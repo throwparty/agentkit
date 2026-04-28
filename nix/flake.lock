@@ -41,11 +41,11 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1770158714,
-        "narHash": "sha256-LeJqntMK1vTrt1Hn+xH9hHOdfrAjZZ7GaHg1QBJJaU8=",
+        "lastModified": 1777451708,
+        "narHash": "sha256-aG16Ut6shyjL7YNIB8p6HS1kSo7gJi5sMAPRtAP0FEI=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "9060e902a39d603930df2bb6b818cdbffef3597a",
+        "rev": "8cf8abd7d0205ca2366fa8de194adc5c09afdeec",
         "type": "github"
       },
       "original": {
@@ -70,11 +70,32 @@
         ]
       },
       "locked": {
-        "lastModified": 1770088046,
-        "narHash": "sha256-4hfYDnUTvL1qSSZEA4CEThxfz+KlwSFQ30Z9jgDguO0=",
+        "lastModified": 1777432579,
+        "narHash": "sha256-Ce11TStDsqCge2vAAfLKe2+4lDI5cSX5ZYZOuKJBKKQ=",
         "owner": "oxalica",
         "repo": "rust-overlay",
-        "rev": "71f9daa4e05e49c434d08627e755495ae222bc34",
+        "rev": "3ecb5e6ab380ced3272ef7fcfe398bffbcc0f152",
+        "type": "github"
+      },
+      "original": {
+        "owner": "oxalica",
+        "repo": "rust-overlay",
+        "type": "github"
+      }
+    },
+    "rust-overlay_2": {
+      "inputs": {
+        "nixpkgs": [
+          "throwparty",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1772247314,
+        "narHash": "sha256-x6IFQ9bL7YYfW2m2z8D3Em2YtAA3HE8kiCFwai2fwrw=",
+        "owner": "oxalica",
+        "repo": "rust-overlay",
+        "rev": "a1ab5e89ab12e1a37c0b264af6386a7472d68a15",
         "type": "github"
       },
       "original": {
@@ -106,14 +127,15 @@
         ],
         "nixpkgs": [
           "nixpkgs"
-        ]
+        ],
+        "rust-overlay": "rust-overlay_2"
       },
       "locked": {
-        "lastModified": 1769859465,
-        "narHash": "sha256-kVrLeQ50pCY5EJi+kUs9eAT27cum+Cz6JY8ebfaikig=",
+        "lastModified": 1772295030,
+        "narHash": "sha256-f4tGB/+8aweMwOmLIooQuYaT4mGteS9Npi07o6jvveY=",
         "ref": "refs/heads/main",
-        "rev": "7fd1f4f905e5325daa51cf0c6ac5c82d06b94368",
-        "revCount": 11,
+        "rev": "9cbde860e307c0e505c66f7e01a19b09ba3c0c24",
+        "revCount": 14,
         "type": "git",
         "url": "ssh://git@github.com/throwparty/nix"
       },
