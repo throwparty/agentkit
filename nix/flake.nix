@@ -32,6 +32,7 @@
         devShells.default =
           let
             inherit (throwparty.devShells.${system}) commonTools;
+            inherit (throwparty.lib) mergeShells mkToolVersions;
             inherit (pkgs)
               cargo-auditable
               cargo-deny
@@ -42,14 +43,14 @@
               python3
               syft
               ;
-            toolVersions = throwparty.lib.mkToolVersions {
+            rustToolVersions = mkToolVersions {
               inherit pkgs;
               name = "default";
               commands = ''
                 ${getExe openssl} version
                 ${getExe python3} --version
                 ${getExe' rustToolchain "cargo"} --version
-                printf "cosign %s\n" "$(${getExe cosign} version | grep GitVersion | awk '{print $2}')"
+                # printf "cosign %s\n" "$(${getExe cosign} version | grep GitVersion | awk '{print $2}')"
                 printf "goreleaser %s\n" "$(${getExe goreleaser} --version | grep GitVersion | awk '{print $2}')"
                 printf "pkg-config %s\n" "$(${getExe pkg-config} --version | head -n 1)"
                 ${getExe' rustToolchain "rustc"} --version
@@ -57,21 +58,21 @@
                 ${getExe syft} --version
               '';
             };
-          in
-          pkgs.mkShell {
-            nativeBuildInputs = [
-              cargo-auditable
-              cargo-deny
-              cosign
-              goreleaser
-              openssl
-              pkg-config
-              python3
-              rustToolchain
-              syft
-            ];
-            shellHook = "\ncat ${toolVersions}";
-          };
+            rustShell = pkgs.mkShell {
+              nativeBuildInputs = [
+                cargo-auditable
+                cargo-deny
+                cosign
+                goreleaser
+                openssl
+                pkg-config
+                python3
+                rustToolchain
+                syft
+              ];
+              shellHook = "\ncat ${rustToolVersions}";
+            };
+          in (mergeShells [ commonTools rustShell ]);
       }
     );
 }
