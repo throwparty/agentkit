@@ -8,9 +8,8 @@ import type { Configuration as WebpackConfig } from "webpack";
 import type { ConfigureWebpackUtils } from "@docusaurus/types";
 
 const config: Config = {
-  title: "Litterbox",
-  tagline:
-    "Review outputs, not actions: give your AI agents litter trays to poop into.",
+  title: "AgentKit",
+  tagline: "A composable set of agentic software engineering tools.",
   favicon: "img/favicon.ico",
 
   future: {
@@ -18,11 +17,11 @@ const config: Config = {
     v4: true,
   },
 
-  url: "https://litterbox.throw.party",
+  url: "https://agentkit.throw.party",
   baseUrl: "/",
 
   organizationName: "throwparty",
-  projectName: "litterbox",
+  projectName: "agentkit",
 
   onBrokenLinks: "throw",
 
@@ -128,7 +127,7 @@ const config: Config = {
       {
         docs: {
           sidebarPath: "./sidebars.ts",
-          editUrl: "https://github.com/throwparty/litterbox/tree/main/docs/",
+          editUrl: "https://github.com/throwparty/agentkit/tree/main/docs/",
         },
         theme: {
           customCss: "./src/css/custom.css",
@@ -145,9 +144,9 @@ const config: Config = {
       respectPrefersColorScheme: true,
     },
     navbar: {
-      title: "Litterbox",
+      title: "AgentKit",
       logo: {
-        alt: "A poop wearing a party hat.",
+        alt: "Tools used to maintain the agents.",
         src: "img/icon.png",
       },
       items: [
@@ -158,7 +157,7 @@ const config: Config = {
           label: "Getting started",
         },
         {
-          href: "https://github.com/throwparty/litterbox",
+          href: "https://github.com/throwparty/agentkit",
           label: "GitHub",
           position: "right",
         },
@@ -181,7 +180,7 @@ const config: Config = {
           items: [
             {
               label: "Discussions",
-              href: "https://github.com/throwparty/litterbox/discussions",
+              href: "https://github.com/throwparty/agentkit/discussions",
             },
           ],
         },
@@ -190,7 +189,7 @@ const config: Config = {
           items: [
             {
               label: "GitHub",
-              href: "https://github.com/throwparty/litterbox",
+              href: "https://github.com/throwparty/agentkit",
             },
             {
               label: "throw.party",
