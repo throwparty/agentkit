@@ -13,7 +13,7 @@ const config: Config = {
   favicon: "img/favicon.ico",
 
   future: {
-    experimental_faster: process.env.DOCUSAURUS_FASTER === "true",
+    faster: process.env.DOCUSAURUS_FASTER === "true",
     v4: true,
   },
 
