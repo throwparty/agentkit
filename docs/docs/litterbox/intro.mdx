@@ -1,0 +1,64 @@
+---
+sidebar_position: 1
+---
+
+# 👋 Introducing Litterbox
+
+Litterbox couples source control branching with compute sandboxes to provide AI coding agents with dedicated, isolated environments.
+
+Each sandbox runs in its own container, with its own working copy. You configure your development harness (such as Cursor, Claude Code, or OpenCode) to restrict operations to Litterbox tools, ensuring all edits and executions occur within that sandbox. After each operation, Litterbox snapshots the container’s working copy and updates the corresponding branch in your host Git repository with the diff.
+
+To allow you to interact with sandboxes, Litterbox can forward ports from servers running inside the sandbox to your local machine. It'll pick unused ports for each sandbox automatically.
+
+## Workflow
+
+To better visualise how Litterbox works, let's walk through a simple example of an agent spinning up a sandbox and writing a single file.
+
+```mermaid
+flowchart TD
+  start([Start])
+  finish([Finish])
+
+  user[Developer]
+
+  subgraph harness[Harness]
+    sessionNew[Start session]
+    session[/Session/]
+    prompt@{ shape: doc, label: "Prompt" }
+  end
+
+  subgraph litterbox[Litterbox]
+    sandboxCreate@{ shape: subprocess, label: "sandbox-create tool" }
+    write@{ shape: subprocess, label: "write tool" }
+    snapshot@{ shape: subprocess, label: "Snapshot" }
+    sandboxDelete@{ shape: subprocess, label: "sandbox-delete subcommand" }
+    sandbox[/Sandbox/]
+  end
+
+  subgraph repo[Repository]
+    sandboxBranch[(Sandbox branch)]
+    trunkBranch[(Trunk branch)]
+  end
+
+  start --> user
+  user -->|"1. Call"| sessionNew
+  sessionNew -->|"2. Creates"| session
+  session -->|"3. Calls"| sandboxCreate
+  sandboxCreate -->|"4. Produces"| sandbox
+  prompt -->|"5. Sent to"| session
+  session -->|"6. Uses"| write
+  write -->|"7. Updates"| sandbox
+  sandbox -->|"8. Snapshot"| snapshot
+  snapshot -->|"9. Commit appended to"| sandboxBranch
+  sandboxBranch -->|"10. Merged into"| trunkBranch
+  user -->|"11. Calls"| sandboxDelete
+  sandboxDelete -->|"12. Removes"| sandbox & sandboxBranch
+  trunkBranch -->|"13. Process complete"| finish
+
+```
+
+## Prerequisites
+
+- A Docker engine, for instance:
+  - Docker Desktop or similar
+  - Lima or similar
