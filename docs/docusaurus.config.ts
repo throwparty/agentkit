@@ -147,7 +147,7 @@ const config: Config = {
       title: "AgentKit",
       logo: {
         alt: "Tools used to maintain the agents.",
-        src: "img/icon.png",
+        src: "img/logo.png",
       },
       items: [
         {

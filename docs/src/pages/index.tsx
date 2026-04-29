@@ -37,7 +37,7 @@ export default function Home(): ReactNode {
       <main>
         <div className={clsx("container", styles.logoRow)}>
           <img
-            src="img/logo.jpg"
+            src="img/logo.png"
             alt="Two cats flank a litter tray with three clumps of poop. The poops are wearing party hats."
           />
         </div>
