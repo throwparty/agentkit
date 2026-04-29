@@ -31,7 +31,7 @@
       {
         devShells.default =
           let
-            inherit (throwparty.devShells.${system}) commonTools;
+            inherit (throwparty.devShells.${system}) commonTools nodejs_24;
             inherit (throwparty.lib) mergeShells mkToolVersions;
             inherit (pkgs)
               cargo-auditable
@@ -72,7 +72,7 @@
               ];
               shellHook = "\ncat ${rustToolVersions}";
             };
-          in (mergeShells [ commonTools rustShell ]);
+          in (mergeShells [ commonTools nodejs_24 rustShell ]);
       }
     );
 }
