@@ -1,29 +1,5 @@
-[package]
-name = "litterbox"
-version = "0.1.0"
-edition = "2024"
-license = "Apache-2.0"
-
-[lints.rust]
-warnings = "deny"
-
-[lints.clippy]
-all = "warn"
-
-[dependencies]
-bollard = "0.20.1"
-bytes = "1.7.2"
-clap = { version = "4.5.23", features = ["derive"] }
-diffy = "0.4.2"
-futures-util = "0.3.31"
-git2 = { version = "0.20.4", default-features = false }
-glob = "0.3.1"
-regex = "1.11.1"
-rmcp = { version = "0.14.0", features = ["macros", "schemars", "server", "transport-io"] }
-schemars = { version = "1.2.1", features = ["derive"] }
-serde = { version = "1.0.228", features = ["derive"] }
-tar = "0.4.43"
-tempfile = "3.13.0"
-thiserror = "2.0.18"
-tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread"] }
-toml = "0.8.19"
+[workspace]
+resolver = "3"
+members = [
+    "crates/agentkit-litterbox"
+]

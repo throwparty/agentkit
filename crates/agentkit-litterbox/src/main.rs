@@ -3,13 +3,13 @@ use std::process::ExitCode;
 
 use bollard::query_parameters::ListContainersOptionsBuilder;
 use clap::{Arg, CommandFactory, Parser, Subcommand};
-use litterbox::compute::DockerCompute;
-use litterbox::domain::{ComputeError, SandboxError, SandboxMetadata, SandboxStatus, slugify_name};
-use litterbox::mcp;
-use litterbox::sandbox::{
+use agentkit_litterbox::compute::DockerCompute;
+use agentkit_litterbox::domain::{ComputeError, SandboxError, SandboxMetadata, SandboxStatus, slugify_name};
+use agentkit_litterbox::mcp;
+use agentkit_litterbox::sandbox::{
     DockerSandboxProvider, SandboxProvider, branch_name_for_slug, container_name_for_slug,
 };
-use litterbox::scm::{Scm, ThreadSafeScm};
+use agentkit_litterbox::scm::{Scm, ThreadSafeScm};
 
 #[derive(Parser)]
 #[command(
@@ -31,14 +31,14 @@ enum Commands {
     /// Shows all sandboxes with their current status (active, paused, missing, or error).
     /// Status information requires Docker to be available; otherwise statuses show as unknown.
     List,
-    
+
     /// Run the MCP (Model Control Protocol) server over stdio
     ///
     /// Starts the Litterbox MCP server, enabling communication with AI agents and tools
     /// that support the Model Control Protocol. The server uses standard input/output
     /// for communication.
     Stdio,
-    
+
     /// Pause one or more sandboxes
     ///
     /// Pauses the container(s) associated with sandbox(es), preserving their state
@@ -50,7 +50,7 @@ enum Commands {
             help = "Sandbox name to pause"
         )]
         name: Option<String>,
-        
+
         /// Pause all sandboxes in the current repository
         #[arg(
             long,
@@ -58,7 +58,7 @@ enum Commands {
             help = "Pause all sandboxes in this repository"
         )]
         all_envs: bool,
-        
+
         /// Pause all Litterbox sandboxes across all repositories
         #[arg(
             long,
@@ -67,7 +67,7 @@ enum Commands {
         )]
         all_repos: bool,
     },
-    
+
     /// Resume a paused sandbox
     ///
     /// Resumes a previously paused sandbox, restoring its container to an active state.
@@ -75,7 +75,7 @@ enum Commands {
         /// Name of the sandbox to resume
         name: String,
     },
-    
+
     /// Delete a sandbox
     ///
     /// Removes both the sandbox's Git branch and container. Active sandboxes require
@@ -83,12 +83,12 @@ enum Commands {
     Delete {
         /// Name of the sandbox to delete
         name: String,
-        
+
         /// Force deletion even if the sandbox is active
         #[arg(short, long)]
         force: bool,
     },
-    
+
     /// Execute a shell command in a sandbox
     ///
     /// Runs the specified command inside the sandbox's container and returns the output.
@@ -96,7 +96,7 @@ enum Commands {
     Shell {
         /// Name of the sandbox to run the command in
         name: String,
-        
+
         /// Command and arguments to execute
         #[arg(required = true, trailing_var_arg = true)]
         command: Vec<String>,
@@ -141,7 +141,7 @@ async fn main() -> ExitCode {
 
 async fn handle_stdio() -> ExitCode {
     // Load and print config for debugging
-    match litterbox::config_loader::load_final() {
+    match agentkit_litterbox::config_loader::load_final() {
         Ok(config) => {
             eprintln!("Loaded configuration: {:#?}", config);
         }
