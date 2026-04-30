@@ -1,0 +1,259 @@
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
+
+/// A cached HTTP response stored in the look-aside cache.
+#[derive(Debug, Clone)]
+pub struct CacheEntry {
+    /// The HTML content.
+    pub content: String,
+    /// The content type (e.g., "text/html; charset=utf-8").
+    pub content_type: String,
+    /// The length of the content in bytes.
+    pub content_length: usize,
+    expires_at: Instant,
+}
+
+/// Look-aside TTL cache for HTTP responses.
+///
+/// This implements a simple in-memory cache with TTL-based expiration.
+/// The cache key is a normalized URL (lowercase scheme+host+path, no fragments).
+///
+/// Behavior:
+/// - On `get()`: check if key exists and not expired → return hit
+/// - If miss: the caller fetches content, then calls `put()` to cache it
+/// - Never updates in place; stale entries expire naturally
+/// - Cache is process-scoped, not persisted across restarts
+pub struct Cache {
+    entries: HashMap<String, CacheEntry>,
+    default_ttl: Duration,
+}
+
+impl Cache {
+    /// Create a new cache with the given default TTL.
+    pub fn new(default_ttl: Duration) -> Self {
+        Self {
+            entries: HashMap::new(),
+            default_ttl,
+        }
+    }
+
+    /// Get a cached response by URL, or None if not cached or expired.
+    pub fn get(&mut self, uri: &str) -> Option<CacheEntry> {
+        let key = normalize_url(uri);
+        let entry = self.entries.get(&key)?;
+
+        if Instant::now() < entry.expires_at {
+            Some(entry.clone())
+        } else {
+            // Expired — remove and return None
+            self.entries.remove(&key);
+            None
+        }
+    }
+
+    /// Store a response in the cache with the default TTL.
+    pub fn put(
+        &mut self,
+        uri: &str,
+        content: String,
+        content_type: String,
+        content_length: usize,
+    ) {
+        let key = normalize_url(uri);
+        self.entries.insert(
+            key,
+            CacheEntry {
+                content,
+                content_type,
+                content_length,
+                expires_at: Instant::now() + self.default_ttl,
+            },
+        );
+    }
+
+    /// Get the default TTL for this cache.
+    pub fn ttl(&self) -> Duration {
+        self.default_ttl
+    }
+
+    /// Return the number of entries in the cache.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Return true if the cache is empty.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Evict all expired entries.
+    pub fn evict_expired(&mut self) {
+        let now = Instant::now();
+        self.entries.retain(|_, entry| now < entry.expires_at);
+    }
+}
+
+/// Normalize a URL for use as a cache key.
+///
+/// Normalization steps:
+/// 1. Remove fragment (everything after #)
+/// 2. Lowercase the scheme (http/https)
+/// 3. Lowercase the host
+/// 4. Keep path case as-is (most servers are case-sensitive)
+/// 5. Remove trailing slash (except for root "/")
+fn normalize_url(url: &str) -> String {
+    // Parse and re-serialize to ensure validity
+    if let Ok(parsed) = url.parse::<reqwest::Url>() {
+        // Remove fragment, lowercase scheme+host+path, strip trailing slash
+        let scheme = parsed.scheme().to_lowercase();
+        let host = parsed.host_str().unwrap_or_default().to_lowercase();
+        let port = parsed.port().map(|p| format!(":{p}")).unwrap_or_default();
+        let path = match parsed.path().to_lowercase().as_str() {
+            "/" | "" => "/".to_string(),
+            p if p.ends_with('/') => p[..p.len() - 1].to_string(),
+            p => p.to_string(),
+        };
+        let query = parsed.query().map(|q| format!("?{q}")).unwrap_or_default();
+        format!("{scheme}://{host}{port}{path}{query}")
+    } else {
+        url.to_lowercase()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cache_hit() {
+        let mut cache = Cache::new(Duration::from_secs(60));
+        cache.put("https://example.com/page", "content".into(), "text/html".into(), 7);
+
+        let entry = cache.get("https://example.com/page").unwrap();
+        assert_eq!(entry.content, "content");
+        assert_eq!(entry.content_type, "text/html");
+        assert_eq!(entry.content_length, 7);
+    }
+
+    #[test]
+    fn test_cache_miss() {
+        let mut cache = Cache::new(Duration::from_secs(60));
+        assert!(cache.get("https://example.com/missing").is_none());
+    }
+
+    #[test]
+    fn test_cache_normalization_fragments() {
+        let mut cache = Cache::new(Duration::from_secs(60));
+        cache.put("https://example.com/page#section", "content".into(), "text/html".into(), 7);
+
+        // Should hit without the fragment
+        let entry = cache.get("https://example.com/page").unwrap();
+        assert_eq!(entry.content, "content");
+    }
+
+    #[test]
+    fn test_cache_normalization_lowercase() {
+        let mut cache = Cache::new(Duration::from_secs(60));
+        cache.put("https://Example.COM/Page", "content".into(), "text/html".into(), 7);
+
+        // Should hit with different case
+        let entry = cache.get("https://example.com/page").unwrap();
+        assert_eq!(entry.content, "content");
+    }
+
+    #[test]
+    fn test_cache_normalization_trailing_slash() {
+        let mut cache = Cache::new(Duration::from_secs(60));
+        cache.put("https://example.com/page/", "content".into(), "text/html".into(), 7);
+
+        // Should hit without trailing slash
+        let entry = cache.get("https://example.com/page").unwrap();
+        assert_eq!(entry.content, "content");
+    }
+
+    #[test]
+    fn test_cache_root_path() {
+        let mut cache = Cache::new(Duration::from_secs(60));
+        cache.put("https://example.com/", "home".into(), "text/html".into(), 4);
+
+        // Root path should not be affected by trailing slash removal
+        let entry = cache.get("https://example.com").unwrap();
+        assert_eq!(entry.content, "home");
+    }
+
+    #[test]
+    fn test_cache_multiple_keys() {
+        let mut cache = Cache::new(Duration::from_secs(60));
+        cache.put("https://example.com/page1", "content1".into(), "text/html".into(), 8);
+        cache.put("https://example.com/page2", "content2".into(), "text/html".into(), 8);
+
+        let entry1 = cache.get("https://example.com/page1").unwrap();
+        assert_eq!(entry1.content, "content1");
+
+        let entry2 = cache.get("https://example.com/page2").unwrap();
+        assert_eq!(entry2.content, "content2");
+    }
+
+    #[test]
+    fn test_cache_len_and_is_empty() {
+        let mut cache = Cache::new(Duration::from_secs(60));
+        assert!(cache.is_empty());
+        assert_eq!(cache.len(), 0);
+
+        cache.put("https://example.com/page", "content".into(), "text/html".into(), 7);
+        assert!(!cache.is_empty());
+        assert_eq!(cache.len(), 1);
+    }
+
+    #[test]
+    fn test_ttl() {
+        let cache = Cache::new(Duration::from_secs(300));
+        assert_eq!(cache.ttl(), Duration::from_secs(300));
+    }
+
+    #[test]
+    fn test_evict_expired() {
+        let mut cache = Cache::new(Duration::from_millis(50));
+        cache.put("https://example.com/page1", "content1".into(), "text/html".into(), 8);
+        cache.put("https://example.com/page2", "content2".into(), "text/html".into(), 8);
+
+        // Wait for entries to expire
+        std::thread::sleep(Duration::from_millis(100));
+
+        cache.evict_expired();
+        assert!(cache.is_empty());
+    }
+
+    #[test]
+    fn test_normalize_url_preserves_query() {
+        // Query parameters should be preserved in normalization
+        let normalized = normalize_url("https://example.com/page?q=test&foo=bar#frag");
+        assert!(normalized.contains("q=test"));
+        assert!(!normalized.contains("#"));
+    }
+
+    #[test]
+    fn test_normalize_url_different_paths() {
+        let url1 = normalize_url("https://example.com/path1");
+        let url2 = normalize_url("https://example.com/path2");
+        assert_ne!(url1, url2);
+    }
+
+    /// Simulate a TTL expiration scenario using a real cache.
+    #[tokio::test]
+    async fn test_cache_expiry_simulation() {
+        use tokio::time::sleep;
+
+        let mut cache = Cache::new(Duration::from_millis(50));
+        cache.put("https://example.com/page", "content".into(), "text/html".into(), 7);
+
+        // Should hit immediately
+        assert!(cache.get("https://example.com/page").is_some());
+
+        // Wait for expiry
+        sleep(Duration::from_millis(100)).await;
+
+        // Should be expired
+        assert!(cache.get("https://example.com/page").is_none());
+    }
+}
