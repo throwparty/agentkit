@@ -1,0 +1,45 @@
+# MCP basics
+
+## Initialisation
+
+The MCP server initialisation process is consistent for all MCP servers
+
+### Initialize
+
+Request:
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"manual-client","version":"0.1.0"}}}
+```
+
+Response:
+
+```json
+{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{"name":"rmcp","version":"0.14.0"}}}
+```
+
+### Initialized notification
+
+Request:
+
+```json
+{"jsonrpc":"2.0","method":"notifications/initialized"}
+```
+
+No response.
+
+## List available tools
+
+Request:
+
+```json
+{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+```
+
+Response:
+
+```json
+{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"search","description":"Search the web using a configured search engine","inputSchema":{"type":"object","properties":{"query":{"type":"string"},"engine":{"type":"string"},"page":{"type":"integer","default":1},"max_results":{"type":"integer","default":10},"region":{"type":["string","null"]}},"required":["query","engine"]}},{"name":"fetch","description":"Fetch a URL and return its content as markdown","inputSchema":{"type":"object","properties":{"uri":{"type":"string"},"max_length":{"type":"integer","default":8000},"start_index":{"type":"integer","default":0},"format":{"type":"string","default":"markdown"}},"required":["uri"]}},{"name":"list-search-engines","description":"List all available search engines and their configuration status","inputSchema":{"type":"object","properties":{}}}]}}
+```
+
+After this, implementations get a little more specific.
