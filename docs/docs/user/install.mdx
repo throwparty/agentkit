@@ -4,7 +4,7 @@ sidebar_position: 2
 
 # 📦 Installation
 
-The application is distributed as a single `litterbox` binary, which you'll need to [download from the latest release](https://github.com/throwparty/litterbox/releases/latest) make executable and place on your `PATH`.
+AgentKit is distributed as a set of binaries which you'll need to [download from the latest release](https://github.com/throwparty/litterbox/releases/latest), extract, make executable, and place on your `PATH`.
 
 :::info
 
@@ -20,8 +20,10 @@ We're aware that placing binaries on `PATH` isn't great for versioning. Packagin
 
     ```shell
     mkdir -p ~/.local/bin
-    curl -L https://github.com/throwparty/litterbox/releases/download/v0.1.0/litterbox_Linux_x86_64 -o ~/.local/bin/litterbox
-    chmod +x ~/.local/bin/litterbox
+    curl -L https://github.com/throwparty/agentkit/releases/download/latest/agentkit_Linux_$(uname -m).tar.gz -o agentkit-latest.tar.gz
+    tar -xf agentkit-latest.tar.gz -C ~/.local/bin
+    chmod +x ~/.local/bin/agentkit-*
+    rm -f agentkit-latest.tar.gz
     ```
 
     Then, add the following to your shell's rc:
@@ -36,8 +38,10 @@ We're aware that placing binaries on `PATH` isn't great for versioning. Packagin
 
     ```shell
     mkdir -p ~/.local/bin
-    curl -L https://github.com/throwparty/litterbox/releases/download/v0.1.0/litterbox_Darwin_arm64 -o ~/.local/bin/litterbox
-    chmod +x ~/.local/bin/litterbox
+      curl -L https://github.com/throwparty/agentkit/releases/download/latest/agentkit_Darwin_$(uname -m).tar.gz -o agentkit-latest.tar.gz
+    tar -xf agentkit-latest.tar.gx -C ~/.local/bin
+    chmod +x ~/.local/bin/agentkit-*
+    rn -f agentkit-latest.tar.gz
     ```
 
     Then, add the following to your shell's rc:
@@ -54,9 +58,10 @@ We're aware that placing binaries on `PATH` isn't great for versioning. Packagin
     $localBin = Join-Path $env:USERPROFILE ".local" "bin"
     New-Item -ItemType Directory -Force -Path $localBin | Out-Null
 
-    $dest = Join-Path $localBin "litterbox.exe"
-    $url = "https://github.com/throwparty/litterbox/releases/download/v0.1.0/litterbox_Windows_x86_64.exe"
-    Invoke-WebRequest -Uri $url -OutFile $dest
+    $zipPath = Join-Path $env:TEMP "agentkit-latest.zip"
+    $url = "https://github.com/throwparty/agentkit/releases/download/latest/litterbox_Windows_x86_64.zip"
+    Invoke-WebRequest -Uri $url -OutFile $zipPath
+    Expand-Archive -Path $zipPath -DestinationPath $localBin -Force
 
     $oldPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
     if (($oldPath -split ';') -notcontains $localBin) {
@@ -66,4 +71,4 @@ We're aware that placing binaries on `PATH` isn't great for versioning. Packagin
   </TabItem>
 </Tabs>
 
-You now need to [set up your agent harness](category/agents) to launch the Litterbox MCP server and configure an agent that can only use Litterbox's write and exec tools.
+You can now proceed to the documentation for each tool.
