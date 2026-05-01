@@ -1,0 +1,61 @@
+# 🅺 Amazon Kiro
+
+Amazon Kiro is the developer component of Amazon Q, available in both CLI and IDE flavours.
+
+We suggest adding Litterbox to your global Kiro configuration to make it accessible in all of your projects and in both the Kiro CLI and IDE, but you can also enable it in individual projects. See [Kiro's MCP configuration documentation](https://kiro.dev/docs/mcp/configuration/) for details.
+
+## Prerequisites
+
+- You have [installed Litterbox](../install).
+- You have [installed Amazon Kiro](https://kiro.dev/).
+
+## Adding the MCP server
+
+Amend your Kiro MCP configuration file (`.kiro/settings/mcp.json` in either your home directory or project directory) as follows:
+
+```json
+{
+  "mcpServers": {
+    // snip
+    "litterbox": {
+      "command": "/path/to/litterbox",
+      "args": ["stdio"]
+    },
+  // snip
+  }
+}
+```
+
+## Adding an agent
+
+:::warning
+
+We haven't quite figured out `allowedTools` yet, so you will still receive prompts for these.
+
+:::
+
+Create a new Kiro agent in your Kiro configuration directory's `agents` subdirectory. We suggest you name it `litterbox.md`:
+
+```markdown
+---
+name: Litterbox
+description: >
+  Specialised agent for safe, isolated development using Litterbox sandboxes.
+  Use this agent when you need to write, test, and validate code changes in isolation before applying them to the main workspace.
+  Ideal for experimental development, testing risky changes, or iterative debugging workflows.
+tools: ["@litterbox"]
+allowedTools: ["@litterbox/bash", "@litterbox/glob", "@litterbox/grep", "@litterbox/ls", "@litterbox/patch", "@litterbox/read", "@litterbox/sandbox_ports", "@litterbox/write"]
+---
+
+ALWAYS use Litterbox sandboxes for all file, code, and shell tasks---NO EXCEPTIONS.
+
+NEVER install or use the git CLI. Litterbox tools handle git operations automatically; manual edits to “.git” will break your environment.
+
+All tools aside from sandbox-create require an existing sandbox. Your first step, unless given the name of an existing sandbox, should be to create a new sandbox.
+
+When creating a sandbox, note that an HTTP server starts and is port‑forwarded to the host. The sandbox-create output lists port mappings, retrievable later via sandbox-ports. Tell users each service runs at http://localhost:$port.
+```
+
+## Testing
+
+Restart Kiro and verify that the agent selector now shows a *Litterbox* option. You're now ready to [set up your project](../project-setup).

@@ -1,0 +1,58 @@
+---
+sidebar_position: 1
+---
+
+# 👋 Introducing Lens
+
+![The Lens logo depicts a cat sitting over a cluttered desk, inpsecting a book through his glasses and a magnifying glass.](./logo.png)
+
+Lens is an MCP server providing tools for querying search engines and fetching web pages. It currently supports only Brave Search, though Kagi is planned in the near future. It's private and secure by default, using only paid search engines and denying access to resources on your LAN.
+
+## Workflow
+
+To better visualise how Lens works, let's walk through a simple example of an agent searching for information and fetching a relevant page.
+
+```mermaid
+flowchart TD
+  start([Start])
+  finish([Finish])
+
+  user[Developer]
+
+  subgraph harness[Harness]
+    sessionNew[Start session]
+    session[/Session/]
+    prompt@{ shape: doc, label: "Prompt" }
+  end
+
+  subgraph lens[Lens]
+    search@{ shape: subprocess, label: "search tool" }
+    fetch@{ shape: subprocess, label: "fetch tool" }
+  end
+
+  subgraph external[External]
+    searchEngine@{ shape: subprocess, label: "Search engine" }
+    webPage@{ shape: subprocess, label: "Web page" }
+  end
+
+  start --> user
+  user -->|"1. Starts"| sessionNew
+  sessionNew -->|"2. Creates"| session
+  user -->|"3. Sends query"| prompt
+  prompt -->|"4. Sent to"| session
+  session -->|"5. Calls"| search
+  search -->|"6. Queries"| searchEngine
+  searchEngine -->|"7. Results"| search
+  search -->|"8. Returns"| session
+  session -->|"9. Calls"| fetch
+  fetch -->|"10. Fetches"| webPage
+  webPage -->|"11. Content"| fetch
+  fetch -->|"12. Returns"| session
+  session -->|"13. Responds"| user
+  user -->|"14. Process complete"| finish
+
+```
+
+## Prerequisites
+
+None!

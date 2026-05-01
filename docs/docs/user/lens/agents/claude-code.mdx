@@ -1,0 +1,78 @@
+# ✳️ Claude Code
+
+Claude Code is Anthropic's coding agent. It's available as a CLI TUI application, has an experimental Desktop client, and has extensions for several editors.
+
+We suggest adding Litterbox to your global Claude Code configuration to make it available in all of your projects and the various apps and extensions, but you can also enable it in individual projects. See [the Claude Code settings documentation](https://code.claude.com/docs/en/settings) for details.
+
+## Prerequisites
+
+- You have [installed Litterbox](../install).
+- You have [installed Claude Code](https://claude.com/product/claude-code).
+
+## Adding the MCP server
+
+:::info
+
+Adding MCP servers to a project configuration will cause developers to receive the following prompt on the next `claude` launch:
+
+```text
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ New MCP server found in .mcp.json: litterbox
+
+ MCP servers may execute code or access system resources. All tool calls require approval. Learn more in the MCP documentation.
+
+ ❯ 1. Use this and all future MCP servers in this project
+   2. Use this MCP server
+   3. Continue without using this MCP server
+
+ Enter to confirm · Esc to cancel
+```
+
+:::
+
+Run the following command, substituting:
+
+- `user` for `project` or `local` if you wish to install for the current project.
+- The path to the Litterbox binary for the one from the installation step.
+
+```shell
+claude mcp add --scope user litterbox -- /path/to/litterbox stdio
+```
+
+## Adding an agent
+
+Create a new OpenCode agent in your Claude Code configuration directory's `agents` subdirectory. We suggest you name it `litterbox.md`:
+
+```markdown
+---
+name: Litterbox
+description: >
+  Specialised agent for safe, isolated development using Litterbox sandboxes.
+  Use this agent when you need to write, test, and validate code changes in isolation before applying them to the main workspace.
+  Ideal for experimental development, testing risky changes, or iterative debugging workflows.
+tools: >
+  Glob,
+  Grep,
+  Read,
+  TaskCreate,
+  TaskGet,
+  TaskUpdate,
+  TaskList,
+  WebFetch,
+  WebSearch,
+  mcp__litterbox__*
+model: inherit
+---
+
+ALWAYS use Litterbox sandboxes for all file, code, and shell tasks---NO EXCEPTIONS.
+
+NEVER install or use the git CLI. Litterbox tools handle git operations automatically; manual edits to “.git” will break your environment.
+
+All tools aside from sandbox-create require an existing sandbox. Your first step, unless given the name of an existing sandbox, should be to create a new sandbox.
+
+When creating a sandbox, note that an HTTP server starts and is port‑forwarded to the host. The sandbox-create output lists port mappings, retrievable later via sandbox-ports. Tell users each service runs at http://localhost:$port.
+```
+
+## Testing
+
+Restart Claude Code and verify that you can mention the new agent with `@"Litterbox (agent)"`. You're now ready to [set up your project](../project-setup).

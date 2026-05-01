@@ -1,0 +1,9 @@
+{
+  "label": "🛠️ Configuring agents",
+  "position": 3,
+  "link": {
+    "type": "generated-index",
+    "slug": "/category/agents",
+    "description": "Select your agent to configure it to use Litterbox tools instead of working directly on your host system. You don't need to install and configure them all, only the ones you're currently using."
+  }
+}

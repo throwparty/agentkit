@@ -1,0 +1,85 @@
+# 🔳 OpenCode
+
+OpenCode is a powerful agent that supports a broad range of agent models. It's available as a CLI TUI application, has a Desktop client, and has extensions for several editors.
+
+We suggest adding Litterbox to your global OpenCode configuration to make it available in all of your projects and however you consume OpenCode, but you can also enable it in individual projects. See [OpenCode's Config -> Locations documentation](https://opencode.ai/docs/config/#locations) for details.
+
+## Prerequisites
+
+- You have [installed Litterbox](../install).
+- You have [installed OpenCode](https://opencode.ai/download).
+
+## Adding the MCP server
+
+Amend your OpenCode configuration file (`opencode.jsonc` (recommended) or `opencode.json`) as follows, substituting the path to the Litterbox binary from the installation step:
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  // snip
+  "mcp": {
+    // snip
+    "litterbox": {
+      "command": ["/path/to/litterbox", "stdio"],
+      "type": "local",
+    },
+    // snip
+  },
+  // snip
+}
+```
+
+## Adding an agent
+
+Create a new OpenCode agent in your OpenCode configuration directory's `agents` subdirectory. We suggest you name it `litterbox.md`:
+
+```markdown
+---
+description: Litterbox
+mode: primary
+temperature: 0.1
+tools:
+  "*": false
+  read: true
+  edit: false
+  write: false
+  webfetch: true
+  google_search: true
+  question: true
+  todowrite: true
+  todoread: true
+  task: true
+  discard: true
+  extract: true
+  skill: true
+  "litterbox_*": true
+permission:
+  "*": ask
+  read: allow
+  edit: deny
+  write: deny
+  webfetch: allow
+  google_search: allow
+  question: allow
+  todowrite: allow
+  todoread: allow
+  task: allow
+  discard: allow
+  extract: allow
+  skill: allow
+  "litterbox_*": allow
+  "litterbox_sandbox-create": ask
+---
+
+ALWAYS use Litterbox sandboxes for all file, code, and shell tasks---NO EXCEPTIONS.
+
+NEVER install or use the git CLI. Litterbox tools handle git operations automatically; manual edits to “.git” will break your environment.
+
+All tools aside from sandbox-create require an existing sandbox. Your first step, unless given the name of an existing sandbox, should be to create a new sandbox.
+
+When creating a sandbox, note that an HTTP server starts and is port‑forwarded to the host. The sandbox-create output lists port mappings, retrievable later via sandbox-ports. Tell users each service runs at http://localhost:$port.
+```
+
+## Testing
+
+Restart OpenCode and verify that the agent selector now shows a *Litterbox* option. You're now ready to [set up your project](../project-setup).
