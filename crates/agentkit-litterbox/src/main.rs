@@ -2,7 +2,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use bollard::query_parameters::ListContainersOptionsBuilder;
-use clap::{Arg, CommandFactory, Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use agentkit_litterbox::compute::DockerCompute;
 use agentkit_litterbox::domain::{ComputeError, SandboxError, SandboxMetadata, SandboxStatus, slugify_name};
 use agentkit_litterbox::mcp;
@@ -433,104 +433,11 @@ async fn handle_shell(name: String, command: Vec<String>) -> ExitCode {
 
 fn handle_docgen(kind: DocgenCommand) -> ExitCode {
     let content = match kind {
-        DocgenCommand::Cli => generate_cli_docs(),
+        DocgenCommand::Cli => agentkit_docgen::generate_cli_docs(&Cli::command()),
         DocgenCommand::Mcp => mcp::generate_mcp_docs(),
     };
     print!("{content}");
     ExitCode::from(0)
-}
-
-fn generate_cli_docs() -> String {
-    let mut command = Cli::command();
-    command.build();
-
-    let mut output = String::new();
-    output.push_str("# 👩‍💻 Command line interface\n\n");
-
-    let mut subcommands: Vec<_> = command.get_subcommands().collect();
-    subcommands.sort_by(|a, b| a.get_name().cmp(b.get_name()));
-
-    for subcommand in subcommands {
-        output.push_str(&format!("## `{}`\n\n", subcommand.get_name()));
-
-        if let Some(about) = subcommand
-            .get_long_about()
-            .or_else(|| subcommand.get_about())
-        {
-            output.push_str(&about.to_string());
-            output.push_str("\n\n");
-        }
-
-        let (positionals, options): (Vec<&Arg>, Vec<&Arg>) = subcommand
-            .get_arguments()
-            .filter(|arg| !arg.is_hide_set())
-            .partition(|arg| arg.is_positional());
-
-        if !positionals.is_empty() {
-            output.push_str("Arguments:\n\n");
-            for arg in positionals {
-                let label = format_positional_label(arg);
-                output.push_str(&format!("- `{}`", label));
-                if let Some(help) = arg.get_help().or_else(|| arg.get_long_help()) {
-                    output.push_str(&format!(" {}", help));
-                }
-                output.push('\n');
-            }
-            output.push('\n');
-        }
-
-        if !options.is_empty() {
-            output.push_str("Options:\n\n");
-            for arg in options {
-                if let Some(label) = format_option_label(arg) {
-                    output.push_str(&format!("- `{}`", label));
-                    if let Some(help) = arg.get_help().or_else(|| arg.get_long_help()) {
-                        output.push_str(&format!(" {}", help));
-                    }
-                    output.push('\n');
-                }
-            }
-            output.push('\n');
-        }
-    }
-
-    output
-}
-
-fn format_positional_label(arg: &Arg) -> String {
-    let name = arg
-        .get_value_names()
-        .map(|names| names.iter().map(|name| name.as_str()).collect::<Vec<_>>().join(" "))
-        .unwrap_or_else(|| arg.get_id().as_str().to_string());
-
-    if arg.is_required_set() {
-        name
-    } else {
-        format!("[{name}]")
-    }
-}
-
-fn format_option_label(arg: &Arg) -> Option<String> {
-    let mut flags = Vec::new();
-    if let Some(short) = arg.get_short() {
-        flags.push(format!("-{short}"));
-    }
-    if let Some(long) = arg.get_long() {
-        flags.push(format!("--{long}"));
-    }
-    if flags.is_empty() {
-        return None;
-    }
-
-    let mut label = flags.join(", ");
-    if let Some(value_name) = arg
-        .get_value_names()
-        .map(|names| names.iter().map(|name| name.as_str()).collect::<Vec<_>>().join(" "))
-    {
-        label.push_str(&format!(" <{value_name}>",));
-    }
-
-    Some(label)
 }
 
 fn build_provider() -> Result<DockerSandboxProvider<ThreadSafeScm, DockerCompute>, SandboxError> {
