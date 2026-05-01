@@ -1,0 +1,31 @@
+# 🤖 MCP tools
+
+## `fetch`
+
+Fetch a URL and return its content as markdown.
+
+Parameters:
+
+- `uri` (string, required) URL to fetch (http/https only; LAN IPs blocked).
+- `max_length` (integer, optional) Maximum output length in characters (default: 8000).
+- `start_index` (integer, optional) Start index for truncation (default: 0).
+- `format` (string, optional) Output format (default: `markdown`).
+
+## `list-search-engines`
+
+List all available search engines and their configuration status.
+
+Parameters: none
+
+## `search`
+
+Search the web using a configured search engine.
+
+Parameters:
+
+- `query` (string, required) Search query (max 400 chars, 50 words).
+- `engine` (string, required) Search engine name (e.g., `brave`).
+- `page` (integer, optional) Page number (default: 1).
+- `max_results` (integer, optional) Maximum results per page (default: 10, max 20).
+- `region` (string, optional) Region/language code (e.g., `en-US`).
+

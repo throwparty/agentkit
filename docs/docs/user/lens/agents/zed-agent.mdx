@@ -1,0 +1,106 @@
+# 🆉 Zed Agent
+
+Zed is a high-performance, multiplayer code editor. Zed Agent brings Zed-hosted models to the editor.
+
+We suggest adding Litterbox to your global Zed configuration to make it available in all of your projects, but you can also enable it in individual projects. See the [Zed AI's Agent Settings documentation](https://zed.dev/docs/ai/agent-settings) and the [Reference's All Settings page](https://zed.dev/docs/reference/all-settings) for details.
+
+:::tip
+
+Since Zed's implementation doesn't allow custom agents to provide prompts, you'll need to `@rule` and choose `Litterbox` to ensure the prompt is used. This should only be necessary once per session.
+
+:::
+
+## Prerequisites
+
+- You have [installed Litterbox](../install).
+- You have [installed Zed](https://zed.dev/docs/installation).
+
+## Adding the MCP server
+
+Use the `zed: open settings file` or `zed: open project settings file` command in the command palette to open the appropriate `settings.json`. Amend it as follows, substituting the path to the Litterbox binary from the installation step:
+
+```json
+{
+  // snip
+  "context_servers": {
+    // snip
+    "litterbox": {
+      "enabled": true,
+      "remote": false,
+      "command": "/path/to/litterbox",
+      "args": ["stdio"],
+      "env": {},
+    },
+    // snip
+  },
+  // snip
+}
+```
+
+## Adding an agent
+
+In the same file, create a new `litterbox` key in the `agent.profiles` object:
+
+```json
+{
+  // snip
+  "agent": {
+    // snip
+    "profiles": {
+      // snip
+      "litterbox": {
+        "name": "Litterbox",
+        "tools": {
+          "web_search": true,
+          "thinking": true,
+          "terminal": true,
+          "save_file": false,
+          "read_file": true,
+          "open": true,
+          "now": true,
+          "list_directory": true,
+          "grep": true,
+          "find_path": true,
+          "fetch": true,
+          "diagnostics": true,
+          "copy_path": true,
+          "create_directory": false,
+        },
+        "enable_all_context_servers": false,
+        "context_servers": {
+          "litterbox": {
+            "tools": {
+              "write": true,
+              "sandbox-ports": true,
+              "sandbox-create": true,
+              "read": true,
+              "patch": true,
+              "ls": true,
+              "grep": true,
+              "glob": true,
+              "bash": true
+            }
+          }
+        },
+      },
+      // snip
+    },
+    // snip
+  },
+  // snip
+}
+```
+
+## Adding a rule
+
+Use the `agent: open rules library` command, click *+* (*New Rule*). Enter the name `Litterbox` and the body:
+
+```markdown
+ALWAYS use Litterbox sandboxes for all file, code, and shell tasks---NO EXCEPTIONS.
+
+NEVER install or use the git CLI. Litterbox tools handle git operations automatically; manual edits to “.git” will break your environment.
+
+All tools aside from sandbox-create require an existing sandbox. Your first step, unless given the name of an existing sandbox, should be to create a new sandbox.
+
+When creating a sandbox, note that an HTTP server starts and is port‑forwarded to the host. The sandbox-create output lists port mappings, retrievable later via sandbox-ports. Tell users each service runs at http://localhost:$port.
+```
