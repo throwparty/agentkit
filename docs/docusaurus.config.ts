@@ -152,9 +152,15 @@ const config: Config = {
       items: [
         {
           type: "docSidebar",
-          sidebarId: "gettingStartedSidebar",
+          sidebarId: "userSidebar",
           position: "left",
           label: "Getting started",
+        },
+        {
+          type: "docSidebar",
+          sidebarId: "devSidebar",
+          position: "right",
+          label: "Hacking",
         },
         {
           href: "https://github.com/throwparty/agentkit",
@@ -166,15 +172,6 @@ const config: Config = {
     footer: {
       style: "dark",
       links: [
-        {
-          title: "Docs",
-          items: [
-            {
-              label: "Getting started",
-              to: "/docs/intro",
-            },
-          ],
-        },
         {
           title: "Community",
           items: [
