@@ -10,4 +10,14 @@ jobs:
     permissions:
       actions: write
       contents: read
-    uses: ./.github/workflows/litterbox.build-and-test.yaml
+    uses: ./.github/workflows/agentkit.build-and-test.yaml
+  release-snapshot:
+    name: Release snapshot
+    permissions:
+      actions: write
+      contents: write
+      # For keyless signing with cosign
+      id-token: write
+    uses: ./.github/workflows/agentkit.build-and-release.yaml
+    with:
+      goreleaser-extra-args: --snapshot

@@ -11,4 +11,4 @@ jobs:
       actions: write
       contents: write
       id-token: write
-    uses: ./.github/workflows/litterbox.build-and-release.yaml
+    uses: ./.github/workflows/agentkit.build-and-release.yaml

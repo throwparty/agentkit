@@ -1,7 +1,10 @@
 name: "Litterbox: build and release"
 
 on:
-  workflow_call: {}
+  workflow_call:
+    inputs:
+      goreleaser-extra-args:
+        type: string
 
 jobs:
   release:
@@ -65,7 +68,7 @@ jobs:
         with:
           distribution: goreleaser
           version: "~> v2.13.3"
-          args: release --clean
+          args: release --clean ${{ inputs.goreleaser-extra-args }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SDKROOT: ${{ env.SDKROOT }}
