@@ -12,7 +12,7 @@ builds:
       - aarch64-apple-darwin
 
 archives:
-  - formats: [binary]
+  - formats: [tar.gz, zip]
     name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_
