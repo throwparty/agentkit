@@ -458,8 +458,6 @@ pub async fn run_stdio(cfg: config::Config) -> Result<(), Box<dyn std::error::Er
     Ok(())
 }
 
-
-
 // ---------------------------------------------------------------------------
 // MCP documentation generation data
 // ---------------------------------------------------------------------------

@@ -9,9 +9,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
+name = "agentkit-docgen"
+version = "0.1.0"
+dependencies = [
+ "clap",
+]
+
+[[package]]
 name = "agentkit-lens"
 version = "0.1.0"
 dependencies = [
+ "agentkit-docgen",
  "async-trait",
  "clap",
  "html-to-markdown-rs",
@@ -34,6 +42,7 @@ dependencies = [
 name = "agentkit-litterbox"
 version = "0.1.0"
 dependencies = [
+ "agentkit-docgen",
  "bollard",
  "bytes",
  "clap",
