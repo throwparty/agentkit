@@ -6,7 +6,7 @@ We suggest adding Litterbox to your global OpenCode configuration to make it ava
 
 ## Prerequisites
 
-- You have [installed Litterbox](../install).
+- You have [installed Litterbox](../../install).
 - You have [installed OpenCode](https://opencode.ai/download).
 
 ## Adding the MCP server
@@ -20,7 +20,7 @@ Amend your OpenCode configuration file (`opencode.jsonc` (recommended) or `openc
   "mcp": {
     // snip
     "litterbox": {
-      "command": ["/path/to/litterbox", "stdio"],
+      "command": ["/path/to/agentkit-litterbox", "stdio"],
       "type": "local",
     },
     // snip
@@ -31,7 +31,7 @@ Amend your OpenCode configuration file (`opencode.jsonc` (recommended) or `openc
 
 ## Adding an agent
 
-Create a new OpenCode agent in your OpenCode configuration directory's `agents` subdirectory. We suggest you name it `litterbox.md`:
+Create a new agent in your OpenCode configuration directory's `agents` subdirectory. We suggest you name it `litterbox.md`:
 
 ```markdown
 ---
