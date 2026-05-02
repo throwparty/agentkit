@@ -20,4 +20,4 @@ jobs:
       id-token: write
     uses: ./.github/workflows/agentkit.build-and-release.yaml
     with:
-      goreleaser-extra-args: --snapshot
+      build-is-snapshot: true
