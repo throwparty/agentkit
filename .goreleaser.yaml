@@ -1,15 +1,25 @@
 version: 2
 
 builds:
-  - builder: rust
+  - id: lens
+    binary: agentkit-lens
+    builder: rust
     flags:
       - --release
-    targets:
+      - --package=agentkit-lens
+    targets: &default_targets
       - x86_64-unknown-linux-gnu
       - x86_64-apple-darwin
       - x86_64-pc-windows-gnu
       - aarch64-unknown-linux-gnu
       - aarch64-apple-darwin
+  - id: litterbox
+    binary: agentkit-litterbox
+    builder: rust
+    flags:
+      - --release
+      - --package=agentkit-litterbox
+    targets: *default_targets
 
 archives:
   - formats: [tar.gz, zip]

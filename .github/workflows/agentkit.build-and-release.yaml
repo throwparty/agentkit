@@ -3,8 +3,9 @@ name: "Litterbox: build and release"
 on:
   workflow_call:
     inputs:
-      goreleaser-extra-args:
-        type: string
+      build-is-snapshot:
+        type: boolean
+        default: false
 
 jobs:
   release:
@@ -68,9 +69,18 @@ jobs:
         with:
           distribution: goreleaser
           version: "~> v2.13.3"
-          args: release --clean ${{ inputs.goreleaser-extra-args }}
+          args: >
+            release --clean
+            ${{ inputs.build-is-snapshot && '--snapshot' || '' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SDKROOT: ${{ env.SDKROOT }}
           MACOSX_DEPLOYMENT_TARGET: ${{ env.MACOSX_DEPLOYMENT_TARGET }}
           ZIG_SYSTEM_LIB_DIR: ${{ env.ZIG_SYSTEM_LIB_DIR }}
+      - name: Upload snapshot artifacts
+        if: inputs.build-is-snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: litterbox-snapshot-${{ github.sha }}
+          path: dist/
+          retention-days: 30
