@@ -1,5 +1,5 @@
 {
-  description = "throwparty/litterbox";
+  description = "throwparty/agentkit";
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
     nixpkgs.url = "github:NixOS/nixpkgs/release-25.11";
