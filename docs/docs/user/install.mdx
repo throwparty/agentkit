@@ -4,7 +4,7 @@ sidebar_position: 2
 
 # 📦 Installation
 
-AgentKit is distributed as a set of binaries which you'll need to [download from the latest release](https://github.com/throwparty/litterbox/releases/latest), extract, make executable, and place on your `PATH`.
+AgentKit is distributed as a set of binaries which you'll need to [download from the latest release](https://github.com/throwparty/agentkit/releases/latest), extract, make executable, and place on your `PATH`.
 
 :::info
 
@@ -59,7 +59,7 @@ We're aware that placing binaries on `PATH` isn't great for versioning. Packagin
     New-Item -ItemType Directory -Force -Path $localBin | Out-Null
 
     $zipPath = Join-Path $env:TEMP "agentkit-latest.zip"
-    $url = "https://github.com/throwparty/agentkit/releases/download/latest/litterbox_Windows_x86_64.zip"
+    $url = "https://github.com/throwparty/agentkit/releases/download/latest/agentkit_Windows_x86_64.zip"
     Invoke-WebRequest -Uri $url -OutFile $zipPath
     Expand-Archive -Path $zipPath -DestinationPath $localBin -Force
 

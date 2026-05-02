@@ -1,0 +1,54 @@
+---
+sidebar_position: 3
+---
+
+# 🚀 First use
+
+Start by giving your agent a prompt that requires research or live web data:
+
+> Find me the latest news about Rust 2025 and summarize the top 3 articles.
+
+Assuming your agent harness is correctly configured, you should see a response along the lines of:
+
+> Researching the latest Rust 2025 news...
+>
+> 🔍 agentkit_lens__search [query="latest Rust 2025 news", engine="brave", max_results=10]
+>
+> I've found several relevant articles about Rust in 2025. Let me fetch the top 3 to get the full details.
+>
+> 🌐 agentkit_lens__fetch [uri="https://blog.rust-lang.org/2025/01/01/rust-1-84-released/", max_length=8000]
+>
+> Let me fetch the second and third results as well...
+>
+> 🌐 agentkit_lens__fetch [uri="https://medium.com/rust-updates-2025", max_length=8000]
+>
+> 🌐 agentkit_lens__fetch [uri="https://dev.to/rust-daily-2025", max_length=8000]
+>
+> ### Top 3 Rust 2025 Articles
+>
+> **1. Rust 1.84 Released**
+>    The latest stable release includes improved error handling with new macro features and performance optimizations...
+>
+> **2. Rust Adoption Surges in 2025**
+>    Major enterprises are adopting Rust for systems programming, with benchmarks showing 40% performance improvements...
+>
+> **3. New Rust WebAssembly Toolchain**
+>    The updated wasm-pack and wasm-bindgen tools make it easier than ever to compile Rust to WebAssembly...
+
+The search results were cached with a TTL of 1 hour, so subsequent searches for the same query will return instant results from cache rather than making additional API calls.
+
+Or for a fetching-focused example:
+
+> Fetch the content from https://example.com and convert it to markdown.
+
+Should yield:
+
+> I'll fetch that page for you...
+>
+> 🌐 agentkit_lens__fetch [uri="https://example.com", max_length=8000, format="markdown"]
+>
+> # Example Domain
+>
+> This domain is for use in illustrative examples in documents. You may use this domain in literature without prior coordination or asking for permission.
+>
+> [More information...](https://www.iana.org/domains/example)
