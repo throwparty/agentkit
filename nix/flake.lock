@@ -131,11 +131,11 @@
         "rust-overlay": "rust-overlay_2"
       },
       "locked": {
-        "lastModified": 1772295030,
-        "narHash": "sha256-f4tGB/+8aweMwOmLIooQuYaT4mGteS9Npi07o6jvveY=",
+        "lastModified": 1777987991,
+        "narHash": "sha256-O2JGRU08/wcxHk4kvalhVjxNZ1EUa04RwoT/rTfSVnE=",
         "ref": "refs/heads/main",
-        "rev": "9cbde860e307c0e505c66f7e01a19b09ba3c0c24",
-        "revCount": 14,
+        "rev": "05c2a4055d721f8c82d0ef70c0ea52ef564278f2",
+        "revCount": 15,
         "type": "git",
         "url": "ssh://git@github.com/throwparty/nix"
       },

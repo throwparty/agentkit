@@ -1,0 +1,16 @@
+repos:
+  - repo: local
+    hooks:
+      - id: fmt
+        name: Format
+        language: system
+        entry: just fmt
+        pass_filenames: false
+        types: [rust]
+
+      - id: lint
+        name: Clippy
+        language: system
+        entry: just lint
+        pass_filenames: false
+        types: [rust]
