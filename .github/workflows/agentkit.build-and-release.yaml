@@ -65,7 +65,8 @@ jobs:
             echo "MACOSX_DEPLOYMENT_TARGET=12.0"
             echo "ZIG_SYSTEM_LIB_DIR=$SDKROOT/usr/lib"
           } >>"$GITHUB_ENV"
-      - uses: goreleaser/goreleaser-action@v7.2.1
+      - name: Release
+        uses: goreleaser/goreleaser-action@v7.2.1
         with:
           distribution: goreleaser
           version: "~> v2.13.3"
