@@ -21,7 +21,7 @@ jobs:
           rustup default stable
           rustup component add clippy
       - name: Cache dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5.0.5
         with:
           path: |
             ~/.cargo/registry
@@ -31,7 +31,7 @@ jobs:
       - name: Install cargo-binstall
         uses: cargo-bins/cargo-binstall@main
         with:
-          version: 1.17.5
+          version: 1.19.0
       - name: Install cargo-deny
         run: cargo-binstall cargo-deny --version 0.19.0 --no-confirm
       - name: Lint
