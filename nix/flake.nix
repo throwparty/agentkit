@@ -38,6 +38,8 @@
               cargo-deny
               cosign
               goreleaser
+              mdformat
+              nixfmt
               openssl
               pkg-config
               python3
@@ -47,10 +49,11 @@
               inherit pkgs;
               name = "default";
               commands = ''
+                ${getExe mdformat} --version
+                ${getExe nixfmt} --version
                 ${getExe openssl} version
                 ${getExe python3} --version
                 ${getExe' rustToolchain "cargo"} --version
-                # printf "cosign %s\n" "$(${getExe cosign} version | grep GitVersion | awk '{print $2}')"
                 printf "goreleaser %s\n" "$(${getExe goreleaser} --version | grep GitVersion | awk '{print $2}')"
                 printf "pkg-config %s\n" "$(${getExe pkg-config} --version | head -n 1)"
                 ${getExe' rustToolchain "rustc"} --version
@@ -64,6 +67,8 @@
                 cargo-deny
                 cosign
                 goreleaser
+                mdformat
+                nixfmt
                 openssl
                 pkg-config
                 python3
