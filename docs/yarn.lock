@@ -4788,6 +4788,34 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@throwparty/agentkit-docs@workspace:.":
+  version: 0.0.0-use.local
+  resolution: "@throwparty/agentkit-docs@workspace:."
+  dependencies:
+    "@chevrotain/regexp-to-ast": "npm:12.0.0"
+    "@cmfcmf/docusaurus-search-local": "npm:^2.0.1"
+    "@docusaurus/core": "npm:^3.10.1"
+    "@docusaurus/faster": "npm:^3.10.1"
+    "@docusaurus/module-type-aliases": "npm:^3.10.1"
+    "@docusaurus/plugin-content-docs": "npm:^3.10.1"
+    "@docusaurus/preset-classic": "npm:^3.10.1"
+    "@docusaurus/theme-mermaid": "npm:^3.10.1"
+    "@docusaurus/tsconfig": "npm:^3.10.1"
+    "@docusaurus/types": "npm:^3.10.1"
+    "@mdx-js/react": "npm:^3.1.1"
+    "@rspack/binding": "npm:^2.0.4"
+    "@rspack/binding-darwin-arm64": "npm:^2.0.4"
+    "@rspack/core": "npm:^2.0.4"
+    clsx: "npm:^2.1.1"
+    prism-react-renderer: "npm:^2.4.1"
+    react: "npm:^19.2.6"
+    react-dom: "npm:^19.2.6"
+    typescript: "npm:~6.0.3"
+    vscode-jsonrpc: "npm:8.2.1"
+    vscode-languageserver-types: "npm:3.17.5"
+  languageName: unknown
+  linkType: soft
+
 "@trysound/sax@npm:0.2.0":
   version: 0.2.0
   resolution: "@trysound/sax@npm:0.2.0"
@@ -11439,34 +11467,6 @@ __metadata:
   checksum: 10c0/5120171d4bdb1577764c5afa96e413353bff530d1b37081cb29cccc747f989eb1baf40574fe8e27060fc1aef72b59c042f72b9b208413de33bcf411343c69057
   languageName: node
   linkType: hard
-
-"my-website@workspace:.":
-  version: 0.0.0-use.local
-  resolution: "my-website@workspace:."
-  dependencies:
-    "@chevrotain/regexp-to-ast": "npm:12.0.0"
-    "@cmfcmf/docusaurus-search-local": "npm:^2.0.1"
-    "@docusaurus/core": "npm:^3.10.1"
-    "@docusaurus/faster": "npm:^3.10.1"
-    "@docusaurus/module-type-aliases": "npm:^3.10.1"
-    "@docusaurus/plugin-content-docs": "npm:^3.10.1"
-    "@docusaurus/preset-classic": "npm:^3.10.1"
-    "@docusaurus/theme-mermaid": "npm:^3.10.1"
-    "@docusaurus/tsconfig": "npm:^3.10.1"
-    "@docusaurus/types": "npm:^3.10.1"
-    "@mdx-js/react": "npm:^3.1.1"
-    "@rspack/binding": "npm:^2.0.4"
-    "@rspack/binding-darwin-arm64": "npm:^2.0.4"
-    "@rspack/core": "npm:^2.0.4"
-    clsx: "npm:^2.1.1"
-    prism-react-renderer: "npm:^2.4.1"
-    react: "npm:^19.2.6"
-    react-dom: "npm:^19.2.6"
-    typescript: "npm:~6.0.3"
-    vscode-jsonrpc: "npm:8.2.1"
-    vscode-languageserver-types: "npm:3.17.5"
-  languageName: unknown
-  linkType: soft
 
 "nanoid@npm:^3.3.11":
   version: 3.3.11
