@@ -16,6 +16,7 @@ use tokio::sync::Mutex;
 use tracing::warn;
 
 use crate::brave;
+use crate::kagi;
 use crate::cache::Cache;
 use crate::config;
 use crate::safety;
@@ -116,6 +117,13 @@ impl LensServer {
 
         if let Some(ref api_key) = cfg.brave_search_api_key {
             registry.register(Box::new(brave::BraveSearchEngine::new(brave::BraveOptions {
+                api_key: api_key.clone(),
+            })));
+        }
+
+        // Register Kagi search engine
+        if let Some(ref api_key) = cfg.kagi_search_api_key {
+            registry.register(Box::new(kagi::KagiSearchEngine::new(kagi::KagiOptions {
                 api_key: api_key.clone(),
             })));
         }
