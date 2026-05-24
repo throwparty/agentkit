@@ -10,6 +10,10 @@ pub struct Config {
     #[arg(long = "brave-search-api-key")]
     pub brave_search_api_key: Option<String>,
 
+    /// Kagi Search API key (required for Kagi search functionality).
+    #[arg(long = "kagi-search-api-key")]
+    pub kagi_search_api_key: Option<String>,
+
     /// Cache TTL duration (optional, defaults to 1 hour).
     /// Supports human-readable format: 1s, 30m, 4h, 2d, 1w.
     #[arg(long = "cache-ttl", default_value = "1h")]
@@ -85,6 +89,7 @@ mod tests {
     fn test_empty_ttl() {
         let config = Config {
             brave_search_api_key: None,
+            kagi_search_api_key: None,
             cache_ttl: String::new(),
         };
         config.parse_cache_ttl();
@@ -95,6 +100,7 @@ mod tests {
     fn test_no_suffix() {
         let config = Config {
             brave_search_api_key: None,
+            kagi_search_api_key: None,
             cache_ttl: "100".to_string(),
         };
         config.parse_cache_ttl();
@@ -104,6 +110,7 @@ mod tests {
     fn test_seconds() {
         let config = Config {
             brave_search_api_key: None,
+            kagi_search_api_key: None,
             cache_ttl: "30s".to_string(),
         };
         assert_eq!(config.parse_cache_ttl().as_secs(), 30);
@@ -113,6 +120,7 @@ mod tests {
     fn test_minutes() {
         let config = Config {
             brave_search_api_key: None,
+            kagi_search_api_key: None,
             cache_ttl: "15m".to_string(),
         };
         assert_eq!(config.parse_cache_ttl().as_secs(), 15 * 60);
@@ -122,6 +130,7 @@ mod tests {
     fn test_hours() {
         let config = Config {
             brave_search_api_key: None,
+            kagi_search_api_key: None,
             cache_ttl: "2h".to_string(),
         };
         assert_eq!(config.parse_cache_ttl().as_secs(), 2 * 3600);
@@ -131,6 +140,7 @@ mod tests {
     fn test_days() {
         let config = Config {
             brave_search_api_key: None,
+            kagi_search_api_key: None,
             cache_ttl: "1d".to_string(),
         };
         assert_eq!(config.parse_cache_ttl().as_secs(), 24 * 3600);
@@ -140,6 +150,7 @@ mod tests {
     fn test_weeks() {
         let config = Config {
             brave_search_api_key: None,
+            kagi_search_api_key: None,
             cache_ttl: "2w".to_string(),
         };
         assert_eq!(config.parse_cache_ttl().as_secs(), 2 * 7 * 24 * 3600);
@@ -149,6 +160,7 @@ mod tests {
     fn test_default_value() {
         let config = Config {
             brave_search_api_key: None,
+            kagi_search_api_key: None,
             cache_ttl: "1h".to_string(),
         };
         assert_eq!(config.parse_cache_ttl().as_secs(), 3600);
@@ -159,6 +171,7 @@ mod tests {
     fn test_invalid_number() {
         let config = Config {
             brave_search_api_key: None,
+            kagi_search_api_key: None,
             cache_ttl: "abcs".to_string(),
         };
         config.parse_cache_ttl();
@@ -168,6 +181,7 @@ mod tests {
     fn test_single_digit() {
         let config = Config {
             brave_search_api_key: None,
+            kagi_search_api_key: None,
             cache_ttl: "5m".to_string(),
         };
         assert_eq!(config.parse_cache_ttl().as_secs(), 5 * 60);

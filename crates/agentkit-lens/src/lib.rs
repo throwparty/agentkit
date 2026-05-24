@@ -2,6 +2,7 @@
 pub mod brave;
 pub mod cache;
 pub mod config;
+pub mod kagi;
 pub mod mcp;
 pub mod safety;
 pub mod search;
