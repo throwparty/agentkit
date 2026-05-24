@@ -15,7 +15,7 @@
     "typecheck": "tsc"
   },
   "dependencies": {
-    "@chevrotain/regexp-to-ast": "11.1.1",
+    "@chevrotain/regexp-to-ast": "12.0.0",
     "@cmfcmf/docusaurus-search-local": "^2.0.1",
     "@docusaurus/core": "^3.10.1",
     "@docusaurus/faster": "^3.10.1",
@@ -25,19 +25,19 @@
     "@mdx-js/react": "^3.1.1",
     "clsx": "^2.1.1",
     "prism-react-renderer": "^2.4.1",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4",
-    "vscode-jsonrpc": "8.2.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "vscode-jsonrpc": "8.2.1",
     "vscode-languageserver-types": "3.17.5"
   },
   "devDependencies": {
     "@docusaurus/module-type-aliases": "^3.10.1",
     "@docusaurus/tsconfig": "^3.10.1",
     "@docusaurus/types": "^3.10.1",
-    "@rspack/binding": "^1.7.6",
-    "@rspack/binding-darwin-arm64": "^1.7.6",
-    "@rspack/core": "^1.7.6",
-    "typescript": "~5.9.3"
+    "@rspack/binding": "^2.0.4",
+    "@rspack/binding-darwin-arm64": "^2.0.4",
+    "@rspack/core": "^2.0.4",
+    "typescript": "~6.0.3"
   },
   "browserslist": {
     "production": [
