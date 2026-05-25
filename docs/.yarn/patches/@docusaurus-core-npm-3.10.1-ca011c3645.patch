@@ -1,0 +1,90 @@
+diff --git a/lib/server/site.js b/lib/server/site.js
+index 14cdc98d96367f81c253e42bc9a06f7c25b43da2..815725d85964259000632f2f0ecf0c3fef96a7e6 100644
+--- a/lib/server/site.js
++++ b/lib/server/site.js
+@@ -37,7 +37,7 @@ async function loadContext(params) {
+     const { siteDir, outDir: baseOutDir = utils_1.DEFAULT_BUILD_DIR_NAME, locale, config: customConfigFilePath, automaticBaseUrlLocalizationDisabled, } = params;
+     const generatedFilesDir = path_1.default.resolve(siteDir, utils_1.GENERATED_FILES_DIR_NAME);
+     const { siteVersion, loadSiteConfig: { siteConfig: initialSiteConfig, siteConfigPath }, } = await (0, combine_promises_1.default)({
+-        siteVersion: (0, siteMetadata_1.loadSiteVersion)(siteDir),
++        siteVersion: (0, siteMetadata_1.tryLoadSitePackageJson)(siteDir).then((pkg) => pkg?.version),
+         loadSiteConfig: (0, config_1.loadSiteConfig)({
+             siteDir,
+             customConfigFilePath,
+diff --git a/lib/server/siteMetadata.d.ts b/lib/server/siteMetadata.d.ts
+index 373e9e51e955a207c7a858cc1e209d642102b883..2c965206eeedd28784ae2664fc191659dc17f9e7 100644
+--- a/lib/server/siteMetadata.d.ts
++++ b/lib/server/siteMetadata.d.ts
+@@ -5,9 +5,14 @@
+  * LICENSE file in the root directory of this source tree.
+  */
+ import type { LoadedPlugin, PluginVersionInformation, SiteMetadata } from '@docusaurus/types';
+-export declare function loadSiteVersion(siteDir: string): Promise<string | undefined>;
++type PackageJson = {
++    name?: string;
++    version?: string;
++};
++export declare function tryLoadSitePackageJson(siteDir: string): Promise<PackageJson | undefined>;
+ export declare function loadPluginVersion(pluginPath: string, siteDir: string): Promise<PluginVersionInformation>;
+ export declare function createSiteMetadata({ siteVersion, plugins, }: {
+     siteVersion: string | undefined;
+     plugins: LoadedPlugin[];
+ }): SiteMetadata;
++export {};
+diff --git a/lib/server/siteMetadata.js b/lib/server/siteMetadata.js
+index a8734a8291bdf7550b965d46bea37f226f18b0eb..87c2f782779115e11317228bb467a5a5351e0b83 100644
+--- a/lib/server/siteMetadata.js
++++ b/lib/server/siteMetadata.js
+@@ -6,26 +6,28 @@
+  * LICENSE file in the root directory of this source tree.
+  */
+ Object.defineProperty(exports, "__esModule", { value: true });
+-exports.loadSiteVersion = loadSiteVersion;
++exports.tryLoadSitePackageJson = tryLoadSitePackageJson;
+ exports.loadPluginVersion = loadPluginVersion;
+ exports.createSiteMetadata = createSiteMetadata;
+ const tslib_1 = require("tslib");
+ const fs_extra_1 = tslib_1.__importDefault(require("fs-extra"));
+ const path_1 = tslib_1.__importDefault(require("path"));
+ const utils_1 = require("@docusaurus/utils");
+-async function loadPackageJsonVersion(packageJsonPath) {
++async function tryLoadPackageJson(packageJsonPath) {
+     if (await fs_extra_1.default.pathExists(packageJsonPath)) {
+-        // eslint-disable-next-line @typescript-eslint/no-var-requires, import/no-dynamic-require, global-require
+-        return require(packageJsonPath).version;
++        try {
++            return (await fs_extra_1.default.readJSON(packageJsonPath));
++        }
++        catch (error) {
++            throw new Error(`Couldn't load package.json file at ${packageJsonPath}`, {
++                cause: error,
++            });
++        }
+     }
+     return undefined;
+ }
+-async function loadPackageJsonName(packageJsonPath) {
+-    // eslint-disable-next-line @typescript-eslint/no-var-requires, import/no-dynamic-require, global-require
+-    return require(packageJsonPath).name;
+-}
+-async function loadSiteVersion(siteDir) {
+-    return loadPackageJsonVersion(path_1.default.join(siteDir, 'package.json'));
++async function tryLoadSitePackageJson(siteDir) {
++    return tryLoadPackageJson(path_1.default.join(siteDir, 'package.json'));
+ }
+ async function loadPluginVersion(pluginPath, siteDir) {
+     let potentialPluginPackageJsonDirectory = path_1.default.dirname(pluginPath);
+@@ -38,10 +40,11 @@ async function loadPluginVersion(pluginPath, siteDir) {
+                 // as local plugin.
+                 return { type: 'project' };
+             }
++            const packageJson = await tryLoadPackageJson(packageJsonPath);
+             return {
+                 type: 'package',
+-                name: await loadPackageJsonName(packageJsonPath),
+-                version: await loadPackageJsonVersion(packageJsonPath),
++                name: packageJson?.name,
++                version: packageJson?.version,
+             };
+         }
+         potentialPluginPackageJsonDirectory = path_1.default.dirname(potentialPluginPackageJsonDirectory);
