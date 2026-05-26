@@ -14,7 +14,13 @@
     };
   };
   outputs =
-    { flake-utils, nixpkgs, rust-overlay, throwparty, ... }:
+    {
+      flake-utils,
+      nixpkgs,
+      rust-overlay,
+      throwparty,
+      self,
+    }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
@@ -78,6 +84,51 @@
               shellHook = "\ncat ${rustToolVersions}";
             };
           in (mergeShells [ commonTools nodejs_24 rustShell ]);
+
+          packages =
+            let
+              lib = nixpkgs.lib;
+              mkAgentkitBin =
+                bin:
+                let
+                  qualifiedBin = "agentkit-${bin}";
+                  commonCargoFlags = [
+                    "--package" qualifiedBin
+                    "--bin" qualifiedBin
+                  ];
+                in
+                pkgs.rustPlatform.buildRustPackage {
+                  pname = qualifiedBin;
+                  version = "0.1.0";
+
+                  src = ../.;
+                  cargoBuildFlags = commonCargoFlags;
+                  cargoTestFlags = commonCargoFlags;
+                  cargoDepsName = "agentkit";
+                  cargoHash = "sha256-XbTHwPJAUoUjnZae33h3oz93aV3OjOA7r/E01p2LdJM=";
+
+                  meta = {
+                    description = "Provides fetch and search tools backed by various search engines.";
+                    homepage = "https://agentkit.throw.party/docs/user/${bin}/";
+                    license = lib.licenses.asl20;
+                    mainProgram = "agentkit-${bin}";
+                  };
+                };
+            in
+            {
+              agentkit-lens = mkAgentkitBin "lens";
+              agentkit-litterbox = mkAgentkitBin "litterbox";
+            };
       }
-    );
+    )
+    // {
+      overlays.default =
+        final: prev:
+        {
+          inherit (self.packages.${final.system})
+            agentkit-lens
+            agentkit-litterbox
+            ;
+        };
+      };
 }
