@@ -2,13 +2,13 @@
 
 Some future ideas I'd like to flesh out. As components come into existence, their roadmap items will move to their directories.
 
-## Lens
-
-An agent for online research, providing web search across various search engines, and direct fetch of resources. Results are cached, converted to Markdown, and paginated.
-
 ## Sling
 
 An agentic coding client, which connects to a harness as an ACP client.
+
+## Stethoscope
+
+Language Server Protocol insight.
 
 ## Tackle
 
