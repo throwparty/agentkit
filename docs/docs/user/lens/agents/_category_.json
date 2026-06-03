@@ -3,7 +3,7 @@
   "position": 3,
   "link": {
     "type": "generated-index",
-    "slug": "/category/agents",
+    "slug": "/category/lens-agents",
     "description": "Select your agent to configure it to use Lens tools for search and fetch. You don't need to install and configure them all, only the ones you're currently using."
   }
 }
