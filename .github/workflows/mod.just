@@ -8,8 +8,8 @@ list:
 actionlint:
     actionlint
 
-zizmor:
-    zizmor {{source_directory()}}
+zizmor *flags:
+    zizmor {{flags}} {{source_directory()}}
 
 lint: zizmor actionlint
 
