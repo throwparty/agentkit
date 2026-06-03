@@ -18,7 +18,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6.0.2
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -28,22 +28,22 @@ jobs:
           rustup toolchain install stable
           rustup default stable
       - name: Install Cosign
-        uses: sigstore/cosign-installer@v4.1.1
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # ratchet:sigstore/cosign-installer@v4.1.1
       - name: Install Syft
-        uses: anchore/sbom-action/download-syft@v0.24.0
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # ratchet:anchore/sbom-action/download-syft@v0.24.0
       - name: Install Zig
-        uses: goto-bus-stop/setup-zig@v2.2.1
+        uses: goto-bus-stop/setup-zig@abea47f85e598557f500fa1fd2ab7464fcb39406 # ratchet:goto-bus-stop/setup-zig@v2.2.1
         with:
           version: 0.15.2
       - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@main
+        uses: cargo-bins/cargo-binstall@f8810ffa11196f23afb38e6fb64716fbf814ad8f # ratchet:cargo-bins/cargo-binstall@main
         with:
           version: 1.19.0
       - name: Install cargo-zigbuild
         run: cargo binstall cargo-zigbuild --version 0.21.8 --no-confirm
       - name: Cache macOS SDK
         id: cache-macos-sdk
-        uses: actions/cache@v5.0.5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # ratchet:actions/cache@v5.0.5
         with:
           path: ${{ runner.temp }}/macos-sdk
           key: macosx-sdk-26.1
@@ -66,7 +66,7 @@ jobs:
             echo "ZIG_SYSTEM_LIB_DIR=$SDKROOT/usr/lib"
           } >>"$GITHUB_ENV"
       - name: Release
-        uses: goreleaser/goreleaser-action@v7.2.1
+        uses: goreleaser/goreleaser-action@1a80836c5c9d9e5755a25cb59ec6f45a3b5f41a8 # ratchet:goreleaser/goreleaser-action@v7.2.1
         with:
           distribution: goreleaser
           version: "~> v2.13.3"
@@ -80,7 +80,7 @@ jobs:
           ZIG_SYSTEM_LIB_DIR: ${{ env.ZIG_SYSTEM_LIB_DIR }}
       - name: Upload snapshot artifacts
         if: inputs.build-is-snapshot
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # ratchet:actions/upload-artifact@v4
         with:
           name: litterbox-snapshot-${{ github.sha }}
           path: dist/
