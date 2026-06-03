@@ -26,12 +26,14 @@ use crate::compute::{ContainerInspection, DockerCompute};
 use crate::config_loader;
 use crate::domain::{
     ComputeError, ExecutionResult, ForwardedPort, ForwardedPortMapping, SandboxConfig,
-    SandboxError, SandboxMetadata, SandboxStatus, slugify_name,
+    SandboxError, SandboxMetadata, SandboxStatus, ScmMode, slugify_name,
 };
+use crate::metadata_store;
 use crate::sandbox::{
     DockerSandboxProvider, SandboxProvider, branch_name_for_slug, container_name_for_slug,
 };
 use crate::scm::{Scm, ThreadSafeScm};
+use crate::vcs_store::VcsStore;
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct SandboxCreateArgs {
@@ -132,6 +134,7 @@ impl SandboxServer {
                 target: port.target,
             })
             .collect();
+        let project_slug = resolve_project_slug(&config);
         let provider = build_provider_with_config(&config).map_err(map_error)?;
         let sandbox_config = SandboxConfig {
             image,
@@ -142,6 +145,12 @@ impl SandboxServer {
             .create(&args.name, &sandbox_config)
             .await
             .map_err(map_error)?;
+        // Persist metadata for mode binding across config changes
+        let slug = slugify_name(&args.name).map_err(map_error)?;
+        if let Err(error) = metadata_store::store(&project_slug, &slug, &metadata) {
+            let _ = provider.delete(&metadata).await;
+            return Err(McpError::internal_error(error.to_string(), None));
+        }
         let content = Content::json(metadata)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
         Ok(CallToolResult::success(vec![content]))
@@ -536,6 +545,18 @@ pub async fn run_stdio() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn resolve_project_slug(config: &crate::config::Config) -> String {
+    config.project.slug.clone().unwrap_or_else(|| {
+        std::env::current_dir()
+            .ok()
+            .as_ref()
+            .and_then(|d| d.file_name())
+            .and_then(|n| n.to_str())
+            .map(crate::domain::slugify)
+            .unwrap_or_else(|| "unknown".to_string())
+    })
+}
+
 fn build_provider() -> Result<DockerSandboxProvider<ThreadSafeScm, DockerCompute>, SandboxError> {
     let config = config_loader::load_final().map_err(|e| SandboxError::Config(e.to_string()))?;
     build_provider_with_config(&config)
@@ -544,9 +565,32 @@ fn build_provider() -> Result<DockerSandboxProvider<ThreadSafeScm, DockerCompute
 fn build_provider_with_config(
     config: &crate::config::Config,
 ) -> Result<DockerSandboxProvider<ThreadSafeScm, DockerCompute>, SandboxError> {
-    let scm =
-        ThreadSafeScm::open_with_prefix(std::path::Path::new("."), config.project.slug.clone())?;
+    let mode = config.git.snapshot_mode.unwrap_or_default();
+    let host_path = std::path::Path::new(".");
     let compute = DockerCompute::connect()?;
+
+    let scm = match mode {
+        ScmMode::Remote => {
+            let slug = resolve_project_slug(config);
+
+            let bare_path = VcsStore::clone_bare(host_path, &slug)?;
+            VcsStore::install_remote(host_path, &bare_path)?;
+            let host_abs = host_path.canonicalize().unwrap_or_else(|_| host_path.to_path_buf());
+            ThreadSafeScm::open_with_mode_and_prefix(
+                &bare_path,
+                mode,
+                config.project.slug.clone(),
+                Some(host_abs),
+            )?
+        }
+        ScmMode::Direct => ThreadSafeScm::open_with_mode_and_prefix(
+            host_path,
+            mode,
+            config.project.slug.clone(),
+            None,
+        )?,
+    };
+
     Ok(DockerSandboxProvider::new(scm, compute))
 }
 
@@ -569,6 +613,14 @@ fn map_sandbox_error(name: &str, error: SandboxError) -> McpError {
 fn resolve_sandbox_metadata(name: &str) -> Result<SandboxMetadata, SandboxError> {
     let slug = slugify_name(name)?;
     let config = config_loader::load_final().map_err(|e| SandboxError::Config(e.to_string()))?;
+    let project_slug = resolve_project_slug(&config);
+
+    // Load persisted metadata (mode-bound at creation time)
+    if let Some(meta) = metadata_store::load(&project_slug, &slug)? {
+        return Ok(meta);
+    }
+
+    // Legacy fallback: no metadata file = Direct mode
     let scm = ThreadSafeScm::open_with_prefix(Path::new("."), config.project.slug)?;
     let repo_prefix = scm.repo_prefix()?;
     Ok(SandboxMetadata {
@@ -576,6 +628,8 @@ fn resolve_sandbox_metadata(name: &str) -> Result<SandboxMetadata, SandboxError>
         branch_name: branch_name_for_slug(&slug),
         container_id: container_name_for_slug(&repo_prefix, &slug),
         status: SandboxStatus::Active,
+        mode: ScmMode::Direct,
+        project_slug,
         forwarded_ports: Vec::new(),
     })
 }
@@ -870,8 +924,32 @@ async fn snapshot_after<P: SandboxProvider>(
     sandbox: &str,
     trigger: SnapshotTrigger,
 ) -> Result<(), SandboxError> {
-    let config = config_loader::load_final().map_err(|e| SandboxError::Config(e.to_string()))?;
-    let scm = ThreadSafeScm::for_sandbox(Path::new("."), config.project.slug.clone(), sandbox)?;
+    let scm = match metadata.mode {
+        ScmMode::Direct => {
+            let config = config_loader::load_final()
+                .map_err(|e| SandboxError::Config(e.to_string()))?;
+            ThreadSafeScm::for_sandbox(
+                Path::new("."),
+                config.project.slug,
+                sandbox,
+            )?
+        }
+        ScmMode::Remote => {
+            let host_path = Path::new(".");
+            let bare_path = VcsStore::clone_bare(host_path, &metadata.project_slug)?;
+            let host_abs = host_path
+                .canonicalize()
+                .unwrap_or_else(|_| host_path.to_path_buf());
+            let scm = ThreadSafeScm::open_with_mode_and_prefix(
+                &bare_path,
+                ScmMode::Remote,
+                None,
+                Some(host_abs),
+            )?;
+            scm.set_snapshot_branch(metadata.branch_name.clone())?;
+            scm
+        }
+    };
 
     // Download container /src to temp staging directory
     let staging_dir = tempfile::tempdir()
@@ -1457,6 +1535,10 @@ mod tests {
     }
 
     impl Scm for TestScm {
+        fn mode(&self) -> ScmMode {
+            ScmMode::Direct
+        }
+
         fn create_branch(&self, _slug: &str) -> Result<String, SandboxError> {
             Ok("branch".to_string())
         }
@@ -1743,6 +1825,8 @@ impl SandboxProvider for TestProvider {
             branch_name: "litterbox/sandbox".to_string(),
             container_id: "container".to_string(),
             status: SandboxStatus::Active,
+            mode: ScmMode::Direct,
+            project_slug: "project".to_string(),
             forwarded_ports: Vec::new(),
         }
     }

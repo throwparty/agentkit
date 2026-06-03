@@ -19,8 +19,10 @@ use crate::domain::{
     SandboxError,
     SandboxMetadata,
     SandboxStatus,
+    ScmMode,
 };
-use crate::scm::Scm;
+use crate::scm::{GitScm, Scm};
+use crate::vcs_store::VcsStore;
 
 const DEFAULT_WORKDIR: &str = "/src";
 const DEFAULT_PORT_RANGE_START: u16 = 3000;
@@ -184,6 +186,8 @@ where
                 branch_name,
                 container_id,
                 status: SandboxStatus::Active,
+                mode: self.scm.mode(),
+                project_slug: self.scm.repo_prefix()?,
                 forwarded_ports,
             })
         })
@@ -216,7 +220,22 @@ where
     ) -> BoxFuture<'a, Result<(), SandboxError>> {
         Box::pin(async move {
             self.compute.delete_container(&metadata.container_id).await?;
-            self.scm.delete_branch(&metadata.name)?;
+
+            match metadata.mode {
+                ScmMode::Direct => {
+                    self.scm.delete_branch(&metadata.name)?;
+                }
+                ScmMode::Remote => {
+                    let bare_path = VcsStore::resolve_path(&metadata.project_slug);
+                    let scm = GitScm::open(&bare_path, ScmMode::Remote)?;
+                    scm.delete_branch(&metadata.name)?;
+                    let remaining = scm.list_sandboxes()?;
+                    if remaining.is_empty() {
+                        VcsStore::destroy_bare(&metadata.project_slug)?;
+                    }
+                }
+            }
+
             Ok(())
         })
     }
@@ -722,4 +741,47 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn create_remote_mode_sets_project_slug() -> Result<(), Box<dyn std::error::Error>> {
+        if std::env::var("LITTERBOX_DOCKER_TESTS").is_err() {
+            return Ok(());
+        }
+
+        let (tempdir, _repo) = init_repo();
+        let slug = format!("test-project-{}", unique_suffix());
+        let _bare_path = crate::vcs_store::VcsStore::clone_bare(tempdir.path(), &slug)?;
+
+        let scm = ThreadSafeScm::open_with_mode(&_bare_path, ScmMode::Remote)?;
+        let compute = DockerCompute::connect()?;
+        let provider = DockerSandboxProvider::new(scm, compute);
+
+        let name = format!("sandbox-{}", unique_suffix());
+        let metadata = provider
+            .create(
+                &name,
+                &SandboxConfig {
+                    image: "busybox:latest".to_string(),
+                    setup_command: None,
+                    forwarded_ports: Vec::new(),
+                },
+            )
+            .await?;
+
+        assert_eq!(metadata.project_slug, slug);
+
+        let client = provider.compute.client();
+        let _ = client
+            .remove_container(
+                &metadata.container_id,
+                Some(RemoveContainerOptions {
+                    force: true,
+                    ..Default::default()
+                }),
+            )
+            .await;
+        let _ = provider.scm.delete_branch(&metadata.name);
+        let _ = std::fs::remove_dir_all(&_bare_path);
+
+        Ok(())
+    }
 }

@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::domain::ScmMode;
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
@@ -10,6 +12,8 @@ pub struct Config {
     pub docker: DockerConfig,
     #[serde(default)]
     pub ports: PortsConfig,
+    #[serde(default)]
+    pub git: GitConfig,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -36,6 +40,12 @@ pub struct PortsConfig {
     pub ports: Vec<ForwardedPort>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitConfig {
+    #[serde(rename = "snapshot-mode", default)]
+    pub snapshot_mode: Option<ScmMode>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ConfigError {
     #[error("File not found: {0}")]
@@ -48,7 +58,8 @@ pub enum ConfigError {
 
 #[cfg(test)]
 mod tests {
-    use super::{Config, ForwardedPort, PortsConfig};
+    use super::{Config, ForwardedPort, GitConfig, PortsConfig};
+    use crate::domain::ScmMode;
 
     #[test]
     fn forwarded_port_instantiates() {
@@ -112,5 +123,44 @@ target = 8081
         assert_eq!(config.ports.ports[0].target, 8080);
         assert_eq!(config.ports.ports[1].name, "frontend");
         assert_eq!(config.ports.ports[1].target, 8081);
+    }
+
+    #[test]
+    fn git_snapshot_mode_parses_remote() {
+        let input = r#"
+docker = { image = "image", setup-command = "setup" }
+
+[git]
+snapshot-mode = "remote"
+"#;
+        let config: Config = toml::from_str(input).expect("config parses");
+        assert_eq!(config.git.snapshot_mode, Some(ScmMode::Remote));
+    }
+
+    #[test]
+    fn git_snapshot_mode_parses_direct() {
+        let input = r#"
+docker = { image = "image", setup-command = "setup" }
+
+[git]
+snapshot-mode = "direct"
+"#;
+        let config: Config = toml::from_str(input).expect("config parses");
+        assert_eq!(config.git.snapshot_mode, Some(ScmMode::Direct));
+    }
+
+    #[test]
+    fn git_snapshot_mode_defaults_to_none() {
+        let input = r#"
+docker = { image = "image", setup-command = "setup" }
+"#;
+        let config: Config = toml::from_str(input).expect("config parses");
+        assert_eq!(config.git.snapshot_mode, None);
+    }
+
+    #[test]
+    fn git_config_defaults_correctly() {
+        let config = GitConfig::default();
+        assert_eq!(config.snapshot_mode, None);
     }
 }

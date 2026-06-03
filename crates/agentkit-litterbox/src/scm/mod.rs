@@ -3,9 +3,10 @@ use std::sync::Mutex;
 
 use git2::{BranchType, IndexAddOption, ObjectType, Repository, StatusOptions};
 
-use crate::domain::{SandboxError, ScmError, slugify};
+use crate::domain::{SandboxError, ScmError, ScmMode, slugify};
 
 pub trait Scm {
+    fn mode(&self) -> ScmMode;
     fn create_branch(&self, slug: &str) -> Result<String, SandboxError>;
     fn delete_branch(&self, slug: &str) -> Result<(), SandboxError>;
     fn make_archive(&self, reference: &str) -> Result<Vec<u8>, SandboxError>;
@@ -19,17 +20,45 @@ pub trait Scm {
 
 pub struct GitScm {
     repo: Repository,
+    mode: ScmMode,
     snapshot_branch: Option<String>,
+    /// For remote mode, path to the host repo (used for archive operations).
+    host_repo_path: Option<PathBuf>,
 }
 
 impl GitScm {
-    pub fn open(path: &Path) -> Result<Self, SandboxError> {
+    pub fn open(path: &Path, mode: ScmMode) -> Result<Self, SandboxError> {
         Repository::open(path)
             .map(|repo| Self {
                 repo,
+                mode,
                 snapshot_branch: None,
+                host_repo_path: None,
             })
             .map_err(|source| SandboxError::Scm(ScmError::Open { source }))
+    }
+
+    pub fn open_with_host(
+        path: &Path,
+        mode: ScmMode,
+        host_repo_path: Option<PathBuf>,
+    ) -> Result<Self, SandboxError> {
+        Repository::open(path)
+            .map(|repo| Self {
+                repo,
+                mode,
+                snapshot_branch: None,
+                host_repo_path,
+            })
+            .map_err(|source| SandboxError::Scm(ScmError::Open { source }))
+    }
+
+    pub fn open_direct(path: &Path) -> Result<Self, SandboxError> {
+        Self::open(path, ScmMode::Direct)
+    }
+
+    pub fn mode(&self) -> ScmMode {
+        self.mode
     }
 
     pub fn set_snapshot_branch(&mut self, branch: String) {
@@ -60,9 +89,11 @@ impl GitScm {
             .map_err(|source| SandboxError::Scm(ScmError::BranchCreate { source }))
     }
 
-    fn tree_from_reference(&self, reference: &str) -> Result<git2::Tree<'_>, SandboxError> {
-        let obj = self
-            .repo
+    fn tree_from_reference_in<'a>(
+        repo: &'a Repository,
+        reference: &str,
+    ) -> Result<git2::Tree<'a>, SandboxError> {
+        let obj = repo
             .revparse_single(reference)
             .map_err(|source| SandboxError::Scm(ScmError::Archive { source }))?;
         obj.peel_to_tree()
@@ -190,25 +221,47 @@ pub struct ThreadSafeScm {
 
 impl ThreadSafeScm {
     pub fn open(path: &Path) -> Result<Self, SandboxError> {
-        GitScm::open(path).map(|scm| Self {
+        GitScm::open_direct(path).map(|scm| Self {
             inner: Mutex::new(scm),
             prefix_override: None,
         })
     }
 
-    pub fn open_with_prefix(path: &Path, prefix: Option<String>) -> Result<Self, SandboxError> {
-        GitScm::open(path).map(|scm| Self {
+    pub fn open_with_mode(path: &Path, mode: ScmMode) -> Result<Self, SandboxError> {
+        GitScm::open(path, mode).map(|scm| Self {
+            inner: Mutex::new(scm),
+            prefix_override: None,
+        })
+    }
+
+    pub fn open_with_prefix(
+        path: &Path,
+        prefix: Option<String>,
+    ) -> Result<Self, SandboxError> {
+        GitScm::open_direct(path).map(|scm| Self {
             inner: Mutex::new(scm),
             prefix_override: prefix,
         })
     }
 
+    pub fn open_with_mode_and_prefix(
+        path: &Path,
+        mode: ScmMode,
+        prefix: Option<String>,
+        host_repo_path: Option<PathBuf>,
+    ) -> Result<Self, SandboxError> {
+        GitScm::open_with_host(path, mode, host_repo_path).map(|scm| Self {
+            inner: Mutex::new(scm),
+            prefix_override: prefix,
+        })
+    }
+ 
     pub fn for_sandbox(
         path: &Path,
         prefix: Option<String>,
         sandbox_slug: &str,
     ) -> Result<Self, SandboxError> {
-        let mut scm = GitScm::open(path)?;
+        let mut scm = GitScm::open_direct(path)?;
         let branch_name = GitScm::branch_name(sandbox_slug);
         scm.set_snapshot_branch(branch_name);
 
@@ -216,6 +269,14 @@ impl ThreadSafeScm {
             inner: Mutex::new(scm),
             prefix_override: prefix,
         })
+    }
+
+    pub fn set_snapshot_branch(
+        &self,
+        branch: String,
+    ) -> Result<(), SandboxError> {
+        self.lock()?.set_snapshot_branch(branch);
+        Ok(())
     }
 
     pub fn commit_snapshot_from_staging(
@@ -235,6 +296,10 @@ impl ThreadSafeScm {
 }
 
 impl Scm for ThreadSafeScm {
+    fn mode(&self) -> ScmMode {
+        self.lock().map(|g| g.mode()).unwrap_or(ScmMode::Direct)
+    }
+
     fn create_branch(&self, slug: &str) -> Result<String, SandboxError> {
         self.lock()?.create_branch(slug)
     }
@@ -277,6 +342,10 @@ impl Scm for ThreadSafeScm {
 }
 
 impl Scm for GitScm {
+    fn mode(&self) -> ScmMode {
+        self.mode
+    }
+
     fn create_branch(&self, slug: &str) -> Result<String, SandboxError> {
         let branch_name = Self::branch_name(slug);
         let head = self.head_commit()?;
@@ -314,10 +383,22 @@ impl Scm for GitScm {
     }
 
     fn make_archive(&self, reference: &str) -> Result<Vec<u8>, SandboxError> {
-        let tree = self.tree_from_reference(reference)?;
+        let repo = match self.mode {
+            ScmMode::Remote => {
+                if let Some(ref host_path) = self.host_repo_path {
+                    &Repository::open(host_path).map_err(|source| {
+                        SandboxError::Scm(ScmError::Open { source })
+                    })?
+                } else {
+                    &self.repo
+                }
+            }
+            ScmMode::Direct => &self.repo,
+        };
+        let tree = Self::tree_from_reference_in(repo, reference)?;
         let mut builder = tar::Builder::new(Vec::new());
 
-        Self::append_tree(&self.repo, &mut builder, &tree, Path::new(""))?;
+        Self::append_tree(repo, &mut builder, &tree, Path::new(""))?;
 
         builder.into_inner().map_err(SandboxError::Io)
     }
@@ -375,11 +456,9 @@ impl Scm for GitScm {
     }
 
     fn commit_snapshot(&self, message: &str) -> Result<Option<git2::Oid>, SandboxError> {
-        let workdir = self.repo.workdir().ok_or_else(|| {
-            SandboxError::Config("Repository has no working directory".to_string())
-        })?;
-
-        // Use the same logic as commit_snapshot_from_staging
+        let Some(workdir) = self.repo.workdir() else {
+            return Ok(None);
+        };
         self.commit_snapshot_from_staging(workdir, message)
     }
 
@@ -649,7 +728,9 @@ mod tests {
         let (_tempdir, repo) = init_repo();
         let scm = GitScm {
             repo,
+            mode: ScmMode::Direct,
             snapshot_branch: None,
+            host_repo_path: None,
         };
 
         let branch_name = scm.create_branch("my-feature").expect("create branch");
@@ -674,7 +755,9 @@ mod tests {
         let (_tempdir, repo) = init_repo();
         let scm = GitScm {
             repo,
+            mode: ScmMode::Direct,
             snapshot_branch: None,
+            host_repo_path: None,
         };
 
         scm.create_branch("my-feature").expect("create branch");
@@ -689,7 +772,9 @@ mod tests {
         let (_tempdir, repo) = init_repo();
         let scm = GitScm {
             repo,
+            mode: ScmMode::Direct,
             snapshot_branch: None,
+            host_repo_path: None,
         };
 
         let branch_name = scm.create_branch("cleanup").expect("create branch");
@@ -707,7 +792,9 @@ mod tests {
         let (_tempdir, repo) = init_repo();
         let scm = GitScm {
             repo,
+            mode: ScmMode::Direct,
             snapshot_branch: None,
+            host_repo_path: None,
         };
 
         let err = scm.delete_branch("missing").expect_err("missing branch");
@@ -719,7 +806,9 @@ mod tests {
         let (tempdir, repo) = init_repo();
         let scm = GitScm {
             repo,
+            mode: ScmMode::Direct,
             snapshot_branch: None,
+            host_repo_path: None,
         };
 
         let ignored_path = tempdir.path().join("ignored.txt");
@@ -745,7 +834,9 @@ mod tests {
         let (tempdir, repo) = init_repo();
         let scm = GitScm {
             repo,
+            mode: ScmMode::Direct,
             snapshot_branch: None,
+            host_repo_path: None,
         };
         fs::write(tempdir.path().join("README.md"), "updated").expect("write");
 
@@ -757,7 +848,9 @@ mod tests {
         let (_tempdir, repo) = init_repo();
         let scm = GitScm {
             repo,
+            mode: ScmMode::Direct,
             snapshot_branch: None,
+            host_repo_path: None,
         };
 
         assert!(!scm.has_changes().expect("has changes"));
@@ -768,7 +861,9 @@ mod tests {
         let (_tempdir, repo) = init_repo();
         let scm = GitScm {
             repo,
+            mode: ScmMode::Direct,
             snapshot_branch: None,
+            host_repo_path: None,
         };
 
         let result = scm.commit_snapshot("snapshot").expect("commit");
@@ -780,7 +875,9 @@ mod tests {
         let (tempdir, repo) = init_repo();
         let scm = GitScm {
             repo,
+            mode: ScmMode::Direct,
             snapshot_branch: None,
+            host_repo_path: None,
         };
 
         fs::write(tempdir.path().join("README.md"), "updated").expect("write");
@@ -804,7 +901,9 @@ mod tests {
         let (tempdir, repo) = init_repo();
         let scm = GitScm {
             repo,
+            mode: ScmMode::Direct,
             snapshot_branch: None,
+            host_repo_path: None,
         };
         let head_before = scm
             .repo
@@ -838,7 +937,9 @@ mod tests {
         let (tempdir, repo) = init_repo();
         let scm = GitScm {
             repo,
+            mode: ScmMode::Direct,
             snapshot_branch: None,
+            host_repo_path: None,
         };
 
         fs::write(tempdir.path().join("README.md"), "first").expect("write");
@@ -862,7 +963,9 @@ mod tests {
         let (_tempdir, repo) = init_repo();
         let scm = GitScm {
             repo,
+            mode: ScmMode::Direct,
             snapshot_branch: Some("test-snapshot".to_string()),
+            host_repo_path: None,
         };
 
         let staging_dir = TempDir::new().expect("staging dir");
@@ -895,7 +998,9 @@ mod tests {
         let (_tempdir, repo) = init_repo();
         let scm = GitScm {
             repo,
+            mode: ScmMode::Direct,
             snapshot_branch: Some("test-snapshot".to_string()),
+            host_repo_path: None,
         };
 
         let staging_dir = TempDir::new().expect("staging dir");
@@ -931,7 +1036,9 @@ mod tests {
         let (_tempdir, repo) = init_repo();
         let scm = GitScm {
             repo,
+            mode: ScmMode::Direct,
             snapshot_branch: Some("test-snapshot".to_string()),
+            host_repo_path: None,
         };
 
         let staging_dir = TempDir::new().expect("staging dir");
@@ -966,7 +1073,9 @@ mod tests {
         let (_tempdir, repo) = init_repo();
         let scm = GitScm {
             repo,
+            mode: ScmMode::Direct,
             snapshot_branch: Some("test-snapshot".to_string()),
+            host_repo_path: None,
         };
 
         let staging_dir = TempDir::new().expect("staging dir");
@@ -1000,7 +1109,9 @@ mod tests {
         let (_tempdir, repo) = init_repo();
         let scm = GitScm {
             repo,
+            mode: ScmMode::Direct,
             snapshot_branch: Some("test-snapshot".to_string()),
+            host_repo_path: None,
         };
 
         let staging_dir = TempDir::new().expect("staging dir");
@@ -1032,7 +1143,9 @@ mod tests {
         let (_tempdir, repo) = init_repo();
         let scm = GitScm {
             repo,
+            mode: ScmMode::Direct,
             snapshot_branch: Some("test-snapshot".to_string()),
+            host_repo_path: None,
         };
 
         let staging_dir = TempDir::new().expect("staging dir");
@@ -1060,7 +1173,9 @@ mod tests {
         let (tempdir, repo) = init_repo();
         let scm = GitScm {
             repo,
+            mode: ScmMode::Direct,
             snapshot_branch: Some("test-snapshot".to_string()),
+            host_repo_path: None,
         };
 
         // Create a file in working tree
@@ -1109,7 +1224,9 @@ mod tests {
         let (tempdir, repo) = init_repo();
         let scm = GitScm {
             repo,
+            mode: ScmMode::Direct,
             snapshot_branch: Some("test-snapshot".to_string()),
+            host_repo_path: None,
         };
 
         // Stage a file
@@ -1157,7 +1274,9 @@ mod tests {
         let (_tempdir, repo) = init_repo();
         let scm = GitScm {
             repo,
+            mode: ScmMode::Direct,
             snapshot_branch: Some("test-snapshot".to_string()),
+            host_repo_path: None,
         };
 
         let staging_dir = TempDir::new().expect("staging dir");
@@ -1175,7 +1294,9 @@ mod tests {
         let (_tempdir, repo) = init_repo();
         let scm = GitScm {
             repo,
+            mode: ScmMode::Direct,
             snapshot_branch: Some("test-snapshot".to_string()),
+            host_repo_path: None,
         };
 
         // Create staging dir with a path component that could accidentally become a prefix
@@ -1222,7 +1343,9 @@ mod tests {
         let (_tempdir, repo) = init_repo();
         let scm = GitScm {
             repo,
+            mode: ScmMode::Direct,
             snapshot_branch: Some("test-snapshot".to_string()),
+            host_repo_path: None,
         };
 
         // Create initial snapshot
@@ -1260,5 +1383,22 @@ mod tests {
         let second_commit = scm.repo.find_commit(second_oid).expect("second commit");
         assert_eq!(second_commit.parent_count(), 1);
         assert_eq!(second_commit.parent_id(0).expect("parent"), initial_oid);
+    }
+    #[test]
+    fn commit_snapshot_on_bare_repo_returns_none() {
+        // Bare repos have no workdir, so commit_snapshot returns Ok(None)
+        let tempdir = TempDir::new().expect("tempdir");
+        let repo = git2::Repository::init_bare(tempdir.path()).expect("init bare");
+        assert!(repo.is_bare());
+
+        let scm = GitScm {
+            repo,
+            mode: ScmMode::Remote,
+            snapshot_branch: None,
+            host_repo_path: None,
+        };
+
+        let result = scm.commit_snapshot("test message").expect("commit_snapshot");
+        assert!(result.is_none());
     }
 }

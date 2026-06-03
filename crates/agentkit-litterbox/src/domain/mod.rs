@@ -1,6 +1,6 @@
 use std::fmt;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -16,7 +16,7 @@ pub struct ForwardedPort {
     pub target: u16,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ForwardedPortMapping {
     pub name: String,
     pub target: u16,
@@ -31,19 +31,21 @@ pub struct ExecutionResult {
     pub stderr: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SandboxStatus {
     Active,
     Paused,
     Error(String),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SandboxMetadata {
     pub name: String,
     pub branch_name: String,
     pub container_id: String,
     pub status: SandboxStatus,
+    pub mode: ScmMode,
+    pub project_slug: String,
     pub forwarded_ports: Vec<ForwardedPortMapping>,
 }
 
@@ -83,11 +85,13 @@ impl fmt::Display for SandboxMetadata {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "name={}, branch={}, container={}, status={}, forwarded_ports={}",
+            "name={}, branch={}, container={}, status={}, mode={:?}, project_slug={}, forwarded_ports={}",
             self.name,
             self.branch_name,
             self.container_id,
             self.status,
+            self.mode,
+            self.project_slug,
             self.forwarded_ports.len()
         )
     }
@@ -143,6 +147,8 @@ pub enum ScmError {
     Reference { #[source] source: git2::Error },
     #[error("failed to apply patch: {message}")]
     ApplyPatch { message: String },
+    #[error("Git clone failed: {source}")]
+    Clone { #[source] source: git2::Error },
 }
 
 #[derive(Error, Debug)]
@@ -169,6 +175,14 @@ pub enum ComputeError {
     ContainerUpload { #[source] source: bollard::errors::Error },
     #[error("Docker download failed: {source}")]
     ContainerDownload { #[source] source: bollard::errors::Error },
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScmMode {
+    Direct,
+    #[default]
+    Remote,
 }
 
 pub fn slugify(name: &str) -> String {
@@ -250,5 +264,42 @@ mod tests {
         let message = err.to_string();
         assert!(message.contains("exit code 1"));
         assert!(message.contains("boom"));
+    }
+
+    #[test]
+    fn scm_mode_default_is_remote() {
+        assert_eq!(ScmMode::default(), ScmMode::Remote);
+    }
+
+    #[test]
+    fn sandbox_metadata_toml_includes_new_fields() {
+        let metadata = SandboxMetadata {
+            name: "test".to_string(),
+            branch_name: "litterbox/test".to_string(),
+            container_id: "abc123".to_string(),
+            status: SandboxStatus::Active,
+            mode: ScmMode::Remote,
+            project_slug: "myproject".to_string(),
+            forwarded_ports: Vec::new(),
+        };
+        let toml_str = toml::to_string(&metadata).expect("serialize");
+        assert!(toml_str.contains("mode = \"Remote\"") || toml_str.contains("mode = \"remote\""));
+        assert!(toml_str.contains("project_slug = \"myproject\""));
+    }
+
+    #[test]
+    fn sandbox_metadata_toml_always_has_project_slug() {
+        let metadata = SandboxMetadata {
+            name: "test".to_string(),
+            branch_name: "litterbox/test".to_string(),
+            container_id: "abc123".to_string(),
+            status: SandboxStatus::Active,
+            mode: ScmMode::Direct,
+            project_slug: "myproject".to_string(),
+            forwarded_ports: Vec::new(),
+        };
+        let toml_str = toml::to_string(&metadata).expect("serialize");
+        assert!(toml_str.contains("mode = \"Direct\"") || toml_str.contains("mode = \"direct\""));
+        assert!(toml_str.contains("project_slug = \"myproject\""));
     }
 }

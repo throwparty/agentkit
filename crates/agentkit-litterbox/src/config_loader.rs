@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
-use crate::config::{Config, ConfigError, PortsConfig};
+use crate::config::{Config, ConfigError, GitConfig, PortsConfig};
 use crate::domain::slugify_name;
 
 /// Loads and parses a single TOML configuration file into a Config struct.
@@ -31,6 +31,9 @@ pub fn merge(base: Config, local: Config) -> Config {
                 local.ports.ports
             },
         },
+        git: GitConfig {
+            snapshot_mode: local.git.snapshot_mode.or(base.git.snapshot_mode),
+        },
     }
 }
 
@@ -53,6 +56,7 @@ fn default_config() -> Config {
             setup_command: None,
         },
         ports: PortsConfig::default(),
+        git: GitConfig::default(),
     }
 }
 
@@ -78,6 +82,7 @@ pub fn load_final() -> Result<Config, ConfigError> {
                 setup_command: None,
             },
             ports: PortsConfig::default(),
+            git: GitConfig::default(),
         }
     };
 
@@ -121,7 +126,7 @@ fn validate_ports(config: &Config) -> Result<(), ConfigError> {
 #[cfg(test)]
 mod tests {
     use super::validate_ports;
-    use crate::config::{Config, DockerConfig, PortsConfig, ProjectConfig, ForwardedPort};
+    use crate::config::{Config, DockerConfig, GitConfig, PortsConfig, ProjectConfig, ForwardedPort};
 
     fn base_config(ports: Vec<ForwardedPort>) -> Config {
         Config {
@@ -131,6 +136,7 @@ mod tests {
                 setup_command: Some("setup".to_string()),
             },
             ports: PortsConfig { ports },
+            git: GitConfig::default(),
         }
     }
 
