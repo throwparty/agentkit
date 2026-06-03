@@ -11,6 +11,13 @@ jobs:
       actions: write
       contents: read
     uses: ./.github/workflows/agentkit.build-and-test.yaml
+  docs:
+    name: Build docs
+    permissions:
+      contents: read
+      pages: read
+      id-token: write
+    uses: ./.github/workflows/docs.build.yaml
   release-snapshot:
     name: Release snapshot
     permissions:
