@@ -5,10 +5,18 @@ on:
     branches: [main]
 
 jobs:
+  build-docs:
+    name: Build docs
+    permissions:
+      contents: read
+      pages: read
+      id-token: write
+    uses: ./.github/workflows/docs.build.yaml
   deploy-docs:
-    name: Build and deploy docs
+    name: Deploy docs
+    needs: build-docs
     permissions:
       contents: read
       pages: write
       id-token: write
-    uses: ./.github/workflows/docs.build-and-deploy.yaml
+    uses: ./.github/workflows/docs.deploy.yaml
