@@ -12,7 +12,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6.0.2
         with:
           persist-credentials: false
       - name: Install Rust
@@ -21,7 +21,7 @@ jobs:
           rustup default stable
           rustup component add clippy
       - name: Cache dependencies
-        uses: actions/cache@v5.0.5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # ratchet:actions/cache@v5.0.5
         with:
           path: |
             ~/.cargo/registry
@@ -29,7 +29,7 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@main
+        uses: cargo-bins/cargo-binstall@f8810ffa11196f23afb38e6fb64716fbf814ad8f # ratchet:cargo-bins/cargo-binstall@main
         with:
           version: 1.19.0
       - name: Install cargo-deny
