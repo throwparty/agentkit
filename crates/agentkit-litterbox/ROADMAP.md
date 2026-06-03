@@ -12,5 +12,5 @@
 
 ## Version control
 
-- Git remotes instead of in-place index manipulation
+- ✅ Git remotes instead of in-place index manipulation (snapshot-mode: remote)
 - Agent-managed milestones, for automated squashing of commits?

@@ -4,8 +4,9 @@ use std::process::ExitCode;
 use bollard::query_parameters::ListContainersOptionsBuilder;
 use clap::{CommandFactory, Parser, Subcommand};
 use agentkit_litterbox::compute::DockerCompute;
-use agentkit_litterbox::domain::{ComputeError, SandboxError, SandboxMetadata, SandboxStatus, slugify_name};
+use agentkit_litterbox::domain::{ComputeError, SandboxError, SandboxMetadata, SandboxStatus, ScmMode, slugify_name};
 use agentkit_litterbox::mcp;
+use agentkit_litterbox::metadata_store;
 use agentkit_litterbox::sandbox::{
     DockerSandboxProvider, SandboxProvider, branch_name_for_slug, container_name_for_slug,
 };
@@ -347,17 +348,39 @@ async fn handle_delete(name: String, force: bool) -> ExitCode {
         Ok(slug) => slug,
         Err(error) => return report_error("delete", error),
     };
-    let repo_prefix = match repo_prefix() {
-        Ok(prefix) => prefix,
-        Err(error) => return report_error("delete", error),
+
+    // Resolve project slug from current directory (same logic as build_provider_with_config)
+    let project_slug = std::env::current_dir()
+        .ok()
+        .as_ref()
+        .and_then(|d| d.file_name())
+        .and_then(|n| n.to_str())
+        .map(agentkit_litterbox::domain::slugify)
+        .unwrap_or_else(|| "unknown".to_string());
+
+    // Load persisted metadata for correct mode binding
+    let metadata = match metadata_store::load(&project_slug, &slug) {
+        Ok(Some(meta)) => meta,
+        _ => {
+            // Legacy fallback: no metadata file = Direct mode
+            let repo_prefix = match repo_prefix() {
+                Ok(prefix) => prefix,
+                Err(error) => return report_error("delete", error),
+            };
+            metadata_for_slug(&repo_prefix, &slug, SandboxStatus::Active)
+        }
     };
-    let container = container_name_for_slug(&repo_prefix, &slug);
+
     let compute = match DockerCompute::connect() {
         Ok(compute) => compute,
         Err(error) => return report_error("delete", error),
     };
 
-    match compute.client().inspect_container(&container, None).await {
+    match compute
+        .client()
+        .inspect_container(&metadata.container_id, None)
+        .await
+    {
         Ok(info) => {
             let running = info
                 .state
@@ -383,10 +406,12 @@ async fn handle_delete(name: String, force: bool) -> ExitCode {
         Ok(provider) => provider,
         Err(error) => return report_error("delete", error),
     };
-    let metadata = metadata_for_slug(&repo_prefix, &slug, SandboxStatus::Active);
     if let Err(error) = provider.delete(&metadata).await {
         return report_error("delete", error);
     }
+
+    // Clean up metadata file
+    let _ = metadata_store::remove(&project_slug, &slug);
 
     println!("Deleted {name}");
     ExitCode::from(0)
@@ -452,6 +477,8 @@ fn metadata_for_slug(repo_prefix: &str, slug: &str, status: SandboxStatus) -> Sa
         branch_name: branch_name_for_slug(slug),
         container_id: container_name_for_slug(repo_prefix, slug),
         status,
+        mode: ScmMode::Direct,
+        project_slug: repo_prefix.to_string(),
         forwarded_ports: Vec::new(),
     }
 }

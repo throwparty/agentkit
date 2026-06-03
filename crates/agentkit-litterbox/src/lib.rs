@@ -5,3 +5,5 @@ pub mod scm;
 pub mod sandbox;
 pub mod config;
 pub mod config_loader;
+pub mod metadata_store;
+pub mod vcs_store;

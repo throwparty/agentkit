@@ -19,6 +19,10 @@ All options may be specified in the project or local overrides configuration fil
 - `image` specifies a Docker image to use for sandboxes.
 - `setup-command`: Command to run during sandbox setup.
 
+### `git` (table)
+
+- `snapshot-mode`: Controls how sandbox snapshots are stored. `"remote"` (default) stores snapshots in an isolated bare clone, keeping your working repository clean. `"direct"` stores snapshots as branches within your working repository.
+
 ### `ports` (array of tables)
 
 - `name` is a unique identifier for the port.
@@ -43,6 +47,9 @@ slug = "my-project"
 [docker]
 image = "ubuntu:latest"
 setup-command = "echo 'Setup complete'"
+
+[git]
+snapshot-mode = "direct"
 ```
 
 ### Layer 3: local overrides (`.litterbox.local.toml`)
@@ -55,4 +62,7 @@ slug = "my-conflicting-project"
 
 [docker]
 image = "my-custom-image:v1.0"
+
+[git]
+snapshot-mode = "direct"
 ```
