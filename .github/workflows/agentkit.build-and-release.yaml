@@ -59,7 +59,7 @@ jobs:
             curl -L "$SDK_URL" -o "$SDK_DIR/MacOSX.sdk.tar.xz"
             tar -xf "$SDK_DIR/MacOSX.sdk.tar.xz" -C "$SDK_DIR"
           fi
-          SDKROOT="$(ls -d "$SDK_DIR"/MacOSX*.sdk | head -n 1)"
+          SDKROOT="$(find "$SDK_DIR" -maxdepth 1 -type d -name 'MacOSX*.sdk' | head -n 1)"
           {
             printf "SDKROOT=%s\n" "$SDKROOT"
             echo "MACOSX_DEPLOYMENT_TARGET=12.0"
