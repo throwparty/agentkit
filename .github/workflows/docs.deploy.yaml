@@ -5,6 +5,10 @@ on:
 
 permissions: {}
 
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
 jobs:
   deploy:
     name: Deploy
