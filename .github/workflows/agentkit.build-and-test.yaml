@@ -3,6 +3,8 @@ name: "Litterbox: build and test"
 on:
   workflow_call: {}
 
+
+permissions: {}
 jobs:
   test:
     name: Build and test
