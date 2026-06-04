@@ -1,0 +1,29 @@
+name: "Workflows: lint"
+
+on:
+  workflow_call: {}
+
+concurrency:
+  group: workflows-lint-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6.0.2
+        with:
+          persist-credentials: false
+      - name: Run actionlint
+        run: |
+          bash <(curl -sS https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          ./actionlint
+      - name: Run zizmor
+        run: |
+          pip install zizmor
+          zizmor .github/workflows .github/dependabot.yaml
