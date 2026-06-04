@@ -3,6 +3,8 @@ name: "Docs: deploy"
 on:
   workflow_call: {}
 
+permissions: {}
+
 jobs:
   deploy:
     name: Deploy
