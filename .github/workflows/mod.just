@@ -9,7 +9,7 @@ actionlint:
     actionlint
 
 zizmor *flags:
-    zizmor --persona=pedantic {{flags}} {{source_directory()}}
+    zizmor --persona=auditor {{flags}} {{source_directory()}}
 
 lint: zizmor actionlint
 
