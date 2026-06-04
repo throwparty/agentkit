@@ -15,8 +15,8 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-      pages: read
-      id-token: write
+      pages: read  # To configure Pages and upload build artifact
+      id-token: write  # Required by actions/configure-pages
     defaults:
       run:
         working-directory: ./docs

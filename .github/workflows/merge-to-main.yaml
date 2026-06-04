@@ -42,7 +42,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.agentkit == 'true'
     permissions:
-      actions: write
+      actions: write  # Called workflow uses it for cargo caches
       contents: read
     uses: ./.github/workflows/agentkit.build-and-test.yaml
 
@@ -52,8 +52,8 @@ jobs:
     if: needs.changes.outputs.docs == 'true'
     permissions:
       contents: read
-      pages: read
-      id-token: write
+      pages: read  # To configure Pages and upload build artifact
+      id-token: write  # Required by actions/configure-pages
     uses: ./.github/workflows/docs.build.yaml
 
   deploy-docs:
@@ -61,6 +61,6 @@ jobs:
     needs: build-docs
     permissions:
       contents: read
-      pages: write
-      id-token: write
+      pages: write  # To deploy to GitHub Pages
+      id-token: write  # Required by actions/deploy-pages
     uses: ./.github/workflows/docs.deploy.yaml

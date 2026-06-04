@@ -8,12 +8,13 @@ concurrency:
   cancel-in-progress: true
 
 permissions: {}
+
 jobs:
   test:
     name: Build and test
     runs-on: ubuntu-24.04
     permissions:
-      actions: write
+      actions: write  # To manage cargo caches
       contents: read
     steps:
       - name: Checkout
