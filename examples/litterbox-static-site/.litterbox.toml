@@ -1,0 +1,13 @@
+[project]
+slug = "litterbox-static-site"
+
+[docker]
+image = "busybox:latest"
+setup-command = "httpd -p 8080 -h /src/public -f &"
+
+[[ports]]
+name = "http"
+target = 8080
+
+[git]
+snapshot-mode = "remote"
