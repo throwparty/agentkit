@@ -3,6 +3,9 @@ name: "Litterbox: build and test"
 on:
   workflow_call: {}
 
+concurrency:
+  group: agentkit-build-and-test-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions: {}
 jobs:

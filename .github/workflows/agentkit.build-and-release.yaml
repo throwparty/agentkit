@@ -7,6 +7,10 @@ on:
         type: boolean
         default: false
 
+concurrency:
+  group: agentkit-build-and-release-${{ inputs.build-is-snapshot && 'snapshot' || 'release' }}
+  cancel-in-progress: false
+
 permissions: {}
 
 jobs:
