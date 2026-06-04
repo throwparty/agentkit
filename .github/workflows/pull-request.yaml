@@ -41,7 +41,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.agentkit == 'true'
     permissions:
-      actions: write
+      actions: write  # Called workflow uses it for cargo caches
       contents: read
     uses: ./.github/workflows/agentkit.build-and-test.yaml
 
@@ -51,8 +51,8 @@ jobs:
     if: needs.changes.outputs.docs == 'true'
     permissions:
       contents: read
-      pages: read
-      id-token: write
+      pages: read  # To configure Pages and upload build artifact
+      id-token: write  # Required by actions/configure-pages
     uses: ./.github/workflows/docs.build.yaml
 
   release-snapshot:
@@ -60,9 +60,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.agentkit == 'true'
     permissions:
-      actions: write
-      contents: write
-      id-token: write
+      actions: write  # Called workflow uses it for build caches
+      contents: write  # Called workflow publishes snapshot artifacts
+      id-token: write  # Called workflow uses keyless signing
     uses: ./.github/workflows/agentkit.build-and-release.yaml
     with:
       build-is-snapshot: true
