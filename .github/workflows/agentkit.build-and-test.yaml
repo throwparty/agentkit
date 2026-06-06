@@ -5,7 +5,7 @@ on:
 
 concurrency:
   group: agentkit-build-and-test-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions: {}
 
