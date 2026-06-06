@@ -4,3 +4,4 @@ members = [
     "crates/agentkit-litterbox",
     "crates/agentkit-lens"
 ]
+exclude = ["adrs"]
