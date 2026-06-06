@@ -326,11 +326,8 @@ impl SandboxServer {
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for SandboxServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            instructions: Some("Litterbox sandbox management".into()),
-            capabilities: ServerCapabilities::builder().enable_tools().build(),
-            ..Default::default()
-        }
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_instructions("Litterbox sandbox management")
     }
 }
 
