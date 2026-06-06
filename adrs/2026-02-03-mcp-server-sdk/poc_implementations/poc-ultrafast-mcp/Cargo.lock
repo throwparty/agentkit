@@ -1978,6 +1978,7 @@ checksum = "562d481066bde0658276a35467c4af00bdc6ee726305698a55b86e61d7ad82bb"
 [[package]]
 name = "ultrafast-mcp"
 version = "202506018.1.0"
+source = "git+https://github.com/LukeCarrier/ultrafast-mcp?branch=streamable-http-stdio-feat-fix#0eb0841fe63332554b48a46f722203996e592eb3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1998,6 +1999,7 @@ dependencies = [
 [[package]]
 name = "ultrafast-mcp-auth"
 version = "202506018.1.0"
+source = "git+https://github.com/LukeCarrier/ultrafast-mcp?branch=streamable-http-stdio-feat-fix#0eb0841fe63332554b48a46f722203996e592eb3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2020,6 +2022,7 @@ dependencies = [
 [[package]]
 name = "ultrafast-mcp-client"
 version = "202506018.1.0"
+source = "git+https://github.com/LukeCarrier/ultrafast-mcp?branch=streamable-http-stdio-feat-fix#0eb0841fe63332554b48a46f722203996e592eb3"
 dependencies = [
  "async-trait",
  "futures",
@@ -2035,6 +2038,7 @@ dependencies = [
 [[package]]
 name = "ultrafast-mcp-core"
 version = "202506018.1.0"
+source = "git+https://github.com/LukeCarrier/ultrafast-mcp?branch=streamable-http-stdio-feat-fix#0eb0841fe63332554b48a46f722203996e592eb3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2056,6 +2060,7 @@ dependencies = [
 [[package]]
 name = "ultrafast-mcp-monitoring"
 version = "202506018.1.0"
+source = "git+https://github.com/LukeCarrier/ultrafast-mcp?branch=streamable-http-stdio-feat-fix#0eb0841fe63332554b48a46f722203996e592eb3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2074,6 +2079,7 @@ dependencies = [
 [[package]]
 name = "ultrafast-mcp-server"
 version = "202506018.1.0"
+source = "git+https://github.com/LukeCarrier/ultrafast-mcp?branch=streamable-http-stdio-feat-fix#0eb0841fe63332554b48a46f722203996e592eb3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2090,6 +2096,7 @@ dependencies = [
 [[package]]
 name = "ultrafast-mcp-transport"
 version = "202506018.1.0"
+source = "git+https://github.com/LukeCarrier/ultrafast-mcp?branch=streamable-http-stdio-feat-fix#0eb0841fe63332554b48a46f722203996e592eb3"
 dependencies = [
  "anyhow",
  "async-trait",
