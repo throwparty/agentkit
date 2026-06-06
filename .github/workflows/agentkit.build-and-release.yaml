@@ -8,7 +8,7 @@ on:
         default: false
 
 concurrency:
-  group: agentkit-build-and-release-${{ inputs.build-is-snapshot && 'snapshot' || 'release' }}
+  group: ${{ inputs.build-is-snapshot && format('actor-{0}', github.actor) || 'release' }}
   cancel-in-progress: false
 
 permissions: {}
