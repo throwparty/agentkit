@@ -302,11 +302,8 @@ impl LensServer {
 #[tool_handler]
 impl ServerHandler for LensServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            instructions: Some("Lens MCP server for web search and URL fetching".into()),
-            capabilities: ServerCapabilities::builder().enable_tools().build(),
-            ..Default::default()
-        }
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_instructions("Lens MCP server for web search and URL fetching")
     }
 }
 
