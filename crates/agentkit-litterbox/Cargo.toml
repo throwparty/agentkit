@@ -24,7 +24,7 @@ regex = "1.11.1"
 rmcp = { version = "1.7.0", features = ["macros", "schemars", "server", "transport-io"] }
 schemars = { version = "1.2.1", features = ["derive"] }
 serde = { version = "1.0.228", features = ["derive"] }
-tar = "0.4.43"
+tar = "0.4.46"
 tempfile = "3.13.0"
 thiserror = "2.0.18"
 tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread"] }
