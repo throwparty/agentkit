@@ -55,7 +55,7 @@ in_vuln_range() {
 }
 
 locked_versions() {
-  grep -A2 "^name = \"$1\"" "$lock" | grep "^version = " | sed 's/version = "\(.*\)"/\1/'
+  grep -A2 "^name = \"$1\"" "$lock" | grep '^version[[:space:]]*=' | sed 's/version[[:space:]]*=[[:space:]]*"\(.*\)"/\1/'
 }
 
 # --- scan Cargo.lock ---
@@ -100,20 +100,18 @@ done <<< "$(locked_versions "$pkg")"
 
 # --- try: upstream cargo update ---
 echo ""
-echo "  compatible update didn't help (still $new, needs $fixed+)"
+echo "  compatible update didn't help (still $vuln_version, needs $fixed+)"
 echo "  Looking up who depends on $pkg …"
 
-# Find which crates directly depend on the vulnerable package
-upstreams=$(awk -v pkg="$pkg" '
-  /^\[\[package\]\]/ { in_block=1; block=""; name="" }
-  in_block { block = block $0 "\n" }
-  /^name = / && in_block { gsub(/^name = "/, ""); gsub(/".*/, ""); name=$0 }
-  /^$/ && in_block {
-    if (block ~ "\"" pkg "\"" && name != "" && name != pkg) print "    " name
-    in_block=0
-  }
-  END { if (in_block && block ~ "\"" pkg "\"" && name != "" && name != pkg) print "    " name }
-' "$lock")
+# Use cargo's dependency graph rather than parsing Cargo.lock text heuristically.
+upstreams=$(
+  cargo tree --edges normal --invert "$pkg" 2>/dev/null \
+  | sed '1d' \
+  | grep -E '^    [^ ]' \
+  | grep -vE '^        ' \
+  | sed -E 's/^    ([^ ]+).*/    \1/' \
+  | sort -u
+)
 if [[ -n "$upstreams" ]]; then
   echo "  Directly pulled in by:"
   echo "$upstreams"
