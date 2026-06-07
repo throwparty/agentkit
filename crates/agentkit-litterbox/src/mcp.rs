@@ -1569,7 +1569,7 @@ mod tests {
                 .lock()
                 .expect("commit lock")
                 .push(message.to_string());
-            Ok(Some(Oid::zero()))
+            Ok(Some(Oid::ZERO_SHA1))
         }
 
         fn apply_patch(&self, _diff: &str) -> Result<(), SandboxError> {
