@@ -17,7 +17,7 @@ all = "warn"
 agentkit-docgen = { path = "../agentkit-docgen" }
 async-trait = "0.1"
 clap = { version = "4.5.23", features = ["derive"] }
-html-to-markdown-rs = "3.3.3"
+html-to-markdown-rs = "3.5.7"
 regex = "1.11"
 hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "tokio"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "gzip", "rustls-tls", "http2"] }
