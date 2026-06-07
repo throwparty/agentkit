@@ -169,7 +169,7 @@ impl GitScm {
     ) -> Result<(), SandboxError> {
         let name = entry
             .name()
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid path"))?;
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid path"))?;
         let path = base.join(PathBuf::from(name));
 
         match entry.kind() {
