@@ -3,7 +3,7 @@
 A composable set of agentic software engineering tools.
 
 > [!WARNING]
-> AgentKit is in the proof of concept stage. Because it works by directly updating your Git index, bugs may cause data loss. Please use at your own risk.
+> AgentKit is under active development and is highly experimental; please use at your own risk and heed the warnings for each component.
 
 ---
 
