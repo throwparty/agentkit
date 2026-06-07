@@ -1,11 +1,12 @@
-name: Pull request
+name: Merge queue
 
 on:
-  pull_request:
+  merge_group:
+    types: [checks_requested]
     branches: [main]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.merge_group.head_ref }}
   cancel-in-progress: false
 
 permissions: {}
@@ -66,14 +67,3 @@ jobs:
       contents: read
     uses: ./.github/workflows/workflows.lint.yaml
 
-  release-snapshot:
-    name: Release snapshot
-    needs: changes
-    if: needs.changes.outputs.agentkit == 'true'
-    permissions:
-      actions: write  # Called workflow uses it for build caches
-      contents: write  # Called workflow publishes snapshot artifacts
-      id-token: write  # Called workflow uses keyless signing
-    uses: ./.github/workflows/agentkit.build-and-release.yaml
-    with:
-      build-is-snapshot: true
