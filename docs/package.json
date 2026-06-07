@@ -57,6 +57,8 @@
   "packageManager": "yarn@4.15.0",
   "resolutions": {
     "@docusaurus/core@npm:3.10.1": "patch:@docusaurus/core@npm%3A3.10.1#~/.yarn/patches/@docusaurus-core-npm-3.10.1-ca011c3645.patch",
+    "ajv@^8.0.0": "^8.18.0",
+    "ajv@ajv@npm:^8.9.0": "^8.18.0",
     "minimatch@^10.1.2": "^10.2.1",
     "picomatch@^4.0.3": "^4.0.4",
     "qs@~6.14.0": "^6.15.2",
@@ -64,7 +66,6 @@
     "serialize-javascript@^6.0.1": "^7.0.3",
     "serialize-javascript@^6.0.2": "^7.0.3",
     "uuid@^8.3.2": "^11.1.1",
-    "ajv@^8.0.0": "^8.18.0",
-    "ajv@ajv@npm:^8.9.0": "^8.18.0"
+    "ws@^8.18.0": "^8.20.1"
   }
 }
