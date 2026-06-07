@@ -542,3 +542,177 @@ pub static TOOL_DOCS: &[ToolDoc] = &[
         params: &[],
     },
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -------------------------------------------------------------------------
+    // is_blocked_ip tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_is_blocked_ip_v4_loopback() {
+        assert!(is_blocked_ip(std::net::IpAddr::V4(
+            std::net::Ipv4Addr::new(127, 0, 0, 1)
+        )));
+        assert!(is_blocked_ip(std::net::IpAddr::V4(
+            std::net::Ipv4Addr::new(127, 255, 255, 255)
+        )));
+    }
+
+    #[test]
+    fn test_is_blocked_ip_v4_class_a() {
+        assert!(is_blocked_ip(std::net::IpAddr::V4(
+            std::net::Ipv4Addr::new(10, 0, 0, 1)
+        )));
+        assert!(is_blocked_ip(std::net::IpAddr::V4(
+            std::net::Ipv4Addr::new(10, 255, 255, 255)
+        )));
+    }
+
+    #[test]
+    fn test_is_blocked_ip_v4_class_b() {
+        assert!(is_blocked_ip(std::net::IpAddr::V4(
+            std::net::Ipv4Addr::new(172, 16, 0, 1)
+        )));
+        assert!(is_blocked_ip(std::net::IpAddr::V4(
+            std::net::Ipv4Addr::new(172, 31, 255, 255)
+        )));
+    }
+
+    #[test]
+    fn test_is_blocked_ip_v4_class_b_edges() {
+        assert!(!is_blocked_ip(std::net::IpAddr::V4(
+            std::net::Ipv4Addr::new(172, 15, 255, 255)
+        )));
+        assert!(!is_blocked_ip(std::net::IpAddr::V4(
+            std::net::Ipv4Addr::new(172, 32, 0, 1)
+        )));
+    }
+
+    #[test]
+    fn test_is_blocked_ip_v4_class_c() {
+        assert!(is_blocked_ip(std::net::IpAddr::V4(
+            std::net::Ipv4Addr::new(192, 168, 0, 1)
+        )));
+        assert!(is_blocked_ip(std::net::IpAddr::V4(
+            std::net::Ipv4Addr::new(192, 168, 255, 255)
+        )));
+    }
+
+    #[test]
+    fn test_is_blocked_ip_v4_link_local() {
+        assert!(is_blocked_ip(std::net::IpAddr::V4(
+            std::net::Ipv4Addr::new(169, 254, 0, 1)
+        )));
+        assert!(is_blocked_ip(std::net::IpAddr::V4(
+            std::net::Ipv4Addr::new(169, 254, 169, 254)
+        )));
+    }
+
+    #[test]
+    fn test_is_blocked_ip_v4_zero() {
+        assert!(is_blocked_ip(std::net::IpAddr::V4(
+            std::net::Ipv4Addr::new(0, 0, 0, 0)
+        )));
+    }
+
+    #[test]
+    fn test_is_blocked_ip_v4_public() {
+        assert!(!is_blocked_ip(std::net::IpAddr::V4(
+            std::net::Ipv4Addr::new(8, 8, 8, 8)
+        )));
+        assert!(!is_blocked_ip(std::net::IpAddr::V4(
+            std::net::Ipv4Addr::new(1, 1, 1, 1)
+        )));
+        assert!(!is_blocked_ip(std::net::IpAddr::V4(
+            std::net::Ipv4Addr::new(203, 0, 113, 1)
+        )));
+    }
+
+    #[test]
+    fn test_is_blocked_ip_v6_loopback() {
+        assert!(is_blocked_ip(std::net::IpAddr::V6(
+            std::net::Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)
+        )));
+    }
+
+    #[test]
+    fn test_is_blocked_ip_v6_ula() {
+        assert!(is_blocked_ip(std::net::IpAddr::V6(
+            std::net::Ipv6Addr::new(0xfc00, 0, 0, 0, 0, 0, 0, 1)
+        )));
+        assert!(is_blocked_ip(std::net::IpAddr::V6(
+            std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1)
+        )));
+    }
+
+    #[test]
+    fn test_is_blocked_ip_v6_link_local() {
+        assert!(is_blocked_ip(std::net::IpAddr::V6(
+            std::net::Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1)
+        )));
+    }
+
+    #[test]
+    fn test_is_blocked_ip_v6_multicast_not_blocked() {
+        // mcp.rs is_blocked_ip does NOT block multicast (only safety.rs does)
+        assert!(!is_blocked_ip(std::net::IpAddr::V6(
+            std::net::Ipv6Addr::new(0xff00, 0, 0, 0, 0, 0, 0, 1)
+        )));
+    }
+
+    #[test]
+    fn test_is_blocked_ip_v6_ipv4_mapped() {
+        let mapped: std::net::Ipv6Addr =
+            std::net::Ipv4Addr::new(127, 0, 0, 1).to_ipv6_mapped();
+        assert!(is_blocked_ip(std::net::IpAddr::V6(mapped)));
+
+        let mapped: std::net::Ipv6Addr =
+            std::net::Ipv4Addr::new(192, 168, 1, 1).to_ipv6_mapped();
+        assert!(is_blocked_ip(std::net::IpAddr::V6(mapped)));
+    }
+
+    #[test]
+    fn test_is_blocked_ip_v6_allowed() {
+        assert!(!is_blocked_ip(std::net::IpAddr::V6(
+            std::net::Ipv6Addr::new(0x2606, 0x4700, 0, 0, 0, 0, 0, 1)
+        )));
+    }
+
+    // -------------------------------------------------------------------------
+    // html_to_markdown tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_html_to_markdown_removes_basic_tags() {
+        let html = "<h1>Hello</h1><p>World</p>";
+        let result = html_to_markdown(html);
+        assert!(!result.contains('<'));
+    }
+
+    #[test]
+    fn test_html_to_markdown_removes_script_style() {
+        let html = concat!(
+            "<html><head><style>.cls{color:red}</style></head>",
+            "<body><script>alert('xss')</script>",
+            "<p>Hello</p></body></html>",
+        );
+        let result = html_to_markdown(html);
+        assert!(!result.contains("alert"), "script content should be removed");
+        assert!(!result.contains(".cls"), "style content should be removed");
+        assert!(!result.contains('<'), "no raw HTML tags should remain");
+    }
+
+    #[test]
+    fn test_html_to_markdown_empty_input() {
+        assert_eq!(html_to_markdown(""), "");
+    }
+
+    #[test]
+    fn test_html_to_markdown_no_html() {
+        let result = html_to_markdown("just plain text");
+        assert!(result.contains("just plain text"));
+    }
+}
