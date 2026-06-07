@@ -39,8 +39,13 @@ function $(cmd) {
 }
 
 function cmp(a, b) {
-  const pa = a.split(".").map(Number);
-  const pb = b.split(".").map(Number);
+  const parseCore = (v) =>
+    (v.split(/[+-]/, 1)[0].match(/^\d+(?:\.\d+){0,2}/)?.[0] ?? "")
+      .split(".")
+      .map(n => Number(n) || 0);
+
+  const pa = parseCore(a);
+  const pb = parseCore(b);
   for (let i = 0; i < 3; i++) {
     const va = pa[i] || 0;
     const vb = pb[i] || 0;

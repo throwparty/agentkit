@@ -87,10 +87,12 @@ echo "--- cargo update -p $pkg@$vuln_version (latest compatible) ---"
 cargo update -p "${pkg}@${vuln_version}" 2>&1
 
 still_vuln=
+remaining_vuln_versions=
 while IFS= read -r ver; do
   if in_vuln_range "$ver"; then
     echo "  $pkg $ver still vulnerable"
     still_vuln=1
+    remaining_vuln_versions+="${remaining_vuln_versions:+, }$ver"
   else
     echo "  $pkg $ver is now safe"
   fi
@@ -100,7 +102,7 @@ done <<< "$(locked_versions "$pkg")"
 
 # --- try: upstream cargo update ---
 echo ""
-echo "  compatible update didn't help (still $vuln_version, needs $fixed+)"
+echo "  compatible update didn't help (still ${remaining_vuln_versions:-unknown}, needs $fixed+)"
 echo "  Looking up who depends on $pkg …"
 
 # Use cargo's dependency graph rather than parsing Cargo.lock text heuristically.
