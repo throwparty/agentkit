@@ -67,3 +67,12 @@ jobs:
       contents: read
     uses: ./.github/workflows/workflows.lint.yaml
 
+  ready:
+    name: Ready
+    needs: [test, docs, lint-workflows]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
+
