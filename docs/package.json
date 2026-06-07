@@ -58,6 +58,9 @@
   "resolutions": {
     "@docusaurus/core@npm:3.10.1": "patch:@docusaurus/core@npm%3A3.10.1#~/.yarn/patches/@docusaurus-core-npm-3.10.1-ca011c3645.patch",
     "minimatch@^10.1.2": "^10.2.1",
+    "picomatch@^4.0.3": "^4.0.4",
+    "serialize-javascript@^6.0.0": "^7.0.3",
+    "serialize-javascript@^6.0.1": "^7.0.3",
     "serialize-javascript@^6.0.2": "^7.0.3"
   }
 }
