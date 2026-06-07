@@ -5,7 +5,19 @@ import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const YARN = ".yarn/releases/yarn-4.15.0.cjs";
+
+function getYarnPath() {
+  try {
+    const yarnrc = readFileSync(resolve(HERE, ".yarnrc.yml"), "utf8");
+    const m = yarnrc.match(/^\s*yarnPath:\s*["']?([^"'\n]+)["']?\s*$/m);
+    if (m?.[1]) return m[1];
+  } catch {
+    // fall back to default below
+  }
+  return ".yarn/releases/yarn-4.15.0.cjs";
+}
+
+const YARN = getYarnPath();
 
 // ── parse arguments ─────────────────────────────────────────────
 const input = process.argv[2];
@@ -68,7 +80,11 @@ if (pkg.ecosystem !== "npm") {
 
 const pkgName = pkg.name;
 const vulnRange = alert.security_vulnerability.vulnerable_version_range;
-const firstPatched = alert.security_vulnerability.first_patched_version.identifier;
+const firstPatched = alert.security_vulnerability.first_patched_version?.identifier;
+if (!firstPatched) {
+  console.log("No first patched version is available for alert #" + num + "; cannot safely auto-resolve.");
+  process.exit(1);
+}
 
 console.log("  Package:       " + pkgName);
 console.log("  Vulnerable:    " + vulnRange);
@@ -106,7 +122,7 @@ if (toAdd.length === 0) {
 
 if (!pj.resolutions) pj.resolutions = {};
 for (const [k, v] of toAdd) pj.resolutions[k] = v;
-writeFileSync("package.json", JSON.stringify(pj, null, 2) + "\n");
+writeFileSync(resolve(HERE, "package.json"), JSON.stringify(pj, null, 2) + "\n");
 console.log("\n  → " + toAdd.length + " resolution(s) written to package.json");
 
 // ── apply ───────────────────────────────────────────────────────
