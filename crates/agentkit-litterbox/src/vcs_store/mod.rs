@@ -23,7 +23,7 @@ impl VcsStore {
             .join(format!(".{}.clone.lock", slug));
 
         if let Some(parent) = lock_path.parent() {
-            fs::create_dir_all(parent).map_err(SandboxError::Io)?;
+            fs::create_dir_all(parent)?;
         }
 
         let file = fs::OpenOptions::new()
