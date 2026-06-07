@@ -510,7 +510,7 @@ impl GitScm {
             if parent_commit.tree_id() == tree_oid {
                 return Ok(None);
             }
-        } else if tree_oid == git2::Oid::zero() {
+        } else if tree_oid == git2::Oid::ZERO_SHA1 {
             return Ok(None);
         }
 
