@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 git2 = "0.20"
-gix = "0.80"
+gix = "0.83"
 tempfile = "3.12"
 
 [dev-dependencies]
