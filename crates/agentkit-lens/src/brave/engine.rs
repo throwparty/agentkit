@@ -13,20 +13,36 @@ pub struct BraveOptions {
 pub struct BraveSearchEngine {
     api_key: Arc<str>,
     client: reqwest::Client,
+    base_url: String,
 }
 
 impl BraveSearchEngine {
     /// Create a new Brave search engine with the given options.
     pub fn new(options: BraveOptions) -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .gzip(true)
-            .build()
-            .expect("Failed to build HTTP client");
+        Self::new_with_client(options, None, None)
+    }
+
+    /// Create a new Brave search engine with a custom HTTP client and base URL.
+    ///
+    /// Used for testing with wiremock servers. Pass `None` for either parameter
+    /// to use the default production value.
+    pub fn new_with_client(
+        options: BraveOptions,
+        client: Option<reqwest::Client>,
+        base_url: Option<String>,
+    ) -> Self {
+        let client = client.unwrap_or_else(|| {
+            reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .gzip(true)
+                .build()
+                .expect("Failed to build HTTP client")
+        });
 
         Self {
             api_key: Arc::from(options.api_key),
             client,
+            base_url: base_url.unwrap_or_else(|| "https://api.search.brave.com".to_string()),
         }
     }
 
@@ -36,7 +52,8 @@ impl BraveSearchEngine {
         let offset = ((req.page - 1) * req.max_results).min(9);
 
         let mut url = format!(
-            "https://api.search.brave.com/res/v1/web/search?q={}",
+            "{}/res/v1/web/search?q={}",
+            self.base_url,
             urlencoding::encode(&req.query)
         );
 
@@ -163,6 +180,24 @@ impl SearchEngine for BraveSearchEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wiremock::matchers::{header, method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn brave_engine(api_key: &str, base_url: &str) -> BraveSearchEngine {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .gzip(true)
+            .build()
+            .unwrap();
+        BraveSearchEngine::new_with_client(
+            BraveOptions {
+                api_key: api_key.to_string(),
+            },
+            Some(client),
+            Some(base_url.to_string()),
+        )
+    }
+
     #[test]
     fn test_brave_engine_name() {
         let engine = BraveSearchEngine::new(BraveOptions {
@@ -369,5 +404,172 @@ mod tests {
         let response = engine.parse_response(api_response, &req);
         assert!(response.results.is_empty());
         assert_eq!(response.total_pages, 0);
+    }
+
+    #[tokio::test]
+    async fn test_brave_search_success() {
+        let mock_server = MockServer::start().await;
+        let base = mock_server.uri();
+
+        Mock::given(method("GET"))
+            .and(path("/res/v1/web/search"))
+            .and(query_param("q", "rust async"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "type": "search",
+                    "query": {
+                        "original": "rust async",
+                        "more_results_available": true,
+                        "altered": null,
+                        "country": null,
+                        "safesearch": null,
+                        "bad_results": null
+                    },
+                    "web": {
+                        "type": "search",
+                        "results": [
+                            {
+                                "title": "Rust Async Book",
+                                "url": "https://example.com/async",
+                                "description": "A book about async Rust"
+                            }
+                        ]
+                    }
+                })),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let engine = brave_engine("test-key", &base);
+        let req = SearchRequest::new("rust async", "brave");
+        let response = engine.search(req).await.unwrap();
+
+        assert_eq!(response.query, "rust async");
+        assert_eq!(response.results.len(), 1);
+        assert_eq!(response.results[0].title, "Rust Async Book");
+        assert_eq!(response.results[0].link, "https://example.com/async");
+        assert_eq!(response.results[0].snippet, "A book about async Rust");
+        assert_eq!(response.results[0].position, 1);
+        assert!(response.has_more);
+    }
+
+    #[tokio::test]
+    async fn test_brave_search_empty_results() {
+        let mock_server = MockServer::start().await;
+        let base = mock_server.uri();
+
+        Mock::given(method("GET"))
+            .and(path("/res/v1/web/search"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "type": "search",
+                    "query": {
+                        "original": "xyznonexistent",
+                        "more_results_available": false
+                    },
+                    "web": {
+                        "type": "search",
+                        "results": []
+                    }
+                })),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let engine = brave_engine("test-key", &base);
+        let req = SearchRequest::new("xyznonexistent", "brave");
+        let response = engine.search(req).await.unwrap();
+
+        assert!(response.results.is_empty());
+        assert!(!response.has_more);
+    }
+
+    #[tokio::test]
+    async fn test_brave_search_unauthorized() {
+        let mock_server = MockServer::start().await;
+        let base = mock_server.uri();
+
+        Mock::given(method("GET"))
+            .and(path("/res/v1/web/search"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&mock_server)
+            .await;
+
+        let engine = brave_engine("bad-key", &base);
+        let req = SearchRequest::new("test", "brave");
+        let err = engine.search(req).await.unwrap_err();
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Invalid") || msg.contains("invalid") || msg.contains("key"),
+            "error should mention invalid key: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_brave_search_rate_limited() {
+        let mock_server = MockServer::start().await;
+        let base = mock_server.uri();
+
+        Mock::given(method("GET"))
+            .and(path("/res/v1/web/search"))
+            .respond_with(ResponseTemplate::new(429))
+            .mount(&mock_server)
+            .await;
+
+        let engine = brave_engine("test-key", &base);
+        let req = SearchRequest::new("test", "brave");
+        let err = engine.search(req).await.unwrap_err();
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Rate") || msg.contains("rate"),
+            "error should mention rate limiting: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_brave_search_server_error() {
+        let mock_server = MockServer::start().await;
+        let base = mock_server.uri();
+
+        Mock::given(method("GET"))
+            .and(path("/res/v1/web/search"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("Internal Server Error"))
+            .mount(&mock_server)
+            .await;
+
+        let engine = brave_engine("test-key", &base);
+        let req = SearchRequest::new("test", "brave");
+        let err = engine.search(req).await.unwrap_err();
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("500") || msg.contains("error"),
+            "error should mention HTTP error: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_brave_search_accept_header() {
+        let mock_server = MockServer::start().await;
+        let base = mock_server.uri();
+
+        Mock::given(method("GET"))
+            .and(path("/res/v1/web/search"))
+            .and(header("X-Subscription-Token", "secret-key-42"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "type": "search",
+                    "query": { "original": "test", "more_results_available": false },
+                    "web": { "type": "search", "results": [] }
+                })),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let engine = brave_engine("secret-key-42", &base);
+        let req = SearchRequest::new("test", "brave");
+        assert!(engine.search(req).await.is_ok());
     }
 }
