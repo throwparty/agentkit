@@ -385,7 +385,7 @@ mod tests {
             .expect("litterbox remote");
         assert_eq!(
             host_remote.url().map(|u| u.to_string()),
-            Some(bare_path.to_string_lossy().to_string())
+            Ok(bare_path.to_string_lossy().to_string())
         );
 
         // Open GitScm on bare clone (as build_provider_with_config does for remote mode)
@@ -451,7 +451,7 @@ mod tests {
             .expect("litterbox remote should persist");
         assert_eq!(
             host_remote_after.url().map(|u| u.to_string()),
-            Some(bare_path.to_string_lossy().to_string())
+            Ok(bare_path.to_string_lossy().to_string())
         );
     }
 }
