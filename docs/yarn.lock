@@ -4206,10 +4206,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@rspack/binding-darwin-arm64@npm:^2.0.5":
-  version: 2.0.5
-  resolution: "@rspack/binding-darwin-arm64@npm:2.0.5"
-  checksum: 10c0/e0bb16f6aeb45e6b808607474ff6a0b161dcbc158b02b506dd171701150e1b7ed794425a5114c9b92fb49120023144b7bbc045df9f2614dacfe2d9a48ae0e117
+"@rspack/binding-darwin-arm64@npm:^2.0.6":
+  version: 2.0.8
+  resolution: "@rspack/binding-darwin-arm64@npm:2.0.8"
+  checksum: 10c0/3d1c10902a0564dfa2cc18827a2ec028507cd8848c1d596603da14c50aeec4169cd375ee710ba23082a873e0e6a57f82bb00d9be94c07b3e97806376d160dc10
   conditions: os=darwin & cpu=arm64
   languageName: node
   linkType: hard
@@ -4942,7 +4942,7 @@ __metadata:
     "@docusaurus/types": "npm:^3.10.1"
     "@mdx-js/react": "npm:^3.1.1"
     "@rspack/binding": "npm:^2.0.5"
-    "@rspack/binding-darwin-arm64": "npm:^2.0.5"
+    "@rspack/binding-darwin-arm64": "npm:^2.0.6"
     "@rspack/core": "npm:^2.0.6"
     clsx: "npm:^2.1.1"
     prism-react-renderer: "npm:^2.4.1"
