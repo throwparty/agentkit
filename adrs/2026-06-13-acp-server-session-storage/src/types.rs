@@ -4,6 +4,7 @@ use std::collections::VecDeque;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Session {
     pub id: String,
+    pub head_prompt_turn_id: Option<String>,
     pub cwd: String,
     pub title: String,
     pub mode: Option<String>,
