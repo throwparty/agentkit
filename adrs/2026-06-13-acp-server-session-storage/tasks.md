@@ -1,5 +1,5 @@
 ---
-status: draft
+status: in-progress
 created: 2026-06-13
 updated: 2026-06-13
 author: adrian
@@ -18,13 +18,13 @@ its own migration. Task 5 completes the cross-entity operations.
 
 ## Summary
 
-| # | Task | Effort | Depends on | Entity |
-|---|------|--------|------------|--------|
-| 1 | Scaffold + ID types + core types + trait | medium | — | Foundation |
-| 2 | Session entity (both backends) | medium | 1 | Session |
-| 3 | PromptTurn entity (both backends) | medium | 2 | PromptTurn |
-| 4 | Message entity (both backends) | medium | 3 | Message |
-| 5 | Context assembly + fork (both backends) | medium | 4 | Cross-entity |
+| # | Task | Effort | Depends on | Entity | Status |
+|---|------|--------|------------|--------|--------|
+| 1 | Scaffold + ID types + core types + trait | medium | — | Foundation | ✅ |
+| 2 | Session entity (both backends) | medium | 1 | Session | |
+| 3 | PromptTurn entity (both backends) | medium | 2 | PromptTurn | |
+| 4 | Message entity (both backends) | medium | 3 | Message | |
+| 5 | Context assembly + fork (both backends) | medium | 4 | Cross-entity | |
 
 Total: 5 tasks, estimated 1–3 days each.
 
