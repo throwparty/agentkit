@@ -24,3 +24,8 @@ updates:
     open-pull-requests-limit: 10
     cooldown:
       default-days: 7
+    groups:
+      react:
+        patterns:
+          - react
+          - react-dom
