@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 use crate::store::{SessionStore, StoreError};
-use crate::types::Session;
+use crate::types::{PromptTurn, Session};
 
 pub fn test_session(id: &str) -> Session {
     Session {
@@ -117,4 +117,113 @@ async fn session_clear<S: SessionStore>(store: &S) {
     store.clear().await.unwrap();
     let sessions = store.list_sessions().await.unwrap();
     assert!(sessions.is_empty());
+}
+
+pub fn test_prompt_turn(
+    id: &str,
+    session_id: &str,
+    parent_id: Option<&str>,
+    position: usize,
+) -> PromptTurn {
+    PromptTurn {
+        id: id.to_string(),
+        session_id: session_id.to_string(),
+        parent_id: parent_id.map(|s| s.to_string()),
+        messages: Vec::new(),
+        position,
+        created_at: 1000 + position as u64,
+    }
+}
+
+pub async fn run_prompt_turn_tests<S: SessionStore>(store: &S) {
+    prompt_turn_append(store).await;
+    prompt_turn_append_first(store).await;
+    prompt_turn_append_missing_session(store).await;
+    prompt_turn_dag_parent(store).await;
+    prompt_turn_children(store).await;
+    prompt_turn_session_list(store).await;
+    prompt_turn_position_increments(store).await;
+}
+
+async fn prompt_turn_append<S: SessionStore>(store: &S) {
+    let s = test_session("pt-sess-1");
+    store.create_session(s).await.unwrap();
+    let turn = test_prompt_turn("turn-1", "pt-sess-1", None, 0);
+    store.append_prompt_turn(turn).await.unwrap();
+}
+
+async fn prompt_turn_append_first<S: SessionStore>(store: &S) {
+    let s = test_session("pt-sess-2");
+    store.create_session(s).await.unwrap();
+    let turn = test_prompt_turn("turn-2", "pt-sess-2", None, 0);
+    store.append_prompt_turn(turn).await.unwrap();
+}
+
+async fn prompt_turn_append_missing_session<S: SessionStore>(store: &S) {
+    let turn = test_prompt_turn("turn-missing", "nonexistent", None, 0);
+    let err = store.append_prompt_turn(turn).await.unwrap_err();
+    assert!(
+        matches!(&err, StoreError::NotFound { entity, id } if *entity == "session" && *id == "nonexistent"),
+        "expected NotFound, got {err}"
+    );
+}
+
+async fn prompt_turn_dag_parent<S: SessionStore>(store: &S) {
+    let s = test_session("pt-sess-3");
+    store.create_session(s).await.unwrap();
+    let turn_a = test_prompt_turn("turn-A", "pt-sess-3", None, 0);
+    store.append_prompt_turn(turn_a).await.unwrap();
+    let turn_b = test_prompt_turn("turn-B", "pt-sess-3", Some("turn-A"), 1);
+    store.append_prompt_turn(turn_b).await.unwrap();
+
+    let children = store.get_prompt_turn_children("turn-A").await.unwrap();
+    assert_eq!(children.len(), 1);
+    assert_eq!(children[0].id, "turn-B");
+    assert_eq!(children[0].parent_id, Some("turn-A".to_string()));
+}
+
+async fn prompt_turn_children<S: SessionStore>(store: &S) {
+    let s = test_session("pt-sess-4");
+    store.create_session(s).await.unwrap();
+    let turn_a = test_prompt_turn("turn-C", "pt-sess-4", None, 0);
+    store.append_prompt_turn(turn_a).await.unwrap();
+    let turn_b = test_prompt_turn("turn-D", "pt-sess-4", Some("turn-C"), 1);
+    store.append_prompt_turn(turn_b).await.unwrap();
+    let turn_c = test_prompt_turn("turn-E", "pt-sess-4", Some("turn-C"), 2);
+    store.append_prompt_turn(turn_c).await.unwrap();
+
+    let children = store.get_prompt_turn_children("turn-C").await.unwrap();
+    assert_eq!(children.len(), 2);
+    let child_ids: Vec<&str> = children.iter().map(|t| t.id.as_str()).collect();
+    assert!(child_ids.contains(&"turn-D"));
+    assert!(child_ids.contains(&"turn-E"));
+}
+
+async fn prompt_turn_session_list<S: SessionStore>(store: &S) {
+    let s = test_session("pt-sess-5");
+    store.create_session(s).await.unwrap();
+    let turn_a = test_prompt_turn("turn-F", "pt-sess-5", None, 0);
+    store.append_prompt_turn(turn_a).await.unwrap();
+    let turn_b = test_prompt_turn("turn-G", "pt-sess-5", Some("turn-F"), 1);
+    store.append_prompt_turn(turn_b).await.unwrap();
+
+    let turns = store.get_session_prompt_turns("pt-sess-5").await.unwrap();
+    assert_eq!(turns.len(), 2);
+    assert_eq!(turns[0].position, 0);
+    assert_eq!(turns[1].position, 1);
+}
+
+async fn prompt_turn_position_increments<S: SessionStore>(store: &S) {
+    let s = test_session("pt-sess-6");
+    store.create_session(s).await.unwrap();
+    for i in 0..3 {
+        let turn =
+            test_prompt_turn(&format!("turn-pos-{i}"), "pt-sess-6", None, i);
+        store.append_prompt_turn(turn).await.unwrap();
+    }
+    let turns = store.get_session_prompt_turns("pt-sess-6").await.unwrap();
+    assert_eq!(turns.len(), 3);
+    for (i, t) in turns.iter().enumerate() {
+        assert_eq!(t.position, i);
+    }
 }

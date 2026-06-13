@@ -50,6 +50,7 @@ impl SqliteSessionStore {
         let opts = SqliteConnectOptions::new()
             .filename(path)
             .create_if_missing(true)
+            .foreign_keys(true)
             .journal_mode(SqliteJournalMode::Wal)
             .busy_timeout(std::time::Duration::from_millis(5000));
 
@@ -209,22 +210,77 @@ impl SessionStore for SqliteSessionStore {
         Ok(())
     }
 
-    async fn append_prompt_turn(&self, _turn: PromptTurn) -> Result<(), StoreError> {
-        Err(StoreError::Database("not implemented".to_string()))
+    async fn append_prompt_turn(&self, turn: PromptTurn) -> Result<(), StoreError> {
+        {
+            let exists: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?)",
+            )
+            .bind(&turn.session_id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| StoreError::Database(e.to_string()))?;
+
+            if !exists {
+                return Err(StoreError::NotFound {
+                    entity: "session",
+                    id: turn.session_id.clone(),
+                });
+            }
+        }
+
+        sqlx::query(
+            r#"
+            INSERT INTO prompt_turns (id, session_id, parent_id, position, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&turn.id)
+        .bind(&turn.session_id)
+        .bind(&turn.parent_id)
+        .bind(turn.position as i64)
+        .bind(turn.created_at as i64)
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(|e| map_sqlx_error("prompt_turn", &turn.id, e))
     }
 
     async fn get_prompt_turn_children(
         &self,
-        _id: &str,
+        id: &str,
     ) -> Result<Vec<PromptTurn>, StoreError> {
-        Err(StoreError::Database("not implemented".to_string()))
+        let rows = sqlx::query_as::<_, PromptTurnRow>(
+            r#"
+            SELECT id, session_id, parent_id, position, created_at
+            FROM prompt_turns WHERE parent_id = ?
+            ORDER BY position
+            "#,
+        )
+        .bind(id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| StoreError::Database(e.to_string()))?;
+
+        Ok(rows.into_iter().map(Into::into).collect())
     }
 
     async fn get_session_prompt_turns(
         &self,
-        _session_id: &str,
+        session_id: &str,
     ) -> Result<Vec<PromptTurn>, StoreError> {
-        Err(StoreError::Database("not implemented".to_string()))
+        let rows = sqlx::query_as::<_, PromptTurnRow>(
+            r#"
+            SELECT id, session_id, parent_id, position, created_at
+            FROM prompt_turns WHERE session_id = ?
+            ORDER BY position
+            "#,
+        )
+        .bind(session_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| StoreError::Database(e.to_string()))?;
+
+        Ok(rows.into_iter().map(Into::into).collect())
     }
 
     async fn append_message(&self, _message: Message) -> Result<(), StoreError> {
@@ -253,11 +309,37 @@ impl SessionStore for SqliteSessionStore {
     }
 
     async fn clear(&self) -> Result<(), StoreError> {
+        sqlx::query("DELETE FROM prompt_turns")
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StoreError::Database(e.to_string()))?;
         sqlx::query("DELETE FROM sessions")
             .execute(&self.pool)
             .await
             .map(|_| ())
             .map_err(|e| StoreError::Database(e.to_string()))
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct PromptTurnRow {
+    id: String,
+    session_id: String,
+    parent_id: Option<String>,
+    position: i64,
+    created_at: i64,
+}
+
+impl From<PromptTurnRow> for PromptTurn {
+    fn from(row: PromptTurnRow) -> Self {
+        PromptTurn {
+            id: row.id,
+            session_id: row.session_id,
+            parent_id: row.parent_id,
+            messages: Vec::new(),
+            position: row.position as usize,
+            created_at: row.created_at as u64,
+        }
     }
 }
 
@@ -299,11 +381,17 @@ impl From<SessionRow> for Session {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_helpers::run_session_tests;
+    use crate::test_helpers::{run_prompt_turn_tests, run_session_tests};
 
     #[tokio::test]
     async fn test_session_crud() {
         let store = SqliteSessionStore::connect(":memory:").await.unwrap();
         run_session_tests(&store).await;
+    }
+
+    #[tokio::test]
+    async fn test_prompt_turn_ops() {
+        let store = SqliteSessionStore::connect(":memory:").await.unwrap();
+        run_prompt_turn_tests(&store).await;
     }
 }

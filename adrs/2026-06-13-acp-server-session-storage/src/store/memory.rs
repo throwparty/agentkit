@@ -17,12 +17,14 @@ fn now() -> u64 {
 
 pub struct InMemorySessionStore {
     sessions: Arc<RwLock<HashMap<String, Session>>>,
+    prompt_turns: Arc<RwLock<HashMap<String, PromptTurn>>>,
 }
 
 impl InMemorySessionStore {
     pub fn new() -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
+            prompt_turns: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 }
@@ -105,22 +107,47 @@ impl SessionStore for InMemorySessionStore {
         Ok(())
     }
 
-    async fn append_prompt_turn(&self, _turn: PromptTurn) -> Result<(), StoreError> {
-        Err(StoreError::Database("not implemented".to_string()))
+    async fn append_prompt_turn(&self, turn: PromptTurn) -> Result<(), StoreError> {
+        {
+            let sessions = self.sessions.read().await;
+            if !sessions.contains_key(&turn.session_id) {
+                return Err(StoreError::NotFound {
+                    entity: "session",
+                    id: turn.session_id.clone(),
+                });
+            }
+        }
+        let mut prompt_turns = self.prompt_turns.write().await;
+        prompt_turns.insert(turn.id.clone(), turn);
+        Ok(())
     }
 
     async fn get_prompt_turn_children(
         &self,
-        _id: &str,
+        id: &str,
     ) -> Result<Vec<PromptTurn>, StoreError> {
-        Err(StoreError::Database("not implemented".to_string()))
+        let prompt_turns = self.prompt_turns.read().await;
+        let mut children: Vec<PromptTurn> = prompt_turns
+            .values()
+            .filter(|t| t.parent_id.as_deref() == Some(id))
+            .cloned()
+            .collect();
+        children.sort_by(|a, b| a.position.cmp(&b.position));
+        Ok(children)
     }
 
     async fn get_session_prompt_turns(
         &self,
-        _session_id: &str,
+        session_id: &str,
     ) -> Result<Vec<PromptTurn>, StoreError> {
-        Err(StoreError::Database("not implemented".to_string()))
+        let prompt_turns = self.prompt_turns.read().await;
+        let mut turns: Vec<PromptTurn> = prompt_turns
+            .values()
+            .filter(|t| t.session_id == session_id)
+            .cloned()
+            .collect();
+        turns.sort_by(|a, b| a.position.cmp(&b.position));
+        Ok(turns)
     }
 
     async fn append_message(&self, _message: Message) -> Result<(), StoreError> {
@@ -151,6 +178,8 @@ impl SessionStore for InMemorySessionStore {
     async fn clear(&self) -> Result<(), StoreError> {
         let mut sessions = self.sessions.write().await;
         sessions.clear();
+        let mut prompt_turns = self.prompt_turns.write().await;
+        prompt_turns.clear();
         Ok(())
     }
 }
@@ -158,11 +187,17 @@ impl SessionStore for InMemorySessionStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_helpers::run_session_tests;
+    use crate::test_helpers::{run_prompt_turn_tests, run_session_tests};
 
     #[tokio::test]
     async fn test_session_crud() {
         let store = InMemorySessionStore::new();
         run_session_tests(&store).await;
+    }
+
+    #[tokio::test]
+    async fn test_prompt_turn_ops() {
+        let store = InMemorySessionStore::new();
+        run_prompt_turn_tests(&store).await;
     }
 }
