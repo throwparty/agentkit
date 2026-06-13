@@ -5052,7 +5052,7 @@ __metadata:
     "@rspack/core": "npm:^2.0.5"
     clsx: "npm:^2.1.1"
     prism-react-renderer: "npm:^2.4.1"
-    react: "npm:^19.2.6"
+    react: "npm:^19.2.7"
     react-dom: "npm:^19.2.6"
     typescript: "npm:~6.0.3"
     vscode-jsonrpc: "npm:9.0.0"
@@ -13425,10 +13425,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"react@npm:^19.2.6":
-  version: 19.2.6
-  resolution: "react@npm:19.2.6"
-  checksum: 10c0/66afde33b9a9ee87b1e1cae39d8e7e040d1262e719524fd70660c4d4ce79929c532ac19fc3df5a911edaf02768fdf2c49de4ede1ba99bc6aad72796e0e26e798
+"react@npm:^19.2.7":
+  version: 19.2.7
+  resolution: "react@npm:19.2.7"
+  checksum: 10c0/0bd0e2f1bbd4ba97561c6597bf8a5fec05e6476fe61e165c1065598d16668efc6715205599c94d3ddd49d36cb0f21cbf1b9bcc18ee840b805ce222c3e8d558ac
   languageName: node
   linkType: hard
 
