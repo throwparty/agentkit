@@ -283,12 +283,56 @@ impl SessionStore for SqliteSessionStore {
         Ok(rows.into_iter().map(Into::into).collect())
     }
 
-    async fn append_message(&self, _message: Message) -> Result<(), StoreError> {
-        Err(StoreError::Database("not implemented".to_string()))
+    async fn append_message(&self, message: Message) -> Result<(), StoreError> {
+        {
+            let exists: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM prompt_turns WHERE id = ?)",
+            )
+            .bind(&message.prompt_turn_id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| StoreError::Database(e.to_string()))?;
+
+            if !exists {
+                return Err(StoreError::NotFound {
+                    entity: "prompt_turn",
+                    id: message.prompt_turn_id.clone(),
+                });
+            }
+        }
+
+        sqlx::query(
+            r#"
+            INSERT INTO messages (id, prompt_turn_id, role, content, position, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&message.id)
+        .bind(&message.prompt_turn_id)
+        .bind(&message.role)
+        .bind(&message.content)
+        .bind(message.position as i64)
+        .bind(message.created_at as i64)
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(|e| map_sqlx_error("message", &message.id, e))
     }
 
-    async fn get_messages_for_turn(&self, _turn_id: &str) -> Result<Vec<Message>, StoreError> {
-        Err(StoreError::Database("not implemented".to_string()))
+    async fn get_messages_for_turn(&self, turn_id: &str) -> Result<Vec<Message>, StoreError> {
+        let rows = sqlx::query_as::<_, MessageRow>(
+            r#"
+            SELECT id, prompt_turn_id, role, content, position, created_at
+            FROM messages WHERE prompt_turn_id = ?
+            ORDER BY position
+            "#,
+        )
+        .bind(turn_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| StoreError::Database(e.to_string()))?;
+
+        Ok(rows.into_iter().map(Into::into).collect())
     }
 
     async fn get_context(
@@ -309,6 +353,10 @@ impl SessionStore for SqliteSessionStore {
     }
 
     async fn clear(&self) -> Result<(), StoreError> {
+        sqlx::query("DELETE FROM messages")
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StoreError::Database(e.to_string()))?;
         sqlx::query("DELETE FROM prompt_turns")
             .execute(&self.pool)
             .await
@@ -318,6 +366,29 @@ impl SessionStore for SqliteSessionStore {
             .await
             .map(|_| ())
             .map_err(|e| StoreError::Database(e.to_string()))
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct MessageRow {
+    id: String,
+    prompt_turn_id: String,
+    role: String,
+    content: String,
+    position: i64,
+    created_at: i64,
+}
+
+impl From<MessageRow> for Message {
+    fn from(row: MessageRow) -> Self {
+        Message {
+            id: row.id,
+            prompt_turn_id: row.prompt_turn_id,
+            role: row.role,
+            content: row.content,
+            position: row.position as usize,
+            created_at: row.created_at as u64,
+        }
     }
 }
 
@@ -381,7 +452,7 @@ impl From<SessionRow> for Session {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_helpers::{run_prompt_turn_tests, run_session_tests};
+    use crate::test_helpers::{run_message_tests, run_prompt_turn_tests, run_session_tests};
 
     #[tokio::test]
     async fn test_session_crud() {
@@ -393,5 +464,11 @@ mod tests {
     async fn test_prompt_turn_ops() {
         let store = SqliteSessionStore::connect(":memory:").await.unwrap();
         run_prompt_turn_tests(&store).await;
+    }
+
+    #[tokio::test]
+    async fn test_message_ops() {
+        let store = SqliteSessionStore::connect(":memory:").await.unwrap();
+        run_message_tests(&store).await;
     }
 }

@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 use crate::store::{SessionStore, StoreError};
-use crate::types::{PromptTurn, Session};
+use crate::types::{Message, PromptTurn, Session};
 
 pub fn test_session(id: &str) -> Session {
     Session {
@@ -226,4 +226,99 @@ async fn prompt_turn_position_increments<S: SessionStore>(store: &S) {
     for (i, t) in turns.iter().enumerate() {
         assert_eq!(t.position, i);
     }
+}
+
+pub fn test_message(
+    id: &str,
+    prompt_turn_id: &str,
+    role: &str,
+    content: &str,
+    position: usize,
+) -> Message {
+    Message {
+        id: id.to_string(),
+        prompt_turn_id: prompt_turn_id.to_string(),
+        role: role.to_string(),
+        content: content.to_string(),
+        position,
+        created_at: 1000 + position as u64,
+    }
+}
+
+pub async fn run_message_tests<S: SessionStore>(store: &S) {
+    message_append(store).await;
+    message_append_missing_turn(store).await;
+    message_get_by_turn(store).await;
+    message_position_order(store).await;
+    message_multiple_turns(store).await;
+}
+
+async fn message_append<S: SessionStore>(store: &S) {
+    let s = test_session("msg-sess-1");
+    store.create_session(s).await.unwrap();
+    let turn = test_prompt_turn("msg-turn-1", "msg-sess-1", None, 0);
+    store.append_prompt_turn(turn).await.unwrap();
+    let msg = test_message("msg-1", "msg-turn-1", "user", "hello", 0);
+    store.append_message(msg).await.unwrap();
+}
+
+async fn message_append_missing_turn<S: SessionStore>(store: &S) {
+    let msg = test_message("msg-missing", "nonexistent-turn", "user", "test", 0);
+    let err = store.append_message(msg).await.unwrap_err();
+    assert!(
+        matches!(&err, StoreError::NotFound { entity, id } if *entity == "prompt_turn" && *id == "nonexistent-turn"),
+        "expected NotFound, got {err}"
+    );
+}
+
+async fn message_get_by_turn<S: SessionStore>(store: &S) {
+    let s = test_session("msg-sess-5");
+    store.create_session(s).await.unwrap();
+    let turn = test_prompt_turn("msg-turn-5", "msg-sess-5", None, 0);
+    store.append_prompt_turn(turn).await.unwrap();
+    for i in 0..3 {
+        let msg = test_message(&format!("msg-5-{i}"), "msg-turn-5", "user", "content", i);
+        store.append_message(msg).await.unwrap();
+    }
+    let msgs = store.get_messages_for_turn("msg-turn-5").await.unwrap();
+    assert_eq!(msgs.len(), 3);
+    for (i, m) in msgs.iter().enumerate() {
+        assert_eq!(m.position, i);
+    }
+}
+
+async fn message_position_order<S: SessionStore>(store: &S) {
+    let s = test_session("msg-sess-3");
+    store.create_session(s).await.unwrap();
+    let turn = test_prompt_turn("msg-turn-3", "msg-sess-3", None, 0);
+    store.append_prompt_turn(turn).await.unwrap();
+    let orders = [("msg-a", 2), ("msg-b", 0), ("msg-c", 1)];
+    for (id, pos) in orders {
+        let msg = test_message(id, "msg-turn-3", "user", "content", pos);
+        store.append_message(msg).await.unwrap();
+    }
+    let msgs = store.get_messages_for_turn("msg-turn-3").await.unwrap();
+    assert_eq!(msgs.len(), 3);
+    assert_eq!(msgs[0].id, "msg-b");
+    assert_eq!(msgs[1].id, "msg-c");
+    assert_eq!(msgs[2].id, "msg-a");
+}
+
+async fn message_multiple_turns<S: SessionStore>(store: &S) {
+    let s = test_session("msg-sess-4");
+    store.create_session(s).await.unwrap();
+    let turn_a = test_prompt_turn("msg-turn-4a", "msg-sess-4", None, 0);
+    let turn_b = test_prompt_turn("msg-turn-4b", "msg-sess-4", None, 1);
+    store.append_prompt_turn(turn_a).await.unwrap();
+    store.append_prompt_turn(turn_b).await.unwrap();
+    let msg_a = test_message("msg-4a", "msg-turn-4a", "user", "turn a", 0);
+    let msg_b = test_message("msg-4b", "msg-turn-4b", "assistant", "turn b", 0);
+    store.append_message(msg_a).await.unwrap();
+    store.append_message(msg_b).await.unwrap();
+    let msgs_a = store.get_messages_for_turn("msg-turn-4a").await.unwrap();
+    assert_eq!(msgs_a.len(), 1);
+    assert_eq!(msgs_a[0].content, "turn a");
+    let msgs_b = store.get_messages_for_turn("msg-turn-4b").await.unwrap();
+    assert_eq!(msgs_b.len(), 1);
+    assert_eq!(msgs_b[0].content, "turn b");
 }

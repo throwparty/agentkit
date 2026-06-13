@@ -18,6 +18,7 @@ fn now() -> u64 {
 pub struct InMemorySessionStore {
     sessions: Arc<RwLock<HashMap<String, Session>>>,
     prompt_turns: Arc<RwLock<HashMap<String, PromptTurn>>>,
+    messages: Arc<RwLock<HashMap<String, Message>>>,
 }
 
 impl InMemorySessionStore {
@@ -25,6 +26,7 @@ impl InMemorySessionStore {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             prompt_turns: Arc::new(RwLock::new(HashMap::new())),
+            messages: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 }
@@ -150,12 +152,30 @@ impl SessionStore for InMemorySessionStore {
         Ok(turns)
     }
 
-    async fn append_message(&self, _message: Message) -> Result<(), StoreError> {
-        Err(StoreError::Database("not implemented".to_string()))
+    async fn append_message(&self, message: Message) -> Result<(), StoreError> {
+        {
+            let prompt_turns = self.prompt_turns.read().await;
+            if !prompt_turns.contains_key(&message.prompt_turn_id) {
+                return Err(StoreError::NotFound {
+                    entity: "prompt_turn",
+                    id: message.prompt_turn_id.clone(),
+                });
+            }
+        }
+        let mut messages = self.messages.write().await;
+        messages.insert(message.id.clone(), message);
+        Ok(())
     }
 
-    async fn get_messages_for_turn(&self, _turn_id: &str) -> Result<Vec<Message>, StoreError> {
-        Err(StoreError::Database("not implemented".to_string()))
+    async fn get_messages_for_turn(&self, turn_id: &str) -> Result<Vec<Message>, StoreError> {
+        let messages = self.messages.read().await;
+        let mut result: Vec<Message> = messages
+            .values()
+            .filter(|m| m.prompt_turn_id == turn_id)
+            .cloned()
+            .collect();
+        result.sort_by(|a, b| a.position.cmp(&b.position));
+        Ok(result)
     }
 
     async fn get_context(
@@ -180,6 +200,8 @@ impl SessionStore for InMemorySessionStore {
         sessions.clear();
         let mut prompt_turns = self.prompt_turns.write().await;
         prompt_turns.clear();
+        let mut messages = self.messages.write().await;
+        messages.clear();
         Ok(())
     }
 }
@@ -187,7 +209,7 @@ impl SessionStore for InMemorySessionStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_helpers::{run_prompt_turn_tests, run_session_tests};
+    use crate::test_helpers::{run_message_tests, run_prompt_turn_tests, run_session_tests};
 
     #[tokio::test]
     async fn test_session_crud() {
@@ -199,5 +221,11 @@ mod tests {
     async fn test_prompt_turn_ops() {
         let store = InMemorySessionStore::new();
         run_prompt_turn_tests(&store).await;
+    }
+
+    #[tokio::test]
+    async fn test_message_ops() {
+        let store = InMemorySessionStore::new();
+        run_message_tests(&store).await;
     }
 }
