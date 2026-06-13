@@ -26,7 +26,7 @@
     "clsx": "^2.1.1",
     "prism-react-renderer": "^2.4.1",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6",
+    "react-dom": "^19.2.7",
     "vscode-jsonrpc": "9.0.0",
     "vscode-languageserver-types": "3.18.0"
   },
