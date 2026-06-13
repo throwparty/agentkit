@@ -1,5 +1,10 @@
 # Litterbox roadmap
 
+## Forking sandboxes
+
+- Fork the branch (new branch with the fork point as the merge base).
+- Duplicate the compute resource.
+
 ## Sandboxing mechanisms
 
 - Bubblewrap
