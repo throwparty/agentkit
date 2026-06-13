@@ -337,19 +337,140 @@ impl SessionStore for SqliteSessionStore {
 
     async fn get_context(
         &self,
-        _session_id: &str,
-        _max_turns: Option<usize>,
+        session_id: &str,
+        max_turns: Option<usize>,
     ) -> Result<Vec<Message>, StoreError> {
-        Err(StoreError::Database("not implemented".to_string()))
+        {
+            let exists: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?)",
+            )
+            .bind(session_id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| StoreError::Database(e.to_string()))?;
+
+            if !exists {
+                return Err(StoreError::NotFound {
+                    entity: "session",
+                    id: session_id.to_string(),
+                });
+            }
+        }
+
+        let turn_ids: Vec<(String,)> = sqlx::query_as(
+            r#"
+            SELECT id FROM prompt_turns WHERE session_id = ? ORDER BY position
+            "#,
+        )
+        .bind(session_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| StoreError::Database(e.to_string()))?;
+
+        let turn_ids: Vec<String> = turn_ids.into_iter().map(|r| r.0).collect();
+        let relevant: &[String] = match max_turns {
+            Some(0) => return Ok(vec![]),
+            Some(n) => {
+                let len = turn_ids.len();
+                let start = len.saturating_sub(n);
+                &turn_ids[start..]
+            }
+            None => &turn_ids,
+        };
+
+        let mut result = Vec::new();
+        for turn_id in relevant {
+            let mut msgs = self.get_messages_for_turn(turn_id).await?;
+            result.append(&mut msgs);
+        }
+        Ok(result)
     }
 
     async fn fork_session(
         &self,
-        _new_session: Session,
-        _source_session_id: &str,
-        _fork_point_turn_id: &str,
+        new_session: Session,
+        source_session_id: &str,
+        fork_point_turn_id: &str,
     ) -> Result<(), StoreError> {
-        Err(StoreError::Database("not implemented".to_string()))
+        {
+            let exists: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?)",
+            )
+            .bind(source_session_id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| StoreError::Database(e.to_string()))?;
+
+            if !exists {
+                return Err(StoreError::NotFound {
+                    entity: "session",
+                    id: source_session_id.to_string(),
+                });
+            }
+        }
+
+        let source_turns = self.get_session_prompt_turns(source_session_id).await?;
+        let fork_idx = source_turns
+            .iter()
+            .position(|t| t.id == fork_point_turn_id)
+            .ok_or_else(|| StoreError::NotFound {
+                entity: "prompt_turn",
+                id: fork_point_turn_id.to_string(),
+            })?;
+
+        let mut turn_id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let new_session_id = new_session.id.clone();
+
+        let mut forked_session = new_session;
+        forked_session.forked_from_session_id = Some(source_session_id.to_string());
+        forked_session.fork_point_turn_id = Some(fork_point_turn_id.to_string());
+        self.create_session(forked_session).await?;
+
+        for turn in &source_turns[..=fork_idx] {
+            let new_turn_id = uuid::Uuid::new_v4().to_string();
+            turn_id_map.insert(turn.id.clone(), new_turn_id.clone());
+
+            sqlx::query(
+                r#"
+                INSERT INTO prompt_turns (id, session_id, parent_id, position, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                "#,
+            )
+            .bind(&new_turn_id)
+            .bind(&new_session_id)
+            .bind(&turn.parent_id)
+            .bind(turn.position as i64)
+            .bind(turn.created_at as i64)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StoreError::Database(e.to_string()))?;
+
+            let source_msgs = self.get_messages_for_turn(&turn.id).await?;
+            for msg in &source_msgs {
+                let new_msg_id = uuid::Uuid::new_v4().to_string();
+                sqlx::query(
+                    r#"
+                    INSERT INTO messages (id, prompt_turn_id, role, content, position, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    "#,
+                )
+                .bind(&new_msg_id)
+                .bind(&new_turn_id)
+                .bind(&msg.role)
+                .bind(&msg.content)
+                .bind(msg.position as i64)
+                .bind(msg.created_at as i64)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| StoreError::Database(e.to_string()))?;
+            }
+        }
+
+        if let Some(new_id) = turn_id_map.get(fork_point_turn_id) {
+            self.set_session_head(&new_session_id, new_id).await?;
+        }
+
+        Ok(())
     }
 
     async fn clear(&self) -> Result<(), StoreError> {
@@ -452,7 +573,10 @@ impl From<SessionRow> for Session {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_helpers::{run_message_tests, run_prompt_turn_tests, run_session_tests};
+    use crate::test_helpers::{
+        run_context_tests, run_fork_tests, run_message_tests, run_prompt_turn_tests,
+        run_session_tests,
+    };
 
     #[tokio::test]
     async fn test_session_crud() {
@@ -470,5 +594,17 @@ mod tests {
     async fn test_message_ops() {
         let store = SqliteSessionStore::connect(":memory:").await.unwrap();
         run_message_tests(&store).await;
+    }
+
+    #[tokio::test]
+    async fn test_context_assembly() {
+        let store = SqliteSessionStore::connect(":memory:").await.unwrap();
+        run_context_tests(&store).await;
+    }
+
+    #[tokio::test]
+    async fn test_fork() {
+        let store = SqliteSessionStore::connect(":memory:").await.unwrap();
+        run_fork_tests(&store).await;
     }
 }

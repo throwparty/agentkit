@@ -180,19 +180,95 @@ impl SessionStore for InMemorySessionStore {
 
     async fn get_context(
         &self,
-        _session_id: &str,
-        _max_turns: Option<usize>,
+        session_id: &str,
+        max_turns: Option<usize>,
     ) -> Result<Vec<Message>, StoreError> {
-        Err(StoreError::Database("not implemented".to_string()))
+        {
+            let sessions = self.sessions.read().await;
+            sessions.get(session_id).ok_or_else(|| StoreError::NotFound {
+                entity: "session",
+                id: session_id.to_string(),
+            })?;
+        }
+
+        let turns = self.get_session_prompt_turns(session_id).await?;
+        let turns: Vec<PromptTurn> = match max_turns {
+            Some(0) => return Ok(vec![]),
+            Some(n) => turns.into_iter().rev().take(n).rev().collect(),
+            None => turns,
+        };
+
+        let mut result = Vec::new();
+        for turn in &turns {
+            result.append(&mut self.get_messages_for_turn(&turn.id).await?);
+        }
+        Ok(result)
     }
 
     async fn fork_session(
         &self,
-        _new_session: Session,
-        _source_session_id: &str,
-        _fork_point_turn_id: &str,
+        new_session: Session,
+        source_session_id: &str,
+        fork_point_turn_id: &str,
     ) -> Result<(), StoreError> {
-        Err(StoreError::Database("not implemented".to_string()))
+        {
+            let sessions = self.sessions.read().await;
+            sessions.get(source_session_id).ok_or_else(|| StoreError::NotFound {
+                entity: "session",
+                id: source_session_id.to_string(),
+            })?;
+        }
+
+        let source_turns = self.get_session_prompt_turns(source_session_id).await?;
+        let fork_idx = source_turns
+            .iter()
+            .position(|t| t.id == fork_point_turn_id)
+            .ok_or_else(|| StoreError::NotFound {
+                entity: "prompt_turn",
+                id: fork_point_turn_id.to_string(),
+            })?;
+
+        let mut turn_id_map: HashMap<String, String> = HashMap::new();
+
+        {
+            let mut prompt_turns = self.prompt_turns.write().await;
+            for turn in &source_turns[..=fork_idx] {
+                let new_turn_id = uuid::Uuid::new_v4().to_string();
+                turn_id_map.insert(turn.id.clone(), new_turn_id.clone());
+                let mut forked_turn = turn.clone();
+                forked_turn.id = new_turn_id;
+                forked_turn.session_id = new_session.id.clone();
+                prompt_turns.insert(forked_turn.id.clone(), forked_turn);
+            }
+        }
+
+        {
+            let mut messages = self.messages.write().await;
+            for (old_turn_id, new_turn_id) in &turn_id_map {
+                let turn_msgs: Vec<Message> = messages
+                    .values()
+                    .filter(|m| &m.prompt_turn_id == old_turn_id)
+                    .cloned()
+                    .collect();
+                for msg in turn_msgs {
+                    let mut forked_msg = msg;
+                    forked_msg.id = uuid::Uuid::new_v4().to_string();
+                    forked_msg.prompt_turn_id = new_turn_id.clone();
+                    messages.insert(forked_msg.id.clone(), forked_msg);
+                }
+            }
+        }
+
+        let mut forked_session = new_session;
+        forked_session.forked_from_session_id = Some(source_session_id.to_string());
+        forked_session.fork_point_turn_id = Some(fork_point_turn_id.to_string());
+        if let Some(new_id) = turn_id_map.get(fork_point_turn_id) {
+            forked_session.head_prompt_turn_id = Some(new_id.clone());
+        }
+
+        let mut sessions = self.sessions.write().await;
+        sessions.insert(forked_session.id.clone(), forked_session);
+        Ok(())
     }
 
     async fn clear(&self) -> Result<(), StoreError> {
@@ -209,7 +285,10 @@ impl SessionStore for InMemorySessionStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_helpers::{run_message_tests, run_prompt_turn_tests, run_session_tests};
+    use crate::test_helpers::{
+        run_context_tests, run_fork_tests, run_message_tests, run_prompt_turn_tests,
+        run_session_tests,
+    };
 
     #[tokio::test]
     async fn test_session_crud() {
@@ -227,5 +306,17 @@ mod tests {
     async fn test_message_ops() {
         let store = InMemorySessionStore::new();
         run_message_tests(&store).await;
+    }
+
+    #[tokio::test]
+    async fn test_context_assembly() {
+        let store = InMemorySessionStore::new();
+        run_context_tests(&store).await;
+    }
+
+    #[tokio::test]
+    async fn test_fork() {
+        let store = InMemorySessionStore::new();
+        run_fork_tests(&store).await;
     }
 }
