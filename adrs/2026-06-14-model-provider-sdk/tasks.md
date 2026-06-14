@@ -26,35 +26,40 @@ Phases A–C (rig) and D–F (llm) can run in parallel if two implementers are a
 
 **Spec reference**: §11 (Sample Crates), §4.1 (rig candidate)
 
-### A2: Wire CLI argument parsing
+### A1: Create rig-sample crate
+
+**Status: ✅ complete**
 
 | Field | Value |
 |---|---|
-| **Description** | Add `--provider` (string, default "openai"), `--model` (string, default "gpt-4o"), `--prompt` (string) arguments via clap |
-| **Acceptance** | `cargo run -- --help` shows all three flags with descriptions |
+| **Description** | Scaffold `adrs/2026-06-14-model-provider-sdk/rig-sample/` with `Cargo.toml` depending on `rig-core`, tokio, clap, serde, serde_json |
+| **Acceptance** | `cargo build` succeeds, `cargo run -- --help` prints CLI flags |
+| **Dependencies** | None |
+| **Testing** | Compilation check only |
+
+### A2: Wire CLI argument parsing
+
+**Status: ✅ complete**
+
+| Field | Value |
+|---|---|
+| **Description** | Add `--model` (string, default "gpt-4o"), `--prompt` (string, default "Say hello") arguments via clap |
+| **Acceptance** | `cargo run -- --help` shows both flags with descriptions |
 | **Dependencies** | A1 |
 | **Owner** | Implementation agent |
-| **Testing** | Manual: run with `--provider openai --prompt "hello"` |
+| **Testing** | Manual: run with `--prompt "hello"` |
 
 ### A3: Configure OpenAI provider
 
-| Field | Value |
-|---|---|
-| **Description** | Initialize `rig::providers::openai::Client` from `OPENAI_API_KEY` env var. Build a `CompletionModel` and send a simple text prompt, print the response |
-| **Acceptance** | With `OPENAI_API_KEY` set, `cargo run -- --provider openai` returns a coherent text response |
-| **Dependencies** | A2 |
-| **Owner** | Implementation agent |
-| **Testing** | Manual live test with real API key; no automated test yet |
-
-### A4: Configure llama-swap provider
+**Status: ✅ complete**
 
 | Field | Value |
 |---|---|
-| **Description** | Reuse rig's OpenAI client with base URL override (`http://localhost:8080/v1`) and dummy API key. Should work with a local llama-swap instance |
-| **Acceptance** | With llama-swap running locally, `cargo run -- --provider llama-swap` returns a text response |
+| **Description** | Initialize `rig_core::providers::openai::Client` from `SWITCHBOARD_OPENAI_API_KEY` env var. Build an agent and send a simple text prompt, print the response |
+| **Acceptance** | `cargo build` succeeds. With API key set, `cargo run` reaches OpenAI and returns a response (or a provider error like 429 if quota exhausted) |
 | **Dependencies** | A2 |
 | **Owner** | Implementation agent |
-| **Testing** | Manual live test against local llama-swap; verify with `curl http://localhost:8080/v1/chat/completions` first |
+| **Testing** | Manual live test: `SWITCHBOARD_OPENAI_API_KEY=$KEY cargo run -- --prompt "hello"` |
 
 ## Phase B: rig-sample agent loop
 
@@ -76,7 +81,7 @@ Phases A–C (rig) and D–F (llm) can run in parallel if two implementers are a
 |---|---|
 | **Description** | Implement the turn protocol using rig's `Agent` type: accept prompt, push to history, call `agent.chat()`, detect tool calls, execute tools, feed results back, repeat until no tool calls or max turns reached |
 | **Acceptance** | Single text prompt returns response without error. Prompt that triggers a tool call results in tool execution + final response |
-| **Dependencies** | A3, A4, B1 |
+| **Dependencies** | A3, B1 |
 | **Owner** | Implementation agent |
 | **Testing** | Manual test with both providers; verify tool call round-trip with a prompt like "call echo with 'hi' and tell me what it returned" |
 
@@ -168,15 +173,15 @@ Phases A–C (rig) and D–F (llm) can run in parallel if two implementers are a
 | **Owner** | Implementation agent |
 | **Testing** | Manual live test with real API key |
 
-### D4: Configure llama-swap provider
+### D4: Configure OpenAI provider
 
 | Field | Value |
 |---|---|
-| **Description** | Initialize `llm::providers::openai::OpenAIProvider` with base URL pointed at `http://localhost:8080/v1` and no API key. Same pattern as rig-sample's llama-swap setup. If llm's OpenAI builder does not support `.base_url()`, fall back to using the native Ollama provider pointed at a real Ollama instance |
-| **Acceptance** | With llama-swap running locally, `cargo run -- --provider llama-swap` returns a text response |
+| **Description** | Initialize `llm::providers::openai::OpenAIProvider` from `SWITCHBOARD_OPENAI_API_KEY` env var. Same pattern as rig-sample's A3. Send a simple text prompt, print the response |
+| **Acceptance** | `cargo build` succeeds. With API key set, `cargo run` reaches OpenAI and returns a response (or a provider error if quota exhausted) |
 | **Dependencies** | D2 |
 | **Owner** | Implementation agent |
-| **Testing** | Manual live test against local llama-swap; verify with `curl http://localhost:8080/v1/chat/completions` first |
+| **Testing** | Manual live test against OpenAI API |
 
 ## Phase E: llm-sample agent loop
 

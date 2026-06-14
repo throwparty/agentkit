@@ -55,11 +55,10 @@ If no Rust library satisfies these requirements, we may consider WASM-interop wi
 
 **Actions**:
 1. Scaffolds two binary crates, one depending on rig-core and one on llm
-2. In each crate, configures two provider clients (e.g., OpenAI + Ollama via llama-swap)
+2. In each crate, configures the OpenAI provider client
 3. Defines a static tool (always returns a hardcoded result)
 4. Runs a single prompt turn where the model calls the tool and responds
-5. Swaps the provider by changing the client configuration, keeping the calling code identical
-6. Compares API surface, error handling, compile times, binary size, and documentation quality between the two implementations
+5. Compares API surface, error handling, compile times, binary size, and documentation quality between the two implementations
 
 **Outcome**: The chosen SDK is validated with working code, not just documentation. The runner-up library has a comparable sample crate, so the decision is reversible if the selected library proves problematic during integration.
 
@@ -466,8 +465,7 @@ Both crates demonstrate the same capabilities with their respective library:
 
 1. **A single prompt turn**: Operator sends a message → model responds.
 2. **A tool call round-trip**: Model requests a tool → the crate executes a statically defined tool (returns a hardcoded result) → model receives the result and produces a final response.
-3. **Provider swapping**: The same interaction works with at least two different providers (e.g., OpenAI and Ollama via llama-swap's OpenAI-compatible endpoint).
-4. **Token usage reporting**: Usage struct inspected and logged after each turn.
+3. **Token usage reporting**: Usage struct inspected and logged after each turn.
 
 ### Crate structure
 
@@ -502,18 +500,14 @@ adrs/2026-06-14-model-provider-sdk/
 
 ### Testing
 
-- `llama-swap` instance running locally for offline-compatible testing (OpenAI-compatible API shape)
 - rig-sample: offline test with recorded cassettes (rig's built-in cassette infrastructure)
 - llm-sample: offline test with HTTP mocking (e.g., `wiremock` — llm has no cassette system)
-- Live integration test with at least one real provider for each crate
+- Live integration test with a real OpenAI API key for each crate, gated behind `#[ignore]`
 
 ### Deliverables
 
 1. `adrs/2026-06-14-model-provider-sdk/rig-sample/` crate using rig-core with the working agent loop
 2. `adrs/2026-06-14-model-provider-sdk/llm-sample/` crate using llm with the working agent loop
-3. `adrs/2026-06-14-model-provider-sdk/README.md` documenting:
-   - Architecture of each crate
-   - Side-by-side comparison of compile times, binary size, tool call behaviour, error messages, documentation quality
-   - Final recommendation (confirms §6 or overrides it)
+3. `adrs/2026-06-14-model-provider-sdk/README.md` documenting side-by-side comparison of compile times, binary size, tool call behaviour, error messages, documentation quality, and final recommendation
 4. Offline tests for both crates that run in CI without network access
 5. Core API surface notes identifying traits and types that would need to be abstracted for harness integration

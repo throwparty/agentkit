@@ -12,7 +12,7 @@ decision: pending
 
 | Spec Requirement | Plan Coverage | Verification |
 |---|---|---|
-| **FR1** — Multi-provider completion via unified interface | §3.1 each crate configures two providers (OpenAI + llama-swap) using the library's own client types | Both crates complete a prompt with both providers |
+| **FR1** — Multi-provider completion via unified interface | §3.1 each crate configures a provider (OpenAI) using the library's own client types | Both crates complete a prompt with the OpenAI provider |
 | **FR2** — Tool calling round-trip | §3.2 each crate implements a static echo tool and agent loop | Tool result surfaces in model's final response |
 | **FR3** — Streaming | **Out of scope for samples** (§11 spec) | Not tested |
 | **FR4** — Token usage reporting | §3.4 usage inspected and logged after each turn in both crates | Non-zero token counts asserted in tests |
@@ -33,13 +33,13 @@ Two independent sample crates, each validating a candidate library. No shared ab
 adrs/2026-06-14-model-provider-sdk/
 ├── rig-sample/         # depends on rig-core
 │   ├── Cargo.toml
-│   ├── src/main.rs     # CLI, agent loop, OpenAI + llama-swap providers
+│   ├── src/main.rs     # CLI, agent loop, OpenAI provider
 │   └── tests/
 │       ├── cassette.rs # offline replay via rig cassette system
 │       └── live.rs     # live integration (gated)
 └── llm-sample/         # depends on llm
     ├── Cargo.toml
-    ├── src/main.rs     # CLI, agent loop, OpenAI + llama-swap providers
+    ├── src/main.rs     # CLI, agent loop, OpenAI provider
     └── tests/
         ├── mock.rs     # offline test via wiremock
         └── live.rs     # live integration (gated)
@@ -49,21 +49,17 @@ adrs/2026-06-14-model-provider-sdk/
 
 ```mermaid
 flowchart TB
-    subgraph rig_sample["samples/rig-sample"]
-        CLI["main.rs\nparses --provider flag"]
+    subgraph rig_sample["adrs/2026-06-14-model-provider-sdk/rig-sample"]
+        CLI["main.rs\nCLI args"]
         AgentLoop["agent_turn()\nuses rig::Agent directly"]
-        OpenAIAdapter["rig::providers::openai::Client\n+ CompletionModel"]
-        LlamaSwapAdapter["rig::providers::openai::Client\nwith base_url override"]
+        OpenAIAdapter["rig_core::providers::openai::Client\nreads SWITCHBOARD_OPENAI_API_KEY"]
     end
 
     RemoteOpenAI["OpenAI API"]
-    LocalLlamaSwap["llama-swap\nlocalhost:8080/v1"]
 
     CLI --> AgentLoop
     AgentLoop --> OpenAIAdapter
-    AgentLoop --> LlamaSwapAdapter
     OpenAIAdapter --> RemoteOpenAI
-    LlamaSwapAdapter --> LocalLlamaSwap
 ```
 
 The rig-sample uses rig's native `Agent` type and `CompletionModel` trait directly. No custom wrapper trait — the goal is to evaluate rig's API as-is.
@@ -72,21 +68,17 @@ The rig-sample uses rig's native `Agent` type and `CompletionModel` trait direct
 
 ```mermaid
 flowchart TB
-    subgraph llm_sample["samples/llm-sample"]
-        CLI["main.rs\nparses --provider flag"]
+    subgraph llm_sample["adrs/2026-06-14-model-provider-sdk/llm-sample"]
+        CLI["main.rs\nCLI args"]
         AgentLoop["agent_turn()\nuses llm::LLMProvider directly"]
-        OpenAIAdapter["llm::providers::openai::OpenAIProvider\nwith API key auth"]
-        LlamaSwapAdapter["llm::providers::openai::OpenAIProvider\nwith base_url override"]
+        OpenAIAdapter["llm::providers::openai::OpenAIProvider\nreads SWITCHBOARD_OPENAI_API_KEY"]
     end
 
     RemoteOpenAI["OpenAI API"]
-    LocalLlamaSwap["llama-swap\nlocalhost:8080/v1"]
 
     CLI --> AgentLoop
     AgentLoop --> OpenAIAdapter
-    AgentLoop --> LlamaSwapAdapter
     OpenAIAdapter --> RemoteOpenAI
-    LlamaSwapAdapter --> LocalLlamaSwap
 ```
 
 ### Boundaries
@@ -207,19 +199,7 @@ Tool definition sent to the model (identical for both):
 
 ### 3.3 Provider Configuration
 
-**rig-sample:**
-| CLI flag | Provider | Auth method |
-|---|---|---|
-| `--provider openai` | OpenAI | `OPENAI_API_KEY` env |
-| `--provider llama-swap` | llama-swap (reuses rig's OpenAI client with base_url override) | None (local) |
-
-**llm-sample:**
-| CLI flag | Provider | Auth method |
-|---|---|---|
-| `--provider openai` | OpenAI | `OPENAI_API_KEY` env |
-| `--provider llama-swap` | llama-swap (llm's OpenAI provider with base_url override) | None (local) |
-
-Both crates use the same pattern for local testing: OpenAI provider with a base URL override pointing at `http://localhost:8080/v1`. No separate "llama-swap" provider exists in either library — both treat it as an OpenAI-compatible endpoint.
+Both crates authenticate via `SWITCHBOARD_OPENAI_API_KEY` env var (with fallback to `OPENAI_API_KEY`). Only one provider (OpenAI) is configured — multi-provider validation is deferred until a second provider endpoint is available.
 
 ### 3.4 Usage Collection
 
@@ -367,11 +347,10 @@ The comparison produces a final recommendation: either confirm the provisional r
 |---|---|---|---|---|
 | R1 | rig pre-1.0 breaking change during development | Medium | Medium — would require adapting sample code | Pin to exact version in Cargo.toml; samples are throwaway so impact is limited |
 | R2 | llm's tool calling API differs enough from OpenAI expectations to cause issues | Medium | Medium — may require provider-specific tool serialization | Test both crates with same prompt; document differences in comparison README |
-| R3 | llama-swap incompatibility with either library | Medium | High — blocks offline testing | Test llama-swap endpoint independently first with curl; fall back to Ollama or wiremock |
-| R4 | rig's cassette infrastructure doesn't capture tool-call round-trips cleanly | Low | Medium — would lose offline testing for rig agent loop | Fall back to wiremock for rig-sample too |
-| R5 | llm has no cassette system, so offline testing requires more setup | High | Low — wiremock is straightforward | Document wiremock setup in crate README; fixture files committed to repo |
-| R6 | llm's OpenAI provider does not support base URL override, preventing llama-swap testing | Medium | High — llm-sample would only have one provider to test | Verify by reading llm's OpenAI client builder API before scaffolding; fall back to using real Ollama (native) as second provider if override is unsupported |
-| R7 | Comparison dimensions are subjective (docs quality, error messages) | Medium | Low — recommendation can still be made with objective data | Prefer objective metrics where possible (LoC, binary size, compile time); mark subjective assessments as opinion |
+| R3 | rig's cassette infrastructure doesn't capture tool-call round-trips cleanly | Low | Medium — would lose offline testing for rig agent loop | Fall back to wiremock for rig-sample too |
+| R4 | llm has no cassette system, so offline testing requires more setup | High | Low — wiremock is straightforward | Document wiremock setup in crate README; fixture files committed to repo |
+| R5 | OpenAI API quota exhausted, preventing live testing | Medium | High — cannot verify real provider round-trip | Use recorded cassettes for offline testing; add funded API key before final sign-off |
+| R6 | Comparison dimensions are subjective (docs quality, error messages) | Medium | Low — recommendation can still be made with objective data | Prefer objective metrics where possible (LoC, binary size, compile time); mark subjective assessments as opinion |
 
 ## 8. Rollout and Rollback
 
