@@ -1,0 +1,19 @@
+credential_helper = "keychain"
+
+[models."gpt-4o"]
+context_window = 128000
+
+[[providers]]
+identity = "test_provider"
+api_surface = "openai"
+base_url = "https://api.openai.com/v1"
+billing = "pay_as_you_go"
+models = ["gpt-4o"]
+
+[providers.auth]
+type = "bearer_token"
+credential_env = "TEST_API_KEY"
+
+[providers.pricing]
+input_per_mtok = 2.50
+output_per_mtok = 10.00
