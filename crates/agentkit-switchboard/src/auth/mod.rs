@@ -30,11 +30,8 @@ fn status_output(config: &SwitchboardConfig, filter: Option<&str>) -> String {
             }
         }
         let auth_type = provider.auth.r#type.to_string();
-        let env = provider
-            .auth
-            .credential_env
-            .as_deref()
-            .unwrap_or("none");
+        let env = crate::config::credential_env_var(&provider.identity, &provider.auth.r#type)
+            .unwrap_or_else(|| "none".into());
         let oauth = if provider.auth.oauth.is_some() { "configured" } else { "not configured" };
         out.push_str(&format!("{id}: type={auth_type}, env={env}, oauth={oauth}\n"));
     }

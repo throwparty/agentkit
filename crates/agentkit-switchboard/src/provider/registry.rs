@@ -17,12 +17,12 @@ impl ProviderRegistry {
         let mut quotas = HashMap::new();
 
         for (identity, cfg) in configs {
-            let has_credential = match cfg.auth.r#type.to_string().as_str() {
-                "none" => true,
+            let has_credential = match &cfg.auth.r#type {
+                crate::config::AuthType::None => true,
                 _ => {
-                    let from_env = cfg.auth.credential_env.as_ref().and_then(|name| env::read(name));
-                    let helper_name = ""; // checked at runtime
-                    from_env.is_some() || helper_name == "keychain"
+                    let from_env = crate::config::credential_env_var(&cfg.identity, &cfg.auth.r#type)
+                        .and_then(|name| env::read(&name));
+                    from_env.is_some()
                 }
             };
 

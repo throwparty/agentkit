@@ -12,7 +12,6 @@ models = ["gpt-4o"]
 
 [providers.auth]
 type = "bearer_token"
-credential_env = "TEST_API_KEY"
 
 [providers.pricing]
 input_per_mtok = 2.50

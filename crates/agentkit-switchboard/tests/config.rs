@@ -18,8 +18,8 @@ fn config_parse_valid() {
     assert_eq!(provider.base_url, "https://api.openai.com/v1");
     assert_eq!(provider.auth.r#type.to_string(), "bearer_token");
     assert_eq!(
-        provider.auth.credential_env.as_deref(),
-        Some("TEST_API_KEY")
+        provider.auth.r#type.to_string(),
+        "bearer_token"
     );
     assert_eq!(cfg.credential_helper.as_deref(), Some("keychain"));
     assert_eq!(cfg.models.len(), 1);

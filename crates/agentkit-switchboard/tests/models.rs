@@ -10,7 +10,6 @@ fn make_provider(id: &str, models: Vec<&str>) -> ProviderConfig {
         billing: BillingModel::PayAsYouGo,
         auth: AuthConfig {
             r#type: AuthType::BearerToken,
-            credential_env: None,
             oauth: None,
         },
         pricing: PricingConfig {

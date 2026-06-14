@@ -75,7 +75,6 @@ impl std::fmt::Display for BillingModel {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthConfig {
     pub r#type: AuthType,
-    pub credential_env: Option<String>,
     pub oauth: Option<OAuthEndpointConfig>,
 }
 
@@ -101,6 +100,29 @@ impl std::fmt::Display for AuthType {
             Self::AnthropicApiKey => write!(f, "anthropic_api_key"),
             Self::OAuthToken => write!(f, "oauth_token"),
             Self::None => write!(f, "none"),
+        }
+    }
+}
+
+impl AuthType {
+    pub fn env_var_suffix(&self) -> &'static str {
+        match self {
+            Self::BearerToken => "API_KEY",
+            Self::OpenAICodexOAuth => "TOKEN",
+            Self::AnthropicApiKey => "API_KEY",
+            Self::OAuthToken => "TOKEN",
+            Self::None => "",
+        }
+    }
+}
+
+pub fn credential_env_var(identity: &str, auth_type: &AuthType) -> Option<String> {
+    match auth_type {
+        AuthType::None => None,
+        _ => {
+            let suffix = auth_type.env_var_suffix();
+            let ident = identity.to_uppercase();
+            Some(format!("AGENTKIT_SWITCHBOARD_{ident}_{suffix}"))
         }
     }
 }
