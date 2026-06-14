@@ -1,9 +1,9 @@
 ---
-status: draft
+status: final
 created: 2026-06-14
 updated: 2026-06-14
 author: adrian
-decision: pending
+decision: confirmed (rig-core)
 ---
 
 # Plan: Model Provider SDK — Sample Crates for rig and llm

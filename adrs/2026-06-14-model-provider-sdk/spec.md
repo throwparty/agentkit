@@ -264,9 +264,18 @@ Rig's `ClientBuilder` supports constructing multiple clients for the same provid
 
 ## 6. Recommendation
 
-Recommendation is provisional based on documentation research. Before committing to rig, build sample crates for both rig and llm (see §10) to validate API ergonomics, compile times, tool calling behaviour, and provider swap mechanics with real code.
+**Decision: Select rig-core (rig).** The provisional recommendation is confirmed after hands-on validation through sample crates (see `README.md` in this directory for the full comparison write-up).
 
-**Provisionally select rig (rig-core).**
+Both sample crates were built and tested with the OpenAI provider (`gpt-5.4-mini`). Key findings that confirmed the recommendation:
+
+- **Testability**: rig's `HttpClientExt` trait enables cassette-based offline testing without network or mock servers. llm does not allow custom HTTP client injection.
+- **Usage detail**: rig provides 7 usage fields (including cached, reasoning, tool-use tokens) with `Add`/`AddAssign`. llm provides 2 fields (prompt_tokens, completion_tokens).
+- **Binary size**: 11MB (rig) vs 28MB (llm) for release builds with one provider enabled.
+- **WASM support**: rig supports WASM; llm does not.
+
+The remaining risk (pre-1.0 stability) is mitigated by version pinning and wrapping rig types behind the harness's own provider trait.
+
+**Final selection: rig-core.**
 
 Rationale by criterion:
 
