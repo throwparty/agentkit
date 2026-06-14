@@ -1435,7 +1435,9 @@ dependencies = [
 name = "rig-sample"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "clap",
+ "http",
  "rig-core",
  "serde",
  "serde_json",
