@@ -1,6 +1,6 @@
-# AgentKit roadmap
+# 💭 Roadmap
 
-Some future ideas I'd like to flesh out. As components come into existence, their roadmap items will move to their directories.
+Below are some future ideas I'd like to flesh out. As components come into existence, their roadmap items will move to their sections.
 
 ## Bridgehead
 
@@ -8,7 +8,7 @@ The UI for managing agents.
 
 ## Sling
 
-An agentic coding client, which connects to a harness as an ACP client.
+A TUI agentic coding client, which connects to a harness as an ACP client.
 
 ## Stethoscope
 
