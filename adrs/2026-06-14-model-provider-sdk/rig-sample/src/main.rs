@@ -1,9 +1,9 @@
 use clap::Parser;
-use rig_core::completion::{Chat, Message, ToolDefinition};
+use rig_core::completion::{Chat, Message};
 use rig_core::prelude::*;
 use rig_core::providers::openai;
-use rig_core::tool::Tool;
-use serde::{Deserialize, Serialize};
+use rig_sample::recording_client::RecordingClient;
+use rig_sample::EchoTool;
 
 #[derive(Parser)]
 struct Args {
@@ -11,45 +11,6 @@ struct Args {
     model: String,
     #[arg(long, default_value = "Say hello")]
     prompt: String,
-}
-
-#[derive(Deserialize)]
-struct EchoArgs {
-    message: String,
-}
-
-#[derive(Serialize)]
-struct EchoOutput {
-    result: String,
-}
-
-struct EchoTool;
-
-impl Tool for EchoTool {
-    const NAME: &'static str = "echo";
-    type Error = std::convert::Infallible;
-    type Args = EchoArgs;
-    type Output = EchoOutput;
-
-    fn definition(&self, _prompt: String) -> impl std::future::Future<Output = ToolDefinition> {
-        async {
-            ToolDefinition {
-                name: "echo".to_string(),
-                description: "Echoes the input arguments back as a result".to_string(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "message": { "type": "string" }
-                    },
-                    "required": ["message"]
-                }),
-            }
-        }
-    }
-
-    async fn call(&self, args: EchoArgs) -> Result<EchoOutput, Self::Error> {
-        Ok(EchoOutput { result: args.message })
-    }
 }
 
 #[tokio::main]
@@ -61,10 +22,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .or_else(|_| std::env::var("OPENAI_API_KEY"))
         .expect("SWITCHBOARD_OPENAI_API_KEY or OPENAI_API_KEY must be set");
 
-    let client = openai::Client::builder()
-        .api_key(&api_key)
-        .build()?;
-    let agent = client.agent(&args.model)
+    let recording = std::env::var("RECORDING").is_ok();
+    let cassette_path = "tests/cassettes/echo_tool.json".to_string();
+    let cassette_exists = std::path::Path::new(&cassette_path).exists();
+
+    let client = if recording {
+        let rec = RecordingClient::new(true, cassette_path);
+        openai::Client::builder()
+            .api_key(&api_key)
+            .http_client(rec)
+            .build()?
+    } else if cassette_exists {
+        let rec = RecordingClient::new(false, cassette_path);
+        openai::Client::builder()
+            .api_key(&api_key)
+            .http_client(rec)
+            .build()?
+    } else {
+        let rec = RecordingClient::new_passthrough(false, cassette_path);
+        openai::Client::builder()
+            .api_key(&api_key)
+            .http_client(rec)
+            .build()?
+    };
+
+    let agent = client
+        .agent(&args.model)
         .preamble("You have access to an echo tool. Call it when asked.")
         .tool(EchoTool)
         .build();
