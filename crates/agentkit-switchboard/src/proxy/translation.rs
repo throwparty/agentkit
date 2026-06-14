@@ -1,4 +1,4 @@
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 #[derive(Debug)]
 pub enum TranslationError {
@@ -29,8 +29,7 @@ pub fn translate_response(body: &Value, source: ProviderKind) -> Result<Value, T
 }
 
 fn chat_to_responses(body: &Value) -> Result<Value, TranslationError> {
-    let streaming = body.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
-    if streaming {
+    if body.get("stream").and_then(|v| v.as_bool()) == Some(true) {
         return Err(TranslationError::StreamingNotSupported);
     }
 
@@ -39,8 +38,8 @@ fn chat_to_responses(body: &Value) -> Result<Value, TranslationError> {
         .and_then(|v| v.as_array())
         .ok_or_else(|| TranslationError::MissingField("messages".into()))?;
 
-    let mut input = Vec::new();
     let mut instructions = None;
+    let mut input = Vec::new();
 
     for msg in messages {
         let role = msg
@@ -61,14 +60,20 @@ fn chat_to_responses(body: &Value) -> Result<Value, TranslationError> {
                 input.push(json!({
                     "type": "message",
                     "role": "user",
-                    "content": [{"type": "input_text", "text": content}]
+                    "content": [{
+                        "type": "input_text",
+                        "text": content
+                    }]
                 }));
             }
             "assistant" => {
                 input.push(json!({
                     "type": "message",
                     "role": "assistant",
-                    "content": [{"type": "output_text", "text": content}]
+                    "content": [{
+                        "type": "output_text",
+                        "text": content
+                    }]
                 }));
             }
             other => return Err(TranslationError::UnknownRole(other.to_string())),
@@ -81,8 +86,8 @@ fn chat_to_responses(body: &Value) -> Result<Value, TranslationError> {
         "reasoning": {"effort": "medium"}
     });
 
-    if let Some(inst) = instructions {
-        result["instructions"] = json!(inst);
+    if let Some(instructions) = instructions {
+        result["instructions"] = json!(instructions);
     }
 
     if let Some(model) = body.get("model").and_then(|v| v.as_str()) {
@@ -93,6 +98,9 @@ fn chat_to_responses(body: &Value) -> Result<Value, TranslationError> {
     }
     if let Some(max_tokens) = body.get("max_tokens") {
         result["max_tokens"] = max_tokens.clone();
+    }
+    if let Some(stream) = body.get("stream") {
+        result["stream"] = stream.clone();
     }
 
     Ok(result)
@@ -122,13 +130,10 @@ fn responses_to_chat(body: &Value) -> Result<Value, TranslationError> {
             })
             .unwrap_or_default();
 
-        let finish_reason = item.get("type").and_then(|v| v.as_str()).map(|t| {
-            if t == "message" {
-                "stop"
-            } else {
-                t
-            }
-        });
+        let finish_reason =
+            item.get("type")
+                .and_then(|v| v.as_str())
+                .map(|t| if t == "message" { "stop" } else { t });
 
         choices.push(json!({
             "index": i as u64,
@@ -197,7 +202,10 @@ mod tests {
             "stream": true
         });
         let result = chat_to_responses(&body);
-        assert!(matches!(result, Err(TranslationError::StreamingNotSupported)));
+        assert!(matches!(
+            result,
+            Err(TranslationError::StreamingNotSupported)
+        ));
     }
 
     #[test]
@@ -211,6 +219,19 @@ mod tests {
         let result = chat_to_responses(&body).unwrap();
         assert_eq!(result["temperature"], 0.5);
         assert_eq!(result["max_tokens"], 500);
+    }
+
+    #[test]
+    fn translate_request_assistant_message() {
+        let body = json!({
+            "model": "gpt-4o",
+            "messages": [{"role": "assistant", "content": "Previous answer"}],
+            "stream": false
+        });
+        let result = chat_to_responses(&body).unwrap();
+        assert_eq!(result["input"][0]["type"], "message");
+        assert_eq!(result["input"][0]["content"][0]["type"], "output_text");
+        assert_eq!(result["stream"], false);
     }
 
     #[test]

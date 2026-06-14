@@ -8,6 +8,8 @@ pub struct CredentialBlob {
     pub refresh_token: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
 }
 
 pub fn read_stdin() -> Result<CredentialBlob, String> {

@@ -15,6 +15,7 @@ pub enum ProviderStatus {
 pub struct ProviderState {
     pub identity: String,
     pub api_surface: ApiSurface,
+    pub base_url: String,
     pub billing: BillingModel,
     pub models: Vec<String>,
     pub has_valid_credential: bool,

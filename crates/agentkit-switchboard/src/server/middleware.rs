@@ -6,10 +6,8 @@ pub async fn request_id_middleware(mut req: Request, next: Next) -> Response {
     let request_id = uuid::Uuid::new_v4().to_string();
     req.extensions_mut().insert(RequestId(request_id.clone()));
     let mut resp = next.run(req).await;
-    resp.headers_mut().insert(
-        "X-Request-Id",
-        request_id.parse().unwrap(),
-    );
+    resp.headers_mut()
+        .insert("X-Request-Id", request_id.parse().unwrap());
     resp
 }
 

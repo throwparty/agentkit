@@ -104,29 +104,6 @@ impl std::fmt::Display for AuthType {
     }
 }
 
-impl AuthType {
-    pub fn env_var_suffix(&self) -> &'static str {
-        match self {
-            Self::BearerToken => "API_KEY",
-            Self::OpenAICodexOAuth => "TOKEN",
-            Self::AnthropicApiKey => "API_KEY",
-            Self::OAuthToken => "TOKEN",
-            Self::None => "",
-        }
-    }
-}
-
-pub fn credential_env_var(identity: &str, auth_type: &AuthType) -> Option<String> {
-    match auth_type {
-        AuthType::None => None,
-        _ => {
-            let suffix = auth_type.env_var_suffix();
-            let ident = identity.to_uppercase();
-            Some(format!("AGENTKIT_SWITCHBOARD_{ident}_{suffix}"))
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OAuthEndpointConfig {
     pub authorize_url: String,

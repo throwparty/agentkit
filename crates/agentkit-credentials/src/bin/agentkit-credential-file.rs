@@ -4,10 +4,24 @@ use std::process::ExitCode;
 use agentkit_credentials::CredentialBlob;
 
 fn credentials_path() -> PathBuf {
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_else(|_| ".".into());
-    PathBuf::from(home).join(".agentkit").join("credentials.json")
+    if let Ok(dir) = std::env::var("AGENTKIT_DATA_DIR") {
+        return PathBuf::from(dir).join("credentials.json");
+    }
+    let base = match std::env::consts::OS {
+        "macos" => {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+            PathBuf::from(home).join("Library").join("Application Support").join("AgentKit").join("switchboard")
+        }
+        "windows" => {
+            let home = std::env::var("USERPROFILE").unwrap_or_else(|_| ".".into());
+            PathBuf::from(home).join("AppData").join("LocalLow").join("AgentKit").join("switchboard")
+        }
+        _ => {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+            PathBuf::from(home).join(".local").join("state").join("agentkit").join("switchboard")
+        }
+    };
+    base.join("credentials.json")
 }
 
 fn ensure_dir(path: &Path) -> std::io::Result<()> {

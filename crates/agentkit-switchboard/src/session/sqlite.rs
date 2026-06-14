@@ -1,5 +1,5 @@
+use crate::session::{RoutingEvent, SessionAffinity, SessionError, SessionManager, SessionStats};
 use sqlx::SqlitePool;
-use crate::session::{SessionAffinity, SessionError, SessionManager, RoutingEvent};
 
 pub struct SqliteSessionManager {
     pool: SqlitePool,
@@ -22,12 +22,14 @@ impl SessionManager for SqliteSessionManager {
         .await
         .map_err(|e| SessionError::Database(e.to_string()))?;
 
-        Ok(row.map(|(provider_identity, model_name, api_surface)| SessionAffinity {
-            session_id: session_id.to_string(),
-            provider_identity,
-            model_name,
-            api_surface,
-        }))
+        Ok(row.map(
+            |(provider_identity, model_name, api_surface)| SessionAffinity {
+                session_id: session_id.to_string(),
+                provider_identity,
+                model_name,
+                api_surface,
+            },
+        ))
     }
 
     async fn assign(
@@ -144,5 +146,22 @@ impl SessionManager for SqliteSessionManager {
         .map_err(|e| SessionError::Database(e.to_string()))?;
 
         Ok(())
+    }
+
+    async fn stats(&self) -> Result<SessionStats, SessionError> {
+        let (active_sessions, total_sessions) = sqlx::query_as::<_, (i64, i64)>(
+            "SELECT \
+             COALESCE(SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END), 0), \
+             COUNT(*) \
+             FROM session_affinity",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| SessionError::Database(e.to_string()))?;
+
+        Ok(SessionStats {
+            active_sessions: active_sessions as u64,
+            total_sessions: total_sessions as u64,
+        })
     }
 }

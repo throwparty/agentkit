@@ -1,13 +1,15 @@
-use sqlx::SqlitePool;
-use agentkit_switchboard::session::{SessionAffinity, SessionManager, RoutingEvent};
 use agentkit_switchboard::session::memory::MemorySessionManager;
 use agentkit_switchboard::session::sqlite::SqliteSessionManager;
+use agentkit_switchboard::session::{RoutingEvent, SessionManager};
+use sqlx::SqlitePool;
 
 async fn test_session_manager(sm: &impl SessionManager) {
     let lookup = sm.lookup("sess_1").await.unwrap();
     assert!(lookup.is_none(), "unknown session should return None");
 
-    sm.assign("sess_1", "provider_a", "gpt-4o", "openai").await.unwrap();
+    sm.assign("sess_1", "provider_a", "gpt-4o", "openai")
+        .await
+        .unwrap();
 
     let lookup = sm.lookup("sess_1").await.unwrap();
     assert!(lookup.is_some(), "assigned session should be found");
@@ -19,7 +21,7 @@ async fn test_session_manager(sm: &impl SessionManager) {
 
     sm.increment_switch("sess_1", "provider_b").await.unwrap();
     let lookup = sm.lookup("sess_1").await.unwrap().unwrap();
-    assert_eq!(sa.provider_identity, "provider_a");
+    assert_eq!(lookup.provider_identity, "provider_b");
 }
 
 #[tokio::test]
@@ -30,7 +32,10 @@ async fn session_memory_impl() {
 
 async fn make_pool() -> SqlitePool {
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-    sqlx::migrate!("src/db/migrations").run(&pool).await.unwrap();
+    sqlx::migrate!("src/db/migrations")
+        .run(&pool)
+        .await
+        .unwrap();
     pool
 }
 
@@ -46,8 +51,12 @@ async fn session_sqlite_assign_upsert() {
     let pool = make_pool().await;
     let sm = SqliteSessionManager::new(pool);
 
-    sm.assign("sess_x", "provider_a", "gpt-4o", "openai").await.unwrap();
-    sm.assign("sess_x", "provider_b", "gpt-4o", "openai").await.unwrap();
+    sm.assign("sess_x", "provider_a", "gpt-4o", "openai")
+        .await
+        .unwrap();
+    sm.assign("sess_x", "provider_b", "gpt-4o", "openai")
+        .await
+        .unwrap();
 
     let lookup = sm.lookup("sess_x").await.unwrap().unwrap();
     assert_eq!(lookup.provider_identity, "provider_b");
@@ -58,7 +67,9 @@ async fn session_sqlite_tokens() {
     let pool = make_pool().await;
     let sm = SqliteSessionManager::new(pool);
 
-    sm.assign("sess_t", "provider_a", "gpt-4o", "openai").await.unwrap();
+    sm.assign("sess_t", "provider_a", "gpt-4o", "openai")
+        .await
+        .unwrap();
     sm.update_tokens("sess_t", 100, 50).await.unwrap();
     sm.update_tokens("sess_t", 200, 75).await.unwrap();
 }

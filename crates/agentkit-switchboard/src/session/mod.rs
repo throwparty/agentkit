@@ -26,6 +26,12 @@ pub struct RoutingEvent {
     pub degraded_providers: Option<String>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct SessionStats {
+    pub active_sessions: u64,
+    pub total_sessions: u64,
+}
+
 #[derive(Debug)]
 pub enum SessionError {
     Database(String),
@@ -65,4 +71,5 @@ pub trait SessionManager: Send + Sync {
         new_provider: &str,
     ) -> Result<(), SessionError>;
     async fn insert_routing_event(&self, event: RoutingEvent) -> Result<(), SessionError>;
+    async fn stats(&self) -> Result<SessionStats, SessionError>;
 }

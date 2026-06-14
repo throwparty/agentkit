@@ -11,6 +11,7 @@ fn make_provider(id: &str, billing: BillingModel, models: Vec<&str>, available: 
         ProviderState {
             identity: id.to_string(),
             api_surface: ApiSurface::Openai,
+            base_url: "https://api.openai.com/v1".to_string(),
             billing,
             models: models.into_iter().map(|m| m.to_string()).collect(),
             has_valid_credential: available,
@@ -33,6 +34,7 @@ fn make_provider_with_cost(id: &str, billing: BillingModel, cost: f64, models: V
         ProviderState {
             identity: id.to_string(),
             api_surface: ApiSurface::Openai,
+            base_url: "https://api.openai.com/v1".to_string(),
             billing,
             models: models.into_iter().map(|m| m.to_string()).collect(),
             has_valid_credential: true,

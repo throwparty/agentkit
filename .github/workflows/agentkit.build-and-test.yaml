@@ -14,7 +14,7 @@ jobs:
     name: Build and test
     runs-on: ubuntu-24.04
     permissions:
-      actions: write  # To manage cargo caches
+      actions: write # To manage cargo caches
       contents: read
     steps:
       - name: Checkout
@@ -26,6 +26,8 @@ jobs:
           rustup toolchain install stable
           rustup default stable
           rustup component add clippy
+      - name: Install system dependencies
+        uses: ./.github/actions/litterbox-deps-ubuntu
       - name: Cache dependencies
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # ratchet:actions/cache@v5.0.5
         with:

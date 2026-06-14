@@ -7,9 +7,12 @@ fn fixture_path(name: &str) -> std::path::PathBuf {
         .join(name)
 }
 
-use agentkit_switchboard::credential::{CredentialSource, ResolvedCredential};
-use agentkit_switchboard::credential::helper;
+use agentkit_switchboard::config::{
+    ApiSurface, AuthConfig, AuthType, BillingModel, PricingConfig, ProviderConfig,
+};
 use agentkit_switchboard::credential::env;
+use agentkit_switchboard::credential::helper;
+use agentkit_switchboard::credential::{CredentialSource, ResolvedCredential};
 
 #[test]
 fn credential_parse_json_valid() {
@@ -99,9 +102,84 @@ fn credential_helper_get_with_mock_script() {
 
     assert!(result.status.success());
     let stdout = String::from_utf8_lossy(&result.stdout);
-    let parsed = helper::parse_credential_json(&stdout, CredentialSource::Helper {
-        helper_name: helper_name.to_string(),
-    });
-    assert!(parsed.is_some(), "mock helper output should parse: {stdout}");
+    let parsed = helper::parse_credential_json(
+        &stdout,
+        CredentialSource::Helper {
+            helper_name: helper_name.to_string(),
+        },
+    );
+    assert!(
+        parsed.is_some(),
+        "mock helper output should parse: {stdout}"
+    );
     assert_eq!(parsed.unwrap().value, "mock_access_token");
+}
+
+fn provider_with_auth(auth_type: AuthType) -> ProviderConfig {
+    ProviderConfig {
+        identity: "openai_api_key".to_string(),
+        api_surface: ApiSurface::Openai,
+        base_url: "https://api.openai.com/v1".to_string(),
+        billing: BillingModel::PayAsYouGo,
+        auth: AuthConfig {
+            r#type: auth_type,
+            oauth: None,
+        },
+        pricing: PricingConfig {
+            input_per_mtok: 1.0,
+            output_per_mtok: 2.0,
+            cache_read_per_mtok: None,
+            cache_write_per_mtok: None,
+            reasoning_per_mtok: None,
+            models: std::collections::HashMap::new(),
+        },
+        models: Some(vec!["gpt-4o".to_string()]),
+    }
+}
+
+#[test]
+fn credential_default_env_var_name() {
+    assert_eq!(
+        agentkit_switchboard::credential::default_env_var_name(
+            "openai_api_key",
+            &AuthType::BearerToken
+        ),
+        "AGENTKIT_SWITCHBOARD_OPENAI_API_KEY"
+    );
+    assert_eq!(
+        agentkit_switchboard::credential::default_env_var_name(
+            "openai_codex_sub",
+            &AuthType::OpenAICodexOAuth
+        ),
+        "AGENTKIT_SWITCHBOARD_OPENAI_CODEX_TOKEN"
+    );
+}
+
+#[test]
+fn credential_resolution_env_fallback() {
+    let key = "AGENTKIT_SWITCHBOARD_OPENAI_API_KEY";
+    std::env::set_var(key, "env_token");
+    let provider = provider_with_auth(AuthType::BearerToken);
+    let result = agentkit_switchboard::credential::resolve_provider(
+        "missing-helper",
+        "openai_api_key",
+        &provider,
+    )
+    .unwrap();
+    assert_eq!(result.value, "env_token");
+    assert!(matches!(
+        result.source,
+        CredentialSource::EnvVar { ref var_name } if var_name == key
+    ));
+    std::env::remove_var(key);
+}
+
+#[test]
+fn credential_resolution_none_auth() {
+    let provider = provider_with_auth(AuthType::None);
+    let result =
+        agentkit_switchboard::credential::resolve_provider("missing-helper", "local", &provider)
+            .unwrap();
+    assert!(result.value.is_empty());
+    assert!(matches!(result.source, CredentialSource::None));
 }

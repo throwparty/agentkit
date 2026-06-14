@@ -40,6 +40,8 @@ pub enum Commands {
 pub enum AuthCommands {
     #[command(name = "login")]
     Login { identity: String },
+    #[command(name = "add")]
+    Add { identity: String, value: String },
     #[command(name = "status")]
     Status { identity: Option<String> },
     #[command(name = "token")]

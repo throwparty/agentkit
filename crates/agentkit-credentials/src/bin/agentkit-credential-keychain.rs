@@ -1,7 +1,12 @@
 use std::process::ExitCode;
 
-fn service_name() -> &'static str {
-    "agentkit-credential-keychain"
+fn service_name() -> String {
+    std::env::var("AGENTKIT_CREDENTIAL_SERVICE")
+        .unwrap_or_else(|_| "agentkit-credential-keychain".into())
+}
+
+fn diag(msg: &str) {
+    eprintln!("[credential-keychain] {msg}");
 }
 
 fn main() -> ExitCode {
@@ -26,48 +31,119 @@ fn main() -> ExitCode {
 }
 
 fn entry(identity: &str) -> Result<keyring::Entry, keyring::Error> {
-    keyring::Entry::new(service_name(), identity)
+    let svc = service_name();
+    diag(&format!("entry: service='{svc}', account='{identity}'"));
+    keyring::Entry::new(&svc, identity)
 }
 
 fn cmd_get(identity: &str) -> ExitCode {
-    let entry = match entry(identity) {
-        Ok(e) => e,
-        Err(_) => return ExitCode::from(1),
+    let svc = service_name();
+    diag(&format!("get: service='{svc}', account='{identity}'"));
+    let e = match entry(identity) {
+        Ok(e) => {
+            diag("entry created");
+            e
+        }
+        Err(e) => {
+            diag(&format!("entry failed: {e}"));
+            return ExitCode::from(1);
+        }
     };
-    let password = match entry.get_password() {
-        Ok(p) => p,
-        Err(_) => return ExitCode::from(1),
-    };
-    println!("{password}");
-    ExitCode::SUCCESS
+    match e.get_password() {
+        Ok(p) => {
+            println!("{p}");
+            diag("get: success");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            diag(&format!("get_password failed: {e}"));
+            ExitCode::from(1)
+        }
+    }
 }
 
 fn cmd_store(identity: &str) -> ExitCode {
+    let svc = service_name();
+    diag(&format!("store: service='{svc}', account='{identity}'"));
+
     let blob = match agentkit_credentials::read_stdin() {
-        Ok(b) => b,
+        Ok(b) => {
+            diag(&format!(
+                "stdin: {} bytes",
+                serde_json::to_string(&b).unwrap_or_default().len()
+            ));
+            b
+        }
         Err(e) => {
+            diag(&format!("stdin failed: {e}"));
             eprintln!("{e}");
             return ExitCode::from(2);
         }
     };
     let json = serde_json::to_string(&blob).unwrap_or_default();
-    let entry = match entry(identity) {
-        Ok(e) => e,
-        Err(_) => return ExitCode::FAILURE,
+
+    let e = match entry(identity) {
+        Ok(e) => {
+            diag("entry created");
+            e
+        }
+        Err(e) => {
+            diag(&format!("entry failed: {e}"));
+            return ExitCode::FAILURE;
+        }
     };
-    match entry.set_password(&json) {
-        Ok(_) => ExitCode::SUCCESS,
-        Err(_) => ExitCode::FAILURE,
+
+    diag("calling set_password...");
+    match e.set_password(&json) {
+        Ok(_) => {
+            diag(&format!("set_password: success ({} bytes)", json.len()));
+        }
+        Err(e) => {
+            diag(&format!("set_password failed: {e}"));
+            return ExitCode::FAILURE;
+        }
     }
+
+    diag("verifying with get_password...");
+    match e.get_password() {
+        Ok(v) => {
+            if v == json {
+                diag("verify: match");
+            } else {
+                diag(&format!(
+                    "verify: MISMATCH (got {} bytes, expected {})",
+                    v.len(),
+                    json.len()
+                ));
+            }
+        }
+        Err(e) => {
+            diag(&format!("verify failed: {e}"));
+        }
+    }
+
+    diag("store: success");
+    ExitCode::SUCCESS
 }
 
 fn cmd_erase(identity: &str) -> ExitCode {
-    let entry = match entry(identity) {
+    let svc = service_name();
+    diag(&format!("erase: service='{svc}', account='{identity}'"));
+    let e = match entry(identity) {
         Ok(e) => e,
-        Err(_) => return ExitCode::SUCCESS,
+        Err(_) => {
+            diag("no entry, nothing to erase");
+            return ExitCode::SUCCESS;
+        }
     };
-    match entry.delete_credential() {
-        Ok(_) => ExitCode::SUCCESS,
-        Err(_) => ExitCode::FAILURE,
+    match e.delete_credential() {
+        Ok(_) => {
+            diag("erase: success");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            diag(&format!("erase failed: {e}"));
+            ExitCode::FAILURE
+        }
     }
 }
