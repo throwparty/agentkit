@@ -5,6 +5,7 @@ members = [
     "crates/agentkit-docgen",
     "crates/agentkit-lens",
     "crates/agentkit-litterbox",
+    "crates/agentkit-models",
     "crates/agentkit-path",
 ]
 exclude = ["adrs"]
