@@ -6,7 +6,7 @@ list:
     just --list --justfile {{source_directory()}}/mod.just
 
 actionlint:
-    actionlint
+    actionlint -ignore 'unexpected key "queue" for "concurrency" section'
 
 zizmor *flags:
     zizmor --persona=auditor {{flags}} {{source_directory()}}

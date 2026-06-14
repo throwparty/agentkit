@@ -22,7 +22,7 @@ jobs:
       - name: Run actionlint
         run: |
           bash <(curl -sS https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
-          ./actionlint
+          ./actionlint -ignore 'unexpected key "queue" for "concurrency" section'
       - name: Run zizmor
         run: |
           pip install zizmor
