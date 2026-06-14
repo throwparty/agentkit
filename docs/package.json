@@ -54,7 +54,7 @@
   "engines": {
     "node": ">=20.0"
   },
-  "packageManager": "yarn@4.15.0",
+  "packageManager": "yarn@4.16.0",
   "resolutions": {
     "@docusaurus/core@npm:3.10.1": "patch:@docusaurus/core@npm%3A3.10.1#~/.yarn/patches/@docusaurus-core-npm-3.10.1-ca011c3645.patch",
     "ajv@^8.0.0": "^8.18.0",
