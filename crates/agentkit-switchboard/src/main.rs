@@ -36,11 +36,13 @@ async fn main() -> std::process::ExitCode {
                     }
                 }
                 Some(Commands::Start) | None => {
-                    tracing::info!(
-                        "switchboard starting with {} providers",
-                        cfg.providers.len()
-                    );
-                    std::process::ExitCode::SUCCESS
+                    match agentkit_switchboard::server::start(cfg).await {
+                        Ok(_) => std::process::ExitCode::SUCCESS,
+                        Err(e) => {
+                            tracing::error!("server error: {e}");
+                            std::process::ExitCode::FAILURE
+                        }
+                    }
                 }
             }
         }
