@@ -127,25 +127,12 @@ mod tests {
     use super::*;
 
     use std::fs;
-    use std::sync::OnceLock;
     use tempfile::TempDir;
 
     use crate::domain::ScmMode;
     use crate::scm::{GitScm, Scm};
 
     use git2::Repository;
-
-    /// Ensures `LITTERBOX_DATA_DIR` is set to a temp dir once for this test module.
-    fn ensure_test_dir() -> &'static TempDir {
-        static DIR: OnceLock<TempDir> = OnceLock::new();
-        DIR.get_or_init(|| {
-            let tmp = TempDir::new().expect("tempdir");
-            unsafe {
-                std::env::set_var("LITTERBOX_DATA_DIR", tmp.path());
-            }
-            tmp
-        })
-    }
 
     fn init_host_repo() -> (TempDir, Repository) {
         let tempdir = TempDir::new().expect("tempdir");
@@ -174,7 +161,6 @@ mod tests {
 
     #[test]
     fn resolve_path_returns_platform_path() {
-        ensure_test_dir();
         let slug = "test-project";
         let resolved = VcsStore::resolve_path(slug);
         let lossy = resolved.to_string_lossy();
@@ -183,14 +169,12 @@ mod tests {
 
     #[test]
     fn resolve_path_is_absolute() {
-        ensure_test_dir();
         let resolved = VcsStore::resolve_path("test-project");
         assert!(resolved.is_absolute(), "must be absolute: {resolved:?}");
     }
 
     #[test]
     fn resolve_path_default_slug_basename() {
-        ensure_test_dir();
         let slug = "my-project";
         let resolved = VcsStore::resolve_path(slug);
         assert!(
@@ -202,7 +186,8 @@ mod tests {
 
     #[test]
     fn clone_bare_creates_bare_repo() {
-        ensure_test_dir();
+        
+        
         let (tempdir, _repo) = init_host_repo();
         let slug = "test-bare-clone";
 
@@ -224,7 +209,8 @@ mod tests {
 
     #[test]
     fn clone_bare_sets_depth_option() {
-        ensure_test_dir();
+        
+        
         let (tempdir, _repo) = init_host_repo();
         let slug = "test-depth-clone";
 
@@ -242,7 +228,8 @@ mod tests {
 
     #[test]
     fn clone_bare_skips_existing_path() {
-        ensure_test_dir();
+        
+        
         let (tempdir, _repo) = init_host_repo();
         let slug = "test-skip-clone";
 
@@ -258,7 +245,8 @@ mod tests {
 
     #[test]
     fn self_heal_destroys_corrupt_repo() {
-        ensure_test_dir();
+        
+        
         let (tempdir, _repo) = init_host_repo();
         let slug = "test-self-heal";
 
@@ -289,7 +277,8 @@ mod tests {
 
     #[test]
     fn clone_bare_self_heals_corrupt_repo() {
-        ensure_test_dir();
+        
+        
         let (tempdir, _repo) = init_host_repo();
         let slug = "test-self-heal-clone";
 
@@ -317,7 +306,8 @@ mod tests {
 
     #[test]
     fn destroy_bare_removes_directory() {
-        ensure_test_dir();
+        
+        
         let (tempdir, _repo) = init_host_repo();
         let slug = "test-destroy-bare";
 
@@ -331,7 +321,8 @@ mod tests {
 
     #[test]
     fn destroy_bare_noop_when_missing() {
-        ensure_test_dir();
+        
+        
         let slug = "test-destroy-missing";
         let bare_path = VcsStore::resolve_path(slug);
         assert!(!bare_path.exists());
@@ -342,7 +333,8 @@ mod tests {
 
     #[test]
     fn remote_mode_operations_use_bare_clone_not_host() {
-        ensure_test_dir();
+        
+        
         // Minimal reproducer: remote mode SCM operates on bare clone,
         // not the host repo. Branch appears in bare clone, archive
         // reads from host repo, litterbox remote is installed.

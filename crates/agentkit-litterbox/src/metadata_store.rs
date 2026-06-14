@@ -9,13 +9,17 @@ use crate::domain::{SandboxError, SandboxMetadata};
 const RETRY_MAX: u32 = 3;
 const RETRY_BASE_MS: u64 = 50;
 
-fn base_path(project_slug: &str) -> PathBuf {
-    if let Ok(override_dir) = std::env::var("LITTERBOX_METADATA_DIR") {
-        return PathBuf::from(override_dir).join(project_slug);
+fn base_path(project_slug: &str, metadata_dir: Option<&Path>) -> PathBuf {
+    match metadata_dir {
+        Some(dir) => dir.join(project_slug),
+        None => crate::vcs_store::path::data_dir()
+            .join("metadata")
+            .join(project_slug),
     }
-    crate::vcs_store::path::data_dir()
-        .join("metadata")
-        .join(project_slug)
+}
+
+fn load_metadata_dir() -> Option<PathBuf> {
+    std::env::var("LITTERBOX_METADATA_DIR").ok().map(PathBuf::from)
 }
 
 fn store_in(dir: &Path, slug: &str, meta: &SandboxMetadata) -> Result<(), SandboxError> {
@@ -83,18 +87,21 @@ pub fn store(
     slug: &str,
     meta: &SandboxMetadata,
 ) -> Result<(), SandboxError> {
-    store_in(&base_path(project_slug), slug, meta)
+    let dir = base_path(project_slug, load_metadata_dir().as_deref());
+    store_in(&dir, slug, meta)
 }
 
 pub fn load(
     project_slug: &str,
     slug: &str,
 ) -> Result<Option<SandboxMetadata>, SandboxError> {
-    load_in(&base_path(project_slug), slug)
+    let dir = base_path(project_slug, load_metadata_dir().as_deref());
+    load_in(&dir, slug)
 }
 
 pub fn remove(project_slug: &str, slug: &str) -> Result<(), SandboxError> {
-    remove_in(&base_path(project_slug), slug)
+    let dir = base_path(project_slug, load_metadata_dir().as_deref());
+    remove_in(&dir, slug)
 }
 
 #[cfg(test)]
@@ -184,35 +191,27 @@ mod tests {
 
     #[test]
     fn base_path_uses_data_dir_by_default() {
-        let path = base_path("my-project");
+        let path = base_path("my-project", None);
         let lossy = path.to_string_lossy();
         assert!(lossy.contains("metadata/my-project"), "path: {lossy}");
     }
 
     #[test]
     fn public_api_store_and_load_end_to_end() {
-        // Exercises the full public API: path resolution (via
-        // LITTERBOX_METADATA_DIR override) + file I/O together.
         let tmp = TempDir::new().expect("tempdir");
-        unsafe {
-            std::env::set_var("LITTERBOX_METADATA_DIR", tmp.path());
-        }
+        let dir = base_path("my-project", Some(tmp.path()));
 
         let meta = test_metadata();
-        store("my-project", "my-sandbox", &meta).expect("store");
-        let loaded = load("my-project", "my-sandbox")
+        store_in(&dir, "my-sandbox", &meta).expect("store");
+        let loaded = load_in(&dir, "my-sandbox")
             .expect("load")
             .expect("some");
         assert_eq!(loaded.name, meta.name);
         assert_eq!(loaded.mode, meta.mode);
 
-        remove("my-project", "my-sandbox").expect("remove");
-        assert!(load("my-project", "my-sandbox")
+        remove_in(&dir, "my-sandbox").expect("remove");
+        assert!(load_in(&dir, "my-sandbox")
             .expect("load")
             .is_none());
-
-        unsafe {
-            std::env::remove_var("LITTERBOX_METADATA_DIR");
-        }
     }
 }
