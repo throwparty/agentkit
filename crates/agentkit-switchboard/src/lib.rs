@@ -4,5 +4,6 @@ pub mod models;
 pub mod provider;
 pub mod proxy;
 pub mod credential;
+pub mod auth;
 pub mod session;
 pub mod db;
