@@ -6,9 +6,6 @@ pub fn resolve_path(slug: &str) -> PathBuf {
 }
 
 pub(crate) fn data_dir() -> PathBuf {
-    if let Ok(override_dir) = std::env::var("LITTERBOX_DATA_DIR") {
-        return PathBuf::from(override_dir);
-    }
     match std::env::consts::OS {
         "macos" => macos_data_dir(),
         "windows" => windows_data_dir(),
