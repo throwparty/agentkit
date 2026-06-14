@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use agentkit_switchboard::config::{ApiSurface, BillingModel, PricingConfig};
 use agentkit_switchboard::provider::{ProviderState, ProviderStatus};
-use agentkit_switchboard::provider::router::{select_provider, SessionAffinity, RoutingError, SelectionReason};
+use agentkit_switchboard::session::SessionAffinity;
+use agentkit_switchboard::provider::router::{select_provider, RoutingError, SelectionReason};
 
 fn make_provider(id: &str, billing: BillingModel, models: Vec<&str>, available: bool) -> (String, ProviderState) {
     let status = if available { ProviderStatus::Healthy } else { ProviderStatus::Unconfigured };
@@ -121,6 +122,7 @@ fn routing_session_affinity() {
         session_id: "sess_1".into(),
         provider_identity: "payg".into(),
         model_name: "gpt-4o".into(),
+        api_surface: "openai".into(),
     };
     let result = select_provider("gpt-4o", Some(&session), &p).unwrap();
     assert_eq!(result.identity, "payg");
@@ -138,6 +140,7 @@ fn routing_session_breaks_on_degradation() {
         session_id: "sess_1".into(),
         provider_identity: "degraded_sub".into(),
         model_name: "gpt-4o".into(),
+        api_surface: "openai".into(),
     };
     let result = select_provider("gpt-4o", Some(&session), &p).unwrap();
     assert_eq!(result.identity, "payg");

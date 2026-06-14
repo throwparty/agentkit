@@ -85,6 +85,7 @@ name = "agentkit-switchboard"
 version = "0.1.0"
 dependencies = [
  "agentkit-models",
+ "async-trait",
  "axum",
  "chrono",
  "clap",

@@ -1,13 +1,7 @@
 use std::collections::HashMap;
 use crate::config::BillingModel;
 use crate::provider::ProviderState;
-
-#[derive(Debug, Clone)]
-pub struct SessionAffinity {
-    pub session_id: String,
-    pub provider_identity: String,
-    pub model_name: String,
-}
+use crate::session::SessionAffinity;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProviderSelection {
