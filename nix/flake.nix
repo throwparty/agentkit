@@ -119,6 +119,12 @@
               agentkit-lens = mkAgentkitBin "lens";
               agentkit-litterbox = mkAgentkitBin "litterbox";
             };
+        checks = {
+          inherit (self.packages.${system})
+            agentkit-lens
+            agentkit-litterbox
+            ;
+        };
       }
     )
     // {

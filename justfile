@@ -1,3 +1,4 @@
+mod nix "nix"
 mod workflows ".github/workflows"
 
 set shell := ["bash", "-eux", "-o", "pipefail", "-c"]
@@ -11,6 +12,7 @@ fmt:
     treefmt
 
 lint:
+    just nix:lint
     just workflows:lint
     cargo clippy --all-targets --all-features -- -D warnings
 
