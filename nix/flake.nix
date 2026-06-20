@@ -85,7 +85,7 @@
             };
           in (mergeShells [ commonTools githubActions nodejs_24 rustShell ]);
 
-          packages =
+        packages =
             let
               lib = nixpkgs.lib;
               mkAgentkitBin =
@@ -105,7 +105,7 @@
                   cargoBuildFlags = commonCargoFlags;
                   cargoTestFlags = commonCargoFlags;
                   cargoDepsName = "agentkit";
-                  cargoHash = "sha256-XbTHwPJAUoUjnZae33h3oz93aV3OjOA7r/E01p2LdJM=";
+                  cargoHash = "sha256-OeGe8qQS9XlBNeoHVCRE+aywxsHslqbCxtm6j9RtnWw=";
 
                   meta = {
                     description = "Provides fetch and search tools backed by various search engines.";
