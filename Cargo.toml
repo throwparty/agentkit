@@ -2,6 +2,9 @@
 resolver = "3"
 members = [
     "crates/agentkit-litterbox",
-    "crates/agentkit-lens"
+    "crates/agentkit-lens",
+    "crates/agentkit-switchboard",
+    "crates/agentkit-credentials",
+    "crates/agentkit-models",
 ]
 exclude = ["adrs"]

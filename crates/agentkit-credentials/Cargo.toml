@@ -1,0 +1,25 @@
+[package]
+name = "agentkit-credentials"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+keyring = { version = "3", optional = true, features = ["sync-secret-service"] }
+
+[features]
+default = ["keychain"]
+keychain = ["keyring"]
+
+[[bin]]
+name = "agentkit-credential-keychain"
+path = "src/bin/agentkit-credential-keychain.rs"
+required-features = ["keychain"]
+
+[[bin]]
+name = "agentkit-credential-file"
+path = "src/bin/agentkit-credential-file.rs"

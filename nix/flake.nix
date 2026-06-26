@@ -43,6 +43,7 @@
               cargo-auditable
               cargo-deny
               cosign
+              dbus
               goreleaser
               mdformat
               nixfmt
@@ -72,6 +73,7 @@
                 cargo-auditable
                 cargo-deny
                 cosign
+                dbus
                 goreleaser
                 mdformat
                 nixfmt
