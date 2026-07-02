@@ -41,7 +41,7 @@ jobs:
         with:
           version: 0.15.2
       - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@30b5ca8b54e1dcffd9548bc87ede1531310fdc67 # ratchet:cargo-bins/cargo-binstall@main
+        uses: cargo-bins/cargo-binstall@732870f031d2fb36309d0deaf36abcc704a7be65 # ratchet:cargo-bins/cargo-binstall@main
         with:
           version: 1.19.0
       - name: Install cargo-zigbuild
