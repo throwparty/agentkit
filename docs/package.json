@@ -34,9 +34,9 @@
     "@docusaurus/module-type-aliases": "^3.10.1",
     "@docusaurus/tsconfig": "^3.10.1",
     "@docusaurus/types": "^3.10.1",
-    "@rspack/binding": "^2.0.6",
-    "@rspack/binding-darwin-arm64": "^2.0.6",
-    "@rspack/core": "^2.0.8",
+    "@rspack/binding": "^2.1.2",
+    "@rspack/binding-darwin-arm64": "^2.1.2",
+    "@rspack/core": "^2.1.2",
     "typescript": "~6.0.3"
   },
   "browserslist": {
