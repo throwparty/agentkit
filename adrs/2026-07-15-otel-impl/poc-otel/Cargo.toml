@@ -5,11 +5,10 @@ edition = "2021"
 publish = false
 
 [dependencies]
-opentelemetry = { version = "0.28", features = ["metrics", "logs"] }
-opentelemetry_sdk = { version = "0.28", features = ["metrics", "logs", "testing"] }
-opentelemetry-otlp = { version = "0.28", features = ["http-proto", "reqwest-client", "trace", "metrics", "logs"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+opentelemetry = { version = "0.32", features = ["trace", "metrics", "logs"] }
+opentelemetry_sdk = { version = "0.32", features = ["trace", "metrics", "logs", "testing", "rt-tokio"] }
+opentelemetry-otlp = { version = "0.32", features = ["http-proto", "reqwest-blocking-client", "trace", "metrics", "logs"] }
 tracing = "0.1"
-tracing-opentelemetry = "0.28"
+tracing-opentelemetry = "0.33"
 tracing-subscriber = { version = "0.3", features = ["registry", "env-filter"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
