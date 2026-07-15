@@ -47,6 +47,7 @@
               mdformat
               nixfmt
               openssl
+              otel-desktop-viewer
               pkg-config
               python3
               syft
@@ -58,6 +59,7 @@
                 ${getExe mdformat} --version
                 ${getExe nixfmt} --version
                 ${getExe openssl} version
+                ${getExe otel-desktop-viewer} --version
                 ${getExe python3} --version
                 ${getExe' rustToolchain "cargo"} --version
                 printf "goreleaser %s\n" "$(${getExe goreleaser} --version | grep GitVersion | awk '{print $2}')"
@@ -76,6 +78,7 @@
                 mdformat
                 nixfmt
                 openssl
+                otel-desktop-viewer
                 pkg-config
                 python3
                 rustToolchain
