@@ -1,7 +1,7 @@
 ---
 status: draft
 created: 2026-07-15
-updated: 2026-07-15
+updated: 2026-07-16
 author: adrian
 decision: pending
 ---
@@ -161,6 +161,17 @@ All tests pass with `cargo test` (no network, no external processes):
 **Rollout**: Nothing to roll back — this is a verification task.
 
 ---
+
+## Baseline Measurements (2026-07-16)
+
+| Binary | Profile | Size | Build Time |
+|--------|---------|------|------------|
+| `agentkit-switchboard` (pre-OTel) | release | 13 MB | 15.52s (warm) |
+| `poc-otel` (standalone OTel) | release | 5.5 MB | 30.90s (warm) |
+
+**NFR2 target**: Delta < 2 MB, compile time increase < 30%.
+
+**Note**: The switchboard warm build time is distorted because PoC deps were already compiled in the same workspace. True cold build will be measured after Task 6 integration.
 
 ### Task 6: Integrate OTel into agentkit-switchboard
 
