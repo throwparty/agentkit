@@ -22,11 +22,18 @@ jobs:
       docs: ${{ steps.filter.outputs.docs }}
       nix: ${{ steps.filter.outputs.nix }}
       workflows: ${{ steps.filter.outputs.workflows }}
+      snapshot: ${{ steps.pr-body-check.outputs.matched }}
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # ratchet:actions/checkout@v7.0.0
         with:
           persist-credentials: false
+      - name: Check PR body for snapshot tag
+        id: pr-body-check
+        uses: ./.github/actions/check-pr-body
+        with:
+          tag: snapshot
+          body: ${{ github.event.pull_request.body }}
       - name: Detect changes
         uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
         id: filter
@@ -104,8 +111,9 @@ jobs:
     name: Release snapshot
     needs: changes
     if: >
-      needs.changes.outputs.agentkit == 'true' ||
-      needs.changes.outputs.agentkit-cargo == 'true'
+      (needs.changes.outputs.agentkit == 'true' ||
+       needs.changes.outputs.agentkit-cargo == 'true') &&
+      needs.changes.outputs.snapshot == 'true'
     permissions:
       actions: write  # Called workflow uses it for build caches
       contents: write  # Called workflow publishes snapshot artifacts
