@@ -1,0 +1,30 @@
+name: Check PR body for tag
+description: >
+  Check whether the PR body contains a given tag wrapped in #[...].
+  For example, tag "snapshot" matches #[snapshot] in the body.
+inputs:
+  tag:
+    description: Tag name to search for (without brackets)
+    required: true
+  body:
+    description: PR body text
+    required: true
+
+outputs:
+  matched:
+    description: "true if the tag was found, false otherwise"
+    value: ${{ steps.check.outputs.matched }}
+
+runs:
+  using: composite
+  steps:
+    - id: check
+      shell: bash
+      env:
+        PR_BODY: ${{ inputs.body }}
+      run: |
+        if echo "$PR_BODY" | grep -qF '#[${{ inputs.tag }}]'; then
+          echo "matched=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "matched=false" >> "$GITHUB_OUTPUT"
+        fi

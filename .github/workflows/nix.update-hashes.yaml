@@ -46,10 +46,16 @@ jobs:
       - name: Check and update cargo hash
         id: update-hash
         run: just nix update-hash
+      - name: Check PR body for no-modification tag
+        id: pr-body-check
+        uses: ./.github/actions/check-pr-body
+        with:
+          tag: no modification
+          body: ${{ inputs.pr-body }}
       - name: Commit and push
         if: >-
           steps.update-hash.outcome == 'success' &&
-          !contains(inputs.pr-body, '#[no modification]')
+          steps.pr-body-check.outputs.matched != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: .github/workflows/nix.update-hashes/commit-and-push-hash-update.sh
