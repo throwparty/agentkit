@@ -3,8 +3,8 @@ name: "Nix: update hashes"
 on:
   pull_request:
     paths:
-      - 'Cargo.lock'
-      - 'Cargo.toml'
+      - Cargo.lock
+      - Cargo.toml
   workflow_dispatch: {}
 
 concurrency:
@@ -19,6 +19,9 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write  # To push cargo hash updates
+    defaults:
+      run:
+        shell: nix develop ./nix --command bash -euo pipefail {0}
     if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
     steps:
       - name: Checkout
@@ -29,19 +32,15 @@ jobs:
           persist-credentials: false
       - name: Setup Nix
         uses: ./.github/actions/setup-nix
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Check and update cargo hash
         id: update-hash
-        run: .github/workflows/nix.update-hashes/update-cargo-hash.sh
+        run: just nix:update-hash
       - name: Commit and push
-        if: steps.update-hash.outcome == 'success'
+        if: >-
+          steps.update-hash.outcome == 'success' &&
+          !contains(github.event.pull_request.body, '#[no modification]')
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          if ! git diff --exit-code --quiet nix/flake.nix; then
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add nix/flake.nix
-            git commit -m "Update Nix cargo hash after dependency change"
-            git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}"
-            git push
-          fi
+        run: .github/workflows/nix.update-hashes/commit-and-push-hash-update.sh

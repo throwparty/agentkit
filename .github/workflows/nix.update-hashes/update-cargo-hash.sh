@@ -21,7 +21,9 @@ update_flake_nix() {
 
 main() {
   local nix_output
-  nix_output=$(nix --extra-experimental-features 'nix-command flakes' flake check --show-trace ./nix 2>&1) || true
+  nix_output=$(nix --extra-experimental-features 'nix-command flakes' build --no-link \
+    ./nix#agentkit-lens.cargoDeps \
+    ./nix#agentkit-litterbox.cargoDeps 2>&1) || true
 
   if [[ -z "$nix_output" ]]; then
     echo "All checks passed, no update needed."
