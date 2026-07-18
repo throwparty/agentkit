@@ -36,7 +36,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Check and update cargo hash
         id: update-hash
-        run: just nix:update-hash
+        run: just nix update-hash
       - name: Commit and push
         if: >-
           steps.update-hash.outcome == 'success' &&
