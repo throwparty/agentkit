@@ -13,6 +13,9 @@ jobs:
   test:
     name: Build and test
     runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: nix develop ./nix --command bash -euo pipefail {0}
     permissions:
       actions: write  # To manage cargo caches
       contents: read
@@ -21,8 +24,10 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # ratchet:actions/checkout@v7.0.0
         with:
           persist-credentials: false
-      - name: Install Rust
-        run: .github/actions/setup-rust/setup-rust.sh clippy
+      - name: Setup Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Cache dependencies
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # ratchet:actions/cache@v6.1.0
         with:
@@ -31,12 +36,6 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@732870f031d2fb36309d0deaf36abcc704a7be65 # ratchet:cargo-bins/cargo-binstall@main
-        with:
-          version: 1.19.0
-      - name: Install cargo-deny
-        run: cargo-binstall cargo-deny --version 0.19.0 --no-confirm
       - name: Lint
         if: "!cancelled()"
         run: cargo clippy --locked --all-targets --all-features

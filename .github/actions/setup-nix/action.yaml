@@ -1,12 +1,19 @@
 name: Setup Nix
-description: Install Nix and configure Git for Nix flakes
+description: Install Nix and configure Git for flakes
+
+inputs:
+  github-token:
+    description: GitHub token for flake authentication
+    required: true
 
 runs:
   using: composite
   steps:
     - name: Install Nix
-      shell: bash
-      run: .github/actions/setup-nix/setup-nix.sh
+      uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # ratchet:cachix/install-nix-action@v31.11.0
+      with:
+        extra_nix_config: |
+          access-tokens = github.com=${{ inputs.github-token }}
     - name: Rewrite GitHub SSH URLs to HTTPS
       shell: bash
       run: .github/actions/setup-nix/setup-nix-git-config.sh

@@ -17,6 +17,9 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: nix develop ./nix --command bash -euo pipefail {0}
     permissions:
       actions: write  # To manage build caches
       contents: write  # To publish release artifacts and tags
@@ -27,22 +30,10 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Install Rust
-        run: .github/actions/setup-rust/setup-rust.sh
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # ratchet:sigstore/cosign-installer@v4.1.2
-      - name: Install Syft
-        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # ratchet:anchore/sbom-action/download-syft@v0.24.0
-      - name: Install Zig
-        uses: goto-bus-stop/setup-zig@abea47f85e598557f500fa1fd2ab7464fcb39406 # ratchet:goto-bus-stop/setup-zig@v2.2.1
+      - name: Setup Nix
+        uses: ./.github/actions/setup-nix
         with:
-          version: 0.15.2
-      - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@732870f031d2fb36309d0deaf36abcc704a7be65 # ratchet:cargo-bins/cargo-binstall@main
-        with:
-          version: 1.19.0
-      - name: Install cargo-zigbuild
-        run: cargo binstall cargo-zigbuild --version 0.21.8 --no-confirm
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Cache macOS SDK
         id: cache-macos-sdk
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # ratchet:actions/cache/restore@v6.1.0

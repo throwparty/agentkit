@@ -13,13 +13,23 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: nix develop ./nix --command bash -euo pipefail {0}
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # ratchet:actions/checkout@v7.0.0
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # ratchet:actions/checkout@v7.0.0
         with:
           persist-credentials: false
+      - name: Setup Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Run actionlint
-        run: .github/workflows/workflows.lint/lint-actionlint.sh
+        run: just workflows actionlint
       - name: Run zizmor
-        run: .github/workflows/workflows.lint/lint-zizmor.sh .github/workflows .github/dependabot.yaml
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: just workflows zizmor

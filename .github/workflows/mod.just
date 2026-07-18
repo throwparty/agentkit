@@ -9,17 +9,20 @@ actionlint:
     actionlint -ignore 'unexpected key "queue" for "concurrency" section'
 
 zizmor *flags:
-    zizmor --persona=auditor {{flags}} {{source_directory()}}
+    zizmor --persona=auditor {{flags}} {{source_directory()}}/../dependabot.yaml {{source_directory()}}
 
 test-actions:
     bats ../actions/*/*.bats
 
 test-workflows:
-    bats */*.bats
+    shopt -s globstar; bats **/*.bats
 
 test: test-actions test-workflows
 
-lint: zizmor actionlint test
+step-names:
+    {{source_directory()}}/check-names.sh
+
+lint: step-names zizmor actionlint test
 
 ratchet command:
      find . -type f -path "*.yaml" \

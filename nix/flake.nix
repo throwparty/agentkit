@@ -30,7 +30,13 @@
           ];
         };
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
-          targets = [ "wasm32-wasip1" ];
+          targets = [
+            "wasm32-wasip1"
+            "x86_64-apple-darwin"
+            "x86_64-pc-windows-gnu"
+            "aarch64-unknown-linux-gnu"
+            "aarch64-apple-darwin"
+          ];
         };
         inherit (pkgs.lib) getExe getExe';
       in
@@ -42,7 +48,9 @@
             inherit (pkgs)
               bats
               cargo-auditable
+              cargo-binstall
               cargo-deny
+              cargo-zigbuild
               cosign
               goreleaser
               mdformat
@@ -51,8 +59,17 @@
               otel-desktop-viewer
               pkg-config
               python3
+              rustup
               syft
+              yq-go
+              zig
               ;
+            rustup-wrapped = pkgs.writeShellScriptBin "rustup" "
+              case \"\${1}_\${2}_\" in
+                target_add_|target_install_) exit 0 ;;
+                *) exec ${pkgs.rustup}/bin/rustup \"\$@\" ;;
+              esac
+            ";
             rustToolVersions = mkToolVersions {
               inherit pkgs;
               name = "default";
@@ -67,15 +84,21 @@
                 printf "pkg-config %s\n" "$(${getExe pkg-config} --version | head -n 1)"
                 ${getExe' rustToolchain "rustc"} --version
                 ${getExe bats} --version
+                printf "cargo-binstall %s\n" "$(${getExe cargo-binstall} --version 2>/dev/null || true)"
+                printf "cargo-zigbuild %s\n" "$(${getExe cargo-zigbuild} --version 2>/dev/null || true)"
                 ${getExe cosign} --version
                 ${getExe syft} --version
+                printf "yq %s\n" "$(${getExe yq-go} --version 2>/dev/null || true)"
+                ${getExe zig} version
               '';
             };
             rustShell = pkgs.mkShell {
               nativeBuildInputs = [
                 bats
                 cargo-auditable
+                cargo-binstall
                 cargo-deny
+                cargo-zigbuild
                 cosign
                 goreleaser
                 mdformat
@@ -85,9 +108,20 @@
                 pkg-config
                 python3
                 rustToolchain
+                rustup-wrapped
                 syft
+                yq-go
+                zig
               ];
-              shellHook = "\ncat ${rustToolVersions}";
+              shellHook = ''
+                cat ${rustToolVersions}
+                export RUSTUP_HOME="$PWD/.rustup"
+                export CARGO_HOME="$PWD/.cargo"
+                mkdir -p "$RUSTUP_HOME" "$CARGO_HOME"
+                rustup toolchain link nix "$(dirname "$(readlink -f "$(type -P rustc)")")/.."
+                rustup default nix
+                export PATH="$CARGO_HOME/bin:$PATH"
+              '';
             };
           in (mergeShells [ commonTools githubActions nodejs_24 rustShell ]);
 

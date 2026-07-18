@@ -13,6 +13,9 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: nix develop ./nix --command bash -euo pipefail {0}
     permissions:
       contents: read
     steps:
@@ -22,5 +25,7 @@ jobs:
           persist-credentials: false
       - name: Setup Nix
         uses: ./.github/actions/setup-nix
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Run flake check
-        run: .github/workflows/nix.lint/nix-flake-check.sh ./nix
+        run: just nix lint

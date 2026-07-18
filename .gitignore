@@ -10,3 +10,7 @@
 
 # Zig
 /.zig-cache/
+
+# Our rustup hook
+/.cargo/
+/.rustup/
