@@ -39,6 +39,7 @@
           ];
         };
         inherit (pkgs.lib) getExe getExe';
+        mingwBinutils = pkgs.pkgsCross.mingwW64.buildPackages.binutils;
       in
       {
         devShells.default =
@@ -102,6 +103,7 @@
                 cosign
                 goreleaser
                 mdformat
+                mingwBinutils
                 nixfmt
                 openssl
                 otel-desktop-viewer
