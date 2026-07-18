@@ -11,4 +11,4 @@ lint:
     nix --extra-experimental-features 'nix-command flakes' build {{source_directory()}}#agentkit-litterbox.cargoDeps --no-link
 
 update-hash:
-    .github/workflows/nix.update-hashes/update-cargo-hash.sh
+    cd {{source_directory()}}/.. && .github/workflows/nix.update-hashes/update-cargo-hash.sh
