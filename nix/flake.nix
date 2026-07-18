@@ -40,6 +40,7 @@
             inherit (throwparty.devShells.${system}) commonTools githubActions nodejs_24;
             inherit (throwparty.lib) mergeShells mkToolVersions;
             inherit (pkgs)
+              bats
               cargo-auditable
               cargo-deny
               cosign
@@ -65,12 +66,14 @@
                 printf "goreleaser %s\n" "$(${getExe goreleaser} --version | grep GitVersion | awk '{print $2}')"
                 printf "pkg-config %s\n" "$(${getExe pkg-config} --version | head -n 1)"
                 ${getExe' rustToolchain "rustc"} --version
+                ${getExe bats} --version
                 ${getExe cosign} --version
                 ${getExe syft} --version
               '';
             };
             rustShell = pkgs.mkShell {
               nativeBuildInputs = [
+                bats
                 cargo-auditable
                 cargo-deny
                 cosign

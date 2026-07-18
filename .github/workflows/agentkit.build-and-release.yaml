@@ -28,10 +28,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Install Rust
-        run: |
-          set -eux -o pipefail
-          rustup toolchain install stable
-          rustup default stable
+        run: .github/actions/setup-rust/setup-rust.sh
       - name: Install Cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # ratchet:sigstore/cosign-installer@v4.1.2
       - name: Install Syft
@@ -56,20 +53,7 @@ jobs:
         env:
           SDK_URL: https://github.com/joseluisq/macosx-sdks/releases/download/26.1/MacOSX26.1.sdk.tar.xz
           SDK_CACHED: ${{ steps.cache-macos-sdk.outputs.cache-hit }}
-        run: |
-          set -eux -o pipefail
-          SDK_DIR="${RUNNER_TEMP}/macos-sdk"
-          mkdir -p "$SDK_DIR"
-          if [ "$SDK_CACHED" != "true" ]; then
-            curl -L "$SDK_URL" -o "$SDK_DIR/MacOSX.sdk.tar.xz"
-            tar -xf "$SDK_DIR/MacOSX.sdk.tar.xz" -C "$SDK_DIR"
-          fi
-          SDKROOT="$(find "$SDK_DIR" -maxdepth 1 -type d -name 'MacOSX*.sdk' | head -n 1)"
-          {
-            printf "SDKROOT=%s\n" "$SDKROOT"
-            echo "MACOSX_DEPLOYMENT_TARGET=12.0"
-            echo "ZIG_SYSTEM_LIB_DIR=$SDKROOT/usr/lib"
-          } >>"$GITHUB_ENV"
+        run: .github/workflows/agentkit.build-and-release/prepare-macos-sdk.sh
       - name: Save macOS SDK cache
         if: steps.cache-macos-sdk.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # ratchet:actions/cache/save@v6.1.0
