@@ -28,4 +28,8 @@ setup() {
   [[ "$output" == "MACOSX_DEPLOYMENT_TARGET=12.0" ]]
   run grep "ZIG_SYSTEM_LIB_DIR" "$env_file"
   [[ "$output" == "ZIG_SYSTEM_LIB_DIR=$tmpdir/macos-sdk/MacOSX26.1.sdk/usr/lib" ]]
+  run grep "CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS" "$env_file"
+  [[ "$output" == "CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS=-C link-arg=-F$tmpdir/macos-sdk/MacOSX26.1.sdk/System/Library/Frameworks -C link-arg=-L$tmpdir/macos-sdk/MacOSX26.1.sdk/usr/lib" ]]
+  run grep "CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS" "$env_file"
+  [[ "$output" == "CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS=-C link-arg=-F$tmpdir/macos-sdk/MacOSX26.1.sdk/System/Library/Frameworks -C link-arg=-L$tmpdir/macos-sdk/MacOSX26.1.sdk/usr/lib" ]]
 }
