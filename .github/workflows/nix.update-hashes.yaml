@@ -18,7 +18,7 @@ jobs:
     name: Update
     runs-on: ubuntu-24.04
     permissions:
-      contents: write
+      contents: write  # To push cargo hash updates
     if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
     steps:
       - name: Checkout
@@ -26,7 +26,7 @@ jobs:
         with:
           ref: ${{ github.head_ref }}
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: false
       - name: Setup Nix
         uses: ./.github/actions/setup-nix
       - name: Check and update cargo hash
@@ -53,4 +53,5 @@ jobs:
             exit 0
           fi
           git commit -m "Update Nix cargo hash after dependency change"
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}"
           git push
