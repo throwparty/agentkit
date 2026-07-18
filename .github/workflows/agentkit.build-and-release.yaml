@@ -52,14 +52,9 @@ jobs:
           path: ${{ runner.temp }}/macos-sdk
           key: macosx-sdk-26.1
       - name: Release
-        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # ratchet:goreleaser/goreleaser-action@v7.2.3
-        with:
-          distribution: goreleaser
-          version: "~> v2.13.3"
-          args: >
-            release --clean
-            ${{ inputs.build-is-snapshot && '--snapshot' || '' }}
+        run: goreleaser release --clean $SNAPSHOT_FLAG
         env:
+          SNAPSHOT_FLAG: ${{ inputs.build-is-snapshot && '--snapshot' || '' }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SDKROOT: ${{ env.SDKROOT }}
           MACOSX_DEPLOYMENT_TARGET: ${{ env.MACOSX_DEPLOYMENT_TARGET }}
