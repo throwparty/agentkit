@@ -3,7 +3,7 @@ use rmcp::{
     ErrorData as McpError, ServerHandler, ServiceExt,
     handler::server::tool::ToolRouter,
     handler::server::wrapper::Parameters,
-    model::{CallToolResult, Content, ServerCapabilities, ServerInfo},
+    model::{CallToolResult, ContentBlock, ServerCapabilities, ServerInfo},
     tool, tool_handler, tool_router,
     transport::stdio,
 };
@@ -151,7 +151,7 @@ impl SandboxServer {
             let _ = provider.delete(&metadata).await;
             return Err(McpError::internal_error(error.to_string(), None));
         }
-        let content = Content::json(metadata)
+        let content = ContentBlock::json(metadata)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
         Ok(CallToolResult::success(vec![content]))
     }
@@ -175,7 +175,7 @@ impl SandboxServer {
             name: args.sandbox,
             forwarded_ports,
         };
-        let content = Content::json(response)
+        let content = ContentBlock::json(response)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
         Ok(CallToolResult::success(vec![content]))
     }
@@ -190,7 +190,7 @@ impl SandboxServer {
         let content = read_in_sandbox(&provider, &metadata, &args.path, args.offset, args.limit)
             .await
             .map_err(|error| map_read_error(&args.sandbox, error))?;
-        let content = Content::text(content);
+        let content = ContentBlock::text(content);
         Ok(CallToolResult::success(vec![content]))
     }
 
@@ -268,7 +268,7 @@ impl SandboxServer {
         )
         .await
         .map_err(map_error)?;
-        let content = Content::json(result)
+        let content = ContentBlock::json(result)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
         Ok(CallToolResult::success(vec![content]))
     }
@@ -281,7 +281,7 @@ impl SandboxServer {
         let entries = ls_in_sandbox(&provider, &metadata, &args.path, recursive)
             .await
             .map_err(|error| map_ls_error(&args.sandbox, error))?;
-        let content = Content::json(entries)
+        let content = ContentBlock::json(entries)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
         Ok(CallToolResult::success(vec![content]))
     }
@@ -296,7 +296,7 @@ impl SandboxServer {
         let matches = glob_in_sandbox(&provider, &metadata, &args.pattern, args.path.as_deref())
             .await
             .map_err(|error| map_glob_tool_error(&args.sandbox, error))?;
-        let content = Content::json(matches)
+        let content = ContentBlock::json(matches)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
         Ok(CallToolResult::success(vec![content]))
     }
@@ -317,7 +317,7 @@ impl SandboxServer {
         )
         .await
         .map_err(|error| map_grep_error(&args.sandbox, error))?;
-        let content = Content::json(matches)
+        let content = ContentBlock::json(matches)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
         Ok(CallToolResult::success(vec![content]))
     }

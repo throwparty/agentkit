@@ -3,7 +3,7 @@ use rmcp::{
         router::tool::ToolRouter,
         wrapper::Parameters,
     },
-    model::{CallToolResult, Content, ServerCapabilities, ServerInfo},
+    model::{CallToolResult, ContentBlock, ServerCapabilities, ServerInfo},
     service::serve_server,
     tool, tool_handler, tool_router,
     transport::stdio,
@@ -151,12 +151,12 @@ impl LensServer {
         // Validate query
         if args.query.len() > 400 {
             return Ok(CallToolResult::error(vec![
-                Content::text("Query exceeds 400 character limit".to_string()),
+                ContentBlock::text("Query exceeds 400 character limit".to_string()),
             ]));
         }
         if args.query.split_whitespace().count() > 50 {
             return Ok(CallToolResult::error(vec![
-                Content::text("Query exceeds 50 word limit".to_string()),
+                ContentBlock::text("Query exceeds 50 word limit".to_string()),
             ]));
         }
 
@@ -179,7 +179,7 @@ impl LensServer {
         if !engine.is_configured() {
             let hint = engine.config_hint().unwrap_or_else(|| "Engine is not configured".to_string());
             return Ok(CallToolResult::error(vec![
-                Content::text(format!(
+                ContentBlock::text(format!(
                     "Search engine '{}' is not configured: {}",
                     args.engine, hint
                 )),
@@ -202,14 +202,14 @@ impl LensServer {
                     total_pages: response.total_pages,
                     has_more: response.has_more,
                 };
-                let content = Content::json(output)
+                let content = ContentBlock::json(output)
                     .map_err(|e| McpError::internal_error(e.to_string(), None))?;
                 Ok(CallToolResult::success(vec![content]))
             }
             Err(e) => {
                 warn!("Search error: {}", e);
                 Ok(CallToolResult::error(vec![
-                    Content::text(format!("Search failed: {}", e)),
+                    ContentBlock::text(format!("Search failed: {}", e)),
                 ]))
             }
         }
@@ -238,7 +238,7 @@ impl LensServer {
                 content_length: cached.content_length,
                 cached: true,
             };
-            let content = Content::json(output)
+            let content = ContentBlock::json(output)
                 .map_err(|e| McpError::internal_error(e.to_string(), None))?;
             return Ok(CallToolResult::success(vec![content]));
         }
@@ -254,7 +254,7 @@ impl LensServer {
             Err(e) => {
                 warn!("Fetch error for {}: {}", url, e);
                 return Ok(CallToolResult::error(vec![
-                    Content::text(format!("Fetch failed: {}", e)),
+                    ContentBlock::text(format!("Fetch failed: {}", e)),
                 ]));
             }
         };
@@ -274,7 +274,7 @@ impl LensServer {
             cached: false,
         };
 
-        let content = Content::json(output)
+        let content = ContentBlock::json(output)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         Ok(CallToolResult::success(vec![content]))
     }
@@ -289,7 +289,7 @@ impl LensServer {
         let registry = self.registry.lock().await;
         let outputs: Vec<EngineInfoOutput> = registry.list().into_iter().map(Into::into).collect();
         let output = EnginesResponseOutput { engines: outputs };
-        let content = Content::json(output)
+        let content = ContentBlock::json(output)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         Ok(CallToolResult::success(vec![content]))
     }
