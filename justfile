@@ -12,8 +12,8 @@ fmt:
     treefmt
 
 lint:
-    just nix:lint
-    just workflows:lint
+    just nix lint
+    just workflows lint
     cargo clippy --all-targets --all-features -- -D warnings
 
 test:
