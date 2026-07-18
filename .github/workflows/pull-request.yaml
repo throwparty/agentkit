@@ -18,6 +18,7 @@ jobs:
       contents: read
     outputs:
       agentkit: ${{ steps.filter.outputs.agentkit }}
+      agentkit-cargo: ${{ steps.filter.outputs.agentkit-cargo }}
       docs: ${{ steps.filter.outputs.docs }}
       nix: ${{ steps.filter.outputs.nix }}
       workflows: ${{ steps.filter.outputs.workflows }}
@@ -31,9 +32,10 @@ jobs:
         id: filter
         with:
           filters: |
-            agentkit:
+            agentkit-cargo:
               - 'Cargo.toml'
               - 'Cargo.lock'
+            agentkit:
               - 'crates/**'
               - 'deny.toml'
               - '.goreleaser.yaml'
@@ -47,7 +49,7 @@ jobs:
   test:
     name: Build and test
     needs: changes
-    if: needs.changes.outputs.agentkit == 'true'
+    if: needs.changes.outputs.agentkit == 'true' || needs.changes.outputs.agentkit-cargo == 'true'
     permissions:
       actions: write  # Called workflow uses it for cargo caches
       contents: read
@@ -74,15 +76,29 @@ jobs:
   lint-nix:
     name: Lint Nix
     needs: changes
-    if: needs.changes.outputs.agentkit == 'true' || needs.changes.outputs.nix == 'true'
+    if: needs.changes.outputs.agentkit == 'true' || needs.changes.outputs.agentkit-cargo == 'true' || needs.changes.outputs.nix == 'true'
     permissions:
       contents: read
     uses: ./.github/workflows/nix.lint.yaml
 
+  update-hashes:
+    name: Update cargo hashes
+    needs: changes
+    if: needs.changes.outputs.agentkit-cargo == 'true'
+    permissions:
+      actions: write  # Called workflow uses it for nix caches
+      contents: write  # Called workflow pushes hash updates
+    uses: ./.github/workflows/nix.update-hashes.yaml
+    with:
+      head-ref: ${{ github.head_ref }}
+      head-sha: ${{ github.event.pull_request.head.sha }}
+      pr-body: ${{ github.event.pull_request.body }}
+      is-fork: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+
   release-snapshot:
     name: Release snapshot
     needs: changes
-    if: needs.changes.outputs.agentkit == 'true'
+    if: needs.changes.outputs.agentkit == 'true' || needs.changes.outputs.agentkit-cargo == 'true'
     permissions:
       actions: write  # Called workflow uses it for build caches
       contents: write  # Called workflow publishes snapshot artifacts
@@ -93,7 +109,7 @@ jobs:
 
   ready:
     name: Ready
-    needs: [test, docs, lint-workflows, lint-nix, release-snapshot]
+    needs: [test, docs, lint-workflows, lint-nix, update-hashes, release-snapshot]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     steps:
