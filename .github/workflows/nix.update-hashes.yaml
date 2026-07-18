@@ -1,14 +1,23 @@
 name: "Nix: update hashes"
 
 on:
-  pull_request:
-    paths:
-      - Cargo.lock
-      - Cargo.toml
-  workflow_dispatch: {}
+  workflow_call:
+    inputs:
+      head-ref:
+        required: true
+        type: string
+      head-sha:
+        required: true
+        type: string
+      pr-body:
+        required: true
+        type: string
+      is-fork:
+        required: true
+        type: boolean
 
 concurrency:
-  group: nix-update-hashes-${{ github.event.pull_request.number || github.ref }}
+  group: nix-update-hashes-${{ inputs.head-ref }}
   cancel-in-progress: true
 
 permissions: {}
@@ -22,12 +31,12 @@ jobs:
     defaults:
       run:
         shell: nix develop ./nix --command bash -euo pipefail {0}
-    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ !inputs.is-fork }}
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # ratchet:actions/checkout@v7.0.0
         with:
-          ref: ${{ github.head_ref }}
+          ref: ${{ inputs.head-ref }}
           fetch-depth: 0
           persist-credentials: false
       - name: Setup Nix
@@ -40,7 +49,7 @@ jobs:
       - name: Commit and push
         if: >-
           steps.update-hash.outcome == 'success' &&
-          !contains(github.event.pull_request.body, '#[no modification]')
+          !contains(inputs.pr-body, '#[no modification]')
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: .github/workflows/nix.update-hashes/commit-and-push-hash-update.sh
