@@ -49,7 +49,9 @@ jobs:
   test:
     name: Build and test
     needs: changes
-    if: needs.changes.outputs.agentkit == 'true' || needs.changes.outputs.agentkit-cargo == 'true'
+    if: >
+      needs.changes.outputs.agentkit == 'true' ||
+      needs.changes.outputs.agentkit-cargo == 'true'
     permissions:
       actions: write  # Called workflow uses it for cargo caches
       contents: read
@@ -76,7 +78,10 @@ jobs:
   lint-nix:
     name: Lint Nix
     needs: changes
-    if: needs.changes.outputs.agentkit == 'true' || needs.changes.outputs.agentkit-cargo == 'true' || needs.changes.outputs.nix == 'true'
+    if: >
+      needs.changes.outputs.agentkit == 'true' ||
+      needs.changes.outputs.agentkit-cargo == 'true' ||
+      needs.changes.outputs.nix == 'true'
     permissions:
       contents: read
     uses: ./.github/workflows/nix.lint.yaml
@@ -98,7 +103,9 @@ jobs:
   release-snapshot:
     name: Release snapshot
     needs: changes
-    if: needs.changes.outputs.agentkit == 'true' || needs.changes.outputs.agentkit-cargo == 'true'
+    if: >
+      needs.changes.outputs.agentkit == 'true' ||
+      needs.changes.outputs.agentkit-cargo == 'true'
     permissions:
       actions: write  # Called workflow uses it for build caches
       contents: write  # Called workflow publishes snapshot artifacts
