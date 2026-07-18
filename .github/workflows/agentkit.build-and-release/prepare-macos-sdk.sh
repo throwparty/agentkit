@@ -17,16 +17,23 @@ main() {
   local sdkroot
   sdkroot=$(find "$sdk_dir" -maxdepth 1 -type d -name 'MacOSX*.sdk' | head -n 1)
 
+  local framework_dir="$sdkroot/System/Library/Frameworks"
+  local syslib_dir="$sdkroot/usr/lib"
+
   if [[ -n "$env_file" ]]; then
     {
       printf "SDKROOT=%s\n" "$sdkroot"
       echo "MACOSX_DEPLOYMENT_TARGET=12.0"
-      echo "ZIG_SYSTEM_LIB_DIR=$sdkroot/usr/lib"
+      echo "ZIG_SYSTEM_LIB_DIR=$syslib_dir"
+      echo "CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS=-C link-arg=-F$framework_dir -C link-arg=-L$syslib_dir"
+      echo "CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS=-C link-arg=-F$framework_dir -C link-arg=-L$syslib_dir"
     } >> "$env_file"
   else
     export SDKROOT="$sdkroot"
     export MACOSX_DEPLOYMENT_TARGET=12.0
-    export ZIG_SYSTEM_LIB_DIR="$sdkroot/usr/lib"
+    export ZIG_SYSTEM_LIB_DIR="$syslib_dir"
+    export CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS="-C link-arg=-F$framework_dir -C link-arg=-L$syslib_dir"
+    export CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS="-C link-arg=-F$framework_dir -C link-arg=-L$syslib_dir"
   fi
 
   printf '%s\n' "$sdkroot"

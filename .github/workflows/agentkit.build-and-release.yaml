@@ -59,6 +59,8 @@ jobs:
           SDKROOT: ${{ env.SDKROOT }}
           MACOSX_DEPLOYMENT_TARGET: ${{ env.MACOSX_DEPLOYMENT_TARGET }}
           ZIG_SYSTEM_LIB_DIR: ${{ env.ZIG_SYSTEM_LIB_DIR }}
+          CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS: ${{ env.CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS }}
+          CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS: ${{ env.CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS }}
       - name: Upload snapshot artifacts
         if: inputs.build-is-snapshot
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7.0.1
