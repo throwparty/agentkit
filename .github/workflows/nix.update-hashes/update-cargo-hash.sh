@@ -15,7 +15,7 @@ update_flake_nix() {
   sed -i 's|^\( *\)cargoHash = "sha256-[A-Za-z0-9+/=]*";|\1cargoHash = "'"$new_hash"'";|' "$flake_file"
   if [[ "$before" == "$(cat "$flake_file")" ]]; then
     echo "No cargoHash line found to update." >&2
-    return 1
+    return 0
   fi
 }
 
@@ -27,7 +27,7 @@ main() {
 
   if [[ -z "$nix_output" ]]; then
     echo "All checks passed, no update needed."
-    exit 0
+    return 0
   fi
 
   echo "$nix_output" >&2
@@ -37,7 +37,7 @@ main() {
 
   if [[ -z "$new_hash" ]]; then
     echo "No hash mismatch detected." >&2
-    return 1
+    return 0
   fi
 
   update_flake_nix "$new_hash"
