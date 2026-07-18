@@ -20,10 +20,6 @@ jobs:
         with:
           persist-credentials: false
       - name: Run actionlint
-        run: |
-          bash <(curl -sS https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
-          ./actionlint -ignore 'unexpected key "queue" for "concurrency" section'
+        run: .github/workflows/workflows.lint/lint-actionlint.sh
       - name: Run zizmor
-        run: |
-          pip install zizmor
-          zizmor .github/workflows .github/dependabot.yaml
+        run: .github/workflows/workflows.lint/lint-zizmor.sh .github/workflows .github/dependabot.yaml

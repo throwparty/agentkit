@@ -11,7 +11,15 @@ actionlint:
 zizmor *flags:
     zizmor --persona=auditor {{flags}} {{source_directory()}}
 
-lint: zizmor actionlint
+test-actions:
+    bats ../actions/*/*.bats
+
+test-workflows:
+    bats */*.bats
+
+test: test-actions test-workflows
+
+lint: zizmor actionlint test
 
 ratchet command:
      find . -type f -path "*.yaml" \

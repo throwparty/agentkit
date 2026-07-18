@@ -22,10 +22,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install Rust
-        run: |
-          rustup toolchain install stable
-          rustup default stable
-          rustup component add clippy
+        run: .github/actions/setup-rust/setup-rust.sh clippy
       - name: Cache dependencies
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # ratchet:actions/cache@v6.1.0
         with:

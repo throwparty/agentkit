@@ -6,16 +6,7 @@ runs:
   steps:
     - name: Install Nix
       shell: bash
-      run: |
-        sudo mkdir -p -m 0755 /nix
-        sudo chown "${USER}" /nix
-        curl -L https://nixos.org/nix/install | sh -s -- --no-daemon
-        echo "${HOME}/.nix-profile/bin" >> "${GITHUB_PATH}"
-        nix --version
+      run: .github/actions/setup-nix/setup-nix.sh
     - name: Rewrite GitHub SSH URLs to HTTPS
       shell: bash
-      run: |
-        git config --global --add url."https://github.com/".insteadOf "git+ssh://git@github.com/"
-        git config --global --add url."https://github.com/".insteadOf "ssh://git@github.com/"
-        git config --global --add url."https://github.com/".insteadOf "git@github.com:"
-        git config --global --get-all url."https://github.com/".insteadOf
+      run: .github/actions/setup-nix/setup-nix-git-config.sh
