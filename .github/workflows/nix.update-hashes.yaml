@@ -1,0 +1,56 @@
+name: "Nix: update hashes"
+
+on:
+  pull_request:
+    paths:
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: nix-update-hashes-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  update:
+    name: Update
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # ratchet:actions/checkout@v7.0.0
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Setup Nix
+        uses: ./.github/actions/setup-nix
+      - name: Check and update cargo hash
+        run: |
+          if output=$(nix --extra-experimental-features 'nix-command flakes' flake check --show-trace ./nix 2>&1); then
+            echo "All checks passed, no update needed."
+            exit 0
+          fi
+          echo "$output"
+          new_hash=$(echo "$output" \
+            | grep -oP 'got:\s*\Ksha256-[A-Za-z0-9+/=]+' \
+            | head -1)
+          if [ -z "$new_hash" ]; then
+            echo "No hash mismatch detected. Exiting."
+            exit 1
+          fi
+          echo "Updating cargoHash to $new_hash"
+          sed -i 's|^\( *\)cargoHash = "sha256-[A-Za-z0-9+/=]*";|\1cargoHash = "'"$new_hash"'";|' nix/flake.nix
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add nix/flake.nix
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git commit -m "Update Nix cargo hash after dependency change"
+          git push
