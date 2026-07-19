@@ -1,3 +1,5 @@
+pub mod anthropic;
+
 use crate::config::ProviderConfig;
 use std::collections::HashMap;
 
