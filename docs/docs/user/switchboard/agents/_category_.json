@@ -1,0 +1,9 @@
+{
+  "label": "🛠️ Configuring agents",
+  "position": 3,
+  "link": {
+    "type": "generated-index",
+    "slug": "/category/switchboard-agents",
+    "description": "Select your agent to configure it to use the Switchboard proxy endpoint instead of calling upstream providers directly."
+  }
+}

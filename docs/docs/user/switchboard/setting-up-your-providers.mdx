@@ -1,0 +1,120 @@
+---
+sidebar_position: 2
+---
+
+# 🔧 Setting up your providers
+
+Each provider type has its own configuration block and credential setup. Below are the supported providers organised by company.
+
+## OpenAI
+
+### ChatGPT subscription
+
+The ChatGPT subscription uses OAuth tokens via the Codex API at `chatgpt.com/backend-api/codex`. Requests are translated from Chat Completions format to the Responses API transparently.
+
+```toml
+[[providers]]
+identity = "openai_codex_sub"
+api_surface = "openai"
+base_url = "https://chatgpt.com/backend-api/codex"
+billing = "subscription"
+models = ["gpt-4o", "gpt-4o-mini", "gpt-5.4", "gpt-5.3-codex"]
+
+[providers.auth]
+type = "bearer_token"
+
+[providers.auth.oauth]
+authorize_url = "https://provider.example.com/oauth/authorize"
+token_url = "https://provider.example.com/oauth/token"
+scopes = "openid email profile"
+
+[providers.pricing]
+input_per_mtok = 0
+output_per_mtok = 0
+```
+
+**Credentials:** Run the OAuth login flow to store tokens via the credential helper:
+
+```shell
+switchboard auth login openai_codex_sub
+```
+
+This opens a browser, completes the OAuth authorization code flow with PKCE, and stores the access + refresh tokens via `agentkit-credential-keychain`.
+
+For CI/headless environments, set `credential_helper = "file"` and pre-populate the credentials file, or set the environment variable (`AGENTKIT_SWITCHBOARD_` + uppercased identity, non-alphanumeric chars replaced with `_`):
+
+```shell
+export AGENTKIT_SWITCHBOARD_OPENAI_CODEX_SUB=<access_token>
+```
+
+### OpenAI platform
+
+The OpenAI platform API uses a standard API key for pay-as-you-go, per-token billing. Requests are forwarded directly to `api.openai.com/v1`.
+
+```toml
+[[providers]]
+identity = "openai_payg"
+api_surface = "openai"
+base_url = "https://api.openai.com/v1"
+billing = "pay_as_you_go"
+models = ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"]
+
+[providers.auth]
+type = "bearer_token"
+
+[providers.pricing]
+input_per_mtok = 2.50
+output_per_mtok = 10.00
+
+[providers.pricing.models."gpt-4o-mini"]
+input_per_mtok = 0.15
+output_per_mtok = 0.60
+```
+
+**Credentials:** Set the environment variable (`AGENTKIT_SWITCHBOARD_` + uppercased identity, non-alphanumeric chars replaced with `_`):
+
+```shell
+export AGENTKIT_SWITCHBOARD_OPENAI_PAYG=sk-proj-...
+```
+
+Or use the credential helper for storage:
+
+```shell
+switchboard auth add openai_payg sk-proj-...
+```
+
+## Ollama (local)
+
+Local models via Ollama need no credentials or pricing — they are free with no rate limits.
+
+```toml
+[[providers]]
+identity = "ollama_local"
+api_surface = "openai"
+base_url = "http://localhost:11434/v1"
+billing = "free"
+models = ["llama-3.2", "mistral"]
+
+[providers.auth]
+type = "none"
+
+pricing = {}
+```
+
+**Credentials:** None required.
+
+## Starting the proxy
+
+```shell
+switchboard --config switchboard.toml
+```
+
+The HTTP server starts on `127.0.0.1:3812` by default. The session database is created at `~/.switchboard/sessions.db`.
+
+## Checking it works
+
+```shell
+curl http://127.0.0.1:3812/openai/v1/models
+```
+
+This returns the merged model list from the bundled models.dev data plus your TOML overrides. Once you see models, you're ready to [configure your agent](agents/opencode) to point at Switchboard.

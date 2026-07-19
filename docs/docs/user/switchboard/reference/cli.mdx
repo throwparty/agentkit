@@ -1,0 +1,60 @@
+# 👩‍💻 Command line interface
+
+## `auth`
+
+### `login`
+
+Complete OAuth flow for a provider and store tokens via the configured credential helper.
+
+Arguments:
+
+- `identity` Provider identity from your config (e.g. `openai_codex_sub`)
+
+### `add`
+
+Store an API key or token for a provider directly.
+
+Arguments:
+
+- `identity` Provider identity
+- `value` The credential value
+
+### `status`
+
+Show authentication status for all providers or one.
+
+Arguments:
+
+- `[identity]` Provider identity to check (optional — omitting shows all)
+
+### `token`
+
+Print the env var assignment for a provider's access token (useful for CI/script setup).
+
+Arguments:
+
+- `identity` Provider identity
+
+### `logout`
+
+Remove stored credentials for a provider.
+
+Arguments:
+
+- `identity` Provider identity
+
+## `start`
+
+Start the HTTP proxy server (default subcommand if omitted).
+
+Options:
+
+- `--config <PATH>` Path to TOML configuration file (required)
+- `--bind <ADDR>` Network interface to bind (default: `127.0.0.1`)
+- `--port <PORT>` HTTP port (default: `3812`)
+- `--log-level <LEVEL>` Log level: `error`, `warn`, `info`, `debug`, `trace` (default: `info`)
+- `--session-db <PATH>` Path to session SQLite database (default: `~/.switchboard/sessions.db`)
+- `--models-db <PATH>` Path to models.dev JSON snapshot (default: bundled)
+- `--credential-helper <NAME>` Credential helper name (overrides config; default: `"keychain"`)
+- `-h, --help` Print help
+- `-V, --version` Print version
