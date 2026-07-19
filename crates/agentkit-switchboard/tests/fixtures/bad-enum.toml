@@ -1,0 +1,13 @@
+[[providers]]
+identity = "bad_enum"
+api_surface = "openai"
+base_url = "https://api.openai.com/v1"
+billing = "monthly"
+models = ["gpt-4o"]
+
+[providers.auth]
+type = "bearer_token"
+
+[providers.pricing]
+input_per_mtok = 1.0
+output_per_mtok = 1.0
