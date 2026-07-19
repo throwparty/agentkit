@@ -1,0 +1,32 @@
+[[providers]]
+identity = "chatgpt_sub"
+api_surface = "openai"
+base_url = "https://chatgpt.com/backend-api/codex"
+billing = "subscription"
+models = ["gpt-4o", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini"]
+
+[providers.auth]
+type = "bearer_token"
+
+[providers.auth.oauth]
+authorize_url = "https://auth.openai.com/oauth/authorize"
+token_url = "https://auth.openai.com/oauth/token"
+scopes = "openid profile email offline_access"
+
+[providers.pricing]
+input_per_mtok = 0
+output_per_mtok = 0
+
+[[providers]]
+identity = "openai_payg"
+api_surface = "openai"
+base_url = "https://api.openai.com/v1"
+billing = "pay_as_you_go"
+models = ["gpt-5.4-mini"]
+
+[providers.auth]
+type = "bearer_token"
+
+[providers.pricing]
+input_per_mtok = 2.50
+output_per_mtok = 10.00
