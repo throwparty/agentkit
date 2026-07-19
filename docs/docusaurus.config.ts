@@ -146,8 +146,8 @@ const config: Config = {
     navbar: {
       title: "AgentKit",
       logo: {
-        alt: "Tools used to maintain the agents.",
-        src: "img/logo.png",
+        alt: "AgentKit logo, depicting a briefcase filled with tools for maintaining and troubleshooting a software engineering workspace backed by AI agents.",
+        src: "img/logo.svg",
       },
       items: [
         {

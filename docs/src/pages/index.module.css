@@ -21,3 +21,14 @@
     text-align: center;
     margin: 20px auto;
 }
+
+.logoRow a {
+    display: block;
+}
+
+.heroLogo {
+    width: 800px;
+    max-width: 100%;
+    height: auto;
+    color: var(--logo-color);
+}

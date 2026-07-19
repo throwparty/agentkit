@@ -7,6 +7,9 @@
 /* You can override the default Infima variables here. */
 :root {
     --ifm-color-primary: #6b3e26;
+    --logo-color: #102945;
+
+
     --ifm-color-primary-dark: #5f351f;
     --ifm-color-primary-darker: #512d19;
     --ifm-color-primary-darkest: #3c2212;
@@ -40,6 +43,9 @@
 
 [data-theme="dark"] {
     --ifm-color-primary: #9b6b45;
+    --logo-color: #6b9fff;
+
+
     --ifm-color-primary-dark: #8a5f3d;
     --ifm-color-primary-darker: #7a5336;
     --ifm-color-primary-darkest: #5c3e28;
@@ -68,6 +74,12 @@
     --aa-description-highlight-background-color-alpha: 0.35 !important;
     --aa-icon-color-rgb: 160, 124, 98 !important;
     --aa-icon-color-alpha: 0.85 !important;
+}
+
+.navbar__brand {
+    margin-left: 0;
+    padding-top: 0;
+    padding-bottom: 0;
 }
 
 mark[data-markjs] {
