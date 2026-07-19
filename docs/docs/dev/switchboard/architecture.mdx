@@ -1,0 +1,199 @@
+# Architecture
+
+## Crate dependency graph
+
+```mermaid
+flowchart LR
+    subgraph Workspace["Workspace root"]
+        SB["agentkit-switchboard"]
+        CR["agentkit-credentials"]
+        MM["agentkit-models"]
+        DG["agentkit-docgen"]
+        AP["agentkit-path"]
+    end
+
+    SB --> MM
+    SB --> DG
+    SB --> AP
+    CR --> AP
+```
+
+Dependency highlights:
+- `agentkit-switchboard` depends on tokio, axum, reqwest, sqlx, serde, oauth2 — it does **not** depend on keyring or rig-core.
+- `agentkit-credentials` ships two binaries (`agentkit-credential-keychain` and `agentkit-credential-file`) sharing protocol types in a library module. Only the keychain binary depends on `keyring-core`.
+- `agentkit-models` bundles a models.dev snapshot at compile time via `build.rs`.
+- `agentkit-path` provides platform-consistent data directory paths shared across all crates.
+
+## Module map
+
+```mermaid
+flowchart TB
+    subgraph CLI["CLI layer"]
+        main["main.rs"]
+        cli["cli.rs<br/>clap derive"]
+    end
+
+    subgraph Config["Configuration"]
+        config["config/mod.rs<br/>structs"]
+        loader["config/loader.rs<br/>TOML -> HashMap"]
+        auth_cfg["config/authenticator.rs<br/>AuthType trait"]
+    end
+
+    subgraph Server["HTTP server"]
+        server["server/mod.rs<br/>axum Router"]
+        routes["server/routes.rs<br/>handlers"]
+        middleware["server/middleware.rs"]
+    end
+
+    subgraph Proxy["Proxy core"]
+        router["proxy/router.rs<br/>candidate selection + scoring"]
+        forwarder["proxy/forwarder.rs"]
+    end
+
+    subgraph Domain["Domain traits"]
+        quota["domain/quota.rs<br/>ProviderQuotaBehaviour"]
+        conv["domain/conversation.rs<br/>ConversationHandler"]
+        http["domain/http.rs<br/>HttpEndpoint"]
+        sse["domain/sse.rs<br/>SseProcessor"]
+    end
+
+    subgraph Providers["Provider implementations"]
+        openai_mod["providers/openai/"]
+        anthropic_mod["providers/anthropic/"]
+    end
+
+    subgraph Subopenai["OpenAI"]
+        oai_quota["quota.rs"]
+        oai_conv["conversation.rs"]
+    end
+
+    subgraph Subanthropic["Anthropic"]
+        ant_quota["quota.rs"]
+    end
+
+    subgraph Session["Session management"]
+        sess_mod["session/mod.rs<br/>SessionManager trait"]
+        sess_mem["session/memory.rs"]
+        sess_sql["session/sqlite.rs"]
+    end
+
+    subgraph Credential["Credential resolution"]
+        cred_mod["credential/mod.rs<br/>ResolvedCredential"]
+        cred_helper["credential/helper.rs<br/>subprocess exec"]
+    end
+
+    subgraph Auth["OAuth"]
+        auth_mod["auth/mod.rs<br/>dispatch"]
+        oa_codex["auth/openai_codex.rs"]
+    end
+
+    subgraph Models["Model metadata"]
+        models_mod["models/mod.rs"]
+        models_db["models/db.rs"]
+    end
+
+    subgraph Db["Database"]
+        db_mod["db/mod.rs<br/>pool + migrations"]
+        migrations["db/migrations/"]
+    end
+
+    subgraph Tests["Integration tests"]
+        test_config["tests/config.rs"]
+        test_routing["tests/routing.rs"]
+        test_session["tests/session.rs"]
+        test_proxy["tests/proxy_mock.rs"]
+        test_live["tests/live.rs"]
+    end
+
+    main --> cli
+    main --> config
+    main --> loader
+    server --> routes
+    server --> middleware
+    routes --> router
+    routes --> forwarder
+    forwarder --> Domain
+    Domain --> Providers
+    openai_mod --- Subopenai
+    anthropic_mod --- Subanthropic
+    router --> sess_mod
+    sess_mod --> sess_mem
+    sess_mod --> sess_sql
+    sess_sql --> db_mod
+    db_mod --> migrations
+    router --> cred_mod
+    cred_mod --> cred_helper
+    auth_mod --> oa_codex
+    auth_mod --> cred_mod
+    router --> models_mod
+    models_mod --> models_db
+```
+
+## Request lifecycle
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant M as Middleware
+    participant R as Router
+    participant SDB as Session DB
+    participant CH as Credential Helper
+    participant UP as Upstream Provider
+
+    C->>M: POST /openai/v1/chat/completions
+    Note over M: Extract session_id,<br/>model, api_surface
+
+    M->>R: Forward request
+    R->>R: Resolve model metadata<br/>Unknown -> 503
+
+    R->>SDB: Lookup session affinity
+    alt Found + healthy
+        SDB-->>R: Assigned provider
+        Note over R: Fast path (skip ranking)
+    else Found + degraded
+        SDB-->>R: Assigned provider
+        Note over R: Break affinity, re-rank
+    else Not found
+        SDB-->>R: None
+        Note over R: Full ranking
+    end
+
+    Note over R: Filter candidates:<br/>- api_surface match<br/>- serves model<br/>- has credential<br/>- not degraded
+    Note over R: Rank by:<br/>- billing (sub > payg > free)<br/>- cost (cheaper wins)<br/>- tiebreaker (lexical)
+
+    R->>SDB: Upsert session_affinity
+    R->>CH: Resolve credential
+    alt Token expired
+        CH->>CH: Refresh via OAuth
+        CH->>CH: Store new tokens
+    end
+
+    Note over R: Translate request body<br/>if Responses API
+    Note over R: Rewrite URL,<br/>inject auth header
+
+    R->>UP: Forward request
+    UP-->>R: Response (SSE or JSON)
+
+    Note over R: Translate response body<br/>if Responses API
+    Note over R: Parse rate-limit headers,<br/>update quota state
+
+    R->>SDB: Update token counts
+    R->>SDB: Insert routing_event
+    R-->>C: Response + X-Switchboard-* headers
+```
+
+## Security
+
+Credentials are **never** written to the config file, session database, or API responses. They are stored exclusively via credential helpers (system keychain or file with 0600 perms). Log output redacts credential values — helper binary invocations are logged without the credential blob.
+
+## Logging
+
+Uses `tracing` + `tracing-subscriber` with structured JSON output. Key events at each log level:
+
+| Level | Signal |
+|---|---|
+| `error` | All providers degraded for model, OAuth refresh failure |
+| `warn` | Provider degraded, session switched, credential helper not found |
+| `info` | Routing decision per request, proxy start/shutdown |
+
+Filter with `RUST_LOG=switchboard=debug` or the `--log-level` flag.
