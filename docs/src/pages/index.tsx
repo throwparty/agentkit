@@ -4,6 +4,7 @@ import Link from "@docusaurus/Link";
 import useDocusaurusContext from "@docusaurus/useDocusaurusContext";
 import Layout from "@theme/Layout";
 import Heading from "@theme/Heading";
+import Logo from "@theme/Logo";
 
 import styles from "./index.module.css";
 
@@ -33,10 +34,7 @@ export default function Home(): ReactNode {
       <HomepageHeader />
       <main>
         <div className={clsx("container", styles.logoRow)}>
-          <img
-            src="img/logo.png"
-            alt="Two cats flank a litter tray with three clumps of poop. The poops are wearing party hats."
-          />
+          <Logo imageClassName={styles.heroLogo} hideTitle />
         </div>
       </main>
     </Layout>
