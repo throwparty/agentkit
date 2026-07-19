@@ -1,0 +1,120 @@
+---
+---
+
+
+# 🚀 Using Switchboard
+
+Once Switchboard is running, point your agent tools at `http://127.0.0.1:3812/openai/v1/chat/completions` as if it were an OpenAI API endpoint.
+
+## Basic usage
+
+```shell
+curl http://127.0.0.1:3812/openai/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "X-Session-Id: sess_abc123" \
+  -d '{
+    "model": "gpt-4o",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+```
+
+The response includes extra headers that tell you what routing decision was made:
+
+```
+X-Switchboard-Provider: openai_codex_sub
+X-Switchboard-Billing: subscription
+X-Switchboard-Session: sess_abc123
+```
+
+The `X-Session-Id` header is optional but recommended — it enables session affinity so subsequent requests in the same conversation are routed to the same provider, preserving KV cache benefits.
+
+## What happens when things go wrong
+
+### Quota exhaustion (429)
+
+When a subscription provider runs out of quota and returns 429, Switchboard:
+
+1. Marks the provider as degraded for the quota window (e.g. 5 hours).
+2. Re-routes the session to the next-best provider (e.g. pay-as-you-go API key).
+3. Updates the session database so the new provider is used for subsequent requests.
+4. The degraded provider is automatically re-enabled after the cooldown window passes.
+
+The developer never sees the 429 — requests silently fall through to the next-best provider.
+
+### All providers degraded
+
+If every candidate provider is degraded or unavailable, Switchboard returns a 503 with details:
+
+```json
+{
+  "error": {
+    "message": "No available provider for model 'gpt-4o'",
+    "providers": {
+      "openai_codex_sub": { "status": "degraded", "reason": "quota_exhausted" },
+      "openai_payg": { "status": "degraded", "reason": "rate_limit_exceeded" }
+    }
+  }
+}
+```
+
+### Credential failure
+
+If a credential helper binary is not found or an environment variable is unset, the affected provider is excluded from candidate selection. A warning is logged but the proxy continues serving with remaining providers.
+
+## Checking model availability
+
+```shell
+curl http://127.0.0.1:3812/openai/v1/models
+```
+
+Returns the merged model list from the bundled models.dev data plus any TOML overrides, with provider-specific pricing per model.
+
+## Health check
+
+```shell
+curl http://127.0.0.1:3812/health
+```
+
+Returns provider states, session database info, and overall proxy status.
+
+## Managing authentication
+
+Check authentication status for all providers:
+
+```shell
+switchboard auth status
+```
+
+Print the environment variable value for CI setup:
+
+```shell
+switchboard auth token openai_payg
+# AGENTKIT_SWITCHBOARD_OPENAI_PAYG=sk-...
+```
+
+Remove stored credentials:
+
+```shell
+switchboard auth logout openai_codex_sub
+```
+
+## Operations
+
+### Log signals
+
+| Level | Signal | What to do |
+|---|---|---|
+| `error` | All providers degraded for model X | Check credential validity and quota state. |
+| `error` | OAuth refresh failed for identity X | Run `switchboard auth login` to re-auth. |
+| `warn` | Provider X degraded (reason) | Expected when quota exhausts — will auto-recover. |
+| `warn` | Session X switched from A to B | Cache penalty incurred. Expected behaviour. |
+| `warn` | Credential helper not found | Set `credential_helper = "file"` if headless. |
+
+### Undoing things
+
+| What to undo | How |
+|---|---|
+| Wrong config | Edit `switchboard.toml`, restart the binary. |
+| Stale OAuth tokens | Run `switchboard auth login <identity>`. |
+| Corrupt session DB | Delete `~/.switchboard/sessions.db` — it's recreated automatically. |
+| Stop using the proxy | Kill the process. Point your client directly at the upstream provider. |
