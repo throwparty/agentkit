@@ -1,0 +1,36 @@
+# 🔳 OpenCode
+
+OpenCode supports custom OpenAI-compatible providers, making it a natural fit for Switchboard.
+
+## Prerequisites
+
+- You have [set up your providers](../setting-up-your-providers) and Switchboard is running.
+- You have [installed OpenCode](https://opencode.ai/download).
+
+## Configuring the provider
+
+Amend your OpenCode configuration file (`opencode.jsonc`) to add an OpenAI-compatible provider pointing at Switchboard:
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  // snip
+  "providers": {
+    // snip
+    "switchboard": {
+      "model": "gpt-4o",
+      "type": "openai",
+      "apiBase": "http://127.0.0.1:3812",
+      "apiKey": "unused",
+    },
+    // snip
+  },
+  // snip
+}
+```
+
+Set your agent's model to `switchboard` and OpenCode will route all model requests through the proxy.
+
+## Testing
+
+Check the Switchboard logs to verify routing decisions — you'll see which provider was selected for each request.

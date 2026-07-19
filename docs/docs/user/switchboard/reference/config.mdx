@@ -1,0 +1,128 @@
+# 🎛️ Configuration
+
+## Global settings
+
+```toml
+# Credential helper for persistent token storage.
+# Resolved as agentkit-credential-<name> in PATH.
+# Default: "keychain"
+# Set to "file" for headless/CI (stores credentials in a JSON file at
+# ~/.local/state/agentkit/credentials.json with 0600 perms).
+credential_helper = "keychain"
+```
+
+### `credential_helper`
+
+Name of the credential helper binary. Resolved as `agentkit-credential-<name>` in `PATH`.
+
+- Default: `"keychain"`
+- Set to `"file"` for headless/CI environments without a keychain daemon.
+
+## Model metadata overrides
+
+Merge on top of the bundled models.dev snapshot. Provider-agnostic model facts only — pricing is per-provider.
+
+```toml
+[models."gpt-4o"]
+context_window = 128000
+max_output = 16384
+
+[models."gpt-4o".capabilities]
+tool_calling = true
+reasoning = false
+structured_output = true
+```
+
+### `models.<id>.context_window`
+
+Maximum context window size in tokens.
+
+### `models.<id>.max_output`
+
+Maximum output tokens the model can generate.
+
+### `models.<id>.capabilities`
+
+- `tool_calling` — whether the model supports function/tool calling.
+- `reasoning` — whether the model supports reasoning/thinking modes.
+- `structured_output` — whether the model supports structured JSON output.
+
+## Providers
+
+Providers are defined as an array of tables, keyed by `identity`:
+
+```toml
+[[providers]]
+identity = "openai_codex_sub"
+api_surface = "openai"
+base_url = "https://chatgpt.com/backend-api/codex"
+billing = "subscription"
+models = ["gpt-4o", "gpt-4o-mini"]
+
+[providers.auth]
+type = "bearer_token"
+
+[providers.auth.oauth]
+authorize_url = "https://provider.example.com/oauth/authorize"
+token_url = "https://provider.example.com/oauth/token"
+scopes = "openid email profile"
+client_id = "my-client-id"
+
+[providers.pricing]
+input_per_mtok = 0
+output_per_mtok = 0
+```
+
+### `identity`
+
+Unique key for this provider. Used for credential resolution, session affinity lookups, and response headers. Must be unique across all providers.
+
+### `api_surface`
+
+The wire protocol format. Currently only `"openai"` is supported.
+
+### `base_url`
+
+The upstream provider's base URL. Request paths are rewritten by stripping the API surface prefix and appending the upstream path.
+
+### `billing`
+
+- `"subscription"` — flat-rate, time-limited quota. No per-token cost within quota.
+- `"pay_as_you_go"` — per-token cost, rate-limited.
+- `"free"` — local providers (e.g. Ollama). No auth, no limits.
+
+### `models`
+
+Explicit list of model IDs this provider can serve. When absent, models are inferred from the models.dev pricing snapshot.
+
+### `auth.type`
+
+- `"bearer_token"` — sends credentials as `Authorization: Bearer <value>`. Reads from credential helper with env var fallback.
+- `"none"` — no authentication header.
+
+### `auth.oauth`
+
+OAuth 2.1 endpoint configuration. Present for providers that support automatic token refresh.
+
+- `authorize_url` — OAuth authorization endpoint URL.
+- `token_url` — OAuth token endpoint URL.
+- `scopes` — Space-separated OAuth scopes (default: `"openid email"`).
+- `client_id` — OAuth client ID (optional, falls back to a known default per provider).
+
+### `pricing`
+
+Per-provider pricing for cost-aware routing.
+
+- `input_per_mtok` — cost per million input tokens.
+- `output_per_mtok` — cost per million output tokens.
+- `cache_read_per_mtok` — cost per million cached input tokens read.
+- `cache_write_per_mtok` — cost per million cached input tokens written.
+- `reasoning_per_mtok` — cost per million reasoning tokens.
+
+Per-model pricing overrides:
+
+```toml
+[providers.pricing.models."gpt-4o-mini"]
+input_per_mtok = 0.15
+output_per_mtok = 0.60
+```
