@@ -1,3 +1,4 @@
+mod docs "docs"
 mod nix "nix"
 mod workflows ".github/workflows"
 
