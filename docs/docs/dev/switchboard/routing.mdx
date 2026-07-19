@@ -1,0 +1,79 @@
+# Routing algorithm
+
+The core routing algorithm in `proxy/router.rs` is a pure function — no HTTP, no database, no credential helpers. All state is passed as arguments, making it fully unit-testable.
+
+## Function signature
+
+```rust
+fn select_provider(
+    model: &str,
+    api_surface: ApiSurface,
+    session: Option<&SessionAffinity>,
+    providers: &HashMap<String, ProviderState>,
+) -> Result<ProviderSelection, RoutingError>
+```
+
+## Route dispatch
+
+Requests are dispatched by URL path prefix:
+
+| Path | API Surface | Handler |
+|---|---|---|
+| `POST /openai/v1/chat/completions` | OpenAI | Chat completions proxy |
+| `GET /openai/v1/models` | OpenAI | Return merged model list |
+| `GET /health` | General | Health check |
+
+Future API surfaces would add their own prefixes: `POST /anthropic/v1/messages`, `POST /ollama/v1/chat`.
+
+## Candidate selection
+
+For each incoming request:
+
+1. **Determine API surface** from path prefix (`/openai/v1/...` -> `"openai"`).
+
+2. **Resolve model metadata** from merged model DB. Unknown model -> `RoutingError::ModelNotFound`.
+
+3. **Filter candidate providers** (all must pass):
+   - `provider.api_surface` matches the request's API surface.
+   - Provider's model list includes the requested model.
+   - Provider has a valid credential (helper or env var).
+   - Provider is not currently degraded.
+
+4. **Check session affinity** (if `X-Session-Id` present):
+   - Look up session DB for existing provider assignment.
+   - If found and assigned provider passes the filter -> **use it directly** (skip ranking). This is the affinity fast path that preserves KV cache benefits.
+   - If found but assigned provider fails the filter (degraded, credential lost) -> log the switch reason, increment `switch_count`, fall through to ranking.
+
+## Ranking
+
+Providers are ranked by score (lower is better):
+
+1. **Primary: billing model**
+   - `subscription` with remaining quota < `pay_as_you_go` < `free`
+   - Subscription always wins when available because per-token cost is zero within quota.
+
+2. **Secondary: cost per token** (within same billing model)
+   - `estimated_input_tokens * input_price + estimated_output_tokens * output_price`
+   - Lower total cost wins.
+   - Uses the pricing from provider config, with per-model overrides if present.
+
+3. **Tertiary: remaining rate-limit headroom** (reserved for future use).
+
+4. **Tiebreaker: identity string** (lexical, deterministic).
+
+## Error cases
+
+| Condition | Result |
+|---|---|
+| Unknown model | `RoutingError::ModelNotFound` -> 503 |
+| Model not served by any configured provider | `RoutingError::NoProvider` -> 503 |
+| All candidates degraded | `RoutingError::AllDegraded` -> 503 with provider status details |
+| Session affinity breaks on degradation | Re-route, `switch_count` incremented |
+
+## Response headers
+
+Every proxied response includes:
+
+- `X-Switchboard-Provider`: the selected provider identity.
+- `X-Switchboard-Billing`: the billing model (`subscription`, `pay_as_you_go`, `free`).
+- `X-Switchboard-Session`: the session ID (if sent by client).
