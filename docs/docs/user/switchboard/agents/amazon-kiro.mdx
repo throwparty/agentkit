@@ -1,0 +1,22 @@
+# 🅺 Amazon Kiro
+
+Amazon Kiro supports custom OpenAI-compatible endpoints, making it easy to point at Switchboard.
+
+## Prerequisites
+
+- You have [set up your providers](../setting-up-your-providers) and Switchboard is running.
+- You have [installed Amazon Kiro](https://kiro.dev/).
+
+## Configuring the provider
+
+Configure Kiro to use the Switchboard endpoint as its model provider. The proxy endpoint is:
+
+```
+http://127.0.0.1:3812/openai/v1/chat/completions
+```
+
+See [Kiro's provider configuration documentation](https://kiro.dev/docs/models/providers/) for the exact settings format.
+
+## Testing
+
+Run Kiro and verify requests appear in the Switchboard logs.

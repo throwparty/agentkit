@@ -1,0 +1,22 @@
+# ✳️ Claude Code
+
+Claude Code can be configured to use an OpenAI-compatible endpoint via its provider settings.
+
+## Prerequisites
+
+- You have [set up your providers](../setting-up-your-providers) and Switchboard is running.
+- You have [installed Claude Code](https://claude.com/product/claude-code).
+
+## Configuring the provider
+
+Add the Switchboard endpoint to your Claude Code settings. See [the Claude Code provider documentation](https://code.claude.com/docs/en/providers) for the exact configuration format for your version.
+
+The proxy endpoint to point at is:
+
+```
+http://127.0.0.1:3812/openai/v1/chat/completions
+```
+
+## Testing
+
+Run Claude Code and verify requests are routed through Switchboard by checking the proxy logs.
