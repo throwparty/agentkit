@@ -1,0 +1,34 @@
+# 🆉 Zed Agent
+
+Zed Agent supports custom OpenAI-compatible endpoints, making it straightforward to use Switchboard.
+
+## Prerequisites
+
+- You have [set up your providers](../setting-up-your-providers) and Switchboard is running.
+- You have [installed Zed](https://zed.dev/docs/installation).
+
+## Configuring the provider
+
+In your Zed `settings.json`, configure a custom OpenAI-compatible provider pointing at Switchboard:
+
+```json
+{
+  // snip
+  "assistant": {
+    // snip
+    "provider": {
+      "name": "switchboard",
+      "type": "openai",
+      "endpoint": "http://127.0.0.1:3812"
+    },
+    // snip
+  },
+  // snip
+}
+```
+
+See the [Zed provider documentation](https://zed.dev/docs/ai/providers) for the exact configuration format for your version.
+
+## Testing
+
+Run Zed Agent and verify requests appear in the Switchboard logs.

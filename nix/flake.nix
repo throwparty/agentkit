@@ -53,6 +53,7 @@
               cargo-deny
               cargo-zigbuild
               cosign
+              dbus
               goreleaser
               mdformat
               nixfmt
@@ -101,6 +102,7 @@
                 cargo-deny
                 cargo-zigbuild
                 cosign
+                dbus
                 goreleaser
                 mdformat
                 mingwBinutils
@@ -147,7 +149,7 @@
                   cargoBuildFlags = commonCargoFlags;
                   cargoTestFlags = commonCargoFlags;
                   cargoDepsName = "agentkit";
-                  cargoHash = "sha256-M/00KIrt7JH2Skuo2cgQyxf/V822jKkeDlmDj1KIQic=";
+                  cargoHash = "sha256-1h3EzVF0KToAz9BkRvoGuynpzLtbGz/nwMvsesc46FI=";
 
                   meta = {
                     description = "Provides fetch and search tools backed by various search engines.";

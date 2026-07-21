@@ -1,0 +1,111 @@
+# Protocol translation
+
+Providers using the Responses API (e.g. Codex subscription at `chatgpt.com/backend-api/codex`) receive translated requests. The switchboard converts Chat Completions request bodies to Responses API format and converts Responses API responses back to Chat Completions format.
+
+## Chat Completions -> Responses API (request)
+
+**Input (Chat Completions):**
+```json
+{
+  "model": "gpt-4o",
+  "messages": [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "Hello!"},
+    {"role": "assistant", "content": "Hi there!"},
+    {"role": "user", "content": "How are you?"}
+  ],
+  "stream": false,
+  "temperature": 0.7,
+  "max_tokens": 1024
+}
+```
+
+**Output (Responses API):**
+```json
+{
+  "model": "gpt-4o",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [{"type": "input_text", "text": "Hello!"}]
+    },
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": [{"type": "output_text", "text": "Hi there!"}]
+    },
+    {
+      "type": "message",
+      "role": "user",
+      "content": [{"type": "input_text", "text": "How are you?"}]
+    }
+  ],
+  "instructions": "You are a helpful assistant.",
+  "stream": false,
+  "temperature": 0.7,
+  "max_tokens": 1024,
+  "store": false,
+  "reasoning": {"effort": "medium"}
+}
+```
+
+**Transformations:**
+- System message (`role: "system"`) is extracted to the `instructions` field and removed from the `input` array.
+- The `messages` array is converted to `input` with appropriate content types:
+  - `user` messages -> `input_text`
+  - `assistant` messages -> `output_text`
+- `stream`, `temperature`, `max_tokens` pass through unchanged.
+- `store: false` and `reasoning: {effort: "medium"}` are added.
+- Required headers: `OpenAI-Beta: responses=experimental`, `originator: agentkit-switchboard`, `ChatGPT-Account-Id` extracted from the OAuth token JWT.
+
+## Responses API -> Chat Completions (response)
+
+**Input (Responses API):**
+```json
+{
+  "output": [
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": [{"type": "output_text", "text": "I'm doing well!"}]
+    }
+  ],
+  "usage": {
+    "input_tokens": 25,
+    "output_tokens": 8
+  }
+}
+```
+
+**Output (Chat Completions):**
+```json
+{
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "I'm doing well!"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "input_tokens": 25,
+    "output_tokens": 8,
+    "total_tokens": 33
+  }
+}
+```
+
+**Transformations:**
+- `output` array -> `choices` array with `index`, `message`, and `finish_reason: "stop"`.
+- Content blocks are concatenated into a single `content` string.
+- `usage` passed through with `total_tokens` calculated as `input_tokens + output_tokens`.
+
+## Limitations
+
+- **Non-streaming only for Codex subscription in MVP.** Streaming requests to a Codex subscription provider return 400 with a message to use non-streaming. API key providers (direct OpenAI) support streaming natively without translation.
+- **Token counts** for non-streaming: parse response body JSON. For streaming (API key providers only): accumulate `usage` from final SSE chunk.
+- Only basic message types are translated. Tool calls, function calls, and structured outputs may not round-trip correctly — this is scoped for future iterations.

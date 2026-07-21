@@ -1,7 +1,12 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/agentkit-credentials",
+    "crates/agentkit-docgen",
+    "crates/agentkit-lens",
     "crates/agentkit-litterbox",
-    "crates/agentkit-lens"
+    "crates/agentkit-models",
+    "crates/agentkit-path",
+    "crates/agentkit-switchboard",
 ]
 exclude = ["adrs"]

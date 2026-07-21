@@ -1,0 +1,19 @@
+[[providers]]
+identity = "oauth_provider"
+api_surface = "openai"
+base_url = "https://chatgpt.com/backend-api/codex"
+billing = "subscription"
+models = ["gpt-4o"]
+
+[providers.auth]
+type = "bearer_token"
+
+[providers.auth.oauth]
+authorize_url = "https://auth.openai.com/oauth/authorize"
+token_url = "https://auth.openai.com/oauth/token"
+client_id = "test-client-id"
+scopes = "openid profile email offline_access"
+
+[providers.pricing]
+input_per_mtok = 0
+output_per_mtok = 0

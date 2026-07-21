@@ -1,0 +1,74 @@
+# Degradation and recovery
+
+## Architecture
+
+Quota state lives in `Arc<RwLock<HashMap<identity, ProviderQuotaState>>>` — shared across requests, updated after each response. Each provider has a `ProviderQuotaBehaviour` trait implementation that handles its specific header parsing and subscription model.
+
+## ProviderQuotaBehaviour trait
+
+```rust
+trait ProviderQuotaBehaviour: Debug + Send + Sync {
+    fn update_from_headers(&mut self, headers: &[(String, String)]);
+    fn handle_429(&mut self, headers: &[(String, String)], body: Option<&str>)
+        -> (DegradationReason, Option<Duration>);
+}
+```
+
+Built-in implementations:
+
+| Provider | Header mapping | Subscription model |
+|---|---|---|
+| OpenAI | `x-ratelimit-remaining-requests`, `x-ratelimit-remaining-tokens` | Daily token bucket, 5h rolling message window |
+| Anthropic | `anthropic-ratelimit-requests-remaining`, `anthropic-ratelimit-input-tokens-remaining`, `anthropic-ratelimit-output-tokens-remaining` | Rolling windows (6h, daily, weekly) |
+
+Missing headers -> state remains `None` (unknown). Provider is never degraded by absence of headers.
+
+## Degradation state machine
+
+```rust
+enum DegradationReason {
+    RateLimitExceeded,
+    QuotaExhausted,
+    ProviderError,            // 5xx
+    AuthenticationFailure,    // 401/403
+    Timeout,
+}
+
+struct DegradationState {
+    reason: DegradationReason,
+    degraded_until: Option<Instant>,     // None = permanent
+    retry_count: u32,
+    model_groups: Option<Vec<String>>,   // None = all models affected
+}
+```
+
+| Event | Action | Recovery |
+|---|---|---|
+| 429 rate-limit (pay-as-you-go) | Degrade for `retry-after` or `*-reset` time | Auto-recover when reset passes |
+| 429 quota exhausted (subscription) | Degrade for `retry-after` or full window duration (default 5h) | Auto-recover after cooldown |
+| 429 spend cap (pay-as-you-go) | Degrade permanently (end of billing period) | Manual re-enable or config reload |
+| 5xx | Degrade for 30s, exponential backoff (max 5 min) | Auto-recover after backoff |
+| 401/403 | Degrade permanently | Re-authentication required |
+| Timeout | Degrade for 10s, exponential backoff (max 2 min) | Auto-recover after backoff |
+
+## Backoff schedule
+
+| Attempt | 5xx backoff | Timeout backoff |
+|---|---|---|
+| 1 | 30s | 10s |
+| 2 | 60s | 20s |
+| 3 | 120s | 40s |
+| 4 | 240s | 80s |
+| 5+ | 300s (cap) | 120s (cap) |
+
+## Lazy expiry
+
+Degradation is checked **lazily** — on each routing decision, if `degraded_until` is in the past, the degradation is cleared. There is no background timer or periodic sweep.
+
+## Subscription provider cooldown
+
+Subscription providers (e.g. Codex OAuth) use a 5-hour rolling window. On 429, the provider is degraded for the full window duration because the subscription quota API is not available to query exact utilisation. After the cooldown, the provider is re-enabled on the next routing decision.
+
+## Session impact
+
+When a provider is degraded on 429, the session is **re-assigned** to the next-best provider. The re-assignment is persisted to the session database with an incremented `switch_count`.
