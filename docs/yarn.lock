@@ -2759,14 +2759,14 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@docusaurus/faster@npm:^3.10.1":
-  version: 3.10.1
-  resolution: "@docusaurus/faster@npm:3.10.1"
+"@docusaurus/faster@npm:^3.10.2":
+  version: 3.10.2
+  resolution: "@docusaurus/faster@npm:3.10.2"
   dependencies:
-    "@docusaurus/types": "npm:3.10.1"
+    "@docusaurus/types": "npm:3.10.2"
     "@rspack/core": "npm:^1.7.10"
-    "@swc/core": "npm:^1.7.39"
-    "@swc/html": "npm:^1.13.5"
+    "@swc/core": "npm:^1.15.40"
+    "@swc/html": "npm:^1.15.40"
     browserslist: "npm:^4.24.2"
     lightningcss: "npm:^1.27.0"
     semver: "npm:^7.5.4"
@@ -2775,7 +2775,7 @@ __metadata:
     webpack: "npm:^5.95.0"
   peerDependencies:
     "@docusaurus/types": "*"
-  checksum: 10c0/98d8ca36cd4bcd775be37109c8cd3117ff8ba62446ec50b2901bca7653fbbf690ec9aa494524a27c17744a1744a3e520804100aba014e7aa5621ef3df4679359
+  checksum: 10c0/52a8942243839981d5896b7ff117d9ed09584d2a6ae5c2f525b1bc7907b58f3b15d654951ab777e6c33c1d04b6943bbf41589922786b76c9abe1632c265f0ef8
   languageName: node
   linkType: hard
 
@@ -3295,6 +3295,27 @@ __metadata:
     react: ^18.0.0 || ^19.0.0
     react-dom: ^18.0.0 || ^19.0.0
   checksum: 10c0/63cc1d92ec775fb0e58f156b4edc7075612943a94d15d4648b60effcbc34c70a1092569d66d552878779b48d5111abe2fc154ba6a3bca2af0383550c9f9a015b
+  languageName: node
+  linkType: hard
+
+"@docusaurus/types@npm:3.10.2":
+  version: 3.10.2
+  resolution: "@docusaurus/types@npm:3.10.2"
+  dependencies:
+    "@mdx-js/mdx": "npm:^3.0.0"
+    "@types/history": "npm:^4.7.11"
+    "@types/mdast": "npm:^4.0.2"
+    "@types/react": "npm:*"
+    commander: "npm:^5.1.0"
+    joi: "npm:^17.9.2"
+    react-helmet-async: "npm:@slorber/react-helmet-async@1.3.0"
+    utility-types: "npm:^3.10.0"
+    webpack: "npm:^5.95.0"
+    webpack-merge: "npm:^5.9.0"
+  peerDependencies:
+    react: ^18.0.0 || ^19.0.0
+    react-dom: ^18.0.0 || ^19.0.0
+  checksum: 10c0/29672542109c69c7527a14767f0acbfac6635e650be6da75998f97cda7987deda30f402c04438879492a798975c9484265139f603631a2df0575a49f29a7345d
   languageName: node
   linkType: hard
 
@@ -4715,92 +4736,108 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@swc/core-darwin-arm64@npm:1.15.11":
-  version: 1.15.11
-  resolution: "@swc/core-darwin-arm64@npm:1.15.11"
+"@swc/core-darwin-arm64@npm:1.15.46":
+  version: 1.15.46
+  resolution: "@swc/core-darwin-arm64@npm:1.15.46"
   conditions: os=darwin & cpu=arm64
   languageName: node
   linkType: hard
 
-"@swc/core-darwin-x64@npm:1.15.11":
-  version: 1.15.11
-  resolution: "@swc/core-darwin-x64@npm:1.15.11"
+"@swc/core-darwin-x64@npm:1.15.46":
+  version: 1.15.46
+  resolution: "@swc/core-darwin-x64@npm:1.15.46"
   conditions: os=darwin & cpu=x64
   languageName: node
   linkType: hard
 
-"@swc/core-linux-arm-gnueabihf@npm:1.15.11":
-  version: 1.15.11
-  resolution: "@swc/core-linux-arm-gnueabihf@npm:1.15.11"
+"@swc/core-linux-arm-gnueabihf@npm:1.15.46":
+  version: 1.15.46
+  resolution: "@swc/core-linux-arm-gnueabihf@npm:1.15.46"
   conditions: os=linux & cpu=arm
   languageName: node
   linkType: hard
 
-"@swc/core-linux-arm64-gnu@npm:1.15.11":
-  version: 1.15.11
-  resolution: "@swc/core-linux-arm64-gnu@npm:1.15.11"
+"@swc/core-linux-arm64-gnu@npm:1.15.46":
+  version: 1.15.46
+  resolution: "@swc/core-linux-arm64-gnu@npm:1.15.46"
   conditions: os=linux & cpu=arm64 & libc=glibc
   languageName: node
   linkType: hard
 
-"@swc/core-linux-arm64-musl@npm:1.15.11":
-  version: 1.15.11
-  resolution: "@swc/core-linux-arm64-musl@npm:1.15.11"
+"@swc/core-linux-arm64-musl@npm:1.15.46":
+  version: 1.15.46
+  resolution: "@swc/core-linux-arm64-musl@npm:1.15.46"
   conditions: os=linux & cpu=arm64 & libc=musl
   languageName: node
   linkType: hard
 
-"@swc/core-linux-x64-gnu@npm:1.15.11":
-  version: 1.15.11
-  resolution: "@swc/core-linux-x64-gnu@npm:1.15.11"
+"@swc/core-linux-ppc64-gnu@npm:1.15.46":
+  version: 1.15.46
+  resolution: "@swc/core-linux-ppc64-gnu@npm:1.15.46"
+  conditions: os=linux & cpu=ppc64 & libc=glibc
+  languageName: node
+  linkType: hard
+
+"@swc/core-linux-s390x-gnu@npm:1.15.46":
+  version: 1.15.46
+  resolution: "@swc/core-linux-s390x-gnu@npm:1.15.46"
+  conditions: os=linux & cpu=s390x & libc=glibc
+  languageName: node
+  linkType: hard
+
+"@swc/core-linux-x64-gnu@npm:1.15.46":
+  version: 1.15.46
+  resolution: "@swc/core-linux-x64-gnu@npm:1.15.46"
   conditions: os=linux & cpu=x64 & libc=glibc
   languageName: node
   linkType: hard
 
-"@swc/core-linux-x64-musl@npm:1.15.11":
-  version: 1.15.11
-  resolution: "@swc/core-linux-x64-musl@npm:1.15.11"
+"@swc/core-linux-x64-musl@npm:1.15.46":
+  version: 1.15.46
+  resolution: "@swc/core-linux-x64-musl@npm:1.15.46"
   conditions: os=linux & cpu=x64 & libc=musl
   languageName: node
   linkType: hard
 
-"@swc/core-win32-arm64-msvc@npm:1.15.11":
-  version: 1.15.11
-  resolution: "@swc/core-win32-arm64-msvc@npm:1.15.11"
+"@swc/core-win32-arm64-msvc@npm:1.15.46":
+  version: 1.15.46
+  resolution: "@swc/core-win32-arm64-msvc@npm:1.15.46"
   conditions: os=win32 & cpu=arm64
   languageName: node
   linkType: hard
 
-"@swc/core-win32-ia32-msvc@npm:1.15.11":
-  version: 1.15.11
-  resolution: "@swc/core-win32-ia32-msvc@npm:1.15.11"
+"@swc/core-win32-ia32-msvc@npm:1.15.46":
+  version: 1.15.46
+  resolution: "@swc/core-win32-ia32-msvc@npm:1.15.46"
   conditions: os=win32 & cpu=ia32
   languageName: node
   linkType: hard
 
-"@swc/core-win32-x64-msvc@npm:1.15.11":
-  version: 1.15.11
-  resolution: "@swc/core-win32-x64-msvc@npm:1.15.11"
+"@swc/core-win32-x64-msvc@npm:1.15.46":
+  version: 1.15.46
+  resolution: "@swc/core-win32-x64-msvc@npm:1.15.46"
   conditions: os=win32 & cpu=x64
   languageName: node
   linkType: hard
 
-"@swc/core@npm:^1.7.39":
-  version: 1.15.11
-  resolution: "@swc/core@npm:1.15.11"
+"@swc/core@npm:^1.15.40":
+  version: 1.15.46
+  resolution: "@swc/core@npm:1.15.46"
   dependencies:
-    "@swc/core-darwin-arm64": "npm:1.15.11"
-    "@swc/core-darwin-x64": "npm:1.15.11"
-    "@swc/core-linux-arm-gnueabihf": "npm:1.15.11"
-    "@swc/core-linux-arm64-gnu": "npm:1.15.11"
-    "@swc/core-linux-arm64-musl": "npm:1.15.11"
-    "@swc/core-linux-x64-gnu": "npm:1.15.11"
-    "@swc/core-linux-x64-musl": "npm:1.15.11"
-    "@swc/core-win32-arm64-msvc": "npm:1.15.11"
-    "@swc/core-win32-ia32-msvc": "npm:1.15.11"
-    "@swc/core-win32-x64-msvc": "npm:1.15.11"
+    "@swc/core-darwin-arm64": "npm:1.15.46"
+    "@swc/core-darwin-x64": "npm:1.15.46"
+    "@swc/core-linux-arm-gnueabihf": "npm:1.15.46"
+    "@swc/core-linux-arm64-gnu": "npm:1.15.46"
+    "@swc/core-linux-arm64-musl": "npm:1.15.46"
+    "@swc/core-linux-ppc64-gnu": "npm:1.15.46"
+    "@swc/core-linux-s390x-gnu": "npm:1.15.46"
+    "@swc/core-linux-x64-gnu": "npm:1.15.46"
+    "@swc/core-linux-x64-musl": "npm:1.15.46"
+    "@swc/core-win32-arm64-msvc": "npm:1.15.46"
+    "@swc/core-win32-ia32-msvc": "npm:1.15.46"
+    "@swc/core-win32-x64-msvc": "npm:1.15.46"
     "@swc/counter": "npm:^0.1.3"
-    "@swc/types": "npm:^0.1.25"
+    "@swc/types": "npm:^0.1.27"
   peerDependencies:
     "@swc/helpers": ">=0.5.17"
   dependenciesMeta:
@@ -4813,6 +4850,10 @@ __metadata:
     "@swc/core-linux-arm64-gnu":
       optional: true
     "@swc/core-linux-arm64-musl":
+      optional: true
+    "@swc/core-linux-ppc64-gnu":
+      optional: true
+    "@swc/core-linux-s390x-gnu":
       optional: true
     "@swc/core-linux-x64-gnu":
       optional: true
@@ -4827,7 +4868,7 @@ __metadata:
   peerDependenciesMeta:
     "@swc/helpers":
       optional: true
-  checksum: 10c0/84b9dbed8d4d39da9941b796f97f84a52a3ab1a5e002b0395e98d0c3368acab4dde84051eb97c47c85b67c5fc29e3e9b7a646cf238a96df93fc7c54177925c3e
+  checksum: 10c0/70cab177b55c69ba6fea493267a4f31fd28c5a078893810d26ed3a84238dc8e23b875697b9f6494efc34c76b8280f6935345a3d89ed2b4848a9efcc17e1f802f
   languageName: node
   linkType: hard
 
@@ -4838,91 +4879,107 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@swc/html-darwin-arm64@npm:1.15.11":
-  version: 1.15.11
-  resolution: "@swc/html-darwin-arm64@npm:1.15.11"
+"@swc/html-darwin-arm64@npm:1.15.46":
+  version: 1.15.46
+  resolution: "@swc/html-darwin-arm64@npm:1.15.46"
   conditions: os=darwin & cpu=arm64
   languageName: node
   linkType: hard
 
-"@swc/html-darwin-x64@npm:1.15.11":
-  version: 1.15.11
-  resolution: "@swc/html-darwin-x64@npm:1.15.11"
+"@swc/html-darwin-x64@npm:1.15.46":
+  version: 1.15.46
+  resolution: "@swc/html-darwin-x64@npm:1.15.46"
   conditions: os=darwin & cpu=x64
   languageName: node
   linkType: hard
 
-"@swc/html-linux-arm-gnueabihf@npm:1.15.11":
-  version: 1.15.11
-  resolution: "@swc/html-linux-arm-gnueabihf@npm:1.15.11"
+"@swc/html-linux-arm-gnueabihf@npm:1.15.46":
+  version: 1.15.46
+  resolution: "@swc/html-linux-arm-gnueabihf@npm:1.15.46"
   conditions: os=linux & cpu=arm
   languageName: node
   linkType: hard
 
-"@swc/html-linux-arm64-gnu@npm:1.15.11":
-  version: 1.15.11
-  resolution: "@swc/html-linux-arm64-gnu@npm:1.15.11"
+"@swc/html-linux-arm64-gnu@npm:1.15.46":
+  version: 1.15.46
+  resolution: "@swc/html-linux-arm64-gnu@npm:1.15.46"
   conditions: os=linux & cpu=arm64 & libc=glibc
   languageName: node
   linkType: hard
 
-"@swc/html-linux-arm64-musl@npm:1.15.11":
-  version: 1.15.11
-  resolution: "@swc/html-linux-arm64-musl@npm:1.15.11"
+"@swc/html-linux-arm64-musl@npm:1.15.46":
+  version: 1.15.46
+  resolution: "@swc/html-linux-arm64-musl@npm:1.15.46"
   conditions: os=linux & cpu=arm64 & libc=musl
   languageName: node
   linkType: hard
 
-"@swc/html-linux-x64-gnu@npm:1.15.11":
-  version: 1.15.11
-  resolution: "@swc/html-linux-x64-gnu@npm:1.15.11"
+"@swc/html-linux-ppc64-gnu@npm:1.15.46":
+  version: 1.15.46
+  resolution: "@swc/html-linux-ppc64-gnu@npm:1.15.46"
+  conditions: os=linux & cpu=ppc64 & libc=glibc
+  languageName: node
+  linkType: hard
+
+"@swc/html-linux-s390x-gnu@npm:1.15.46":
+  version: 1.15.46
+  resolution: "@swc/html-linux-s390x-gnu@npm:1.15.46"
+  conditions: os=linux & cpu=s390x & libc=glibc
+  languageName: node
+  linkType: hard
+
+"@swc/html-linux-x64-gnu@npm:1.15.46":
+  version: 1.15.46
+  resolution: "@swc/html-linux-x64-gnu@npm:1.15.46"
   conditions: os=linux & cpu=x64 & libc=glibc
   languageName: node
   linkType: hard
 
-"@swc/html-linux-x64-musl@npm:1.15.11":
-  version: 1.15.11
-  resolution: "@swc/html-linux-x64-musl@npm:1.15.11"
+"@swc/html-linux-x64-musl@npm:1.15.46":
+  version: 1.15.46
+  resolution: "@swc/html-linux-x64-musl@npm:1.15.46"
   conditions: os=linux & cpu=x64 & libc=musl
   languageName: node
   linkType: hard
 
-"@swc/html-win32-arm64-msvc@npm:1.15.11":
-  version: 1.15.11
-  resolution: "@swc/html-win32-arm64-msvc@npm:1.15.11"
+"@swc/html-win32-arm64-msvc@npm:1.15.46":
+  version: 1.15.46
+  resolution: "@swc/html-win32-arm64-msvc@npm:1.15.46"
   conditions: os=win32 & cpu=arm64
   languageName: node
   linkType: hard
 
-"@swc/html-win32-ia32-msvc@npm:1.15.11":
-  version: 1.15.11
-  resolution: "@swc/html-win32-ia32-msvc@npm:1.15.11"
+"@swc/html-win32-ia32-msvc@npm:1.15.46":
+  version: 1.15.46
+  resolution: "@swc/html-win32-ia32-msvc@npm:1.15.46"
   conditions: os=win32 & cpu=ia32
   languageName: node
   linkType: hard
 
-"@swc/html-win32-x64-msvc@npm:1.15.11":
-  version: 1.15.11
-  resolution: "@swc/html-win32-x64-msvc@npm:1.15.11"
+"@swc/html-win32-x64-msvc@npm:1.15.46":
+  version: 1.15.46
+  resolution: "@swc/html-win32-x64-msvc@npm:1.15.46"
   conditions: os=win32 & cpu=x64
   languageName: node
   linkType: hard
 
-"@swc/html@npm:^1.13.5":
-  version: 1.15.11
-  resolution: "@swc/html@npm:1.15.11"
+"@swc/html@npm:^1.15.40":
+  version: 1.15.46
+  resolution: "@swc/html@npm:1.15.46"
   dependencies:
     "@swc/counter": "npm:^0.1.3"
-    "@swc/html-darwin-arm64": "npm:1.15.11"
-    "@swc/html-darwin-x64": "npm:1.15.11"
-    "@swc/html-linux-arm-gnueabihf": "npm:1.15.11"
-    "@swc/html-linux-arm64-gnu": "npm:1.15.11"
-    "@swc/html-linux-arm64-musl": "npm:1.15.11"
-    "@swc/html-linux-x64-gnu": "npm:1.15.11"
-    "@swc/html-linux-x64-musl": "npm:1.15.11"
-    "@swc/html-win32-arm64-msvc": "npm:1.15.11"
-    "@swc/html-win32-ia32-msvc": "npm:1.15.11"
-    "@swc/html-win32-x64-msvc": "npm:1.15.11"
+    "@swc/html-darwin-arm64": "npm:1.15.46"
+    "@swc/html-darwin-x64": "npm:1.15.46"
+    "@swc/html-linux-arm-gnueabihf": "npm:1.15.46"
+    "@swc/html-linux-arm64-gnu": "npm:1.15.46"
+    "@swc/html-linux-arm64-musl": "npm:1.15.46"
+    "@swc/html-linux-ppc64-gnu": "npm:1.15.46"
+    "@swc/html-linux-s390x-gnu": "npm:1.15.46"
+    "@swc/html-linux-x64-gnu": "npm:1.15.46"
+    "@swc/html-linux-x64-musl": "npm:1.15.46"
+    "@swc/html-win32-arm64-msvc": "npm:1.15.46"
+    "@swc/html-win32-ia32-msvc": "npm:1.15.46"
+    "@swc/html-win32-x64-msvc": "npm:1.15.46"
   dependenciesMeta:
     "@swc/html-darwin-arm64":
       optional: true
@@ -4934,6 +4991,10 @@ __metadata:
       optional: true
     "@swc/html-linux-arm64-musl":
       optional: true
+    "@swc/html-linux-ppc64-gnu":
+      optional: true
+    "@swc/html-linux-s390x-gnu":
+      optional: true
     "@swc/html-linux-x64-gnu":
       optional: true
     "@swc/html-linux-x64-musl":
@@ -4944,16 +5005,16 @@ __metadata:
       optional: true
     "@swc/html-win32-x64-msvc":
       optional: true
-  checksum: 10c0/a26f2dfe494335804eb4294a7a009791aa6b91bde5aa8a8f8ef393a96d0f58ad52df10126623f7877cbb748caa82b7dba94013c58078137fdc530c5685b3297c
+  checksum: 10c0/ce10a58dcd464036ae82bf6dfebcaa6ac06485c819c9c0359b899a885c92339622f32fd67bfb048ce2d1a9aad0b976f0d0685fcc9cd8a3a2a8735d1f12a23837
   languageName: node
   linkType: hard
 
-"@swc/types@npm:^0.1.25":
-  version: 0.1.25
-  resolution: "@swc/types@npm:0.1.25"
+"@swc/types@npm:^0.1.27":
+  version: 0.1.27
+  resolution: "@swc/types@npm:0.1.27"
   dependencies:
     "@swc/counter": "npm:^0.1.3"
-  checksum: 10c0/847a5b20b131281f89d640a7ed4887fb65724807d53d334b230e84b98c21097aa10cd28a074f9ed287a6ce109e443dd4bafbe7dcfb62333d7806c4ea3e7f8aca
+  checksum: 10c0/25f1bfa0ac34e9ac60aa7de91778f70906cd77a7abb3eb68c5da8d38d5202286b293300d4bb2792b3bb8840a7f5d5c4627c4ec34d2fae6533bfb3e14a70fd8fb
   languageName: node
   linkType: hard
 
@@ -4973,7 +5034,7 @@ __metadata:
     "@chevrotain/regexp-to-ast": "npm:12.0.0"
     "@cmfcmf/docusaurus-search-local": "npm:^2.0.1"
     "@docusaurus/core": "patch:@docusaurus/core@npm%3A3.10.1#~/.yarn/patches/@docusaurus-core-npm-3.10.1-ca011c3645.patch"
-    "@docusaurus/faster": "npm:^3.10.1"
+    "@docusaurus/faster": "npm:^3.10.2"
     "@docusaurus/module-type-aliases": "npm:^3.10.1"
     "@docusaurus/plugin-content-docs": "npm:^3.10.1"
     "@docusaurus/preset-classic": "npm:^3.10.1"
