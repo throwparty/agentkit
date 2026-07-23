@@ -31,7 +31,7 @@
     "vscode-languageserver-types": "3.18.0"
   },
   "devDependencies": {
-    "@docusaurus/module-type-aliases": "^3.10.1",
+    "@docusaurus/module-type-aliases": "^3.10.2",
     "@docusaurus/tsconfig": "^3.10.1",
     "@docusaurus/types": "^3.10.1",
     "@rspack/binding": "^2.1.3",
