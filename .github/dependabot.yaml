@@ -25,10 +25,11 @@ updates:
     cooldown:
       default-days: 7
     groups:
+      docusaurus:
+        patterns: ["@docusaurus/*"]
       react:
         patterns:
           - react
           - react-dom
       rspack:
-        patterns:
-          - "@rspack/*"
+        patterns: ["@rspack/*"]
