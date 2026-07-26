@@ -3295,7 +3295,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@docusaurus/types@npm:3.10.1, @docusaurus/types@npm:^3.10.1":
+"@docusaurus/types@npm:3.10.1":
   version: 3.10.1
   resolution: "@docusaurus/types@npm:3.10.1"
   dependencies:
@@ -3316,7 +3316,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@docusaurus/types@npm:3.10.2":
+"@docusaurus/types@npm:3.10.2, @docusaurus/types@npm:^3.10.2":
   version: 3.10.2
   resolution: "@docusaurus/types@npm:3.10.2"
   dependencies:
@@ -5025,7 +5025,7 @@ __metadata:
     "@docusaurus/preset-classic": "npm:^3.10.1"
     "@docusaurus/theme-mermaid": "npm:^3.10.1"
     "@docusaurus/tsconfig": "npm:^3.10.1"
-    "@docusaurus/types": "npm:^3.10.1"
+    "@docusaurus/types": "npm:^3.10.2"
     "@mdx-js/react": "npm:^3.1.1"
     "@rspack/binding": "npm:^2.1.4"
     "@rspack/binding-darwin-arm64": "npm:^2.1.4"
