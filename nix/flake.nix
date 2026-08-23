@@ -61,6 +61,7 @@
               pkg-config
               python3
               rustup
+              shellcheck
               syft
               yq-go
               zig
@@ -89,6 +90,7 @@
                 printf "cargo-zigbuild %s\n" "$(${getExe cargo-zigbuild} --version 2>/dev/null || true)"
                 ${getExe cosign} --version
                 ${getExe syft} --version
+                printf "shellcheck %s\n" "$(${getExe shellcheck} --version | grep '^version:' | awk '{print $2}')"
                 printf "yq %s\n" "$(${getExe yq-go} --version 2>/dev/null || true)"
                 ${getExe zig} version
               '';
@@ -111,6 +113,7 @@
                 python3
                 rustToolchain
                 rustup-wrapped
+                shellcheck
                 syft
                 yq-go
                 zig
