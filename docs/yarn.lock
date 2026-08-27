@@ -1929,10 +1929,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@chevrotain/regexp-to-ast@npm:12.0.0":
-  version: 12.0.0
-  resolution: "@chevrotain/regexp-to-ast@npm:12.0.0"
-  checksum: 10c0/5cfc68b0cb63cb88281b40660f618555d70feb52b61af1e492862468fa1a0e80c61e84e3ba459431126c889e53f99a8aba4044297e7490a579a67bbe66d5d45e
+"@chevrotain/regexp-to-ast@npm:13.2.0":
+  version: 13.2.0
+  resolution: "@chevrotain/regexp-to-ast@npm:13.2.0"
+  checksum: 10c0/ddba2885059d83b6cb56df12b6b30d96bcd8c90f1b43f541d8a9e9eeafcba37c7542ecf17b1a15d5a8f2ea9c969717523069bf034cf931003e91a2039c1c06e1
   languageName: node
   linkType: hard
 
@@ -5027,7 +5027,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@throwparty/agentkit-docs@workspace:."
   dependencies:
-    "@chevrotain/regexp-to-ast": "npm:12.0.0"
+    "@chevrotain/regexp-to-ast": "npm:13.2.0"
     "@cmfcmf/docusaurus-search-local": "npm:^2.0.1"
     "@docusaurus/core": "npm:^3.10.2"
     "@docusaurus/faster": "npm:^3.10.2"
