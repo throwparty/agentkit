@@ -147,7 +147,7 @@
                   cargoBuildFlags = commonCargoFlags;
                   cargoTestFlags = commonCargoFlags;
                   cargoDepsName = "agentkit";
-                  cargoHash = "sha256-yqFIdigwL76vcJZsyx7nhL3MlKhZaAN4eQAtNX8/GS0=";
+                  cargoHash = "sha256-Ms14+XyrHHzSSAmBRmij9WuyfJYhJ2qNkFDJVSo7Cgo=";
 
                   meta = {
                     description = "Provides fetch and search tools backed by various search engines.";
