@@ -808,9 +808,9 @@ checksum = "c9356095b4b41197bba32173600e1582792cda618f65d12f68e2e77d273413c5"
 
 [[package]]
 name = "html-to-markdown-rs"
-version = "3.11.0"
+version = "3.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f3e479289c322f5982b930575658df32d1161d6fab80b4078ce3e692f491df5"
+checksum = "187d8352a854d055faf1e6574bd14d8c3e429a1c1a73462793155ce63a845fb4"
 dependencies = [
  "ahash",
  "astral-tl",
