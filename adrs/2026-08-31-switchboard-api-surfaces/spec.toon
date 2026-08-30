@@ -1,0 +1,37 @@
+title: Switchboard: API Surfaces
+status: draft
+created: 2026-08-31
+author: adrian
+context: "The switchboard (adrs/2026-06-14-switchboard) conflates three orthogonal concepts: wire format (API surface), billing model, and provider identity. ApiSurface::Openai selects /responses vs /chat/completions by billing model, and ProviderConfig forces one surface per provider. This makes it impossible to represent a gateway provider like OpenCode Zen (https://opencode.ai/docs/zen/), which serves models across three wire formats under one base URL and API key.\n\nZen's four endpoints map to wire formats:\n1. /zen/v1/chat/completions - OpenAI Chat Completions\n2. /zen/v1/responses - OpenAI Responses\n3. /zen/v1/messages - Anthropic Messages\n4. /zen/v1/models/gemini-* - Gemini (no client; deferred)\n\nThe switchboard already ships clients for the first three formats. The translation layer (ConversationHandler) is lossy and unnecessary: each format has native semantics (instructions, cache_control, reasoning effort) that cannot be faithfully mapped to Chat Completions. The switchboard should proxy native formats within a surface, not translate between surfaces."
+problem: The switchboard cannot represent a provider that serves models across multiple wire formats, because wire format is tangled with billing model and provider identity. OpenCode Zen is such a provider: one base URL and API key serving three wire formats. Supporting it requires untangling these concepts and dropping the lossy translation layer in favour of native proxying.
+goals[5]:
+  - Make wire format a first-class concept decoupled from billing and provider identity
+  - "Rename surfaces to explicit wire formats (openai-chat-completions, openai-responses, anthropic-messages)"
+  - Drop translation and proxy native formats within a surface
+  - Allow a provider to serve multiple wire formats
+  - Add OpenCode Zen as the first multi-surface provider
+nonGoals[3]:
+  - Gemini API surface (no client; deferred)
+  - Cross-surface translation (dropped by design)
+  - "Zen team/workspace features (roles, model access control, bring-your-own-key)"
+requirements[7]{id,title,slug,description}:
+  FR-001,Wire Format Decoupling,wire-format-decoupling,"Wire format (API surface) is a first-class concept, decoupled from billing model and provider identity"
+  FR-002,Surface Renaming,surface-renaming,"Surfaces are renamed to explicit wire formats: openai-chat-completions, openai-responses, anthropic-messages"
+  FR-003,Proxy-Native Routing,proxy-native-routing,"Requests are proxied in their native wire format; the translation layer (ConversationHandler) is removed"
+  FR-004,Multi-Surface Providers,multi-surface-providers,A provider can serve models across multiple wire formats
+  FR-005,Zen Provider,zen-provider,"OpenCode Zen is configurable as a provider with base_url https://opencode.ai/zen/v1, bearer_token auth, and pay_as_you_go billing"
+  FR-006,Zen Model Metadata,zen-model-metadata,Zen model facts and pricing are sourced from the models.dev opencode provider snapshot
+  FR-007,Zen Auth,zen-auth,Zen's static API key is stored and presented via the existing bearer_token credential path
+nonFunctional[2]{id,title,slug,description}:
+  NFR-001,No Translation,no-translation,No cross-surface translation is implemented; the switchboard routes within a surface only
+  NFR-002,Reuse Existing Clients,reuse-existing-clients,"Existing wire-format clients (Chat Completions, Responses, Messages) are reused; no new wire-format client is implemented"
+acceptance[5]{id,title,slug,description}:
+  AC-001,Surface Enum,surface-enum,"The ApiSurface enum has three explicit variants: openai-chat-completions, openai-responses, anthropic-messages"
+  AC-002,Billing Decoupled,billing-decoupled,"Endpoint selection is driven by surface, not billing model"
+  AC-003,Multi-Surface Config,multi-surface-config,A provider config can declare multiple surfaces
+  AC-004,Zen Routing,zen-routing,"A Zen request routes to the correct endpoint per surface (chat/completions, responses, messages)"
+  AC-005,Native Proxy,native-proxy,Request and response bodies pass through unchanged (no translation)
+edgeCases[3]{id,title,slug,description}:
+  EC-001,Auth Presentation,auth-presentation,"Zen's single key must be presented correctly per surface (Bearer for OpenAI surfaces, x-api-key for the Anthropic surface); verify Zen's /messages endpoint accepts the expected header"
+  EC-002,Model Deprecation,model-deprecation,Zen deprecates models on a schedule; deprecated models must not be advertised as routable
+  EC-003,Cross-Provider Surface Variance,cross-provider-surface-variance,"The same model may be served via different surfaces by different providers; surface is a property of the (provider, model) pair"
