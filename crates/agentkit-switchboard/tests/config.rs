@@ -90,3 +90,43 @@ fn config_credential_helper_default() {
             .expect("valid config");
     assert_eq!(cfg.credential_helper.as_deref(), Some("keychain"));
 }
+
+#[test]
+fn config_e2e_zen_entries() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("e2e.toml");
+    let cfg = agentkit_switchboard::config::loader::load_config(&path)
+        .expect("e2e.toml should parse");
+
+    let zen_chat = cfg.providers.get("zen_chat").expect("zen_chat entry");
+    assert_eq!(zen_chat.api_surface.to_string(), "openai-chat-completions");
+    assert_eq!(zen_chat.base_url, "https://opencode.ai/zen/v1");
+    assert_eq!(zen_chat.billing.to_string(), "pay_as_you_go");
+    assert_eq!(zen_chat.auth.r#type.to_string(), "bearer_token");
+
+    let zen_responses = cfg.providers.get("zen_responses").expect("zen_responses entry");
+    assert_eq!(zen_responses.api_surface.to_string(), "openai-responses");
+    assert_eq!(zen_responses.base_url, "https://opencode.ai/zen/v1");
+    assert_eq!(zen_responses.billing.to_string(), "pay_as_you_go");
+
+    let zen_messages = cfg.providers.get("zen_messages").expect("zen_messages entry");
+    assert_eq!(zen_messages.api_surface.to_string(), "anthropic-messages");
+    assert_eq!(zen_messages.base_url, "https://opencode.ai/zen/v1");
+    assert_eq!(zen_messages.billing.to_string(), "pay_as_you_go");
+
+    let snapshot = agentkit_models::bundled_snapshot_parsed();
+    let opencode = snapshot
+        .providers
+        .get("opencode")
+        .expect("models.dev opencode provider should be bundled");
+    for entry in [&zen_chat, &zen_responses, &zen_messages] {
+        let models = entry.models.as_ref().expect("zen entry should list models");
+        assert!(!models.is_empty());
+        for model in models {
+            assert!(
+                opencode.models.contains_key(model),
+                "{} model '{model}' should be served by the opencode provider and not deprecated",
+                entry.identity
+            );
+        }
+    }
+}
