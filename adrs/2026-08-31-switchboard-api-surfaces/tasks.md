@@ -67,20 +67,33 @@ Add a surface field to ProviderView and thread a surface parameter through selec
 | Depends On | T-001, T-004 |
 | References | wire-format-decoupling, multi-surface-providers, multi-surface-config |
 
-### T-006: Add Zen provider entries and model metadata
+### T-006: Source Zen model metadata from models.dev
 
-Add three Zen provider entries (zen_chat, zen_responses, zen_messages) with base_url https://opencode.ai/zen/v1, bearer_token auth, pay_as_you_go billing, and per-surface model lists from the models.dev opencode provider. Exclude deprecated models from the routable set.
+Update agentkit-models build.rs to fetch and normalize the current models.dev catalog.json (model facts + provider pricing) into the ModelSnapshot JSON shape: map limit.context/limit.output to context_window/max_output, cost.input/cost.output/cost.cache_read/cost.cache_write to per-mtok fields, and tool_call/reasoning/structured_output to capabilities. Drop status-deprecated models from provider model sets. Vendor the normalized snapshot into data/models.dev.json.
 
 
 | Field | Value |
 |-------|-------|
-| Success Criteria | A switchboard.toml with the three Zen entries parses; each entry serves the correct models for its surface; deprecated models are not advertised. |
+| Success Criteria | cargo build succeeds; the bundled snapshot contains the models.dev opencode provider with per-model pricing; deprecated models are absent from provider model sets. |
+| Complexity | 🟡 Medium |
+| Effort | 2-4h |
+| Depends On |  |
+| References | zen-model-metadata, model-deprecation |
+
+### T-007: Add Zen provider entries to e2e.toml
+
+Add three Zen provider entries (zen_chat, zen_responses, zen_messages) to crates/agentkit-switchboard/e2e.toml with base_url https://opencode.ai/zen/v1, bearer_token auth, pay_as_you_go billing, and per-surface model lists from the models.dev opencode provider (npm @ai-sdk/openai to openai-responses, @ai-sdk/anthropic to anthropic-messages, @ai-sdk/openai-compatible to openai-chat-completions; Gemini deferred). Deprecated models are excluded from the routable set.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | crates/agentkit-switchboard/e2e.toml with the three Zen entries parses; each entry serves the correct models for its surface; deprecated models are not advertised. |
 | Complexity | 🟢 Low |
 | Effort | 1-2h |
-| Depends On | T-001, T-005 |
+| Depends On | T-001, T-005, T-006 |
 | References | zen-provider, zen-model-metadata, zen-auth, zen-routing, model-deprecation, cross-provider-surface-variance |
 
-### T-007: Verify Zen auth presentation on Messages surface
+### T-008: Verify Zen auth presentation on Messages surface
 
 Confirm whether Zen's /messages endpoint accepts Authorization: Bearer or expects x-api-key (the existing Anthropic surface uses x-api-key). Adjust the anthropic-messages inject_headers accordingly.
 
@@ -93,7 +106,7 @@ Confirm whether Zen's /messages endpoint accepts Authorization: Bearer or expect
 | Depends On |  |
 | References | auth-presentation, zen-auth |
 
-### T-008: Update and extend tests
+### T-009: Update and extend tests
 
 Update existing tests for the renamed enum, removed translation, and new endpoints. Add tests for surface-aware routing (a responses request never selects a chat-completions provider) and native proxying (bodies pass through unchanged).
 
@@ -103,6 +116,6 @@ Update existing tests for the renamed enum, removed translation, and new endpoin
 | Success Criteria | cargo test passes; new tests cover surface filtering and native proxying; no test references the removed ConversationHandler. |
 | Complexity | 🟡 Medium |
 | Effort | 3-4h |
-| Depends On | T-001, T-002, T-003, T-004, T-005, T-006 |
+| Depends On | T-001, T-002, T-003, T-004, T-005, T-006, T-007 |
 | References | surface-enum, billing-decoupled, multi-surface-config, zen-routing, native-proxy, reuse-existing-clients |
 
