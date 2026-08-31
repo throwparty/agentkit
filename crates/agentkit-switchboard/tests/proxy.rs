@@ -65,7 +65,8 @@ async fn test_state_with(
 
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
     sqlx::migrate!("src/db/migrations").run(&pool).await.unwrap();
-    let registry = ProviderRegistry::new(&config.providers, "none");
+    let registry = ProviderRegistry::new(&config.providers, "none")
+        .expect("AuthType::None providers always resolve a credential");
     let model_db = ModelDb::new(config.models.clone(), &config.providers);
     let session_manager = Arc::new(SqliteSessionManager::new(pool));
 
