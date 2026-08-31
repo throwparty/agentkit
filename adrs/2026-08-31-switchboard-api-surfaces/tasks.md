@@ -80,7 +80,7 @@ Update agentkit-models build.rs to fetch and normalize the current models.dev ca
 | Depends On |  |
 | References | zen-model-metadata, model-deprecation |
 
-### T-007: Add Zen provider entries to e2e.toml
+### T-007: [x] Add Zen provider entries to e2e.toml
 
 Add three Zen provider entries (zen_chat, zen_responses, zen_messages) to crates/agentkit-switchboard/e2e.toml with base_url https://opencode.ai/zen/v1, bearer_token auth, pay_as_you_go billing, and per-surface model lists from the models.dev opencode provider (npm @ai-sdk/openai to openai-responses, @ai-sdk/anthropic to anthropic-messages, @ai-sdk/openai-compatible to openai-chat-completions; Gemini deferred). Deprecated models are excluded from the routable set.
 
