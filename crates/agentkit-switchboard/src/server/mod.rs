@@ -48,9 +48,9 @@ pub async fn start(
     let app = routes::build_router(state);
 
     let bind_addr = format!("{bind}:{port}");
-    tracing::info!("listening on {bind_addr}");
-
-    let listener = tokio::net::TcpListener::bind(bind_addr).await?;
+    let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
+    let actual_addr = listener.local_addr()?;
+    tracing::info!(address = %actual_addr, "listening");
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
