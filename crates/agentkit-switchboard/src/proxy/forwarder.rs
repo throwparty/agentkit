@@ -136,7 +136,7 @@ pub async fn forward_request(
 
     let parsed_body = serde_json::from_slice::<serde_json::Value>(&body).ok();
 
-    let target_url = http.build_url(base_url, parsed_body.as_ref().unwrap_or(&Value::Null), billing);
+    let target_url = http.build_url(base_url, parsed_body.as_ref().unwrap_or(&Value::Null));
 
     let request_body = match parsed_body {
         Some(ref parsed) => match conversation.prepare_request(parsed.clone(), billing) {
@@ -163,7 +163,7 @@ pub async fn forward_request(
     if !out_headers.contains_key("content-type") {
         out_headers.insert("Content-Type", HeaderValue::from_static("application/json"));
     }
-    http.inject_headers(&mut out_headers, credential, billing);
+    http.inject_headers(&mut out_headers, credential);
 
     let client = shared_client();
     let req_method =

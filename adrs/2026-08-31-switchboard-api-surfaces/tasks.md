@@ -15,7 +15,7 @@ Rename the ApiSurface enum variants from Openai/Anthropic to OpenaiChatCompletio
 | Depends On |  |
 | References | surface-renaming, surface-enum |
 
-### T-002: Split OpenAI provider and decouple endpoint from billing
+### T-002: [x] Split OpenAI provider and decouple endpoint from billing
 
 Split OpenAiProvider into two surface-specific providers (chat-completions and responses). build_url maps surface to path directly (/chat/completions or /responses) instead of branching on billing. Move the Codex-specific headers (OpenAI-Beta, originator, ChatGPT-Account-Id) to the responses provider.
 

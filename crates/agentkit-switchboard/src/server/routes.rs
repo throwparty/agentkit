@@ -211,6 +211,7 @@ async fn chat_completions_handler(
                 .await
             }
             None => {
+                let fallback = crate::providers::pack_for_provider(configured_provider);
                 forwarder::forward_request(
                     forwarder::ForwardRequest {
                         method: axum::http::Method::POST,
@@ -222,8 +223,8 @@ async fn chat_completions_handler(
                         provider_identity: &selection.identity,
                         session_id: session_id.as_deref(),
                     },
-                    &crate::providers::openai::OpenAiProvider,
-                    &crate::providers::openai::conversation::OpenAiConversation,
+                    &*fallback.http,
+                    &*fallback.conversation,
                 )
                 .await
             }

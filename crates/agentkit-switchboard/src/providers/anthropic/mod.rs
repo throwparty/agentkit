@@ -11,11 +11,11 @@ use serde_json::Value;
 pub struct AnthropicProvider;
 
 impl HttpEndpoint for AnthropicProvider {
-    fn build_url(&self, base_url: &str, _body: &Value, _billing: &BillingModel) -> String {
+    fn build_url(&self, base_url: &str, _body: &Value) -> String {
         format!("{}/messages", base_url.trim_end_matches('/'))
     }
 
-    fn inject_headers(&self, headers: &mut HeaderMap, credential: &ResolvedCredential, _billing: &BillingModel) {
+    fn inject_headers(&self, headers: &mut HeaderMap, credential: &ResolvedCredential) {
         headers.remove("authorization");
         if !matches!(credential.source, crate::credential::CredentialSource::None) {
             headers.insert(
