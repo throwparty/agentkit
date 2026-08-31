@@ -1,6 +1,6 @@
 [[providers]]
 identity = "oauth_provider"
-api_surface = "openai"
+api_surface = "openai-responses"
 base_url = "https://chatgpt.com/backend-api/codex"
 billing = "subscription"
 models = ["gpt-4o"]
