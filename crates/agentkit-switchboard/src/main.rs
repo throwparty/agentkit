@@ -71,7 +71,7 @@ async fn main() -> std::process::ExitCode {
                     {
                         Ok(_) => std::process::ExitCode::SUCCESS,
                         Err(e) => {
-                            tracing::error!("server error: {e}");
+                            eprintln!("error: {e}");
                             std::process::ExitCode::FAILURE
                         }
                     }
@@ -79,7 +79,7 @@ async fn main() -> std::process::ExitCode {
             }
         }
         Err(e) => {
-            tracing::error!("{e}");
+            eprintln!("error: {e}");
             std::process::ExitCode::FAILURE
         }
     }
