@@ -35,6 +35,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/openai/v1/chat/completions",
             post(chat_completions_handler),
         )
+        .route("/openai/v1/responses", post(responses_handler))
+        .route("/anthropic/v1/messages", post(messages_handler))
         .route("/openai/v1/models", get(models_handler))
         .route("/health", get(health_handler))
         .layer(axum::middleware::from_fn(
@@ -114,6 +116,55 @@ async fn chat_completions_handler(
     headers: axum::http::HeaderMap,
     body: axum::body::Bytes,
 ) -> Response {
+    proxy_handler(
+        app_state,
+        request_id,
+        headers,
+        body,
+        crate::config::ApiSurface::OpenaiChatCompletions,
+    )
+    .await
+}
+
+async fn responses_handler(
+    State(app_state): State<Arc<AppState>>,
+    Extension(request_id): Extension<RequestId>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    proxy_handler(
+        app_state,
+        request_id,
+        headers,
+        body,
+        crate::config::ApiSurface::OpenaiResponses,
+    )
+    .await
+}
+
+async fn messages_handler(
+    State(app_state): State<Arc<AppState>>,
+    Extension(request_id): Extension<RequestId>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    proxy_handler(
+        app_state,
+        request_id,
+        headers,
+        body,
+        crate::config::ApiSurface::AnthropicMessages,
+    )
+    .await
+}
+
+async fn proxy_handler(
+    app_state: Arc<AppState>,
+    request_id: RequestId,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+    surface: crate::config::ApiSurface,
+) -> Response {
     let session_id = crate::server::middleware::extract_session_id(&headers);
 
     let parsed: Value = match serde_json::from_slice(&body) {
@@ -180,13 +231,14 @@ async fn chat_completions_handler(
                 session_ref,
                 &selection.identity,
                 &model,
+                &surface,
             )
             .await;
             session = Some(SessionAffinity {
                 session_id: sid.clone(),
                 provider_identity: selection.identity.clone(),
                 model_name: model.clone(),
-                api_surface: "openai".to_string(),
+                api_surface: surface.to_string(),
             });
         }
 
@@ -312,6 +364,7 @@ async fn persist_session_assignment(
     existing: Option<&SessionAffinity>,
     provider_identity: &str,
     model: &str,
+    surface: &crate::config::ApiSurface,
 ) {
     if existing.is_some_and(|affinity| affinity.provider_identity != provider_identity) {
         let _ = session_manager
@@ -325,7 +378,7 @@ async fn persist_session_assignment(
     }
 
     let _ = session_manager
-        .assign(session_id, provider_identity, model, "openai")
+        .assign(session_id, provider_identity, model, &surface.to_string())
         .await;
 }
 
