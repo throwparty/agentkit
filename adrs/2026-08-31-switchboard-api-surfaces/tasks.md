@@ -41,7 +41,7 @@ Delete the ConversationHandler trait and its passthrough impls (OpenAiConversati
 | Depends On | T-001 |
 | References | proxy-native-routing, no-translation, native-proxy |
 
-### T-004: Add Responses and Messages inbound endpoints
+### T-004: [x] Add Responses and Messages inbound endpoints
 
 Add POST /openai/v1/responses and POST /anthropic/v1/messages routes. Each route extracts the surface from its path and dispatches to the surface-aware router.
 
