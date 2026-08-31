@@ -296,3 +296,42 @@ async fn proxy_unknown_model_503() {
     let response = tower::Service::call(&mut app, request).await.unwrap();
     assert_eq!(response.status(), 503);
 }
+
+#[test]
+fn anthropic_messages_presents_key_via_x_api_key() {
+    use agentkit_switchboard::credential::{CredentialSource, ResolvedCredential};
+    use agentkit_switchboard::domain::http::HttpEndpoint;
+    use agentkit_switchboard::providers::anthropic::AnthropicProvider;
+    use axum::http::HeaderMap;
+
+    let credential = ResolvedCredential {
+        value: "sk-zen-test".to_string(),
+        source: CredentialSource::Helper {
+            helper_name: "keychain".to_string(),
+        },
+        oauth: None,
+    };
+    let provider = AnthropicProvider;
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "authorization",
+        axum::http::HeaderValue::from_static("Bearer inbound-token"),
+    );
+    provider.inject_headers(&mut headers, &credential);
+
+    assert_eq!(
+        headers.get("x-api-key").map(|v| v.to_str().unwrap()),
+        Some("sk-zen-test"),
+        "Zen's /messages endpoint requires x-api-key, not Authorization: Bearer"
+    );
+    assert!(
+        headers.get("authorization").is_none(),
+        "authorization header should be stripped"
+    );
+    assert_eq!(
+        headers
+            .get("anthropic-version")
+            .map(|v| v.to_str().unwrap()),
+        Some("2023-06-01")
+    );
+}

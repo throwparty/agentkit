@@ -93,7 +93,7 @@ Add three Zen provider entries (zen_chat, zen_responses, zen_messages) to crates
 | Depends On | T-001, T-005, T-006 |
 | References | zen-provider, zen-model-metadata, zen-auth, zen-routing, model-deprecation, cross-provider-surface-variance |
 
-### T-008: Verify Zen auth presentation on Messages surface
+### T-008: [x] Verify Zen auth presentation on Messages surface
 
 Confirm whether Zen's /messages endpoint accepts Authorization: Bearer or expects x-api-key (the existing Anthropic surface uses x-api-key). Adjust the anthropic-messages inject_headers accordingly.
 
