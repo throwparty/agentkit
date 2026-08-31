@@ -67,7 +67,7 @@ Add a surface field to ProviderView and thread a surface parameter through selec
 | Depends On | T-001, T-004 |
 | References | wire-format-decoupling, multi-surface-providers, multi-surface-config |
 
-### T-006: Source Zen model metadata from models.dev
+### T-006: [x] Source Zen model metadata from models.dev
 
 Update agentkit-models build.rs to fetch and normalize the current models.dev catalog.json (model facts + provider pricing) into the ModelSnapshot JSON shape: map limit.context/limit.output to context_window/max_output, cost.input/cost.output/cost.cache_read/cost.cache_write to per-mtok fields, and tool_call/reasoning/structured_output to capabilities. Drop status-deprecated models from provider model sets. Vendor the normalized snapshot into data/models.dev.json.
 
