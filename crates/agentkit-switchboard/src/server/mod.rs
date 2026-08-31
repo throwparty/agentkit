@@ -20,7 +20,8 @@ pub async fn start(
         .credential_helper
         .clone()
         .unwrap_or_else(|| "keychain".to_string());
-    let registry = ProviderRegistry::new(&config.providers, &credential_helper);
+    let registry = ProviderRegistry::new(&config.providers, &credential_helper)
+        .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
     let model_db = if let Some(path) = models_db_path {
         ModelDb::from_snapshot_path(&path, config.models.clone(), &config.providers)?
     } else {
