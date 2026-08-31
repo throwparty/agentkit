@@ -4,7 +4,7 @@ use crate::credential::ResolvedCredential;
 use crate::models::db::ModelDb;
 use crate::domain::quota::{backoff_duration, ProviderQuotaState};
 use crate::provider::registry::ProviderRegistry;
-use crate::provider::router::{select_provider, ProviderSelection, RoutingError};
+use crate::provider::router::{select_provider, RoutingError};
 use crate::proxy::forwarder;
 use crate::server::middleware::RequestId;
 use crate::session::sqlite::SqliteSessionManager;
@@ -84,30 +84,9 @@ fn switchboard_response(
 
 async fn log_routing_event(
     session_manager: &SqliteSessionManager,
-    session_id: &Option<String>,
-    request_id: &str,
-    model: &str,
-    selection: &ProviderSelection,
-    billing: &str,
-    status: StatusCode,
-    latency_ms: i64,
-    input_tokens: Option<i64>,
-    output_tokens: Option<i64>,
+    event: RoutingEvent,
 ) {
-    let _ = session_manager
-        .insert_routing_event(RoutingEvent {
-            session_id: session_id.clone(),
-            request_id: request_id.to_string(),
-            model_name: model.to_string(),
-            provider_identity: selection.identity.clone(),
-            billing_model: billing.to_string(),
-            decision_reason: selection_reason(&selection.reason).to_string(),
-            input_tokens,
-            output_tokens,
-            response_status: Some(status.as_u16() as i64),
-            latency_ms: Some(latency_ms),
-        })
-        .await;
+    let _ = session_manager.insert_routing_event(event).await;
 }
 
 async fn chat_completions_handler(
@@ -299,15 +278,18 @@ async fn proxy_handler(
 
         log_routing_event(
             &app_state.session_manager,
-            &session_id,
-            &request_id.0,
-            &model,
-            &selection,
-            &billing,
-            status,
-            latency_ms,
-            input_tokens,
-            output_tokens,
+            RoutingEvent {
+                session_id: session_id.clone(),
+                request_id: request_id.0.clone(),
+                model_name: model.clone(),
+                provider_identity: selection.identity.clone(),
+                billing_model: billing.clone(),
+                decision_reason: selection_reason(&selection.reason).to_string(),
+                input_tokens,
+                output_tokens,
+                response_status: Some(status.as_u16() as i64),
+                latency_ms: Some(latency_ms),
+            },
         )
         .await;
 
