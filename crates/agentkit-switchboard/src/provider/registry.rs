@@ -82,6 +82,7 @@ impl ProviderRegistry {
                     identity.clone(),
                     ProviderView {
                         identity: identity.clone(),
+                        surface: config.api_surface.clone(),
                         billing: config.billing.clone(),
                         models,
                         pricing: config.pricing.clone(),

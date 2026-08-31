@@ -54,7 +54,7 @@ Add POST /openai/v1/responses and POST /anthropic/v1/messages routes. Each route
 | Depends On | T-001 |
 | References | proxy-native-routing, native-proxy |
 
-### T-005: Make routing surface-aware
+### T-005: [x] Make routing surface-aware
 
 Add a surface field to ProviderView and thread a surface parameter through select_provider. Filter candidates by api_surface == surface in addition to serves_model.
 
