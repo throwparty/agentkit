@@ -206,7 +206,6 @@ async fn chat_completions_handler(
                         session_id: session_id.as_deref(),
                     },
                     &*p.http,
-                    &*p.conversation,
                 )
                 .await
             }
@@ -224,7 +223,6 @@ async fn chat_completions_handler(
                         session_id: session_id.as_deref(),
                     },
                     &*fallback.http,
-                    &*fallback.conversation,
                 )
                 .await
             }
