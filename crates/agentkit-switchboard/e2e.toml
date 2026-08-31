@@ -1,6 +1,6 @@
 [[providers]]
 identity = "chatgpt_sub"
-api_surface = "openai"
+api_surface = "openai-responses"
 base_url = "https://chatgpt.com/backend-api/codex"
 billing = "subscription"
 models = ["gpt-4o", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini"]
@@ -19,7 +19,7 @@ output_per_mtok = 0
 
 [[providers]]
 identity = "openai_payg"
-api_surface = "openai"
+api_surface = "openai-chat-completions"
 base_url = "https://api.openai.com/v1"
 billing = "pay_as_you_go"
 models = ["gpt-5.4-mini"]
