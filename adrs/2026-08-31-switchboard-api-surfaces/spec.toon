@@ -1,5 +1,5 @@
 title: Switchboard: API Surfaces
-status: draft
+status: implemented
 created: 2026-08-31
 author: adrian
 context: "The switchboard (adrs/2026-06-14-switchboard) conflates three orthogonal concepts: wire format (API surface), billing model, and provider identity. ApiSurface::Openai selects /responses vs /chat/completions by billing model, and ProviderConfig forces one surface per provider. This makes it impossible to represent a gateway provider like OpenCode Zen (https://opencode.ai/docs/zen/), which serves models across three wire formats under one base URL and API key.\n\nZen's four endpoints map to wire formats:\n1. /zen/v1/chat/completions - OpenAI Chat Completions\n2. /zen/v1/responses - OpenAI Responses\n3. /zen/v1/messages - Anthropic Messages\n4. /zen/v1/models/gemini-* - Gemini (no client; deferred)\n\nThe switchboard already ships clients for the first three formats. The translation layer (ConversationHandler) is lossy and unnecessary: each format has native semantics (instructions, cache_control, reasoning effort) that cannot be faithfully mapped to Chat Completions. The switchboard should proxy native formats within a surface, not translate between surfaces."
