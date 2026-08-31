@@ -190,7 +190,7 @@ async fn proxy_handler(
     for attempt in 0..max_attempts {
         let providers = app_state.registry.get_states().await;
         let session_ref = session.as_ref();
-        let selection = match select_provider(&model, session_ref, &providers) {
+        let selection = match select_provider(&surface, &model, session_ref, &providers) {
             Ok(s) => s,
             Err(RoutingError::ModelNotFound) => {
                 return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "model not found"}))).into_response();

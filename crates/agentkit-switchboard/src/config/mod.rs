@@ -39,7 +39,7 @@ pub struct ProviderConfig {
     pub models: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ApiSurface {
     #[serde(rename = "openai-chat-completions")]
     OpenaiChatCompletions,

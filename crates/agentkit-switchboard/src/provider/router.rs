@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::config::BillingModel;
+use crate::config::{ApiSurface, BillingModel};
 use crate::provider::ProviderView;
 use crate::session::SessionAffinity;
 
@@ -32,17 +32,20 @@ fn score_billing(billing: &BillingModel) -> u8 {
 }
 
 pub fn select_provider(
+    surface: &ApiSurface,
     model: &str,
     session: Option<&SessionAffinity>,
     providers: &HashMap<String, ProviderView>,
 ) -> Result<ProviderSelection, RoutingError> {
     let mut candidates: Vec<&ProviderView> = providers
         .values()
-        .filter(|p| p.is_available() && p.serves_model(model))
+        .filter(|p| p.is_available() && p.surface == *surface && p.serves_model(model))
         .collect();
 
     if candidates.is_empty() {
-        let any_serves = providers.values().any(|p| p.serves_model(model));
+        let any_serves = providers
+            .values()
+            .any(|p| p.surface == *surface && p.serves_model(model));
         if !any_serves {
             return Err(RoutingError::ModelNotFound);
         }
