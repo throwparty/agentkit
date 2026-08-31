@@ -13,7 +13,7 @@ fn config_parse_valid() {
         .expect("valid config should parse");
     assert_eq!(cfg.providers.len(), 1);
     let provider = cfg.providers.get("test_provider").unwrap();
-    assert_eq!(provider.api_surface.to_string(), "openai");
+    assert_eq!(provider.api_surface.to_string(), "openai-chat-completions");
     assert_eq!(provider.billing.to_string(), "pay_as_you_go");
     assert_eq!(provider.base_url, "https://api.openai.com/v1");
     assert_eq!(provider.auth.r#type.to_string(), "bearer_token");

@@ -2,7 +2,7 @@
 
 ## Tasks
 
-### T-001: Rename ApiSurface enum
+### T-001: [x] Rename ApiSurface enum
 
 Rename the ApiSurface enum variants from Openai/Anthropic to OpenaiChatCompletions, OpenaiResponses, AnthropicMessages, with serde renames openai-chat-completions, openai-responses, anthropic-messages. Update all match sites (pack_for_provider, Display impl).
 

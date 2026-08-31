@@ -22,7 +22,7 @@ async fn test_state(mock_base_url: &str) -> Arc<routes::AppState> {
         "mock_openai".to_string(),
         ProviderConfig {
             identity: "mock_openai".to_string(),
-            api_surface: ApiSurface::Openai,
+            api_surface: ApiSurface::OpenaiChatCompletions,
             base_url: mock_base_url.to_string(),
             billing: BillingModel::PayAsYouGo,
             auth: AuthConfig {

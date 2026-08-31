@@ -1,6 +1,6 @@
 [[providers]]
 identity = "default_client_provider"
-api_surface = "openai"
+api_surface = "openai-responses"
 base_url = "https://api.openai.com/v1"
 billing = "subscription"
 models = ["gpt-4o"]
