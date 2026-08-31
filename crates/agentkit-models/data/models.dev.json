@@ -3999,8 +3999,12 @@
     },
     "agentrouter": {
       "models": {
-        "claude-opus-4-8": {},
-        "claude-opus-5": {},
+        "claude-opus-4-8": {
+          "npm": "@ai-sdk/anthropic"
+        },
+        "claude-opus-5": {
+          "npm": "@ai-sdk/anthropic"
+        },
         "gpt-5.6-sol": {}
       }
     },
@@ -6019,33 +6023,39 @@
         "openai.gpt-5.4": {
           "cache_read_per_mtok": 0.275,
           "input_per_mtok": 2.75,
+          "npm": "@ai-sdk/amazon-bedrock/mantle",
           "output_per_mtok": 16.5
         },
         "openai.gpt-5.5": {
           "cache_read_per_mtok": 0.55,
           "input_per_mtok": 5.5,
+          "npm": "@ai-sdk/amazon-bedrock/mantle",
           "output_per_mtok": 33.0
         },
         "openai.gpt-5.6-luna": {
           "cache_read_per_mtok": 0.022,
           "cache_write_per_mtok": 0.275,
           "input_per_mtok": 0.22,
+          "npm": "@ai-sdk/amazon-bedrock/mantle",
           "output_per_mtok": 1.32
         },
         "openai.gpt-5.6-sol": {
           "cache_read_per_mtok": 0.44,
           "cache_write_per_mtok": 5.5,
           "input_per_mtok": 4.4,
+          "npm": "@ai-sdk/amazon-bedrock/mantle",
           "output_per_mtok": 22.0
         },
         "openai.gpt-5.6-terra": {
           "cache_read_per_mtok": 0.22,
           "cache_write_per_mtok": 2.75,
           "input_per_mtok": 2.2,
+          "npm": "@ai-sdk/amazon-bedrock/mantle",
           "output_per_mtok": 13.2
         },
         "openai.gpt-oss-120b": {
           "input_per_mtok": 0.15,
+          "npm": "@ai-sdk/amazon-bedrock/mantle",
           "output_per_mtok": 0.6
         },
         "openai.gpt-oss-120b-1:0": {
@@ -6054,6 +6064,7 @@
         },
         "openai.gpt-oss-20b": {
           "input_per_mtok": 0.07,
+          "npm": "@ai-sdk/amazon-bedrock/mantle",
           "output_per_mtok": 0.3
         },
         "openai.gpt-oss-20b-1:0": {
@@ -6179,11 +6190,13 @@
         "xai.grok-4.3": {
           "cache_read_per_mtok": 0.2,
           "input_per_mtok": 1.25,
+          "npm": "@ai-sdk/amazon-bedrock/mantle",
           "output_per_mtok": 2.5
         },
         "xai.grok-4.6": {
           "cache_read_per_mtok": 0.55,
           "input_per_mtok": 2.2,
+          "npm": "@ai-sdk/amazon-bedrock/mantle",
           "output_per_mtok": 6.6
         },
         "zai.glm-4.7": {
@@ -6543,72 +6556,84 @@
           "cache_read_per_mtok": 1.0,
           "cache_write_per_mtok": 12.5,
           "input_per_mtok": 10.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 50.0
         },
         "claude-haiku-4-5": {
           "cache_read_per_mtok": 0.1,
           "cache_write_per_mtok": 1.25,
           "input_per_mtok": 1.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 5.0
         },
         "claude-mythos-5": {
           "cache_read_per_mtok": 1.0,
           "cache_write_per_mtok": 12.5,
           "input_per_mtok": 10.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 50.0
         },
         "claude-opus-4-1": {
           "cache_read_per_mtok": 1.5,
           "cache_write_per_mtok": 18.75,
           "input_per_mtok": 15.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 75.0
         },
         "claude-opus-4-5": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 25.0
         },
         "claude-opus-4-6": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 25.0
         },
         "claude-opus-4-7": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 25.0
         },
         "claude-opus-4-8": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 25.0
         },
         "claude-opus-5": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 25.0
         },
         "claude-sonnet-4-5": {
           "cache_read_per_mtok": 0.3,
           "cache_write_per_mtok": 3.75,
           "input_per_mtok": 3.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 15.0
         },
         "claude-sonnet-4-6": {
           "cache_read_per_mtok": 0.3,
           "cache_write_per_mtok": 3.75,
           "input_per_mtok": 3.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 15.0
         },
         "claude-sonnet-5": {
           "cache_read_per_mtok": 0.2,
           "cache_write_per_mtok": 2.5,
           "input_per_mtok": 2.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 10.0
         },
         "codestral-2501": {
@@ -6641,10 +6666,12 @@
         },
         "deepseek-v4-flash": {
           "input_per_mtok": 0.19,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 0.51
         },
         "deepseek-v4-pro": {
           "input_per_mtok": 1.74,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 3.48
         },
         "gpt-5": {
@@ -6788,15 +6815,18 @@
         },
         "kimi-k2.5": {
           "input_per_mtok": 0.6,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 3.0
         },
         "kimi-k2.6": {
           "input_per_mtok": 0.95,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 4.0
         },
         "kimi-k2.7-code": {
           "cache_read_per_mtok": 0.19,
           "input_per_mtok": 0.95,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 4.0
         },
         "llama-3.3-70b-instruct": {
@@ -6876,72 +6906,84 @@
           "cache_read_per_mtok": 1.0,
           "cache_write_per_mtok": 12.5,
           "input_per_mtok": 10.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 50.0
         },
         "claude-haiku-4-5": {
           "cache_read_per_mtok": 0.1,
           "cache_write_per_mtok": 1.25,
           "input_per_mtok": 1.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 5.0
         },
         "claude-mythos-5": {
           "cache_read_per_mtok": 1.0,
           "cache_write_per_mtok": 12.5,
           "input_per_mtok": 10.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 50.0
         },
         "claude-opus-4-1": {
           "cache_read_per_mtok": 1.5,
           "cache_write_per_mtok": 18.75,
           "input_per_mtok": 15.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 75.0
         },
         "claude-opus-4-5": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 25.0
         },
         "claude-opus-4-6": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 25.0
         },
         "claude-opus-4-7": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 25.0
         },
         "claude-opus-4-8": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 25.0
         },
         "claude-opus-5": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 25.0
         },
         "claude-sonnet-4-5": {
           "cache_read_per_mtok": 0.3,
           "cache_write_per_mtok": 3.75,
           "input_per_mtok": 3.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 15.0
         },
         "claude-sonnet-4-6": {
           "cache_read_per_mtok": 0.3,
           "cache_write_per_mtok": 3.75,
           "input_per_mtok": 3.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 15.0
         },
         "claude-sonnet-5": {
           "cache_read_per_mtok": 0.2,
           "cache_write_per_mtok": 2.5,
           "input_per_mtok": 2.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 10.0
         },
         "codestral-2501": {
@@ -7074,10 +7116,12 @@
         },
         "kimi-k2.5": {
           "input_per_mtok": 0.6,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 3.0
         },
         "kimi-k2.6": {
           "input_per_mtok": 0.95,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 4.0
         },
         "llama-3.3-70b-instruct": {
@@ -7601,60 +7645,70 @@
           "cache_read_per_mtok": 1.0,
           "cache_write_per_mtok": 12.5,
           "input_per_mtok": 10.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 50.0
         },
         "anthropic/claude-haiku-4.5": {
           "cache_read_per_mtok": 0.1,
           "cache_write_per_mtok": 1.25,
           "input_per_mtok": 1.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 5.0
         },
         "anthropic/claude-opus-4.5": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 25.0
         },
         "anthropic/claude-opus-4.6": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 25.0
         },
         "anthropic/claude-opus-4.7": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 25.0
         },
         "anthropic/claude-opus-4.8": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 25.0
         },
         "anthropic/claude-opus-5": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 25.0
         },
         "anthropic/claude-sonnet-4.5": {
           "cache_read_per_mtok": 0.3,
           "cache_write_per_mtok": 3.75,
           "input_per_mtok": 3.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 15.0
         },
         "anthropic/claude-sonnet-4.6": {
           "cache_read_per_mtok": 0.3,
           "cache_write_per_mtok": 3.75,
           "input_per_mtok": 3.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 15.0
         },
         "anthropic/claude-sonnet-5": {
           "cache_read_per_mtok": 0.2,
           "cache_write_per_mtok": 2.5,
           "input_per_mtok": 2.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 10.0
         },
         "deepseek/deepseek-v4-pro": {
@@ -7670,106 +7724,127 @@
         "openai/gpt-4.1": {
           "cache_read_per_mtok": 0.5,
           "input_per_mtok": 2.0,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 8.0
         },
         "openai/gpt-4.1-mini": {
           "cache_read_per_mtok": 0.1,
           "input_per_mtok": 0.4,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 1.6
         },
         "openai/gpt-4.1-nano": {
           "cache_read_per_mtok": 0.025,
           "input_per_mtok": 0.1,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 0.4
         },
         "openai/gpt-4o": {
           "cache_read_per_mtok": 0.625,
           "input_per_mtok": 1.25,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 5.0
         },
         "openai/gpt-4o-mini": {
           "cache_read_per_mtok": 0.0375,
           "input_per_mtok": 0.075,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 0.3
         },
         "openai/gpt-5": {
           "cache_read_per_mtok": 0.125,
           "input_per_mtok": 1.25,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 10.0
         },
         "openai/gpt-5-mini": {
           "cache_read_per_mtok": 0.025,
           "input_per_mtok": 0.25,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 2.0
         },
         "openai/gpt-5-nano": {
           "cache_read_per_mtok": 0.005,
           "input_per_mtok": 0.05,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 0.4
         },
         "openai/gpt-5.1": {
           "cache_read_per_mtok": 0.125,
           "input_per_mtok": 1.25,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 10.0
         },
         "openai/gpt-5.4": {
           "cache_read_per_mtok": 0.25,
           "input_per_mtok": 2.5,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 15.0
         },
         "openai/gpt-5.4-mini": {
           "cache_read_per_mtok": 0.075,
           "input_per_mtok": 0.75,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 4.5
         },
         "openai/gpt-5.4-nano": {
           "cache_read_per_mtok": 0.02,
           "input_per_mtok": 0.2,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 1.25
         },
         "openai/gpt-5.4-pro": {
           "input_per_mtok": 30.0,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 180.0
         },
         "openai/gpt-5.5": {
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 30.0
         },
         "openai/gpt-5.5-pro": {
           "input_per_mtok": 30.0,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 180.0
         },
         "openai/gpt-5.6-luna": {
           "cache_read_per_mtok": 0.02,
           "cache_write_per_mtok": 0.25,
           "input_per_mtok": 0.2,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 1.2
         },
         "openai/gpt-5.6-sol": {
           "cache_read_per_mtok": 0.25,
           "cache_write_per_mtok": 3.125,
           "input_per_mtok": 2.0,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 10.0
         },
         "openai/gpt-5.6-terra": {
           "cache_read_per_mtok": 0.2,
           "cache_write_per_mtok": 2.5,
           "input_per_mtok": 2.0,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 12.0
         },
         "openai/o3": {
           "cache_read_per_mtok": 0.5,
           "input_per_mtok": 2.0,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 8.0
         },
         "openai/o3-mini": {
           "cache_read_per_mtok": 0.55,
           "input_per_mtok": 1.1,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 4.4
         },
         "openai/o4-mini": {
           "cache_read_per_mtok": 0.275,
           "input_per_mtok": 1.1,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 4.4
         },
         "xai/grok-4.20-0309-non-reasoning": {
@@ -7963,6 +8038,7 @@
         },
         "north-mini-code-1-0": {
           "input_per_mtok": 0.0,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 0.0
         }
       }
@@ -8530,47 +8606,56 @@
         "deepseek-v4-flash": {
           "cache_read_per_mtok": 0.003,
           "input_per_mtok": 0.12,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 0.21
         },
         "deepseek-v4-flash-0731": {
           "cache_read_per_mtok": 0.003,
           "input_per_mtok": 0.08,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 0.1
         },
         "deepseek-v4-pro": {
           "cache_read_per_mtok": 0.003,
           "input_per_mtok": 0.35,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 0.8
         },
         "deepseek-v4-pro-0813": {
           "cache_read_per_mtok": 0.01,
           "input_per_mtok": 0.35,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 0.8
         },
         "gemma-4-31b-it": {
           "cache_read_per_mtok": 0.02,
           "input_per_mtok": 0.1,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 0.3
         },
         "glm-5.1": {
           "cache_read_per_mtok": 0.08,
           "cache_write_per_mtok": 0.0,
           "input_per_mtok": 0.45,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 2.15
         },
         "glm-5.2": {
           "cache_read_per_mtok": 0.05,
           "input_per_mtok": 0.3,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 1.05
         },
         "glm-5.3": {
           "cache_read_per_mtok": 0.06,
           "input_per_mtok": 0.4,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 1.4
         },
         "glm-5.3-flash": {
           "cache_read_per_mtok": 0.01,
           "input_per_mtok": 0.07,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 0.22
         },
         "greg-1-mini": {
@@ -8596,31 +8681,37 @@
         "kimi-k2.6": {
           "cache_read_per_mtok": 0.05,
           "input_per_mtok": 0.5,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 1.99
         },
         "kimi-k2.7-code": {
           "cache_read_per_mtok": 0.05,
           "input_per_mtok": 0.55,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 2.25
         },
         "kimi-k3": {
           "cache_read_per_mtok": 0.25,
           "input_per_mtok": 2.0,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 8.0
         },
         "kimi-k3-eco": {
           "cache_read_per_mtok": 0.1,
           "input_per_mtok": 1.0,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 4.0
         },
         "mimo-v2.5-pro": {
           "cache_read_per_mtok": 0.003,
           "input_per_mtok": 0.4,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 0.8
         },
         "qwen3.5-397b-a17b": {
           "cache_read_per_mtok": 0.07,
           "input_per_mtok": 0.35,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 1.75
         },
         "qwen3.5-9b": {
@@ -8631,11 +8722,13 @@
         "qwen3.6-27b": {
           "cache_read_per_mtok": 0.04,
           "input_per_mtok": 0.2,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 1.5
         },
         "qwen3.8-27b": {
           "cache_read_per_mtok": 0.03,
           "input_per_mtok": 0.2,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 1.5
         }
       }
@@ -11893,24 +11986,28 @@
           "cache_read_per_mtok": 0.175,
           "cache_write_per_mtok": 1.75,
           "input_per_mtok": 1.75,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 14.0
         },
         "gpt-5.4": {
           "cache_read_per_mtok": 0.25,
           "cache_write_per_mtok": 2.5,
           "input_per_mtok": 2.5,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 15.0
         },
         "gpt-5.4-mini": {
           "cache_read_per_mtok": 0.075,
           "cache_write_per_mtok": 0.75,
           "input_per_mtok": 0.75,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 4.5
         },
         "gpt-5.5": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 5.0,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 30.0
         }
       }
@@ -12632,60 +12729,70 @@
           "cache_read_per_mtok": 1.0,
           "cache_write_per_mtok": 12.5,
           "input_per_mtok": 10.0,
+          "npm": "@ai-sdk/google-vertex/anthropic",
           "output_per_mtok": 50.0
         },
         "claude-haiku-4-5@20251001": {
           "cache_read_per_mtok": 0.1,
           "cache_write_per_mtok": 1.25,
           "input_per_mtok": 1.0,
+          "npm": "@ai-sdk/google-vertex/anthropic",
           "output_per_mtok": 5.0
         },
         "claude-opus-4-5@20251101": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/google-vertex/anthropic",
           "output_per_mtok": 25.0
         },
         "claude-opus-4-6@default": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/google-vertex/anthropic",
           "output_per_mtok": 25.0
         },
         "claude-opus-4-7@default": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/google-vertex/anthropic",
           "output_per_mtok": 25.0
         },
         "claude-opus-4-8@default": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/google-vertex/anthropic",
           "output_per_mtok": 25.0
         },
         "claude-opus-5@default": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/google-vertex/anthropic",
           "output_per_mtok": 25.0
         },
         "claude-sonnet-4-5@20250929": {
           "cache_read_per_mtok": 0.3,
           "cache_write_per_mtok": 3.75,
           "input_per_mtok": 3.0,
+          "npm": "@ai-sdk/google-vertex/anthropic",
           "output_per_mtok": 15.0
         },
         "claude-sonnet-4-6@default": {
           "cache_read_per_mtok": 0.3,
           "cache_write_per_mtok": 3.75,
           "input_per_mtok": 3.0,
+          "npm": "@ai-sdk/google-vertex/anthropic",
           "output_per_mtok": 15.0
         },
         "claude-sonnet-5@default": {
           "cache_read_per_mtok": 0.2,
           "cache_write_per_mtok": 2.5,
           "input_per_mtok": 2.0,
+          "npm": "@ai-sdk/google-vertex/anthropic",
           "output_per_mtok": 10.0
         },
         "gemini-2.5-flash": {
@@ -12781,6 +12888,7 @@
         },
         "meta/llama-4-maverick-17b-128e-instruct-maas": {
           "input_per_mtok": 0.35,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 1.15
         },
         "openai/gpt-oss-120b-maas": {
@@ -25224,70 +25332,84 @@
         "gpt-5": {
           "cache_read_per_mtok": 0.125,
           "input_per_mtok": 1.25,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 10.0
         },
         "gpt-5-1": {
           "cache_read_per_mtok": 0.125,
           "input_per_mtok": 1.25,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 10.0
         },
         "gpt-5-2": {
           "cache_read_per_mtok": 0.175,
           "input_per_mtok": 1.75,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 14.0
         },
         "gpt-5-3-codex": {
           "cache_read_per_mtok": 0.175,
           "input_per_mtok": 1.75,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 14.0
         },
         "gpt-5-4": {
           "cache_read_per_mtok": 0.25,
           "input_per_mtok": 2.5,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 15.0
         },
         "gpt-5-4-mini": {
           "cache_read_per_mtok": 0.075,
           "input_per_mtok": 0.75,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 4.5
         },
         "gpt-5-4-nano": {
           "cache_read_per_mtok": 0.02,
           "input_per_mtok": 0.2,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 1.25
         },
         "gpt-5-5": {
           "cache_read_per_mtok": 0.5,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 30.0
         },
         "gpt-5-5-pro": {
           "input_per_mtok": 30.0,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 180.0
         },
         "gpt-5-6-luna": {
           "cache_read_per_mtok": 0.1,
           "input_per_mtok": 1.0,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 6.0
         },
         "gpt-5-6-sol": {
           "cache_read_per_mtok": 0.5,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 30.0
         },
         "gpt-5-6-terra": {
           "cache_read_per_mtok": 0.25,
           "input_per_mtok": 2.5,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 15.0
         },
         "gpt-5-mini": {
           "cache_read_per_mtok": 0.025,
           "input_per_mtok": 0.25,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 2.0
         },
         "gpt-5-nano": {
           "cache_read_per_mtok": 0.005,
           "input_per_mtok": 0.05,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 0.4
         },
         "gpt-oss-120b": {
@@ -26364,60 +26486,70 @@
           "cache_read_per_mtok": 1.0,
           "cache_write_per_mtok": 12.5,
           "input_per_mtok": 10.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 50.0
         },
         "anthropic/claude-haiku-4.5": {
           "cache_read_per_mtok": 0.1,
           "cache_write_per_mtok": 1.25,
           "input_per_mtok": 1.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 5.0
         },
         "anthropic/claude-opus-4.5": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 25.0
         },
         "anthropic/claude-opus-4.6": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 25.0
         },
         "anthropic/claude-opus-4.7": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 25.0
         },
         "anthropic/claude-opus-4.8": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 25.0
         },
         "anthropic/claude-opus-5": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 25.0
         },
         "anthropic/claude-sonnet-4.5": {
           "cache_read_per_mtok": 0.3,
           "cache_write_per_mtok": 3.75,
           "input_per_mtok": 3.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 15.0
         },
         "anthropic/claude-sonnet-4.6": {
           "cache_read_per_mtok": 0.3,
           "cache_write_per_mtok": 3.75,
           "input_per_mtok": 3.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 15.0
         },
         "anthropic/claude-sonnet-5": {
           "cache_read_per_mtok": 0.2,
           "cache_write_per_mtok": 2.5,
           "input_per_mtok": 2.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 10.0
         },
         "bailian/qwen-flash": {
@@ -26614,30 +26746,35 @@
           "cache_read_per_mtok": 0.2,
           "cache_write_per_mtok": 4.5,
           "input_per_mtok": 2.0,
+          "npm": "@ai-sdk/google",
           "output_per_mtok": 12.0
         },
         "google/gemini-3.5-flash": {
           "cache_read_per_mtok": 0.15,
           "cache_write_per_mtok": 0.083,
           "input_per_mtok": 1.5,
+          "npm": "@ai-sdk/google",
           "output_per_mtok": 9.0
         },
         "google/gemini-3.5-flash-lite": {
           "cache_read_per_mtok": 0.03,
           "cache_write_per_mtok": 0.083,
           "input_per_mtok": 0.3,
+          "npm": "@ai-sdk/google",
           "output_per_mtok": 2.5
         },
         "google/gemini-3.6-flash": {
           "cache_read_per_mtok": 0.075,
           "cache_write_per_mtok": 0.0415,
           "input_per_mtok": 0.75,
+          "npm": "@ai-sdk/google",
           "output_per_mtok": 3.75
         },
         "google/gemini-3.7-flash": {
           "cache_read_per_mtok": 0.075,
           "cache_write_per_mtok": 0.0415,
           "input_per_mtok": 0.75,
+          "npm": "@ai-sdk/google",
           "output_per_mtok": 3.75
         },
         "minimax/m2-her": {
@@ -26719,108 +26856,129 @@
         "openai/gpt-4.1": {
           "cache_read_per_mtok": 0.5,
           "input_per_mtok": 2.0,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 8.0
         },
         "openai/gpt-4.1-mini": {
           "cache_read_per_mtok": 0.1,
           "input_per_mtok": 0.4,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 1.6
         },
         "openai/gpt-4o": {
           "cache_read_per_mtok": 1.25,
           "input_per_mtok": 2.5,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 10.0
         },
         "openai/gpt-4o-mini": {
           "cache_read_per_mtok": 0.075,
           "input_per_mtok": 0.15,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 0.6
         },
         "openai/gpt-5": {
           "cache_read_per_mtok": 0.13,
           "input_per_mtok": 1.25,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 10.0
         },
         "openai/gpt-5-mini": {
           "cache_read_per_mtok": 0.03,
           "input_per_mtok": 0.25,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 2.0
         },
         "openai/gpt-5-nano": {
           "cache_read_per_mtok": 0.01,
           "input_per_mtok": 0.05,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 0.4
         },
         "openai/gpt-5.1": {
           "cache_read_per_mtok": 0.13,
           "input_per_mtok": 1.25,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 10.0
         },
         "openai/gpt-5.1-codex-max": {
           "cache_read_per_mtok": 0.13,
           "input_per_mtok": 1.25,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 10.0
         },
         "openai/gpt-5.1-codex-mini": {
           "cache_read_per_mtok": 0.03,
           "input_per_mtok": 0.25,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 2.0
         },
         "openai/gpt-5.2": {
           "cache_read_per_mtok": 0.18,
           "input_per_mtok": 1.75,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 14.0
         },
         "openai/gpt-5.2-codex": {
           "cache_read_per_mtok": 0.18,
           "input_per_mtok": 1.75,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 14.0
         },
         "openai/gpt-5.3-codex": {
           "cache_read_per_mtok": 0.18,
           "input_per_mtok": 1.75,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 14.0
         },
         "openai/gpt-5.4": {
           "cache_read_per_mtok": 0.25,
           "input_per_mtok": 2.5,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 15.0
         },
         "openai/gpt-5.4-mini": {
           "cache_read_per_mtok": 0.075,
           "input_per_mtok": 0.75,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 4.5
         },
         "openai/gpt-5.4-nano": {
           "cache_read_per_mtok": 0.02,
           "input_per_mtok": 0.2,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 1.25
         },
         "openai/gpt-5.4-pro": {
           "input_per_mtok": 30.0,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 180.0
         },
         "openai/gpt-5.5": {
           "cache_read_per_mtok": 0.5,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 30.0
         },
         "openai/gpt-5.6-luna": {
           "cache_read_per_mtok": 0.02,
           "cache_write_per_mtok": 0.25,
           "input_per_mtok": 0.2,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 1.2
         },
         "openai/gpt-5.6-sol": {
           "cache_read_per_mtok": 0.25,
           "cache_write_per_mtok": 3.125,
           "input_per_mtok": 2.5,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 15.0
         },
         "openai/gpt-5.6-terra": {
           "cache_read_per_mtok": 0.2,
           "cache_write_per_mtok": 2.5,
           "input_per_mtok": 2.0,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 12.0
         },
         "volcengine/doubao-seed-1-6": {
@@ -27179,66 +27337,77 @@
           "cache_read_per_mtok": 1.0,
           "cache_write_per_mtok": 12.5,
           "input_per_mtok": 10.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 50.0
         },
         "claude-haiku-4-5": {
           "cache_read_per_mtok": 0.1,
           "cache_write_per_mtok": 1.25,
           "input_per_mtok": 1.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 5.0
         },
         "claude-opus-4-5": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 25.0
         },
         "claude-opus-4-6": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 25.0
         },
         "claude-opus-4-7": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 25.0
         },
         "claude-opus-4-8": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 25.0
         },
         "claude-opus-5": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 25.0
         },
         "claude-sonnet-4": {
           "cache_read_per_mtok": 0.3,
           "cache_write_per_mtok": 3.75,
           "input_per_mtok": 3.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 15.0
         },
         "claude-sonnet-4-5": {
           "cache_read_per_mtok": 0.3,
           "cache_write_per_mtok": 3.75,
           "input_per_mtok": 3.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 15.0
         },
         "claude-sonnet-4-6": {
           "cache_read_per_mtok": 0.3,
           "cache_write_per_mtok": 3.75,
           "input_per_mtok": 3.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 15.0
         },
         "claude-sonnet-5": {
           "cache_read_per_mtok": 0.2,
           "cache_write_per_mtok": 2.5,
           "input_per_mtok": 2.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 10.0
         },
         "deepseek-v4-flash": {
@@ -27254,31 +27423,37 @@
         "gemini-3-flash": {
           "cache_read_per_mtok": 0.05,
           "input_per_mtok": 0.5,
+          "npm": "@ai-sdk/google",
           "output_per_mtok": 3.0
         },
         "gemini-3.1-pro": {
           "cache_read_per_mtok": 0.2,
           "input_per_mtok": 2.0,
+          "npm": "@ai-sdk/google",
           "output_per_mtok": 12.0
         },
         "gemini-3.5-flash": {
           "cache_read_per_mtok": 0.15,
           "input_per_mtok": 1.5,
+          "npm": "@ai-sdk/google",
           "output_per_mtok": 9.0
         },
         "gemini-3.5-flash-lite": {
           "cache_read_per_mtok": 0.03,
           "input_per_mtok": 0.3,
+          "npm": "@ai-sdk/google",
           "output_per_mtok": 2.5
         },
         "gemini-3.6-flash": {
           "cache_read_per_mtok": 0.15,
           "input_per_mtok": 1.5,
+          "npm": "@ai-sdk/google",
           "output_per_mtok": 7.5
         },
         "gemini-3.7-flash": {
           "cache_read_per_mtok": 0.15,
           "input_per_mtok": 1.5,
+          "npm": "@ai-sdk/google",
           "output_per_mtok": 7.5
         },
         "glm-5": {
@@ -27299,119 +27474,142 @@
         "gpt-5": {
           "cache_read_per_mtok": 0.107,
           "input_per_mtok": 1.07,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 8.5
         },
         "gpt-5-codex": {
           "cache_read_per_mtok": 0.107,
           "input_per_mtok": 1.07,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 8.5
         },
         "gpt-5-nano": {
           "cache_read_per_mtok": 0.005,
           "input_per_mtok": 0.05,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 0.4
         },
         "gpt-5.1": {
           "cache_read_per_mtok": 0.107,
           "input_per_mtok": 1.07,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 8.5
         },
         "gpt-5.1-codex": {
           "cache_read_per_mtok": 0.107,
           "input_per_mtok": 1.07,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 8.5
         },
         "gpt-5.1-codex-max": {
           "cache_read_per_mtok": 0.125,
           "input_per_mtok": 1.25,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 10.0
         },
         "gpt-5.1-codex-mini": {
           "cache_read_per_mtok": 0.025,
           "input_per_mtok": 0.25,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 2.0
         },
         "gpt-5.2": {
           "cache_read_per_mtok": 0.175,
           "input_per_mtok": 1.75,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 14.0
         },
         "gpt-5.2-codex": {
           "cache_read_per_mtok": 0.175,
           "input_per_mtok": 1.75,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 14.0
         },
         "gpt-5.3-codex": {
           "cache_read_per_mtok": 0.175,
           "input_per_mtok": 1.75,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 14.0
         },
         "gpt-5.3-codex-spark": {
           "cache_read_per_mtok": 0.175,
           "input_per_mtok": 1.75,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 14.0
         },
         "gpt-5.4": {
           "cache_read_per_mtok": 0.25,
           "input_per_mtok": 2.5,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 15.0
         },
         "gpt-5.4-mini": {
           "cache_read_per_mtok": 0.075,
           "input_per_mtok": 0.75,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 4.5
         },
         "gpt-5.4-nano": {
           "cache_read_per_mtok": 0.02,
           "input_per_mtok": 0.2,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 1.25
         },
         "gpt-5.4-pro": {
           "cache_read_per_mtok": 30.0,
           "input_per_mtok": 30.0,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 180.0
         },
         "gpt-5.5": {
           "cache_read_per_mtok": 0.5,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 30.0
         },
         "gpt-5.5-pro": {
           "cache_read_per_mtok": 30.0,
           "input_per_mtok": 30.0,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 180.0
         },
         "gpt-5.6-luna": {
           "cache_read_per_mtok": 0.02,
           "cache_write_per_mtok": 0.25,
           "input_per_mtok": 0.2,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 1.2
         },
         "gpt-5.6-sol": {
           "cache_read_per_mtok": 0.2,
           "cache_write_per_mtok": 2.5,
           "input_per_mtok": 2.0,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 10.0
         },
         "gpt-5.6-terra": {
           "cache_read_per_mtok": 0.25,
           "cache_write_per_mtok": 3.125,
           "input_per_mtok": 2.5,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 15.0
         },
         "grok-4.5": {
           "cache_read_per_mtok": 0.3,
           "input_per_mtok": 2.0,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 6.0
         },
         "grok-4.6": {
           "cache_read_per_mtok": 0.5,
           "input_per_mtok": 2.0,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 6.0
         },
         "grok-build-0.1": {
           "cache_read_per_mtok": 0.2,
           "input_per_mtok": 1.0,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 2.0
         },
         "kimi-k2.5": {
@@ -27462,11 +27660,13 @@
         "muse-spark-1.2": {
           "cache_read_per_mtok": 0.15,
           "input_per_mtok": 1.25,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 4.25
         },
         "muse-spark-1.2-contributor-free": {
           "cache_read_per_mtok": 0.0,
           "input_per_mtok": 0.0,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 0.0
         },
         "nemotron-3-ultra-free": {
@@ -27483,12 +27683,14 @@
           "cache_read_per_mtok": 0.02,
           "cache_write_per_mtok": 0.25,
           "input_per_mtok": 0.2,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 1.2
         },
         "qwen3.6-plus": {
           "cache_read_per_mtok": 0.05,
           "cache_write_per_mtok": 0.625,
           "input_per_mtok": 0.5,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 3.0
         }
       }
@@ -27534,11 +27736,13 @@
           "cache_read_per_mtok": 0.02,
           "cache_write_per_mtok": 0.25,
           "input_per_mtok": 0.2,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 1.2
         },
         "grok-4.6": {
           "cache_read_per_mtok": 0.5,
           "input_per_mtok": 2.0,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 6.0
         },
         "hy3": {
@@ -27584,16 +27788,19 @@
         "minimax-m2.7": {
           "cache_read_per_mtok": 0.06,
           "input_per_mtok": 0.3,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 1.2
         },
         "minimax-m3": {
           "cache_read_per_mtok": 0.06,
           "input_per_mtok": 0.3,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 1.2
         },
         "muse-spark-1.2-contributor": {
           "cache_read_per_mtok": 0.002,
           "input_per_mtok": 0.1,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 0.2
         },
         "qwen3.6-plus": {
@@ -27618,6 +27825,7 @@
           "cache_read_per_mtok": 0.016,
           "cache_write_per_mtok": 0.2,
           "input_per_mtok": 0.15,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 0.47
         },
         "qwen3.8-max": {
@@ -36246,6 +36454,7 @@
       "models": {
         "deepseek-v3.2": {
           "input_per_mtok": 0.28,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 0.42
         },
         "deepseek-v4-flash": {
@@ -36257,22 +36466,26 @@
         "deepseek-v4-pro": {
           "cache_read_per_mtok": 0.003625,
           "input_per_mtok": 0.435,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 0.87
         },
         "gemini-3.1-flash-lite-preview": {
           "cache_read_per_mtok": 0.025,
           "cache_write_per_mtok": 1.0,
           "input_per_mtok": 0.25,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 1.5
         },
         "gemini-3.1-pro-preview": {
           "cache_read_per_mtok": 0.2,
           "input_per_mtok": 2.0,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 12.0
         },
         "gemini-3.7-flash": {
           "cache_read_per_mtok": 0.075,
           "input_per_mtok": 0.75,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 3.75
         },
         "glm-5.2": {
@@ -36293,6 +36506,7 @@
         "gpt-5-mini": {
           "cache_read_per_mtok": 0.03,
           "input_per_mtok": 0.25,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 2.0
         },
         "gpt-5.1-codex": {
@@ -36318,21 +36532,25 @@
         "gpt-5.4": {
           "cache_read_per_mtok": 0.25,
           "input_per_mtok": 2.5,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 15.0
         },
         "gpt-5.4-mini": {
           "cache_read_per_mtok": 0.075,
           "input_per_mtok": 0.75,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 4.5
         },
         "gpt-5.4-nano": {
           "cache_read_per_mtok": 0.02,
           "input_per_mtok": 0.2,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 1.25
         },
         "gpt-5.5": {
           "cache_read_per_mtok": 0.5,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/openai-compatible",
           "output_per_mtok": 30.0
         },
         "gpt-5.6-luna": {
@@ -37118,78 +37336,91 @@
           "cache_read_per_mtok": 1.0,
           "cache_write_per_mtok": 12.5,
           "input_per_mtok": 10.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 50.0
         },
         "anthropic/claude-haiku-4.5": {
           "cache_read_per_mtok": 0.1,
           "cache_write_per_mtok": 1.25,
           "input_per_mtok": 1.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 5.0
         },
         "anthropic/claude-opus-4": {
           "cache_read_per_mtok": 1.5,
           "cache_write_per_mtok": 18.75,
           "input_per_mtok": 15.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 75.0
         },
         "anthropic/claude-opus-4.1": {
           "cache_read_per_mtok": 1.5,
           "cache_write_per_mtok": 18.75,
           "input_per_mtok": 15.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 75.0
         },
         "anthropic/claude-opus-4.5": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 25.0
         },
         "anthropic/claude-opus-4.6": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 25.0
         },
         "anthropic/claude-opus-4.7": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 25.0
         },
         "anthropic/claude-opus-4.8": {
           "cache_read_per_mtok": 0.5,
           "cache_write_per_mtok": 6.25,
           "input_per_mtok": 5.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 25.0
         },
         "anthropic/claude-sonnet-4": {
           "cache_read_per_mtok": 0.3,
           "cache_write_per_mtok": 3.75,
           "input_per_mtok": 3.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 15.0
         },
         "anthropic/claude-sonnet-4.5": {
           "cache_read_per_mtok": 0.3,
           "cache_write_per_mtok": 3.75,
           "input_per_mtok": 3.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 15.0
         },
         "anthropic/claude-sonnet-4.6": {
           "cache_read_per_mtok": 0.3,
           "cache_write_per_mtok": 3.75,
           "input_per_mtok": 3.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 15.0
         },
         "anthropic/claude-sonnet-5": {
           "cache_read_per_mtok": 0.2,
           "cache_write_per_mtok": 4.0,
           "input_per_mtok": 2.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 10.0
         },
         "anthropic/claude-sonnet-5-free": {
           "cache_read_per_mtok": 0.0,
           "cache_write_per_mtok": 0.0,
           "input_per_mtok": 0.0,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 0.0
         },
         "baidu/ernie-5.0-thinking-preview": {
@@ -37272,36 +37503,43 @@
           "cache_read_per_mtok": 0.03,
           "cache_write_per_mtok": 0.38,
           "input_per_mtok": 0.3,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 1.2
         },
         "minimax/minimax-m2.1": {
           "cache_read_per_mtok": 0.03,
           "cache_write_per_mtok": 0.38,
           "input_per_mtok": 0.3,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 1.2
         },
         "minimax/minimax-m2.5": {
           "cache_read_per_mtok": 0.03,
           "cache_write_per_mtok": 0.375,
           "input_per_mtok": 0.3,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 1.2
         },
         "minimax/minimax-m2.5-lightning": {
           "cache_read_per_mtok": 0.06,
           "cache_write_per_mtok": 0.75,
           "input_per_mtok": 0.6,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 4.8
         },
         "minimax/minimax-m2.7": {
           "input_per_mtok": 0.3055,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 1.2219
         },
         "minimax/minimax-m2.7-highspeed": {
           "input_per_mtok": 0.611,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 2.4439
         },
         "minimax/minimax-m3": {
           "input_per_mtok": 0.6,
+          "npm": "@ai-sdk/anthropic",
           "output_per_mtok": 2.4
         },
         "moonshotai/kimi-k2.5": {
@@ -37337,69 +37575,84 @@
         "openai/gpt-5": {
           "cache_read_per_mtok": 0.12,
           "input_per_mtok": 1.25,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 10.0
         },
         "openai/gpt-5-codex": {
           "cache_read_per_mtok": 0.12,
           "input_per_mtok": 1.25,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 10.0
         },
         "openai/gpt-5.1": {
           "cache_read_per_mtok": 0.12,
           "input_per_mtok": 1.25,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 10.0
         },
         "openai/gpt-5.1-chat": {
           "cache_read_per_mtok": 0.12,
           "input_per_mtok": 1.25,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 10.0
         },
         "openai/gpt-5.1-codex": {
           "cache_read_per_mtok": 0.12,
           "input_per_mtok": 1.25,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 10.0
         },
         "openai/gpt-5.1-codex-mini": {
           "cache_read_per_mtok": 0.03,
           "input_per_mtok": 0.25,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 2.0
         },
         "openai/gpt-5.2": {
           "cache_read_per_mtok": 0.17,
           "input_per_mtok": 1.75,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 14.0
         },
         "openai/gpt-5.2-codex": {
           "cache_read_per_mtok": 0.17,
           "input_per_mtok": 1.75,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 14.0
         },
         "openai/gpt-5.2-pro": {
           "input_per_mtok": 21.0,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 168.0
         },
         "openai/gpt-5.3-chat": {
           "input_per_mtok": 1.75,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 14.0
         },
         "openai/gpt-5.3-codex": {
           "input_per_mtok": 1.75,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 14.0
         },
         "openai/gpt-5.4": {
           "input_per_mtok": 3.75,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 18.75
         },
         "openai/gpt-5.4-mini": {
           "input_per_mtok": 0.75,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 4.5
         },
         "openai/gpt-5.4-nano": {
           "input_per_mtok": 0.2,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 1.25
         },
         "openai/gpt-5.4-pro": {
           "input_per_mtok": 45.0,
+          "npm": "@ai-sdk/openai",
           "output_per_mtok": 225.0
         },
         "openai/gpt-5.5": {
