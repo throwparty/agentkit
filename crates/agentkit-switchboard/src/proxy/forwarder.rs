@@ -1,6 +1,5 @@
 use crate::config::BillingModel;
 use crate::credential::ResolvedCredential;
-use crate::domain::conversation::ConversationHandler;
 use crate::domain::http::HttpEndpoint;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
 use axum::response::Response;
@@ -88,40 +87,9 @@ fn build_response(
     resp
 }
 
-fn local_outcome(
-    status: StatusCode,
-    body: String,
-    provider_identity: Option<&str>,
-    billing: Option<&BillingModel>,
-) -> ForwardOutcome {
-    let mut headers = HeaderMap::new();
-    if let Some(identity) = provider_identity {
-        headers.insert(
-            "X-Switchboard-Provider",
-            HeaderValue::from_str(identity).unwrap(),
-        );
-    }
-    if let Some(b) = billing {
-        headers.insert(
-            "X-Switchboard-Billing",
-            HeaderValue::from_str(&b.to_string()).unwrap(),
-        );
-    }
-    let mut resp = Response::new(axum::body::Body::from(body.clone()));
-    *resp.status_mut() = status;
-    *resp.headers_mut() = headers;
-    ForwardOutcome {
-        response: resp,
-        status,
-        headers: Vec::new(),
-        body_text: Some(body),
-    }
-}
-
 pub async fn forward_request(
     request: ForwardRequest<'_>,
     http: &dyn HttpEndpoint,
-    conversation: &dyn ConversationHandler,
 ) -> ForwardOutcome {
     let ForwardRequest {
         method,
@@ -138,20 +106,7 @@ pub async fn forward_request(
 
     let target_url = http.build_url(base_url, parsed_body.as_ref().unwrap_or(&Value::Null));
 
-    let request_body = match parsed_body {
-        Some(ref parsed) => match conversation.prepare_request(parsed.clone(), billing) {
-            Ok(translated) => serde_json::to_vec(&translated).unwrap_or_default(),
-            Err(msg) => {
-                return local_outcome(
-                    StatusCode::BAD_REQUEST,
-                    format!("request translation failed: {msg}"),
-                    Some(provider_identity),
-                    Some(billing),
-                );
-            }
-        },
-        None => body.to_vec(),
-    };
+    let request_body = body.to_vec();
 
     let mut out_headers = HeaderMap::new();
     for (key, value) in &headers {
@@ -237,15 +192,7 @@ pub async fn forward_request(
     }
 
     let raw = reqwest_resp.bytes().await.unwrap_or_default();
-    let body_bytes = if status.is_success() {
-        serde_json::from_slice::<serde_json::Value>(&raw)
-            .ok()
-            .and_then(|parsed| conversation.prepare_response(parsed, billing).ok())
-            .and_then(|translated| serde_json::to_vec(&translated).ok())
-            .unwrap_or_else(|| raw.to_vec())
-    } else {
-        raw.to_vec()
-    };
+    let body_bytes = raw.to_vec();
     let body_text = String::from_utf8_lossy(&body_bytes).to_string();
     let response = build_response(
         status,

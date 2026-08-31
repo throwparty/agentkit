@@ -28,7 +28,7 @@ Split OpenAiProvider into two surface-specific providers (chat-completions and r
 | Depends On | T-001 |
 | References | wire-format-decoupling, billing-decoupled |
 
-### T-003: Remove ConversationHandler translation layer
+### T-003: [x] Remove ConversationHandler translation layer
 
 Delete the ConversationHandler trait and its passthrough impls (OpenAiConversation, AnthropicConversation). Update the forwarder to pass request and response bodies through unchanged, removing prepare_request/prepare_response calls.
 

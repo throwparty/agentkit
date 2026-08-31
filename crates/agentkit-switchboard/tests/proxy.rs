@@ -9,9 +9,7 @@ use agentkit_switchboard::credential::{CredentialSource, ResolvedCredential};
 use agentkit_switchboard::models::db::ModelDb;
 use agentkit_switchboard::provider::registry::ProviderRegistry;
 use agentkit_switchboard::proxy::forwarder::{forward_request, ForwardRequest};
-use agentkit_switchboard::providers::openai::{
-    conversation::OpenAiConversation, OpenAiChatCompletionsProvider,
-};
+use agentkit_switchboard::providers::openai::OpenAiChatCompletionsProvider;
 use agentkit_switchboard::session::sqlite::SqliteSessionManager;
 use agentkit_switchboard::server::routes;
 use sqlx::SqlitePool;
@@ -137,7 +135,6 @@ async fn forwarder_preserves_upstream_content_type() {
             session_id: None,
         },
         &OpenAiChatCompletionsProvider,
-        &OpenAiConversation,
     )
     .await;
 

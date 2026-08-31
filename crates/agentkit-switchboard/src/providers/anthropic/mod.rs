@@ -1,8 +1,6 @@
 pub mod quota;
 
-use crate::config::BillingModel;
 use crate::credential::ResolvedCredential;
-use crate::domain::conversation::ConversationHandler;
 use crate::domain::http::HttpEndpoint;
 use axum::http::{HeaderMap, HeaderValue};
 use serde_json::Value;
@@ -27,18 +25,5 @@ impl HttpEndpoint for AnthropicProvider {
                 HeaderValue::from_static("2023-06-01"),
             );
         }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct AnthropicConversation;
-
-impl ConversationHandler for AnthropicConversation {
-    fn prepare_request(&self, body: Value, _billing: &BillingModel) -> Result<Value, String> {
-        Ok(body)
-    }
-
-    fn prepare_response(&self, body: Value, _billing: &BillingModel) -> Result<Value, String> {
-        Ok(body)
     }
 }
