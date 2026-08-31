@@ -1,6 +1,6 @@
 # Switchboard: API Surfaces
 
-**Status:** draft  **Created:** 2026-08-31  **Author:** adrian
+**Status:** implemented  **Created:** 2026-08-31  **Author:** adrian
 
 The switchboard (adrs/2026-06-14-switchboard) conflates three orthogonal concepts: wire format (API surface), billing model, and provider identity. ApiSurface::Openai selects /responses vs /chat/completions by billing model, and ProviderConfig forces one surface per provider. This makes it impossible to represent a gateway provider like OpenCode Zen (https://opencode.ai/docs/zen/), which serves models across three wire formats under one base URL and API key.
 
