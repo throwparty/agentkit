@@ -106,7 +106,7 @@ Confirm whether Zen's /messages endpoint accepts Authorization: Bearer or expect
 | Depends On |  |
 | References | auth-presentation, zen-auth |
 
-### T-009: Update and extend tests
+### T-009: [x] Update and extend tests
 
 Update existing tests for the renamed enum, removed translation, and new endpoints. Add tests for surface-aware routing (a responses request never selects a chat-completions provider) and native proxying (bodies pass through unchanged).
 
