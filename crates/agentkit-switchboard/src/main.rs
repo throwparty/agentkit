@@ -10,7 +10,7 @@ async fn main() -> std::process::ExitCode {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| format!("switchboard={}", cli.log_level).into()),
+                .unwrap_or_else(|_| format!("{}={}", env!("CARGO_CRATE_NAME"), cli.log_level).into()),
         )
         .init();
 
