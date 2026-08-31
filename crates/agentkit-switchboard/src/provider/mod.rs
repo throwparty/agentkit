@@ -2,7 +2,7 @@ pub mod router;
 pub mod quota;
 pub mod registry;
 
-use crate::config::{BillingModel, PricingConfig};
+use crate::config::{ApiSurface, BillingModel, PricingConfig};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProviderStatus {
@@ -20,6 +20,7 @@ pub struct ProviderRuntime {
 #[derive(Debug, Clone)]
 pub struct ProviderView {
     pub identity: String,
+    pub surface: ApiSurface,
     pub billing: BillingModel,
     pub models: Vec<String>,
     pub pricing: PricingConfig,
