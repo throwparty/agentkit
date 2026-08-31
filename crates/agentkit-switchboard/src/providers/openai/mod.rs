@@ -1,4 +1,3 @@
-pub mod conversation;
 pub mod quota;
 
 use crate::credential::ResolvedCredential;
