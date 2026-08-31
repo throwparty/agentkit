@@ -136,6 +136,13 @@ fn normalize_catalog(value: &Value) -> Result<Value, Box<dyn Error>> {
                     insert_cost(&mut pricing, cost, "cache_write", "cache_write_per_mtok");
                     insert_cost(&mut pricing, cost, "reasoning", "reasoning_per_mtok");
                 }
+                if let Some(npm) = model_entry
+                    .get("provider")
+                    .and_then(|v| v.get("npm"))
+                    .and_then(|v| v.as_str())
+                {
+                    pricing.insert("npm".to_string(), json!(npm));
+                }
                 prov_models.insert(model_id.clone(), Value::Object(pricing));
             }
         }
