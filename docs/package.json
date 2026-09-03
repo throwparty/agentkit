@@ -28,7 +28,7 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "vscode-jsonrpc": "9.0.1",
-    "vscode-languageserver-types": "3.18.0"
+    "vscode-languageserver-types": "3.18.3"
   },
   "devDependencies": {
     "@docusaurus/module-type-aliases": "^3.10.2",
