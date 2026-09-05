@@ -2,15 +2,15 @@
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
     "agentkit-lens-dev": {
-      "command": ["cargo", "-C", ".", "run", "--bin", "agentkit-lens", "stdio"],
+      "command": ["cargo", "run", "--manifest-path", "Cargo.toml", "--bin", "agentkit-lens", "stdio"],
       "type": "local",
     },
     "agentkit-litterbox-dev": {
       "command": [
         "cargo",
-        "-C",
-        ".",
         "run",
+        "--manifest-path",
+        "Cargo.toml",
         "--bin",
         "agentkit-litterbox",
         "stdio",
