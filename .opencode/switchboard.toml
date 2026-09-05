@@ -1,0 +1,90 @@
+credential_helper = "keychain"
+
+[[providers]]
+identity = "zen_chat"
+api_surface = "openai-chat-completions"
+base_url = "https://opencode.ai/zen/v1"
+billing = "pay_as_you_go"
+models = [
+  "big-pickle", "deepseek-v4-flash", "deepseek-v4-pro",
+  "glm-5", "glm-5.1", "glm-5.2", "kimi-k2.5", "kimi-k2.6",
+  "kimi-k2.7-code", "kimi-k3", "ling-3.0-flash-fin-free",
+  "mimo-v2.5-free", "minimax-m2.5", "minimax-m2.7",
+  "minimax-m3", "nemotron-3-ultra-free",
+  "nemotron-3.5-lightning-free",
+]
+
+[providers.auth]
+type = "bearer_token"
+
+[providers.pricing]
+input_per_mtok = 0
+output_per_mtok = 0
+
+[[providers]]
+identity = "zen_responses"
+api_surface = "openai-responses"
+base_url = "https://opencode.ai/zen/v1"
+billing = "pay_as_you_go"
+models = [
+  "gpt-5", "gpt-5-codex", "gpt-5-nano", "gpt-5.1",
+  "gpt-5.1-codex", "gpt-5.1-codex-max",
+  "gpt-5.1-codex-mini", "gpt-5.2", "gpt-5.2-codex",
+  "gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.4",
+  "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.4-pro", "gpt-5.5",
+  "gpt-5.5-pro", "gpt-5.6-luna", "gpt-5.6-sol",
+  "gpt-5.6-terra", "grok-4.5", "grok-4.6",
+  "grok-build-0.1", "muse-spark-1.2",
+  "muse-spark-1.2-contributor-free",
+]
+
+[providers.auth]
+type = "bearer_token"
+
+[providers.pricing]
+input_per_mtok = 0
+output_per_mtok = 0
+
+[[providers]]
+identity = "zen_messages"
+api_surface = "anthropic-messages"
+base_url = "https://opencode.ai/zen/v1"
+billing = "pay_as_you_go"
+models = [
+  "claude-fable-5", "claude-haiku-4-5", "claude-opus-4-5",
+  "claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8",
+  "claude-opus-5", "claude-sonnet-4", "claude-sonnet-4-5",
+  "claude-sonnet-4-6", "claude-sonnet-5", "qwen3.5-plus",
+  "qwen3.6-plus",
+]
+
+[providers.auth]
+type = "bearer_token"
+
+[providers.pricing]
+input_per_mtok = 0
+output_per_mtok = 0
+
+[[providers]]
+identity = "peacehaven_llama-swap"
+api_surface = "openai-chat-completions"
+base_url = "https://llama-swap.peacehaven.carrier.family/v1"
+billing = "free"
+models = [
+  "aeon-7-qwen3.6-35b-a3b-heretic-nvfp4",
+  "davidau-glm-4.7-flash-uncensored-heretic-neo-code-imatrix-max-gguf",
+  "google-gemma-4-26b-a4b-it",
+  "gemma4-26b-bf16-256k",
+  "glm4.7-flash-30b-q8-200k",
+  "nemotron3-120b-nvfp4-128k",
+  "qwen3-30b-bf16-40k",
+  "qwen3-30b-fp8-128k",
+  "qwen3.6-35b-nvfp4-256k",
+]
+
+[providers.auth]
+type = "none"
+
+[providers.pricing]
+input_per_mtok = 0
+output_per_mtok = 0
