@@ -1,35 +1,4 @@
-# [[providers]]
-# identity = "chatgpt_sub"
-# api_surface = "openai-responses"
-# base_url = "https://chatgpt.com/backend-api/codex"
-# billing = "subscription"
-# models = ["gpt-4o", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini"]
-
-# [providers.auth]
-# type = "bearer_token"
-
-# [providers.auth.oauth]
-# authorize_url = "https://auth.openai.com/oauth/authorize"
-# token_url = "https://auth.openai.com/oauth/token"
-# scopes = "openid profile email offline_access"
-
-# [providers.pricing]
-# input_per_mtok = 0
-# output_per_mtok = 0
-
-# [[providers]]
-# identity = "openai_payg"
-# api_surface = "openai-chat-completions"
-# base_url = "https://api.openai.com/v1"
-# billing = "pay_as_you_go"
-# models = ["gpt-5.4-mini"]
-
-# [providers.auth]
-# type = "bearer_token"
-
-# [providers.pricing]
-# input_per_mtok = 2.50
-# output_per_mtok = 10.00
+credential_helper = "keychain"
 
 [[providers]]
 identity = "zen_chat"
@@ -91,6 +60,30 @@ models = [
 
 [providers.auth]
 type = "bearer_token"
+
+[providers.pricing]
+input_per_mtok = 0
+output_per_mtok = 0
+
+[[providers]]
+identity = "peacehaven_llama-swap"
+api_surface = "openai-chat-completions"
+base_url = "https://llama-swap.peacehaven.carrier.family/v1"
+billing = "free"
+models = [
+  "aeon-7-qwen3.6-35b-a3b-heretic-nvfp4",
+  "davidau-glm-4.7-flash-uncensored-heretic-neo-code-imatrix-max-gguf",
+  "google-gemma-4-26b-a4b-it",
+  "gemma4-26b-bf16-256k",
+  "glm4.7-flash-30b-q8-200k",
+  "nemotron3-120b-nvfp4-128k",
+  "qwen3-30b-bf16-40k",
+  "qwen3-30b-fp8-128k",
+  "qwen3.6-35b-nvfp4-256k",
+]
+
+[providers.auth]
+type = "none"
 
 [providers.pricing]
 input_per_mtok = 0

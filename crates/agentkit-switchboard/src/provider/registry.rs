@@ -15,13 +15,20 @@ pub struct ProviderRegistry {
 }
 
 impl ProviderRegistry {
-    pub fn new(configs: &HashMap<String, ProviderConfig>, helper_name: &str) -> Self {
+    pub fn new(
+        configs: &HashMap<String, ProviderConfig>,
+        helper_name: &str,
+    ) -> Result<Self, String> {
         let mut states = HashMap::new();
         let mut quotas = HashMap::new();
         let provider_packs = build_provider_map(configs);
 
+        let mut missing: Vec<&str> = Vec::new();
         for (identity, cfg) in configs {
             let has_credential = credential::resolve_provider(helper_name, identity, cfg).is_some();
+            if !has_credential {
+                missing.push(identity);
+            }
             let status = if has_credential {
                 ProviderStatus::Healthy
             } else {
@@ -45,12 +52,32 @@ impl ProviderRegistry {
             quotas.insert(identity.clone(), quota);
         }
 
-        Self {
+        if !missing.is_empty() {
+            let suggestions: Vec<String> = missing
+                .iter()
+                .map(|identity| {
+                    let cfg = &configs[*identity];
+                    if cfg.auth.oauth.is_some() {
+                        format!("    switchboard auth login {identity}")
+                    } else {
+                        format!("    switchboard auth add {identity} <api-key>")
+                    }
+                })
+                .collect();
+            return Err(format!(
+                "missing credential for {} configured provider(s): {}\n  authenticate them before starting the proxy:\n{}",
+                missing.len(),
+                missing.join(", "),
+                suggestions.join("\n"),
+            ));
+        }
+
+        Ok(Self {
             configs: configs.clone(),
             provider_packs,
             states: Arc::new(RwLock::new(states)),
             quotas: Arc::new(RwLock::new(quotas)),
-        }
+        })
     }
 
     pub fn get_provider_pack(&self, identity: &str) -> Option<&ProviderPack> {

@@ -13,6 +13,8 @@ use agentkit_switchboard::config::{
 };
 use agentkit_switchboard::credential::helper;
 use agentkit_switchboard::credential::{CredentialSource, ResolvedCredential};
+use agentkit_switchboard::provider::registry::ProviderRegistry;
+use std::collections::HashMap;
 
 #[test]
 fn credential_parse_json_valid() {
@@ -132,4 +134,36 @@ fn credential_resolution_none_auth() {
             .unwrap();
     assert!(result.value.is_empty());
     assert!(matches!(result.source, CredentialSource::None));
+}
+
+#[test]
+fn registry_errors_when_credential_missing() {
+    let mut providers = HashMap::new();
+    providers.insert(
+        "openai_api_key".to_string(),
+        provider_with_auth(AuthType::BearerToken),
+    );
+    let err = match ProviderRegistry::new(&providers, "nonexistent-helper-xyz") {
+        Ok(_) => panic!("missing credential should fail startup"),
+        Err(e) => e,
+    };
+    assert!(
+        err.contains("openai_api_key"),
+        "error should name the missing provider: {err}"
+    );
+    assert!(
+        err.contains("auth add openai_api_key"),
+        "error should give remediation: {err}"
+    );
+}
+
+#[test]
+fn registry_accepts_none_auth_providers_without_credential() {
+    let mut providers = HashMap::new();
+    providers.insert(
+        "local".to_string(),
+        provider_with_auth(AuthType::None),
+    );
+    ProviderRegistry::new(&providers, "nonexistent-helper-xyz")
+        .expect("none auth providers need no stored credential");
 }

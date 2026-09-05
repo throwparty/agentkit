@@ -130,9 +130,18 @@ pub fn get(helper_name: &str, identity: &str) -> Option<ResolvedCredential> {
     };
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
+        let detail = if stderr.trim().is_empty() {
+            "no credential stored".to_string()
+        } else {
+            stderr.trim().to_string()
+        };
+        let code = output
+            .status
+            .code()
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| output.status.to_string());
         eprintln!(
-            "[helper-get] helper exited with code {}: {stderr}",
-            output.status
+            "[helper-get] no credential for '{identity}' (helper 'agentkit-credential-{helper_name}' exited with {code}): {detail}",
         );
         return None;
     }
