@@ -1,6 +1,6 @@
 [[providers]]
 identity = "bad_enum"
-api_surface = "openai"
+api_surface = "openai-chat-completions"
 base_url = "https://api.openai.com/v1"
 billing = "monthly"
 models = ["gpt-4o"]

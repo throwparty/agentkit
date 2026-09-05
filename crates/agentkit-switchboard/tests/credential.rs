@@ -105,7 +105,7 @@ fn credential_helper_get_with_mock_script() {
 fn provider_with_auth(auth_type: AuthType) -> ProviderConfig {
     ProviderConfig {
         identity: "openai_api_key".to_string(),
-        api_surface: ApiSurface::Openai,
+        api_surface: ApiSurface::OpenaiChatCompletions,
         base_url: "https://api.openai.com/v1".to_string(),
         billing: BillingModel::PayAsYouGo,
         auth: AuthConfig {

@@ -39,19 +39,22 @@ pub struct ProviderConfig {
     pub models: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ApiSurface {
-    #[serde(rename = "openai")]
-    Openai,
-    #[serde(rename = "anthropic")]
-    Anthropic,
+    #[serde(rename = "openai-chat-completions")]
+    OpenaiChatCompletions,
+    #[serde(rename = "openai-responses")]
+    OpenaiResponses,
+    #[serde(rename = "anthropic-messages")]
+    AnthropicMessages,
 }
 
 impl std::fmt::Display for ApiSurface {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Openai => write!(f, "openai"),
-            Self::Anthropic => write!(f, "anthropic"),
+            Self::OpenaiChatCompletions => write!(f, "openai-chat-completions"),
+            Self::OpenaiResponses => write!(f, "openai-responses"),
+            Self::AnthropicMessages => write!(f, "anthropic-messages"),
         }
     }
 }

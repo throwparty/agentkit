@@ -5,7 +5,7 @@ context_window = 128000
 
 [[providers]]
 identity = "test_provider"
-api_surface = "openai"
+api_surface = "openai-chat-completions"
 base_url = "https://api.openai.com/v1"
 billing = "pay_as_you_go"
 models = ["gpt-4o"]

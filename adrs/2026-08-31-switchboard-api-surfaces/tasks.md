@@ -1,0 +1,121 @@
+# Switchboard: API Surfaces
+
+## Tasks
+
+### T-001: [x] Rename ApiSurface enum
+
+Rename the ApiSurface enum variants from Openai/Anthropic to OpenaiChatCompletions, OpenaiResponses, AnthropicMessages, with serde renames openai-chat-completions, openai-responses, anthropic-messages. Update all match sites (pack_for_provider, Display impl).
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | cargo build succeeds; ApiSurface has exactly three variants with the new serde names; no Openai/Anthropic variants remain. |
+| Complexity | 🟢 Low |
+| Effort | 1-2h |
+| Depends On |  |
+| References | surface-renaming, surface-enum |
+
+### T-002: [x] Split OpenAI provider and decouple endpoint from billing
+
+Split OpenAiProvider into two surface-specific providers (chat-completions and responses). build_url maps surface to path directly (/chat/completions or /responses) instead of branching on billing. Move the Codex-specific headers (OpenAI-Beta, originator, ChatGPT-Account-Id) to the responses provider.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | build_url no longer takes billing to choose the path; a chat-completions provider always targets /chat/completions and a responses provider always targets /responses. |
+| Complexity | 🟡 Medium |
+| Effort | 2-4h |
+| Depends On | T-001 |
+| References | wire-format-decoupling, billing-decoupled |
+
+### T-003: [x] Remove ConversationHandler translation layer
+
+Delete the ConversationHandler trait and its passthrough impls (OpenAiConversation, AnthropicConversation). Update the forwarder to pass request and response bodies through unchanged, removing prepare_request/prepare_response calls.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | ConversationHandler is gone; forward_request no longer references it; bodies pass through byte-for-byte. |
+| Complexity | 🟢 Low |
+| Effort | 1-2h |
+| Depends On | T-001 |
+| References | proxy-native-routing, no-translation, native-proxy |
+
+### T-004: [x] Add Responses and Messages inbound endpoints
+
+Add POST /openai/v1/responses and POST /anthropic/v1/messages routes. Each route extracts the surface from its path and dispatches to the surface-aware router.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | curl to /openai/v1/responses and /anthropic/v1/messages reach the router with the correct surface; unknown paths still 404. |
+| Complexity | 🟡 Medium |
+| Effort | 2-3h |
+| Depends On | T-001 |
+| References | proxy-native-routing, native-proxy |
+
+### T-005: [x] Make routing surface-aware
+
+Add a surface field to ProviderView and thread a surface parameter through select_provider. Filter candidates by api_surface == surface in addition to serves_model.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | A request at /openai/v1/responses only considers openai-responses providers; a chat-completions provider is never selected for a responses request. |
+| Complexity | 🟡 Medium |
+| Effort | 2-3h |
+| Depends On | T-001, T-004 |
+| References | wire-format-decoupling, multi-surface-providers, multi-surface-config |
+
+### T-006: [x] Source Zen model metadata from models.dev
+
+Update agentkit-models build.rs to fetch and normalize the current models.dev catalog.json (model facts + provider pricing) into the ModelSnapshot JSON shape: map limit.context/limit.output to context_window/max_output, cost.input/cost.output/cost.cache_read/cost.cache_write to per-mtok fields, and tool_call/reasoning/structured_output to capabilities. Drop status-deprecated models from provider model sets. Vendor the normalized snapshot into data/models.dev.json.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | cargo build succeeds; the bundled snapshot contains the models.dev opencode provider with per-model pricing; deprecated models are absent from provider model sets. |
+| Complexity | 🟡 Medium |
+| Effort | 2-4h |
+| Depends On |  |
+| References | zen-model-metadata, model-deprecation |
+
+### T-007: [x] Add Zen provider entries to e2e.toml
+
+Add three Zen provider entries (zen_chat, zen_responses, zen_messages) to crates/agentkit-switchboard/e2e.toml with base_url https://opencode.ai/zen/v1, bearer_token auth, pay_as_you_go billing, and per-surface model lists from the models.dev opencode provider (npm @ai-sdk/openai to openai-responses, @ai-sdk/anthropic to anthropic-messages, @ai-sdk/openai-compatible to openai-chat-completions; Gemini deferred). Deprecated models are excluded from the routable set.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | crates/agentkit-switchboard/e2e.toml with the three Zen entries parses; each entry serves the correct models for its surface; deprecated models are not advertised. |
+| Complexity | 🟢 Low |
+| Effort | 1-2h |
+| Depends On | T-001, T-005, T-006 |
+| References | zen-provider, zen-model-metadata, zen-auth, zen-routing, model-deprecation, cross-provider-surface-variance |
+
+### T-008: [x] Verify Zen auth presentation on Messages surface
+
+Confirm whether Zen's /messages endpoint accepts Authorization: Bearer or expects x-api-key (the existing Anthropic surface uses x-api-key). Adjust the anthropic-messages inject_headers accordingly.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | A live request to Zen's /messages endpoint succeeds with the correct header; the anthropic-messages provider presents the key correctly. |
+| Complexity | 🟢 Low |
+| Effort | 1h |
+| Depends On |  |
+| References | auth-presentation, zen-auth |
+
+### T-009: [x] Update and extend tests
+
+Update existing tests for the renamed enum, removed translation, and new endpoints. Add tests for surface-aware routing (a responses request never selects a chat-completions provider) and native proxying (bodies pass through unchanged).
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | cargo test passes; new tests cover surface filtering and native proxying; no test references the removed ConversationHandler. |
+| Complexity | 🟡 Medium |
+| Effort | 3-4h |
+| Depends On | T-001, T-002, T-003, T-004, T-005, T-006, T-007 |
+| References | surface-enum, billing-decoupled, multi-surface-config, zen-routing, native-proxy, reuse-existing-clients |
+

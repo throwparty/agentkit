@@ -1,0 +1,30 @@
+flowchart LR
+    subgraph Inbound["Inbound endpoints (one per surface)"]
+        CC["POST /openai/v1/chat/completions"]
+        R["POST /openai/v1/responses"]
+        M["POST /anthropic/v1/messages"]
+    end
+
+    subgraph Surface["Wire format (ApiSurface)"]
+        OCC["openai-chat-completions"]
+        OR["openai-responses"]
+        AM["anthropic-messages"]
+    end
+
+    subgraph Providers["Providers (filtered by surface)"]
+        ZenCC["zen_chat"]
+        ZenR["zen_responses"]
+        ZenM["zen_messages"]
+        Codex["openai_codex_sub"]
+        OpenAI["openai_payg"]
+    end
+
+    CC --> OCC
+    R --> OR
+    M --> AM
+
+    OCC --> ZenCC
+    OCC --> OpenAI
+    OR --> ZenR
+    OR --> Codex
+    AM --> ZenM

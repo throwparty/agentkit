@@ -4,7 +4,7 @@ use crate::credential::ResolvedCredential;
 use crate::models::db::ModelDb;
 use crate::domain::quota::{backoff_duration, ProviderQuotaState};
 use crate::provider::registry::ProviderRegistry;
-use crate::provider::router::{select_provider, ProviderSelection, RoutingError};
+use crate::provider::router::{select_provider, RoutingError};
 use crate::proxy::forwarder;
 use crate::server::middleware::RequestId;
 use crate::session::sqlite::SqliteSessionManager;
@@ -35,6 +35,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             "/openai/v1/chat/completions",
             post(chat_completions_handler),
         )
+        .route("/openai/v1/responses", post(responses_handler))
+        .route("/anthropic/v1/messages", post(messages_handler))
         .route("/openai/v1/models", get(models_handler))
         .route("/health", get(health_handler))
         .layer(axum::middleware::from_fn(
@@ -82,30 +84,9 @@ fn switchboard_response(
 
 async fn log_routing_event(
     session_manager: &SqliteSessionManager,
-    session_id: &Option<String>,
-    request_id: &str,
-    model: &str,
-    selection: &ProviderSelection,
-    billing: &str,
-    status: StatusCode,
-    latency_ms: i64,
-    input_tokens: Option<i64>,
-    output_tokens: Option<i64>,
+    event: RoutingEvent,
 ) {
-    let _ = session_manager
-        .insert_routing_event(RoutingEvent {
-            session_id: session_id.clone(),
-            request_id: request_id.to_string(),
-            model_name: model.to_string(),
-            provider_identity: selection.identity.clone(),
-            billing_model: billing.to_string(),
-            decision_reason: selection_reason(&selection.reason).to_string(),
-            input_tokens,
-            output_tokens,
-            response_status: Some(status.as_u16() as i64),
-            latency_ms: Some(latency_ms),
-        })
-        .await;
+    let _ = session_manager.insert_routing_event(event).await;
 }
 
 async fn chat_completions_handler(
@@ -113,6 +94,55 @@ async fn chat_completions_handler(
     Extension(request_id): Extension<RequestId>,
     headers: axum::http::HeaderMap,
     body: axum::body::Bytes,
+) -> Response {
+    proxy_handler(
+        app_state,
+        request_id,
+        headers,
+        body,
+        crate::config::ApiSurface::OpenaiChatCompletions,
+    )
+    .await
+}
+
+async fn responses_handler(
+    State(app_state): State<Arc<AppState>>,
+    Extension(request_id): Extension<RequestId>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    proxy_handler(
+        app_state,
+        request_id,
+        headers,
+        body,
+        crate::config::ApiSurface::OpenaiResponses,
+    )
+    .await
+}
+
+async fn messages_handler(
+    State(app_state): State<Arc<AppState>>,
+    Extension(request_id): Extension<RequestId>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    proxy_handler(
+        app_state,
+        request_id,
+        headers,
+        body,
+        crate::config::ApiSurface::AnthropicMessages,
+    )
+    .await
+}
+
+async fn proxy_handler(
+    app_state: Arc<AppState>,
+    request_id: RequestId,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+    surface: crate::config::ApiSurface,
 ) -> Response {
     let session_id = crate::server::middleware::extract_session_id(&headers);
 
@@ -139,7 +169,7 @@ async fn chat_completions_handler(
     for attempt in 0..max_attempts {
         let providers = app_state.registry.get_states().await;
         let session_ref = session.as_ref();
-        let selection = match select_provider(&model, session_ref, &providers) {
+        let selection = match select_provider(&surface, &model, session_ref, &providers) {
             Ok(s) => s,
             Err(RoutingError::ModelNotFound) => {
                 return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "model not found"}))).into_response();
@@ -180,13 +210,14 @@ async fn chat_completions_handler(
                 session_ref,
                 &selection.identity,
                 &model,
+                &surface,
             )
             .await;
             session = Some(SessionAffinity {
                 session_id: sid.clone(),
                 provider_identity: selection.identity.clone(),
                 model_name: model.clone(),
-                api_surface: "openai".to_string(),
+                api_surface: surface.to_string(),
             });
         }
 
@@ -206,11 +237,11 @@ async fn chat_completions_handler(
                         session_id: session_id.as_deref(),
                     },
                     &*p.http,
-                    &*p.conversation,
                 )
                 .await
             }
             None => {
+                let fallback = crate::providers::pack_for_provider(configured_provider);
                 forwarder::forward_request(
                     forwarder::ForwardRequest {
                         method: axum::http::Method::POST,
@@ -222,8 +253,7 @@ async fn chat_completions_handler(
                         provider_identity: &selection.identity,
                         session_id: session_id.as_deref(),
                     },
-                    &crate::providers::openai::OpenAiProvider,
-                    &crate::providers::openai::conversation::OpenAiConversation,
+                    &*fallback.http,
                 )
                 .await
             }
@@ -248,15 +278,18 @@ async fn chat_completions_handler(
 
         log_routing_event(
             &app_state.session_manager,
-            &session_id,
-            &request_id.0,
-            &model,
-            &selection,
-            &billing,
-            status,
-            latency_ms,
-            input_tokens,
-            output_tokens,
+            RoutingEvent {
+                session_id: session_id.clone(),
+                request_id: request_id.0.clone(),
+                model_name: model.clone(),
+                provider_identity: selection.identity.clone(),
+                billing_model: billing.clone(),
+                decision_reason: selection_reason(&selection.reason).to_string(),
+                input_tokens,
+                output_tokens,
+                response_status: Some(status.as_u16() as i64),
+                latency_ms: Some(latency_ms),
+            },
         )
         .await;
 
@@ -313,6 +346,7 @@ async fn persist_session_assignment(
     existing: Option<&SessionAffinity>,
     provider_identity: &str,
     model: &str,
+    surface: &crate::config::ApiSurface,
 ) {
     if existing.is_some_and(|affinity| affinity.provider_identity != provider_identity) {
         let _ = session_manager
@@ -326,7 +360,7 @@ async fn persist_session_assignment(
     }
 
     let _ = session_manager
-        .assign(session_id, provider_identity, model, "openai")
+        .assign(session_id, provider_identity, model, &surface.to_string())
         .await;
 }
 

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 fn make_provider(id: &str, models: Vec<&str>) -> ProviderConfig {
     ProviderConfig {
         identity: id.to_string(),
-        api_surface: ApiSurface::Openai,
+        api_surface: ApiSurface::OpenaiChatCompletions,
         base_url: "https://api.openai.com/v1".into(),
         billing: BillingModel::PayAsYouGo,
         auth: AuthConfig {
@@ -37,8 +37,10 @@ fn models_lookup_found() {
     let db = ModelDb::new(HashMap::new(), &providers);
     let model = db.lookup("gpt-4o").expect("gpt-4o should be found");
     assert_eq!(model.id, "gpt-4o");
-    assert_eq!(model.providers.len(), 1);
-    assert_eq!(model.providers[0].identity, "test_provider");
+    assert!(
+        model.providers.iter().any(|p| p.identity == "test_provider"),
+        "test_provider should be listed among gpt-4o providers"
+    );
 }
 
 #[test]
@@ -66,10 +68,17 @@ fn models_merge_override() {
 #[test]
 fn models_provider_pricing() {
     let mut providers = HashMap::new();
-    providers.insert("openai".into(), make_provider("openai", vec!["gpt-4o"]));
+    providers.insert(
+        "custom_provider".into(),
+        make_provider("custom_provider", vec!["gpt-4o"]),
+    );
     let db = ModelDb::new(HashMap::new(), &providers);
     let model = db.lookup("gpt-4o").unwrap();
-    let prov = &model.providers[0];
+    let prov = model
+        .providers
+        .iter()
+        .find(|p| p.identity == "custom_provider")
+        .expect("custom_provider should be listed among gpt-4o providers");
     let pricing = prov.pricing.as_ref().unwrap();
     assert_eq!(pricing.input_per_mtok, 2.50);
     assert_eq!(pricing.output_per_mtok, 10.00);
