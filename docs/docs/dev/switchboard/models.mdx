@@ -1,0 +1,52 @@
+# Model metadata
+
+## Data source
+
+The switchboard ships with a bundled snapshot of model metadata from [models.dev](https://github.com/anomalyco/models.dev) — an open-source TOML registry that separates provider-agnostic model facts from provider-specific pricing. The snapshot is vendored at build time by the `agentkit-models` crate (a separate workspace crate with a `build.rs` that fetches and converts the models.dev data to JSON).
+
+Two layers of data:
+
+1. **Provider-agnostic model facts** (`models/<lab>/<model>.toml`): context window, max output, capabilities, modalities, knowledge cutoff, release date.
+2. **Provider-specific pricing** (`providers/<provider>/models/<model>.toml`): per-million-token costs. Inherits from `base_model` with overrides.
+
+## Merge order
+
+Model metadata is resolved in this precedence order (highest wins):
+
+1. **TOML `[models.*]` overrides** in the user's switchboard config file.
+2. **Bundled models.dev snapshot** (provider pricing merged on top of model-agnostic facts).
+3. **Built-in defaults** (empty — every model fact must come from a source above).
+
+The merge is field-level: if the user's TOML override only specifies `context_window`, only that field is replaced. All other fields from the bundled snapshot are preserved.
+
+## Model lookup
+
+Used by the routing algorithm to:
+1. Verify the requested model is known (unknown -> 503).
+2. Determine provider pricing for cost comparison during ranking.
+3. Assemble the `GET /openai/v1/models` response.
+
+```rust
+fn lookup(model_name: &str) -> Option<MergedModel>;
+fn provider_pricing(provider_identity: &str, model_name: &str) -> Option<PerModelPricing>;
+```
+
+## Pricing overlay
+
+Each provider in the TOML config specifies base pricing (`input_per_mtok`, `output_per_mtok`) with optional per-model overrides:
+
+```toml
+[providers.pricing]
+input_per_mtok = 2.50
+output_per_mtok = 10.00
+
+[providers.pricing.models."gpt-4o-mini"]
+input_per_mtok = 0.15
+output_per_mtok = 0.60
+```
+
+When a model has no per-model override, the provider's base pricing is used. The pricing feeds into the routing cost comparison: `est_tokens * price_per_token`.
+
+## Refresh cadence
+
+The models.dev snapshot is regenerated in CI on each release. A future improvement may add periodic refresh at runtime (e.g., weekly check for updated pricing). Between releases, users can override any field via `[models.*]` TOML in their config file.

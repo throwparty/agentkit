@@ -1,0 +1,8 @@
+{
+  "label": "🧰 Utilities",
+  "position": 300,
+  "link": {
+    "type": "generated-index",
+    "description": "Standalone utilities shipped with AgentKit and the interfaces you can implement to write your own."
+  }
+}

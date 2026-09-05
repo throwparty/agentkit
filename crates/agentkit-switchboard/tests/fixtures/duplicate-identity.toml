@@ -1,0 +1,27 @@
+[[providers]]
+identity = "dup_provider"
+api_surface = "openai"
+base_url = "https://api.openai.com/v1"
+billing = "pay_as_you_go"
+models = ["gpt-4o"]
+
+[providers.auth]
+type = "bearer_token"
+
+[providers.pricing]
+input_per_mtok = 1.0
+output_per_mtok = 1.0
+
+[[providers]]
+identity = "dup_provider"
+api_surface = "openai"
+base_url = "https://api.openai.com/v1"
+billing = "pay_as_you_go"
+models = ["gpt-4o"]
+
+[providers.auth]
+type = "bearer_token"
+
+[providers.pricing]
+input_per_mtok = 1.0
+output_per_mtok = 1.0
