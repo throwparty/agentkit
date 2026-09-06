@@ -80,7 +80,7 @@ Add #[tracing::instrument] at INFO level to proxy_handler, forwarder::forward_re
 | Depends On | T-004 |
 | References | hot-path-spans, phase-trace-tree |
 
-### T-007: Write hermetic tests and verify
+### T-007: [x] Write hermetic tests and verify
 
 Add switchboard tests using opentelemetry_sdk in-memory exporters asserting: a request produces the phase-span tree; switchboard.provider.latency and switchboard.http.requests are recorded with correct attributes; a tracing::info! produces both an OTel log record and stdout. Run cargo clippy --all-targets -- -D warnings and cargo test. Manually verify with OTEL_TRACES_EXPORTER=console that phase spans print to stdout.
 
