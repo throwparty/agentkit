@@ -87,6 +87,7 @@ fn build_response(
     resp
 }
 
+#[tracing::instrument(skip_all, fields(provider_identity = %request.provider_identity))]
 pub async fn forward_request(
     request: ForwardRequest<'_>,
     http: &dyn HttpEndpoint,

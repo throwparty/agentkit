@@ -55,6 +55,7 @@ impl SqliteSessionManager {
         Self { pool }
     }
 
+    #[tracing::instrument(skip_all, fields(session_id = %session_id))]
     pub async fn lookup(&self, session_id: &str) -> Result<Option<SessionAffinity>, SessionError> {
         let row = sqlx::query_as::<_, (String, String, String)>(SQL_LOOKUP)
             .bind(session_id)
@@ -69,6 +70,7 @@ impl SqliteSessionManager {
         }))
     }
 
+    #[tracing::instrument(skip_all, fields(session_id = %session_id, provider = %provider))]
     pub async fn assign(
         &self,
         session_id: &str,
@@ -89,6 +91,7 @@ impl SqliteSessionManager {
         Ok(())
     }
 
+    #[tracing::instrument(skip_all, fields(session_id = %session_id))]
     pub async fn update_tokens(
         &self,
         session_id: &str,

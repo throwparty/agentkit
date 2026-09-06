@@ -84,6 +84,7 @@ impl ProviderRegistry {
         self.provider_packs.get(identity)
     }
 
+    #[tracing::instrument(skip_all)]
     pub async fn get_states(&self) -> HashMap<String, ProviderView> {
         let mut quotas = self.quotas.write().await;
         let mut states = self.states.write().await;
@@ -141,6 +142,7 @@ impl ProviderRegistry {
         }
     }
 
+    #[tracing::instrument(skip_all, fields(provider_identity = %identity))]
     pub async fn record_response(
         &self,
         identity: &str,
