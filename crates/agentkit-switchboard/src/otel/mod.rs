@@ -1,0 +1,315 @@
+use opentelemetry::KeyValue;
+use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
+use opentelemetry_sdk::resource::{
+    EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector,
+};
+use opentelemetry_sdk::trace::SdkTracerProvider;
+use opentelemetry_sdk::Resource;
+use std::time::Duration;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExporterKind {
+    Otlp,
+    Console,
+    None,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TelemetryConfig {
+    pub traces: ExporterKind,
+    pub metrics: ExporterKind,
+    pub logs: ExporterKind,
+}
+
+impl TelemetryConfig {
+    pub fn from_env() -> Self {
+        Self {
+            traces: exporter_from_env("OTEL_TRACES_EXPORTER"),
+            metrics: exporter_from_env("OTEL_METRICS_EXPORTER"),
+            logs: exporter_from_env("OTEL_LOGS_EXPORTER"),
+        }
+    }
+
+    pub fn any_enabled(&self) -> bool {
+        self.traces != ExporterKind::None
+            || self.metrics != ExporterKind::None
+            || self.logs != ExporterKind::None
+    }
+}
+
+fn exporter_from_env(var: &str) -> ExporterKind {
+    match std::env::var(var) {
+        Ok(value) => parse_exporter_value(&value, var),
+        Err(_) => ExporterKind::None,
+    }
+}
+
+fn parse_exporter_value(value: &str, var: &str) -> ExporterKind {
+    let value = value.trim().to_ascii_lowercase();
+    match value.as_str() {
+        "otlp" => ExporterKind::Otlp,
+        "console" => ExporterKind::Console,
+        "none" | "" => ExporterKind::None,
+        other => {
+            tracing::warn!(
+                var,
+                value = other,
+                "unrecognised exporter value; disabling exporter"
+            );
+            ExporterKind::None
+        }
+    }
+}
+
+pub fn build_resource() -> Resource {
+    let service_name = std::env::var("OTEL_SERVICE_NAME")
+        .unwrap_or_else(|_| "agentkit-switchboard".to_string());
+
+    Resource::builder_empty()
+        .with_detector(Box::new(SdkProvidedResourceDetector))
+        .with_detector(Box::new(EnvResourceDetector::new()))
+        .with_detector(Box::new(TelemetryResourceDetector))
+        .with_attribute(KeyValue::new("service.name", service_name))
+        .with_attribute(KeyValue::new("service.version", env!("CARGO_PKG_VERSION")))
+        .build()
+}
+
+pub struct OtelProviders {
+    pub tracer_provider: Option<SdkTracerProvider>,
+    pub meter_provider: Option<SdkMeterProvider>,
+    pub logger_provider: Option<opentelemetry_sdk::logs::SdkLoggerProvider>,
+}
+
+pub fn build_providers(
+    config: &TelemetryConfig,
+) -> Result<OtelProviders, Box<dyn std::error::Error>> {
+    let resource = build_resource();
+
+    let tracer_provider = match config.traces {
+        ExporterKind::None => None,
+        _ => Some(build_tracer_provider(config.traces, resource.clone())?),
+    };
+    let meter_provider = match config.metrics {
+        ExporterKind::None => None,
+        _ => Some(build_meter_provider(config.metrics, resource.clone())?),
+    };
+    let logger_provider = match config.logs {
+        ExporterKind::None => None,
+        _ => Some(build_logger_provider(config.logs, resource)?),
+    };
+
+    Ok(OtelProviders {
+        tracer_provider,
+        meter_provider,
+        logger_provider,
+    })
+}
+
+fn build_tracer_provider(
+    kind: ExporterKind,
+    resource: Resource,
+) -> Result<SdkTracerProvider, Box<dyn std::error::Error>> {
+    let mut builder = SdkTracerProvider::builder().with_resource(resource);
+    match kind {
+        ExporterKind::Otlp => {
+            let exporter = opentelemetry_otlp::SpanExporter::builder()
+                .with_http()
+                .with_timeout(Duration::from_secs(10))
+                .build()?;
+            builder = builder.with_batch_exporter(exporter);
+        }
+        ExporterKind::Console => {
+            builder = builder.with_batch_exporter(opentelemetry_stdout::SpanExporter::default());
+        }
+        ExporterKind::None => unreachable!("caller guards None"),
+    }
+    Ok(builder.build())
+}
+
+fn build_meter_provider(
+    kind: ExporterKind,
+    resource: Resource,
+) -> Result<SdkMeterProvider, Box<dyn std::error::Error>> {
+    let mut builder = SdkMeterProvider::builder().with_resource(resource);
+    match kind {
+        ExporterKind::Otlp => {
+            let exporter = opentelemetry_otlp::MetricExporter::builder()
+                .with_http()
+                .with_timeout(Duration::from_secs(10))
+                .build()?;
+            let reader = PeriodicReader::builder(exporter)
+                .with_interval(Duration::from_secs(60))
+                .build();
+            builder = builder.with_reader(reader);
+        }
+        ExporterKind::Console => {
+            let reader = PeriodicReader::builder(opentelemetry_stdout::MetricExporter::default())
+                .with_interval(Duration::from_secs(60))
+                .build();
+            builder = builder.with_reader(reader);
+        }
+        ExporterKind::None => unreachable!("caller guards None"),
+    }
+    Ok(builder.build())
+}
+
+fn build_logger_provider(
+    kind: ExporterKind,
+    resource: Resource,
+) -> Result<opentelemetry_sdk::logs::SdkLoggerProvider, Box<dyn std::error::Error>> {
+    let mut builder = opentelemetry_sdk::logs::SdkLoggerProvider::builder().with_resource(resource);
+    match kind {
+        ExporterKind::Otlp => {
+            let exporter = opentelemetry_otlp::LogExporter::builder()
+                .with_http()
+                .with_timeout(Duration::from_secs(10))
+                .build()?;
+            builder = builder.with_batch_exporter(exporter);
+        }
+        ExporterKind::Console => {
+            builder = builder.with_batch_exporter(opentelemetry_stdout::LogExporter::default());
+        }
+        ExporterKind::None => unreachable!("caller guards None"),
+    }
+    Ok(builder.build())
+}
+
+pub struct ShutdownGuard {
+    tracer_provider: Option<SdkTracerProvider>,
+    meter_provider: Option<SdkMeterProvider>,
+    logger_provider: Option<opentelemetry_sdk::logs::SdkLoggerProvider>,
+}
+
+impl ShutdownGuard {
+    pub fn new(providers: OtelProviders) -> Self {
+        Self {
+            tracer_provider: providers.tracer_provider,
+            meter_provider: providers.meter_provider,
+            logger_provider: providers.logger_provider,
+        }
+    }
+}
+
+impl Drop for ShutdownGuard {
+    fn drop(&mut self) {
+        if let Some(tp) = self.tracer_provider.take() {
+            if let Err(error) = tp.shutdown() {
+                tracing::warn!(%error, "tracer provider shutdown failed");
+            }
+        }
+        if let Some(mp) = self.meter_provider.take() {
+            if let Err(error) = mp.shutdown() {
+                tracing::warn!(%error, "meter provider shutdown failed");
+            }
+        }
+        if let Some(lp) = self.logger_provider.take() {
+            if let Err(error) = lp.shutdown() {
+                tracing::warn!(%error, "logger provider shutdown failed");
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_exporter_value_maps_spec_values() {
+        assert_eq!(
+            parse_exporter_value("otlp", "OTEL_TRACES_EXPORTER"),
+            ExporterKind::Otlp
+        );
+        assert_eq!(
+            parse_exporter_value("OTLP", "OTEL_TRACES_EXPORTER"),
+            ExporterKind::Otlp
+        );
+        assert_eq!(
+            parse_exporter_value("  otlp  ", "OTEL_TRACES_EXPORTER"),
+            ExporterKind::Otlp
+        );
+        assert_eq!(
+            parse_exporter_value("console", "OTEL_TRACES_EXPORTER"),
+            ExporterKind::Console
+        );
+        assert_eq!(
+            parse_exporter_value("none", "OTEL_TRACES_EXPORTER"),
+            ExporterKind::None
+        );
+        assert_eq!(
+            parse_exporter_value("", "OTEL_TRACES_EXPORTER"),
+            ExporterKind::None
+        );
+    }
+
+    #[test]
+    fn parse_exporter_value_unknown_falls_back_to_none() {
+        assert_eq!(
+            parse_exporter_value("zipkin", "OTEL_TRACES_EXPORTER"),
+            ExporterKind::None
+        );
+        assert_eq!(
+            parse_exporter_value("prometheus", "OTEL_METRICS_EXPORTER"),
+            ExporterKind::None
+        );
+    }
+
+    #[test]
+    fn telemetry_config_any_enabled() {
+        let none = TelemetryConfig {
+            traces: ExporterKind::None,
+            metrics: ExporterKind::None,
+            logs: ExporterKind::None,
+        };
+        assert!(!none.any_enabled());
+
+        let mixed = TelemetryConfig {
+            traces: ExporterKind::Console,
+            metrics: ExporterKind::None,
+            logs: ExporterKind::Otlp,
+        };
+        assert!(mixed.any_enabled());
+    }
+
+    #[tokio::test]
+    async fn build_providers_console_traces() {
+        let config = TelemetryConfig {
+            traces: ExporterKind::Console,
+            metrics: ExporterKind::None,
+            logs: ExporterKind::None,
+        };
+        let providers = build_providers(&config).expect("console providers should build");
+        assert!(providers.tracer_provider.is_some());
+        assert!(providers.meter_provider.is_none());
+        assert!(providers.logger_provider.is_none());
+        drop(ShutdownGuard::new(providers));
+    }
+
+    #[tokio::test]
+    async fn build_providers_otlp_traces() {
+        let config = TelemetryConfig {
+            traces: ExporterKind::Otlp,
+            metrics: ExporterKind::None,
+            logs: ExporterKind::None,
+        };
+        let providers = build_providers(&config).expect("otlp providers should build");
+        assert!(providers.tracer_provider.is_some());
+        assert!(providers.meter_provider.is_none());
+        assert!(providers.logger_provider.is_none());
+        drop(ShutdownGuard::new(providers));
+    }
+
+    #[tokio::test]
+    async fn build_providers_none_builds_nothing() {
+        let config = TelemetryConfig {
+            traces: ExporterKind::None,
+            metrics: ExporterKind::None,
+            logs: ExporterKind::None,
+        };
+        let providers = build_providers(&config).expect("none config should build");
+        assert!(providers.tracer_provider.is_none());
+        assert!(providers.meter_provider.is_none());
+        assert!(providers.logger_provider.is_none());
+    }
+}

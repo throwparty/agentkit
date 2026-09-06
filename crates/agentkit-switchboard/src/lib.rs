@@ -1,6 +1,7 @@
 pub mod config;
 pub mod cli;
 pub mod models;
+pub mod otel;
 pub mod provider;
 pub mod proxy;
 pub mod credential;
