@@ -1,6 +1,6 @@
 # Switchboard: OpenTelemetry Integration
 
-**Status:** draft  **Created:** 2026-09-06  **Author:** adrian
+**Status:** implemented  **Created:** 2026-09-06  **Author:** adrian
 
 The switchboard (crates/agentkit-switchboard) has no structured observability: a plain tracing_subscriber::fmt() logger, no spans, no metrics, and no trace context. The OTel PoC (adrs/2026-07-15-otel-impl/poc-otel) validated the toolchain (opentelemetry 0.32, opentelemetry_sdk 0.32, opentelemetry-otlp 0.32, tracing-opentelemetry 0.33) with in-memory tests and otel-desktop-viewer; that ADR is complete. This ADR integrates the validated stack into the switchboard. Exporter selection follows the OTel SDK environment variable specification (OTEL_TRACES_EXPORTER, OTEL_METRICS_EXPORTER, OTEL_LOGS_EXPORTER with values otlp, console, none); the console exporter uses the upstream opentelemetry-stdout crate, and unset variables default to none (no export) so telemetry is fully opt-in. Separately, switchboard per-request latency is suspected to be dominated by synchronous SQLite writes and exclusive RwLock scans on the response path (routes.rs proxy_handler); hot-path spans will make each phase's duration visible so the hypothesis can be confirmed or refuted.
 
