@@ -54,7 +54,7 @@ init_telemetry(log_level) sets global providers for the enabled signals, then co
 | Depends On | T-002, T-003 |
 | References | otel-subscriber, dual-output, no-crash-without-collector, default-no-export |
 
-### T-005: Add metrics and record them
+### T-005: [x] Add metrics and record them
 
 Create src/otel/metrics.rs exposing a cached Metrics struct via the global meter: switchboard.http.requests counter (method, path, status_code) and switchboard.provider.latency histogram (provider_identity, model_name). Record the histogram in proxy_handler after the upstream forward (using the existing latency_ms) and the counter from a middleware after each HTTP response. No high-cardinality attributes.
 

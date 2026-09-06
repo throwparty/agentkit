@@ -1,4 +1,5 @@
 pub mod log_layer;
+pub mod metrics;
 
 use opentelemetry::logs::LoggerProvider;
 use opentelemetry::trace::TracerProvider;
