@@ -42,6 +42,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .layer(axum::middleware::from_fn(
             crate::server::middleware::request_id_middleware,
         ))
+        .layer(axum::middleware::from_fn(
+            crate::server::middleware::metrics_middleware,
+        ))
         .with_state(state)
 }
 
@@ -260,6 +263,17 @@ async fn proxy_handler(
         };
         let latency_ms = request_started.elapsed().as_millis() as i64;
         let status = outcome.status;
+
+        crate::otel::metrics::metrics().provider_latency.record(
+            latency_ms as f64,
+            &[
+                opentelemetry::KeyValue::new(
+                    "provider_identity",
+                    selection.identity.clone(),
+                ),
+                opentelemetry::KeyValue::new("model_name", model.clone()),
+            ],
+        );
 
         app_state
             .registry
