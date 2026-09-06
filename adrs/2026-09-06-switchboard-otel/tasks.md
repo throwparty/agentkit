@@ -15,7 +15,7 @@ Add the PoC-validated OTel crates to crates/agentkit-switchboard/Cargo.toml: ope
 | Depends On |  |
 | References | otel-subscriber, dependency-overhead |
 
-### T-002: Create otel module with exporter selection
+### T-002: [x] Create otel module with exporter selection
 
 Create src/otel/mod.rs: TelemetryConfig::from_env() reads OTEL_TRACES_EXPORTER, OTEL_METRICS_EXPORTER, OTEL_LOGS_EXPORTER per signal (case-insensitive otlp | console | none; unset selects none; unknown values log a warning and select none); build_resource() sets service.name from OTEL_SERVICE_NAME (fallback agentkit-switchboard) and service.version; per-signal providers use upstream exporters (opentelemetry-otlp for otlp, opentelemetry-stdout for console) with batch processors for traces/logs and a PeriodicReader for metrics; ShutdownGuard flushes all configured providers on drop.
 
