@@ -41,7 +41,7 @@ Copy the PoC log_layer.rs to src/otel/log_layer.rs unchanged: maps tracing::Leve
 | Depends On | T-001 |
 | References | otel-subscriber, logs-and-stdout |
 
-### T-004: Compose subscriber and wire main.rs
+### T-004: [x] Compose subscriber and wire main.rs
 
 init_telemetry(log_level) sets global providers for the enabled signals, then composes tracing_subscriber::registry() with fmt::layer(), tracing-opentelemetry::layer() (when traces enabled), OtelLogLayer (when logs enabled), and EnvFilter (RUST_LOG override; fallback {crate_name}={log_level}). On init failure it falls back to the current fmt-only subscriber. main.rs replaces tracing_subscriber::fmt().init() with otel::init_telemetry(&cli.log_level) and holds the ShutdownGuard for the process lifetime.
 
