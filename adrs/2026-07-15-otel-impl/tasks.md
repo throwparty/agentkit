@@ -17,7 +17,11 @@ decision: pending
 | 3 | Wire traces and metrics, compose subscriber | 1 day | Task 1, Task 2 | FR1, FR2, FR5, NFR5, NFR1 | §3.3.1, §3.3.2, §3.3.4, §3.5 |
 | 4 | Write offline in-memory unit tests | 1 day | Task 3 | FR1–FR6, NFR4 | §4.1 |
 | 5 | Manual integration test with otel-desktop-viewer | 1 day | Task 4 | All FRs, NFR1–NFR5 | §4.2, §4.4, §4.5 |
-| 6 | Integrate OTel into agentkit-switchboard | 2–3 days | Task 5 | §2.3, FR5, NFR2, NFR3 | §6 |
+
+---
+
+> **Note**: The original Task 6 ("Integrate OTel into agentkit-switchboard") was moved to
+> `adrs/2026-09-06-switchboard-otel`. This ADR covers the PoC only.
 
 ---
 
@@ -173,48 +177,6 @@ All tests pass with `cargo test` (no network, no external processes):
 
 **Note**: The switchboard warm build time is distorted because PoC deps were already compiled in the same workspace. True cold build will be measured after Task 6 integration.
 
-### Task 6: Integrate OTel into agentkit-switchboard
-
-**Summary**: Apply the patterns validated in Tasks 1-5 to `crates/agentkit-switchboard`. Add the OTel dependencies, create an `otel` module with `init_telemetry()`, replace the existing `tracing_subscriber::fmt().init()` with a layered subscriber, and add metric instruments at the route handler boundary.
-
-**Depends on**: Task 5 (PoC validated, crate versions known to work).
-
-**Acceptance Criteria**:
-- **Dependencies** (`Cargo.toml`): Add `opentelemetry`, `opentelemetry_sdk`, `opentelemetry-otlp`, `tracing-opentelemetry` at the same pinned versions validated in the PoC.
-- **New module** (`src/otel/mod.rs`): Contains `init_telemetry(log_level)` which:
-  - Creates shared Resource with `service.name = "agentkit-switchboard"` (read from `OTEL_SERVICE_NAME` with fallback)
-  - Creates OTLP HTTP/protobuf exporter reading `OTEL_EXPORTER_OTLP_ENDPOINT` (fallback `http://localhost:4318`)
-  - Creates all three providers (TracerProvider, MeterProvider, LoggerProvider)
-  - Returns `ShutdownGuard` that flushes all three on drop
-  - Lays the OtelLogLayer logic (copied from PoC, adapted to use switchboard's logger name)
-- **Modified** `src/main.rs`:
-  - Replace `tracing_subscriber::fmt().init()` with `otel::init_telemetry(&cli.log_level)`
-  - Preserve existing env-var-based log level (`RUST_LOG` or `--log-level`)
-  - Existing `tracing::info!()` / `tracing::warn!()` / `tracing::debug!()` calls continue working and produce both stdout output and OTel signals — **no changes to individual call sites**
-- **Metrics added** (`src/server/routes.rs` or new `otel/metrics.rs`):
-  - Counter `switchboard.http.requests` with attributes `method`, `path`, `status_code` — recorded after each HTTP response
-  - Histogram `switchboard.provider.latency` with attributes `provider_identity`, `model_name` — recorded after each upstream provider response
-- **No high-cardinality metric attributes**: Review that no metric instrument uses user IDs, session IDs, request IDs, or other dynamic values as attributes
-- **Build passes**: `cargo build` succeeds
-- **Existing tests pass**: `cargo test` in switchboard workspace passes
-- **Binary size**: Delta from baseline (measured in Task 5) is < 2MB
-
-**Test expectations**:
-- Existing switchboard test suite continues passing
-- New in-memory exporter tests for switchboard metrics (optional but recommended — at minimum the PoC tests cover signal correctness)
-- Manual verification: run switchboard + otel-desktop-viewer, confirm traces/logs from existing `tracing` calls appear, plus the two new metric instruments
-
-**Files to change**:
-- `crates/agentkit-switchboard/Cargo.toml` — add OTel dependencies
-- `crates/agentkit-switchboard/src/main.rs` — replace subscriber init
-- `crates/agentkit-switchboard/src/otel/mod.rs` — new file, init_telemetry + ShutdownGuard + OtelLogLayer
-- `crates/agentkit-switchboard/src/server/routes.rs` — add metric recording
-
-**Rollout**:
-- If binary size exceeds 2MB delta: switch to `opentelemetry-stdout` for dev-only export, defer OTLP to a feature flag
-- If compile time exceeds 30% delta: move OTel deps behind a `otel` feature flag in switchboard's Cargo.toml, default on
-- If a bug is found: disable OTel by reverting main.rs subscriber init to the original `fmt().init()` — no other code depends on OTel
-
 ## Implementation Sequence
 
 ```mermaid
@@ -224,9 +186,9 @@ flowchart LR
     tracesMetricsMain[Task 3: traces.rs + metrics.rs + main.rs]
     tests[Task 4: tests/in_memory.rs]
     verification[Task 5: manual verification]
-    switchboard[Task 6: switchboard integration]
 
-    setupRs --> logLayer --> tracesMetricsMain --> tests --> verification --> switchboard
+    setupRs --> logLayer --> tracesMetricsMain --> tests --> verification
 ```
 
-Tasks 1-5 are sequential within the PoC crate. Task 6 is separate (different crate) but depends on Task 5 for validation that the dependency set is correct.
+Tasks 1-5 are sequential within the PoC crate. The switchboard integration that Task 6 previously
+described is now owned by `adrs/2026-09-06-switchboard-otel`.

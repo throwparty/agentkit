@@ -1,0 +1,36 @@
+flowchart TB
+    subgraph App["agentkit-switchboard"]
+        main["main.rs"]
+        subgraph Subscriber["tracing_subscriber::registry()"]
+            fmt["fmt::Layer (stdout)"]
+            traceLayer["tracing-opentelemetry Layer"]
+            logLayer["OtelLogLayer"]
+            filter["EnvFilter"]
+        end
+        subgraph HotPath["proxy_handler (root span)"]
+            routing["get_states (routing)"]
+            forward["forward_request (upstream)"]
+            quota["record_response (quota)"]
+            dbWrite["log_routing_event / update_tokens (SQLite)"]
+        end
+        metrics["otel::metrics (global meter)"]
+    end
+    subgraph OTelSDK["OTel SDK providers"]
+        tp["TracerProvider (batch)"]
+        mp["MeterProvider (periodic)"]
+        lp["LoggerProvider (batch)"]
+    end
+    subgraph Collector["OTLP receiver"]
+        viewer["otel-desktop-viewer :4318"]
+    end
+
+    main --> Subscriber
+    HotPath --> traceLayer
+    HotPath --> logLayer
+    HotPath --> metrics
+    traceLayer --> tp
+    logLayer --> lp
+    metrics --> mp
+    tp --> viewer
+    mp --> viewer
+    lp --> viewer

@@ -555,85 +555,6 @@ The SDK's default batch processor settings provide reasonable behaviour for a lo
 
 These are acceptable for the PoC and switchboard. No tuning needed.
 
-## 6. Switchboard Integration Plan (Task 2.3)
-
-### 6.1 Current State
-
-`main.rs` currently initialises:
-```rust
-tracing_subscriber::fmt()
-    .with_env_filter(
-        tracing_subscriber::EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| format!("switchboard={}", cli.log_level).into()),
-    )
-    .init();
-```
-
-### 6.2 Target State
-
-Replace the single `fmt()` subscriber with a layered subscriber:
-
-```rust
-fn init_telemetry(log_level: &str) -> otel::ShutdownGuard {
-    let (tracer_provider, meter_provider, logger_provider, guard) = otel::init_otel();
-
-    let fmt_layer = tracing_subscriber::fmt::layer()
-        .with_target(true)
-        .with_level(true);
-
-    let otel_trace_layer = tracing_opentelemetry::layer()
-        .with_tracer(tracer_provider.tracer("agentkit-switchboard"));
-
-    let otel_log_layer = OtelLogLayer::new(logger_provider.logger("agentkit-switchboard"));
-
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| format!("switchboard={}", log_level).into());
-
-    tracing_subscriber::registry()
-        .with(fmt_layer)
-        .with(otel_trace_layer)
-        .with(otel_log_layer)
-        .with(filter)
-        .init();
-
-    guard
-}
-```
-
-### 6.3 Metrics Added
-
-In `server/routes.rs` (or a new `otel/metrics.rs` module), create instruments at the route handler boundary:
-
-| Instrument | Type | Attributes | Location |
-|---|---|---|---|
-| `switchboard.http.requests` | Counter | `method`, `path`, `status_code` | After response is sent |
-| `switchboard.provider.latency` | Histogram | `provider_identity`, `model_name` | After upstream response |
-
-### 6.4 Files to Change
-
-| File | Change |
-|---|---|
-| `Cargo.toml` | Add `opentelemetry`, `opentelemetry_sdk`, `opentelemetry-otlp`, `tracing-opentelemetry` (pinned versions) |
-| `src/main.rs` | Replace `tracing_subscriber::fmt().init()` with layered subscriber from `otel::init_telemetry()` |
-| `src/otel/mod.rs` | New module: `setup()`, `ShutdownGuard`, `OtelLogLayer` |
-| `src/server/routes.rs` | Add metric recording at route handler boundaries |
-
-### 6.5 Risks and Mitigations
-
-| Risk | Likelihood | Mitigation |
-|---|---|---|
-| Pre-1.0 OTel crate breaking changes | Medium | Pin exact versions. Wrap API behind internal `otel` module. Upgrade is a single-module change. |
-| OTel dependency increases switchboard binary >2MB | Low | Use HTTP/protobuf transport (not gRPC). Measure before merging. If over budget, evaluate `opentelemetry-stdout` for dev-only. |
-| `tracing-opentelemetry` version mismatch with `opentelemetry` SDK | Medium | PoC validates that `tracing-opentelemetry` 0.28 works with `opentelemetry` 0.28. Pin them together. |
-| Collector fan-out: developer must run otel-desktop-viewer | Low | Docker one-liner in README. No config needed beyond env vars. |
-| Metric high cardinality | Low | Review metric attributes in code review. No user IDs / session IDs on metric instruments. |
-
-### 6.6 Rollout Order
-
-1. **PoC** (this plan) — validate toolchain in isolated crate. No risk to workspace.
-2. **Switchboard integration** — apply patterns from PoC into one crate. Has test coverage before merge.
-3. **Workspace guidelines** — document the pattern (which crate versions, how to init, what NOT to do with metric attributes) so other crates can adopt consistently.
-
 ## 7. Spec Alignment Check
 
 The plan covers all spec requirements. No contradictions or gaps.
@@ -642,7 +563,6 @@ The plan covers all spec requirements. No contradictions or gaps.
 |---|---|---|
 | §2.1 PoC binary | §3.1 crate structure, §3.3 data flow | Covered |
 | §2.2 Survival with no collector | §3.5.1 failure path, §4.3 test | Covered |
-| §2.3 Switchboard integration | §6 full integration plan | Covered |
 | FR1 Traces | §3.2.1 tracer, §3.3.1 spans, §3.4.1 bridge | Covered |
 | FR2 Metrics | §3.2.2 meter, §3.3.2 instruments | Covered |
 | FR3 Logs | §3.2.3 logger, §3.3.3 log layer | Covered |
