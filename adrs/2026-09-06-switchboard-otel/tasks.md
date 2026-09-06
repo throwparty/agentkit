@@ -28,7 +28,7 @@ Create src/otel/mod.rs: TelemetryConfig::from_env() reads OTEL_TRACES_EXPORTER, 
 | Depends On |  |
 | References | exporter-selection, console-exporter, otlp-export, graceful-shutdown |
 
-### T-003: Port OtelLogLayer
+### T-003: [x] Port OtelLogLayer
 
 Copy the PoC log_layer.rs to src/otel/log_layer.rs unchanged: maps tracing::Level to Severity, event message to the log body, and event fields to attributes; emits via an SdkLogger.
 
