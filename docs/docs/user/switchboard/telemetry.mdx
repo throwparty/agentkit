@@ -1,0 +1,31 @@
+---
+sidebar_position: 100
+---
+
+# 📡 Telemetry
+
+Switchboard ships OpenTelemetry instrumentation for **traces, metrics, and logs** — but exports **nothing by default**. Telemetry is fully opt-in, per signal, via the standard OpenTelemetry environment variables. Ordinary stdout logging is unaffected.
+
+- **Traces**: each proxied request produces a span tree that breaks the request into its phases: routing, the upstream round trip, quota bookkeeping, and session-database writes.
+- **Metrics**: `switchboard.http.requests` (method, path, status code) and `switchboard.provider.latency` (provider, model).
+- **Logs**: the same log lines you see on stdout, available as structured records with their attributes.
+
+## Enabling telemetry
+
+Set the exporter for each signal individually:
+
+| Variable | Values | Default |
+|----------|--------|---------|
+| `OTEL_TRACES_EXPORTER` | `otlp` \| `console` \| `none` | `none` |
+| `OTEL_METRICS_EXPORTER` | `otlp` \| `console` \| `none` | `none` |
+| `OTEL_LOGS_EXPORTER` | `otlp` \| `console` \| `none` | `none` |
+
+- **`otlp`** sends to an OTLP receiver (e.g. a collector or viewer) at `OTEL_EXPORTER_OTLP_ENDPOINT` (default `http://localhost:4318`).
+- **`console`** prints the signal to standard output; no collector needed.
+- **`none`** disables a signal (the fallback :w
+- when a variable is unset or misspelled).
+
+Useful extras:
+
+- `OTEL_SERVICE_NAME` — how this instance appears in your telemetry backend (default `agentkit-switchboard`).
+- `RUST_LOG` — controls the normal stdout log lines, independent of OpenTelemetry.
