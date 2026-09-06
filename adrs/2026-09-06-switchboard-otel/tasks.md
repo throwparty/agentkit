@@ -2,7 +2,7 @@
 
 ## Tasks
 
-### T-001: Add OTel dependencies
+### T-001: [x] Add OTel dependencies
 
 Add the PoC-validated OTel crates to crates/agentkit-switchboard/Cargo.toml: opentelemetry 0.32 (trace, metrics, logs), opentelemetry_sdk 0.32 (trace, metrics, logs, testing, rt-tokio), opentelemetry-otlp 0.32 (http-proto, reqwest-blocking-client, trace, metrics, logs), opentelemetry-stdout 0.32, tracing-opentelemetry 0.33. Enable tracing's attributes feature and tracing-subscriber's registry feature. No feature gating of the OTel deps.
 

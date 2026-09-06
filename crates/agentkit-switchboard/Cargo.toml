@@ -13,9 +13,14 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "1"
 reqwest = { version = "0.12", features = ["stream", "json"] }
+opentelemetry = { version = "0.32", features = ["trace", "metrics", "logs"] }
+opentelemetry-otlp = { version = "0.32", features = ["http-proto", "reqwest-blocking-client", "trace", "metrics", "logs"] }
+opentelemetry_sdk = { version = "0.32", features = ["trace", "metrics", "logs", "testing", "rt-tokio"] }
+opentelemetry-stdout = "0.32"
 thiserror = "2"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+tracing = { version = "0.1", features = ["attributes"] }
+tracing-opentelemetry = "0.33"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter", "registry"] }
 uuid = { version = "1", features = ["v4"] }
 axum = { version = "0.8", features = ["macros"] }
 tower-http = { version = "0.6", features = ["cors", "trace"] }
