@@ -85,6 +85,7 @@ fn switchboard_response(
     (status, h, body).into_response()
 }
 
+#[tracing::instrument(skip_all)]
 async fn log_routing_event(
     session_manager: &SqliteSessionManager,
     event: RoutingEvent,
@@ -140,6 +141,7 @@ async fn messages_handler(
     .await
 }
 
+#[tracing::instrument(skip_all, fields(surface = %surface))]
 async fn proxy_handler(
     app_state: Arc<AppState>,
     request_id: RequestId,

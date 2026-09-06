@@ -67,7 +67,7 @@ Create src/otel/metrics.rs exposing a cached Metrics struct via the global meter
 | Depends On | T-002 |
 | References | http-request-metric, provider-latency-metric, no-high-cardinality-metrics |
 
-### T-006: Add hot-path spans
+### T-006: [x] Add hot-path spans
 
 Add #[tracing::instrument] at INFO level to proxy_handler, forwarder::forward_request, registry::get_states, registry::record_response, routes::log_routing_event, and session::sqlite update_tokens, assign, lookup so each request produces a phase-span tree.
 
