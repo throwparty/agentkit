@@ -33,10 +33,6 @@ Build a standalone throwaway binary that emits a trace tree, a counter + histogr
 
 The PoC must not crash when no OTLP receiver is available. Exporter errors must be logged as warnings, not panics. Confirm that when the collector starts later, subsequent runs export normally.
 
-### 2.3 Add OTel to agentkit-switchboard without rewriting existing tracing calls
-
-Integrate OTel into the switchboard crate by adding subscriber layers, not by changing individual `tracing::info!()` / `tracing::warn!()` / `tracing::debug!()` call sites. Add manual metric instruments at the route handler boundary. Verify that existing stdout logging still works alongside OTel export.
-
 ## 3. Functional Requirements
 
 ### FR1: Trace Emission
