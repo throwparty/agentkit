@@ -1,0 +1,87 @@
+# Telemetry
+
+Switchboard ships OpenTelemetry instrumentation for traces, metrics, and logs, built on the Rust OpenTelemetry SDK (`opentelemetry`, `opentelemetry-sdk`, `opentelemetry-otlp`, `opentelemetry-stdout`, and `tracing-opentelemetry`). For enabling and viewing telemetry, see [Telemetry](../../user/switchboard/telemetry).
+
+## Exporter selection
+
+The switchboard reads each signal's exporter selection in code via `otel::TelemetryConfig::from_env` — the Rust SDK does not auto-configure it. Each value maps to an upstream exporter:
+
+| Value | Exporter |
+|-------|----------|
+| `otlp` | `opentelemetry-otlp` (HTTP/protobuf) |
+| `console` | `opentelemetry-stdout` |
+| unset / `none` / unknown | no exporter (unknown logs a warning) |
+
+`otel::build_providers` then builds only the enabled signals — batch processors for traces and logs, a periodic reader (60s) for metrics.
+
+## Resource
+
+`build_resource` sets `service.name` from `OTEL_SERVICE_NAME` (default `agentkit-switchboard`) and `service.version` from the crate version, shared across all signals.
+
+## Subscriber composition
+
+With at least one signal enabled, the switchboard installs a layered `tracing` subscriber:
+
+- `fmt` layer — human-readable stdout logs (always present, controlled by `RUST_LOG`, falling back to `{crate_name}={--log-level}`).
+- `tracing-opentelemetry` trace layer — only when `OTEL_TRACES_EXPORTER` is enabled.
+- `OtelLogLayer` — forwards `tracing` events to the OpenTelemetry logger, only when `OTEL_LOGS_EXPORTER` is enabled.
+
+A single `tracing::info!()` therefore produces both the stdout line and the OpenTelemetry signal when enabled. With no exporter selected the subscriber is fmt-only; if OpenTelemetry initialisation fails, `init_telemetry` falls back to fmt-only and warns.
+
+## Traces: hot-path spans
+
+The request path is instrumented with `#[tracing::instrument]` spans. Each proxied request produces a tree rooted at `proxy_handler`, with child spans timing each phase:
+
+| Span | What it measures |
+|------|------------------|
+| `proxy_handler` | Total request handling (root span; carries `surface`) |
+| `get_states` | Routing: provider-state lock + scan |
+| `forward_request` | Upstream HTTP round trip (carries `provider_identity`) |
+| `record_response` | Quota/registry state update |
+| `log_routing_event` | `routing_events` SQLite insert |
+| `lookup`, `assign`, `update_tokens` | Session DB reads/writes (when a session id is present) |
+
+## Metrics
+
+Two instruments are recorded via the global meter:
+
+| Instrument | Type | Attributes | Recorded |
+|-----------|------|------------|----------|
+| `switchboard.http.requests` | Counter | `method`, `path`, `status_code` | After each HTTP response |
+| `switchboard.provider.latency` | Histogram | `provider_identity`, `model_name` | After each upstream forward |
+
+No user IDs, session IDs, or request IDs are used as metric attributes (they belong on spans/logs only).
+
+## Logs
+
+`OtelLogLayer` maps each `tracing` event to an OpenTelemetry log record: level → severity, message → body, and event fields → attributes.
+
+## Viewing telemetry
+
+Console sink — no collector needed:
+
+```bash
+OTEL_TRACES_EXPORTER=console OTEL_METRICS_EXPORTER=console OTEL_LOGS_EXPORTER=console \
+  cargo run -p agentkit-switchboard -- --config crates/agentkit-switchboard/e2e.toml
+```
+
+Spans, metrics (flushed on shutdown), and log records print to stdout.
+
+Run the bundled viewer:
+
+```bash
+otel-desktop-viewer
+```
+
+It listens on OTLP HTTP at `:4318` and exposes its web UI at `http://localhost:8000`. Then run the proxy:
+
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
+  cargo run -p agentkit-switchboard -- --config crates/agentkit-switchboard/e2e.toml
+```
+
+Open `http://localhost:8000` to inspect traces, metrics, and logs.
+
+## Testing
+
+Hermetic tests in `tests/traces.rs`, `tests/metrics.rs`, and `tests/logs.rs` use the SDK's in-memory exporters to assert the phase-span tree, the two metrics with their attributes, and that a `tracing` call produces both an OTel log record and stdout — no collector required.
