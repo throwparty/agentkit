@@ -7,12 +7,7 @@ use clap::{CommandFactory, Parser};
 async fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| format!("{}={}", env!("CARGO_CRATE_NAME"), cli.log_level).into()),
-        )
-        .init();
+    let _telemetry = agentkit_switchboard::otel::init_telemetry(&cli.log_level);
 
     match config::loader::load_config(&cli.config) {
         Ok(mut cfg) => {

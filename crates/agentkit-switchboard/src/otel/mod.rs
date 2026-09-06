@@ -1,5 +1,7 @@
 pub mod log_layer;
 
+use opentelemetry::logs::LoggerProvider;
+use opentelemetry::trace::TracerProvider;
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
@@ -9,6 +11,9 @@ use opentelemetry_sdk::resource::{
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_sdk::Resource;
 use std::time::Duration;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::Layer;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExporterKind {
@@ -61,6 +66,77 @@ fn parse_exporter_value(value: &str, var: &str) -> ExporterKind {
             );
             ExporterKind::None
         }
+    }
+}
+
+pub fn init_telemetry(log_level: &str) -> ShutdownGuard {
+    let config = TelemetryConfig::from_env();
+    if !config.any_enabled() {
+        init_fmt_only(log_level);
+        return ShutdownGuard::new(empty_providers());
+    }
+
+    let providers = match build_providers(&config) {
+        Ok(providers) => providers,
+        Err(error) => {
+            tracing::warn!(%error, "OTel initialisation failed; falling back to stdout logging");
+            init_fmt_only(log_level);
+            return ShutdownGuard::new(empty_providers());
+        }
+    };
+
+    if let Some(tp) = &providers.tracer_provider {
+        opentelemetry::global::set_tracer_provider(tp.clone());
+    }
+    if let Some(mp) = &providers.meter_provider {
+        opentelemetry::global::set_meter_provider(mp.clone());
+    }
+
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        tracing_subscriber::EnvFilter::new(format!(
+            "{}={}",
+            env!("CARGO_CRATE_NAME"),
+            log_level
+        ))
+    });
+
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .with_target(true)
+        .with_level(true);
+
+    let mut layers: Vec<Box<dyn Layer<tracing_subscriber::Registry> + Send + Sync>> =
+        Vec::new();
+    layers.push(Box::new(fmt_layer));
+    if let Some(tp) = &providers.tracer_provider {
+        let tracer = tp.tracer("agentkit-switchboard");
+        layers.push(Box::new(tracing_opentelemetry::layer().with_tracer(tracer)));
+    }
+    if let Some(lp) = &providers.logger_provider {
+        let logger = lp.logger("agentkit-switchboard");
+        layers.push(Box::new(log_layer::OtelLogLayer::new(logger)));
+    }
+    layers.push(Box::new(filter));
+
+    tracing_subscriber::registry().with(layers).init();
+
+    ShutdownGuard::new(providers)
+}
+
+fn init_fmt_only(log_level: &str) {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                format!("{}={}", env!("CARGO_CRATE_NAME"), log_level).into()
+            }),
+        )
+        .init();
+}
+
+fn empty_providers() -> OtelProviders {
+    OtelProviders {
+        tracer_provider: None,
+        meter_provider: None,
+        logger_provider: None,
     }
 }
 
