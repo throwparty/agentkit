@@ -33,10 +33,11 @@ pub struct TelemetryConfig {
 
 impl TelemetryConfig {
     pub fn from_env() -> Self {
+        let endpoint_set = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").is_ok();
         Self {
-            traces: exporter_from_env("OTEL_TRACES_EXPORTER"),
-            metrics: exporter_from_env("OTEL_METRICS_EXPORTER"),
-            logs: exporter_from_env("OTEL_LOGS_EXPORTER"),
+            traces: or_otlp_if_endpoint("OTEL_TRACES_EXPORTER", endpoint_set),
+            metrics: or_otlp_if_endpoint("OTEL_METRICS_EXPORTER", endpoint_set),
+            logs: or_otlp_if_endpoint("OTEL_LOGS_EXPORTER", endpoint_set),
         }
     }
 
@@ -47,9 +48,10 @@ impl TelemetryConfig {
     }
 }
 
-fn exporter_from_env(var: &str) -> ExporterKind {
+fn or_otlp_if_endpoint(var: &str, endpoint_set: bool) -> ExporterKind {
     match std::env::var(var) {
         Ok(value) => parse_exporter_value(&value, var),
+        Err(_) if endpoint_set => ExporterKind::Otlp,
         Err(_) => ExporterKind::None,
     }
 }
