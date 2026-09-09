@@ -60,6 +60,7 @@
               openssl
               otel-desktop-viewer
               pkg-config
+              prettier
               python3
               rustup
               shellcheck
@@ -91,6 +92,7 @@
                 printf "cargo-binstall %s\n" "$(${getExe cargo-binstall} --version 2>/dev/null || true)"
                 printf "cargo-zigbuild %s\n" "$(${getExe cargo-zigbuild} --version 2>/dev/null || true)"
                 ${getExe cosign} --version
+                printf "prettier %s\n" "$(${getExe prettier} --version)"
                 ${getExe syft} --version
                 printf "shellcheck %s\n" "$(${getExe shellcheck} --version | grep '^version:' | awk '{print $2}')"
                 printf "toml-sort %s\n" "$(${getExe toml-sort} --version)"
@@ -114,6 +116,7 @@
                 openssl
                 otel-desktop-viewer
                 pkg-config
+                prettier
                 python3
                 rustToolchain
                 rustup-wrapped
