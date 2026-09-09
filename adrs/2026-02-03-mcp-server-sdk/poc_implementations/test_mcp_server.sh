@@ -78,10 +78,6 @@ fi
 
 # Test 2: List available tools
 log_test "Test 2: List available tools"
-LIST_TOOLS_REQUEST=$(cat <<EOF
-{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
-EOF
-)
 
 # We need to send initialize + initialized notification + list tools
 SEQUENCE=$(cat <<EOF

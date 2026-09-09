@@ -1,3 +1,4 @@
+# shellcheck disable=SC1091
 load '../test_helper/common'
 
 setup() {
