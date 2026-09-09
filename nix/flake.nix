@@ -64,6 +64,7 @@
               rustup
               shellcheck
               syft
+              toml-sort
               yq-go
               zig
               ;
@@ -92,6 +93,7 @@
                 ${getExe cosign} --version
                 ${getExe syft} --version
                 printf "shellcheck %s\n" "$(${getExe shellcheck} --version | grep '^version:' | awk '{print $2}')"
+                printf "toml-sort %s\n" "$(${getExe toml-sort} --version)"
                 printf "yq %s\n" "$(${getExe yq-go} --version 2>/dev/null || true)"
                 ${getExe zig} version
               '';
@@ -117,6 +119,7 @@
                 rustup-wrapped
                 shellcheck
                 syft
+                toml-sort
                 yq-go
                 zig
               ];
