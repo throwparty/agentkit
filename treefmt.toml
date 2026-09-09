@@ -8,4 +8,5 @@ includes = ["*.md"]
 
 [formatter.toml-sort]
 command = "toml-sort"
+options = ["--in-place"]
 includes = ["*.toml"]
