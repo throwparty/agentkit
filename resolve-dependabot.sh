@@ -39,12 +39,12 @@ ver_cmp() {
 }
 
 in_vuln_range() {
-  local ver=$1 gte= gt= lte= lt=
+  local ver=$1 gte='' gt='' lte='' lt=''
   local IFS=,
   for part in $vuln; do
     part="${part#"${part%%[! ]*}"}"
     local op="${part%%[!><=]*}"
-    local val="${part#$op}"; val="${val# }"
+    local val="${part#"$op"}"; val="${val# }"
     case "$op" in ">=") gte=$val;; ">") gt=$val;; "<=") lte=$val;; "<") lt=$val;; esac
   done
   [[ -z "$gte" ]] || { ver_cmp "$ver" "$gte"; (( $? != 1 )) || return 1; }
@@ -61,7 +61,6 @@ locked_versions() {
 # --- scan Cargo.lock ---
 echo "--- scanning Cargo.lock ---"
 lock="$crate_dir/Cargo.lock"
-toml="$crate_dir/Cargo.toml"
 [[ -f "$lock" ]] || { echo "  Cargo.lock not found: $lock" >&2; exit 1; }
 
 all_versions=$(locked_versions "$pkg")
