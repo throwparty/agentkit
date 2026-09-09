@@ -9,7 +9,8 @@ use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::resource::{
     EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector,
 };
-use opentelemetry_sdk::trace::SdkTracerProvider;
+use opentelemetry_sdk::logs::{BatchLogProcessor, BatchConfigBuilder as LogBatchConfigBuilder};
+use opentelemetry_sdk::trace::{BatchSpanProcessor, BatchConfigBuilder as TraceBatchConfigBuilder, SdkTracerProvider};
 use opentelemetry_sdk::Resource;
 use std::time::Duration;
 use tracing_subscriber::layer::SubscriberExt;
@@ -190,16 +191,27 @@ fn build_tracer_provider(
     resource: Resource,
 ) -> Result<SdkTracerProvider, Box<dyn std::error::Error>> {
     let mut builder = SdkTracerProvider::builder().with_resource(resource);
+    let batch_config = TraceBatchConfigBuilder::default()
+        .with_scheduled_delay(Duration::from_secs(30))
+        .build();
     match kind {
         ExporterKind::Otlp => {
             let exporter = opentelemetry_otlp::SpanExporter::builder()
                 .with_http()
                 .with_timeout(Duration::from_secs(10))
                 .build()?;
-            builder = builder.with_batch_exporter(exporter);
+            builder = builder.with_span_processor(
+                BatchSpanProcessor::builder(exporter)
+                    .with_batch_config(batch_config)
+                    .build(),
+            );
         }
         ExporterKind::Console => {
-            builder = builder.with_batch_exporter(opentelemetry_stdout::SpanExporter::default());
+            builder = builder.with_span_processor(
+                BatchSpanProcessor::builder(opentelemetry_stdout::SpanExporter::default())
+                    .with_batch_config(batch_config)
+                    .build(),
+            );
         }
         ExporterKind::None => unreachable!("caller guards None"),
     }
@@ -238,16 +250,27 @@ fn build_logger_provider(
     resource: Resource,
 ) -> Result<opentelemetry_sdk::logs::SdkLoggerProvider, Box<dyn std::error::Error>> {
     let mut builder = opentelemetry_sdk::logs::SdkLoggerProvider::builder().with_resource(resource);
+    let batch_config = LogBatchConfigBuilder::default()
+        .with_scheduled_delay(Duration::from_secs(30))
+        .build();
     match kind {
         ExporterKind::Otlp => {
             let exporter = opentelemetry_otlp::LogExporter::builder()
                 .with_http()
                 .with_timeout(Duration::from_secs(10))
                 .build()?;
-            builder = builder.with_batch_exporter(exporter);
+            builder = builder.with_log_processor(
+                BatchLogProcessor::builder(exporter)
+                    .with_batch_config(batch_config)
+                    .build(),
+            );
         }
         ExporterKind::Console => {
-            builder = builder.with_batch_exporter(opentelemetry_stdout::LogExporter::default());
+            builder = builder.with_log_processor(
+                BatchLogProcessor::builder(opentelemetry_stdout::LogExporter::default())
+                    .with_batch_config(batch_config)
+                    .build(),
+            );
         }
         ExporterKind::None => unreachable!("caller guards None"),
     }
