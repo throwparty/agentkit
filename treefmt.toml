@@ -1,12 +1,62 @@
-[formatter.nixfmt]
-command = "nixfmt"
-includes = ["*.nix"]
+# XXX: neither --fmt nor --dump format only named files
+
+[formatter.just]
+command = "hack/fmt/just-fmt.sh"
+includes = ["justfile", "mod.just"]
 
 [formatter.mdformat]
 command = "mdformat"
 includes = ["*.md"]
 
+[formatter.nixfmt]
+command = "nixfmt"
+includes = ["*.nix"]
+
+[formatter.prettier]
+command = "prettier"
+options = ["--write"]
+excludes = ["adrs/*/refs/**"]
+includes = [
+  "*.cjs",
+  "*.css",
+  "*.html",
+  "*.js",
+  "*.json",
+  "*.jsonc",
+  "*.jsx",
+  "*.md",
+  "*.mdx",
+  "*.mjs",
+  "*.ts",
+  "*.tsx",
+  "*.yaml",
+  "*.yml"
+]
+
+[formatter.rust]
+command = "rustfmt"
+options = ["--edition", "2024"]
+includes = ["*.rs"]
+
+[formatter.shellcheck]
+command = "shellcheck"
+includes = [
+  "*.bash",
+  "*.bats",
+  "*.sh"
+]
+
+[formatter.shellcheck-envrc]
+command = "shellcheck"
+options = ["--exclude=SC2148"]
+includes = ["*.envrc"]
+
 [formatter.toml-sort]
 command = "toml-sort"
 options = ["--in-place"]
 includes = ["*.toml"]
+
+# Need formatters for:
+# - *.mmd
+# - *.svg
+# - *.toon
