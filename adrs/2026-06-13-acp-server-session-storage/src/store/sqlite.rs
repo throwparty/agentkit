@@ -212,13 +212,12 @@ impl SessionStore for SqliteSessionStore {
 
     async fn append_prompt_turn(&self, turn: PromptTurn) -> Result<(), StoreError> {
         {
-            let exists: bool = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?)",
-            )
-            .bind(&turn.session_id)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|e| StoreError::Database(e.to_string()))?;
+            let exists: bool =
+                sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?)")
+                    .bind(&turn.session_id)
+                    .fetch_one(&self.pool)
+                    .await
+                    .map_err(|e| StoreError::Database(e.to_string()))?;
 
             if !exists {
                 return Err(StoreError::NotFound {
@@ -245,10 +244,7 @@ impl SessionStore for SqliteSessionStore {
         .map_err(|e| map_sqlx_error("prompt_turn", &turn.id, e))
     }
 
-    async fn get_prompt_turn_children(
-        &self,
-        id: &str,
-    ) -> Result<Vec<PromptTurn>, StoreError> {
+    async fn get_prompt_turn_children(&self, id: &str) -> Result<Vec<PromptTurn>, StoreError> {
         let rows = sqlx::query_as::<_, PromptTurnRow>(
             r#"
             SELECT id, session_id, parent_id, position, created_at
@@ -285,13 +281,12 @@ impl SessionStore for SqliteSessionStore {
 
     async fn append_message(&self, message: Message) -> Result<(), StoreError> {
         {
-            let exists: bool = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM prompt_turns WHERE id = ?)",
-            )
-            .bind(&message.prompt_turn_id)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|e| StoreError::Database(e.to_string()))?;
+            let exists: bool =
+                sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM prompt_turns WHERE id = ?)")
+                    .bind(&message.prompt_turn_id)
+                    .fetch_one(&self.pool)
+                    .await
+                    .map_err(|e| StoreError::Database(e.to_string()))?;
 
             if !exists {
                 return Err(StoreError::NotFound {
@@ -341,13 +336,12 @@ impl SessionStore for SqliteSessionStore {
         max_turns: Option<usize>,
     ) -> Result<Vec<Message>, StoreError> {
         {
-            let exists: bool = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?)",
-            )
-            .bind(session_id)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|e| StoreError::Database(e.to_string()))?;
+            let exists: bool =
+                sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?)")
+                    .bind(session_id)
+                    .fetch_one(&self.pool)
+                    .await
+                    .map_err(|e| StoreError::Database(e.to_string()))?;
 
             if !exists {
                 return Err(StoreError::NotFound {
@@ -393,13 +387,12 @@ impl SessionStore for SqliteSessionStore {
         fork_point_turn_id: &str,
     ) -> Result<(), StoreError> {
         {
-            let exists: bool = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?)",
-            )
-            .bind(source_session_id)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|e| StoreError::Database(e.to_string()))?;
+            let exists: bool =
+                sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM sessions WHERE id = ?)")
+                    .bind(source_session_id)
+                    .fetch_one(&self.pool)
+                    .await
+                    .map_err(|e| StoreError::Database(e.to_string()))?;
 
             if !exists {
                 return Err(StoreError::NotFound {
@@ -418,7 +411,8 @@ impl SessionStore for SqliteSessionStore {
                 id: fork_point_turn_id.to_string(),
             })?;
 
-        let mut turn_id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let mut turn_id_map: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
         let new_session_id = new_session.id.clone();
 
         let mut forked_session = new_session;

@@ -1,11 +1,20 @@
-use std::collections::HashMap;
 use agentkit_switchboard::config::{ApiSurface, BillingModel, PricingConfig};
+use agentkit_switchboard::provider::router::{RoutingError, SelectionReason, select_provider};
 use agentkit_switchboard::provider::{ProviderStatus, ProviderView};
 use agentkit_switchboard::session::SessionAffinity;
-use agentkit_switchboard::provider::router::{select_provider, RoutingError, SelectionReason};
+use std::collections::HashMap;
 
-fn make_provider(id: &str, billing: BillingModel, models: Vec<&str>, available: bool) -> (String, ProviderView) {
-    let status = if available { ProviderStatus::Healthy } else { ProviderStatus::Unauthenticated };
+fn make_provider(
+    id: &str,
+    billing: BillingModel,
+    models: Vec<&str>,
+    available: bool,
+) -> (String, ProviderView) {
+    let status = if available {
+        ProviderStatus::Healthy
+    } else {
+        ProviderStatus::Unauthenticated
+    };
     (
         id.to_string(),
         ProviderView {
@@ -27,7 +36,12 @@ fn make_provider(id: &str, billing: BillingModel, models: Vec<&str>, available: 
     )
 }
 
-fn make_provider_with_cost(id: &str, billing: BillingModel, cost: f64, models: Vec<&str>) -> (String, ProviderView) {
+fn make_provider_with_cost(
+    id: &str,
+    billing: BillingModel,
+    cost: f64,
+    models: Vec<&str>,
+) -> (String, ProviderView) {
     (
         id.to_string(),
         ProviderView {
@@ -127,18 +141,24 @@ fn routing_tiebreaker_identity() {
 
 #[test]
 fn routing_model_not_available() {
-    let p = providers_from(vec![
-        make_provider("p", BillingModel::PayAsYouGo, vec!["gpt-4o"], true),
-    ]);
+    let p = providers_from(vec![make_provider(
+        "p",
+        BillingModel::PayAsYouGo,
+        vec!["gpt-4o"],
+        true,
+    )]);
     let result = select_provider(chat_surface(), "nonexistent", None, &p);
     assert_eq!(result, Err(RoutingError::ModelNotFound));
 }
 
 #[test]
 fn routing_no_credential() {
-    let p = providers_from(vec![
-        make_provider("p", BillingModel::PayAsYouGo, vec!["gpt-4o"], false),
-    ]);
+    let p = providers_from(vec![make_provider(
+        "p",
+        BillingModel::PayAsYouGo,
+        vec!["gpt-4o"],
+        false,
+    )]);
     let result = select_provider(chat_surface(), "gpt-4o", None, &p);
     assert_eq!(result, Err(RoutingError::NoProvider));
 }
@@ -164,7 +184,12 @@ fn routing_session_affinity() {
 #[test]
 fn routing_session_breaks_on_degradation() {
     let p = providers_from(vec![
-        make_provider("degraded_sub", BillingModel::Subscription, vec!["gpt-4o"], false),
+        make_provider(
+            "degraded_sub",
+            BillingModel::Subscription,
+            vec!["gpt-4o"],
+            false,
+        ),
         make_provider("payg", BillingModel::PayAsYouGo, vec!["gpt-4o"], true),
     ]);
     let session = SessionAffinity {
@@ -200,16 +225,18 @@ fn routing_responses_never_selects_chat_completions() {
             vec!["gpt-4o"],
         ),
     ]);
-    let result =
-        select_provider(&ApiSurface::OpenaiResponses, "gpt-4o", None, &p).unwrap();
+    let result = select_provider(&ApiSurface::OpenaiResponses, "gpt-4o", None, &p).unwrap();
     assert_eq!(result.identity, "resp");
 }
 
 #[test]
 fn routing_responses_model_not_found_in_surface() {
-    let p = providers_from(vec![
-        make_provider("cc", BillingModel::PayAsYouGo, vec!["gpt-4o"], true),
-    ]);
+    let p = providers_from(vec![make_provider(
+        "cc",
+        BillingModel::PayAsYouGo,
+        vec!["gpt-4o"],
+        true,
+    )]);
     let result = select_provider(&ApiSurface::OpenaiResponses, "gpt-4o", None, &p);
     assert_eq!(result, Err(RoutingError::ModelNotFound));
 }

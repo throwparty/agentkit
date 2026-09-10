@@ -1,3 +1,12 @@
+[advisories]
+db-urls = ["https://github.com/rustsec/advisory-db"]
+unmaintained = "all"
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
 [licenses]
 allow = [
   "Apache-2.0",
@@ -8,18 +17,9 @@ allow = [
   "MIT",
   "Unicode-3.0",
   "Unlicense",
-  "Zlib",
+  "Zlib"
 ]
 confidence-threshold = 0.8
-
-[bans]
-multiple-versions = "warn"
-wildcards = "deny"
-allow-wildcard-paths = true
-
-[advisories]
-db-urls = ["https://github.com/rustsec/advisory-db"]
-unmaintained = "all"
 
 [sources]
 unknown-registry = "deny"

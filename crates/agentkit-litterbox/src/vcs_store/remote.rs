@@ -22,8 +22,9 @@ pub fn install_remote(repo_path: &Path, bare_path: &Path) -> Result<(), SandboxE
             }
         }
         Err(e) if e.code() == git2::ErrorCode::NotFound => {
-            repo.remote(REMOTE_NAME, &bare_url)
-                .map_err(|source| SandboxError::Scm(crate::domain::ScmError::BranchCreate { source }))?;
+            repo.remote(REMOTE_NAME, &bare_url).map_err(|source| {
+                SandboxError::Scm(crate::domain::ScmError::BranchCreate { source })
+            })?;
             Ok(())
         }
         Err(source) => Err(SandboxError::Scm(crate::domain::ScmError::Open { source })),
@@ -47,9 +48,7 @@ fn bare_path_to_url(bare_path: &Path) -> String {
     let canonical = if bare_path.is_absolute() {
         bare_path.to_path_buf()
     } else {
-        std::env::current_dir()
-            .unwrap_or_default()
-            .join(bare_path)
+        std::env::current_dir().unwrap_or_default().join(bare_path)
     };
     canonical.to_string_lossy().into_owned()
 }
@@ -113,7 +112,10 @@ mod tests {
         // Still only one remote
         let repo = Repository::open(tempdir.path()).expect("open repo");
         let remote = repo.find_remote("litterbox").expect("remote exists");
-        assert_eq!(remote.url().unwrap_or(""), bare_path.path().to_str().unwrap());
+        assert_eq!(
+            remote.url().unwrap_or(""),
+            bare_path.path().to_str().unwrap()
+        );
     }
 
     #[test]
@@ -123,8 +125,7 @@ mod tests {
         let second_bare = TempDir::new().expect("second bare");
 
         install_remote(tempdir.path(), first_bare.path()).expect("first install");
-        let err = install_remote(tempdir.path(), second_bare.path())
-            .expect_err("conflicting url");
+        let err = install_remote(tempdir.path(), second_bare.path()).expect_err("conflicting url");
 
         assert!(err.to_string().contains("already exists"));
         assert!(err.to_string().contains("cannot override"));

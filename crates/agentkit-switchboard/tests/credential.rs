@@ -8,9 +8,7 @@ fn fixture_path(name: &str) -> std::path::PathBuf {
 }
 
 use agentkit_switchboard::auth::{AuthConfig, AuthType};
-use agentkit_switchboard::config::{
-    ApiSurface, BillingModel, PricingConfig, ProviderConfig,
-};
+use agentkit_switchboard::config::{ApiSurface, BillingModel, PricingConfig, ProviderConfig};
 use agentkit_switchboard::credential::helper;
 use agentkit_switchboard::credential::{CredentialSource, ResolvedCredential};
 use agentkit_switchboard::provider::registry::ProviderRegistry;
@@ -160,10 +158,7 @@ fn registry_errors_when_credential_missing() {
 #[test]
 fn registry_accepts_none_auth_providers_without_credential() {
     let mut providers = HashMap::new();
-    providers.insert(
-        "local".to_string(),
-        provider_with_auth(AuthType::None),
-    );
+    providers.insert("local".to_string(), provider_with_auth(AuthType::None));
     ProviderRegistry::new(&providers, "nonexistent-helper-xyz")
         .expect("none auth providers need no stored credential");
 }

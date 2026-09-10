@@ -1,10 +1,10 @@
 use crate::auth;
 use crate::credential;
 use crate::credential::ResolvedCredential;
+use crate::domain::quota::{ProviderQuotaState, backoff_duration};
 use crate::models::db::ModelDb;
-use crate::domain::quota::{backoff_duration, ProviderQuotaState};
 use crate::provider::registry::ProviderRegistry;
-use crate::provider::router::{select_provider, RoutingError};
+use crate::provider::router::{RoutingError, select_provider};
 use crate::proxy::forwarder;
 use crate::server::middleware::RequestId;
 use crate::session::sqlite::SqliteSessionManager;
@@ -14,7 +14,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -86,10 +86,7 @@ fn switchboard_response(
 }
 
 #[tracing::instrument(skip_all)]
-async fn log_routing_event(
-    session_manager: &SqliteSessionManager,
-    event: RoutingEvent,
-) {
+async fn log_routing_event(session_manager: &SqliteSessionManager, event: RoutingEvent) {
     let _ = session_manager.insert_routing_event(event).await;
 }
 
@@ -177,11 +174,19 @@ async fn proxy_handler(
         let selection = match select_provider(&surface, &model, session_ref, &providers) {
             Ok(s) => s,
             Err(RoutingError::ModelNotFound) => {
-                return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "model not found"}))).into_response();
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(json!({"error": "model not found"})),
+                )
+                    .into_response();
             }
             Err(RoutingError::NoProvider) => {
                 if attempt == 0 {
-                    return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "no available provider"}))).into_response();
+                    return (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        Json(json!({"error": "no available provider"})),
+                    )
+                        .into_response();
                 }
                 break;
             }
@@ -269,10 +274,7 @@ async fn proxy_handler(
         crate::otel::metrics::metrics().provider_latency.record(
             latency_ms as f64,
             &[
-                opentelemetry::KeyValue::new(
-                    "provider_identity",
-                    selection.identity.clone(),
-                ),
+                opentelemetry::KeyValue::new("provider_identity", selection.identity.clone()),
                 opentelemetry::KeyValue::new("model_name", model.clone()),
             ],
         );

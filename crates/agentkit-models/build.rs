@@ -1,5 +1,12 @@
-use serde_json::{json, Map, Value};
-use std::{convert::TryFrom, env, error::Error, fs, path::{Path, PathBuf}, time::Duration};
+use serde_json::{Map, Value, json};
+use std::{
+    convert::TryFrom,
+    env,
+    error::Error,
+    fs,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
@@ -13,13 +20,21 @@ fn main() {
 
     let snapshot = load_snapshot(&manifest_dir).unwrap_or_else(|err| {
         eprintln!("agentkit-models: {err}; falling back to checked-in snapshot");
-        read_checked_in_snapshot(&manifest_dir)
-            .unwrap_or_else(|fallback_err| panic!("failed to load fallback snapshot: {fallback_err}"))
+        read_checked_in_snapshot(&manifest_dir).unwrap_or_else(|fallback_err| {
+            panic!("failed to load fallback snapshot: {fallback_err}")
+        })
     });
 
     fs::create_dir_all(&out_dir).unwrap();
-    fs::write(&snapshot_path, serde_json::to_vec_pretty(&snapshot).unwrap()).unwrap();
-    println!("cargo:rustc-env=AGENTKIT_MODELS_DEV_JSON={}", snapshot_path.display());
+    fs::write(
+        &snapshot_path,
+        serde_json::to_vec_pretty(&snapshot).unwrap(),
+    )
+    .unwrap();
+    println!(
+        "cargo:rustc-env=AGENTKIT_MODELS_DEV_JSON={}",
+        snapshot_path.display()
+    );
 }
 
 fn load_snapshot(manifest_dir: &Path) -> Result<Value, Box<dyn Error>> {
@@ -32,7 +47,9 @@ fn load_snapshot(manifest_dir: &Path) -> Result<Value, Box<dyn Error>> {
         match normalize_snapshot(&raw) {
             Ok(snapshot) => return Ok(snapshot),
             Err(err) => {
-                eprintln!("agentkit-models: remote snapshot from {url} could not be normalized: {err}");
+                eprintln!(
+                    "agentkit-models: remote snapshot from {url} could not be normalized: {err}"
+                );
                 return read_checked_in_snapshot(manifest_dir);
             }
         }
@@ -52,7 +69,9 @@ fn fetch_snapshot(url: &str) -> Result<String, Box<dyn Error>> {
 }
 
 fn read_checked_in_snapshot(manifest_dir: &Path) -> Result<Value, Box<dyn Error>> {
-    normalize_snapshot(&fs::read_to_string(manifest_dir.join("data/models.dev.json"))?)
+    normalize_snapshot(&fs::read_to_string(
+        manifest_dir.join("data/models.dev.json"),
+    )?)
 }
 
 fn normalize_snapshot(raw: &str) -> Result<Value, Box<dyn Error>> {
@@ -153,12 +172,7 @@ fn normalize_catalog(value: &Value) -> Result<Value, Box<dyn Error>> {
     Ok(json!({ "models": models, "providers": providers }))
 }
 
-fn insert_cost(
-    out: &mut Map<String, Value>,
-    cost: &Map<String, Value>,
-    key: &str,
-    out_key: &str,
-) {
+fn insert_cost(out: &mut Map<String, Value>, cost: &Map<String, Value>, key: &str, out_key: &str) {
     if let Some(v) = cost.get(key).and_then(|v| v.as_f64()) {
         out.insert(out_key.to_string(), json!(v));
     }
@@ -225,7 +239,9 @@ fn infer_capabilities(entry: &Value) -> Map<String, Value> {
         .unwrap_or_default();
 
     let has_param = |needle: &str| {
-        supported_parameters.iter().any(|value| value.as_str() == Some(needle))
+        supported_parameters
+            .iter()
+            .any(|value| value.as_str() == Some(needle))
     };
 
     if has_param("tools") || has_param("tool_choice") {

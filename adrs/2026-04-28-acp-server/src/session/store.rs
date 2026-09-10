@@ -31,7 +31,10 @@ impl SessionStore {
     /// Get a session by ID
     pub async fn get(&self, id: &str) -> Result<Session, String> {
         let sessions = self.sessions.read().await;
-        sessions.get(id).cloned().ok_or_else(|| format!("Session {} not found", id))
+        sessions
+            .get(id)
+            .cloned()
+            .ok_or_else(|| format!("Session {} not found", id))
     }
 
     /// List all sessions
@@ -43,7 +46,9 @@ impl SessionStore {
     /// Close a session
     pub async fn close(&self, id: &str) -> Result<(), String> {
         let mut sessions = self.sessions.write().await;
-        let session = sessions.get_mut(id).ok_or_else(|| format!("Session {} not found", id))?;
+        let session = sessions
+            .get_mut(id)
+            .ok_or_else(|| format!("Session {} not found", id))?;
         session.close();
         Ok(())
     }
@@ -51,7 +56,9 @@ impl SessionStore {
     /// Add a message to a session
     pub async fn add_message(&self, id: &str, role: String, content: String) -> Result<(), String> {
         let mut sessions = self.sessions.write().await;
-        let session = sessions.get_mut(id).ok_or_else(|| format!("Session {} not found", id))?;
+        let session = sessions
+            .get_mut(id)
+            .ok_or_else(|| format!("Session {} not found", id))?;
         session.add_message(role, content);
         Ok(())
     }
@@ -59,7 +66,9 @@ impl SessionStore {
     /// Set the mode for a session
     pub async fn set_mode(&self, id: &str, mode: String) -> Result<(), String> {
         let mut sessions = self.sessions.write().await;
-        let session = sessions.get_mut(id).ok_or_else(|| format!("Session {} not found", id))?;
+        let session = sessions
+            .get_mut(id)
+            .ok_or_else(|| format!("Session {} not found", id))?;
         session.mode = Some(mode);
         Ok(())
     }

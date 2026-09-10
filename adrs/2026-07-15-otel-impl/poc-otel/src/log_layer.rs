@@ -1,11 +1,11 @@
-use opentelemetry::logs::{AnyValue, LogRecord, Logger, Severity};
 use opentelemetry::Key;
+use opentelemetry::logs::{AnyValue, LogRecord, Logger, Severity};
 use opentelemetry_sdk::logs::SdkLogger;
 use std::collections::HashMap;
 use tracing::field::Visit;
+use tracing_subscriber::Layer;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
-use tracing_subscriber::Layer;
 
 pub struct OtelLogLayer {
     logger: SdkLogger,
@@ -83,8 +83,7 @@ impl<'a> Visit for FieldVisitor<'a> {
     }
 
     fn record_i64(&mut self, field: &tracing::field::Field, value: i64) {
-        self.0
-            .insert(Key::new(field.name()), AnyValue::Int(value));
+        self.0.insert(Key::new(field.name()), AnyValue::Int(value));
     }
 
     fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {

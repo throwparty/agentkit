@@ -16,10 +16,10 @@ trait ProviderQuotaBehaviour: Debug + Send + Sync {
 
 Built-in implementations:
 
-| Provider | Header mapping | Subscription model |
-|---|---|---|
-| OpenAI | `x-ratelimit-remaining-requests`, `x-ratelimit-remaining-tokens` | Daily token bucket, 5h rolling message window |
-| Anthropic | `anthropic-ratelimit-requests-remaining`, `anthropic-ratelimit-input-tokens-remaining`, `anthropic-ratelimit-output-tokens-remaining` | Rolling windows (6h, daily, weekly) |
+| Provider  | Header mapping                                                                                                                        | Subscription model                            |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| OpenAI    | `x-ratelimit-remaining-requests`, `x-ratelimit-remaining-tokens`                                                                      | Daily token bucket, 5h rolling message window |
+| Anthropic | `anthropic-ratelimit-requests-remaining`, `anthropic-ratelimit-input-tokens-remaining`, `anthropic-ratelimit-output-tokens-remaining` | Rolling windows (6h, daily, weekly)           |
 
 Missing headers -> state remains `None` (unknown). Provider is never degraded by absence of headers.
 
@@ -42,24 +42,24 @@ struct DegradationState {
 }
 ```
 
-| Event | Action | Recovery |
-|---|---|---|
-| 429 rate-limit (pay-as-you-go) | Degrade for `retry-after` or `*-reset` time | Auto-recover when reset passes |
-| 429 quota exhausted (subscription) | Degrade for `retry-after` or full window duration (default 5h) | Auto-recover after cooldown |
-| 429 spend cap (pay-as-you-go) | Degrade permanently (end of billing period) | Manual re-enable or config reload |
-| 5xx | Degrade for 30s, exponential backoff (max 5 min) | Auto-recover after backoff |
-| 401/403 | Degrade permanently | Re-authentication required |
-| Timeout | Degrade for 10s, exponential backoff (max 2 min) | Auto-recover after backoff |
+| Event                              | Action                                                         | Recovery                          |
+| ---------------------------------- | -------------------------------------------------------------- | --------------------------------- |
+| 429 rate-limit (pay-as-you-go)     | Degrade for `retry-after` or `*-reset` time                    | Auto-recover when reset passes    |
+| 429 quota exhausted (subscription) | Degrade for `retry-after` or full window duration (default 5h) | Auto-recover after cooldown       |
+| 429 spend cap (pay-as-you-go)      | Degrade permanently (end of billing period)                    | Manual re-enable or config reload |
+| 5xx                                | Degrade for 30s, exponential backoff (max 5 min)               | Auto-recover after backoff        |
+| 401/403                            | Degrade permanently                                            | Re-authentication required        |
+| Timeout                            | Degrade for 10s, exponential backoff (max 2 min)               | Auto-recover after backoff        |
 
 ## Backoff schedule
 
 | Attempt | 5xx backoff | Timeout backoff |
-|---|---|---|
-| 1 | 30s | 10s |
-| 2 | 60s | 20s |
-| 3 | 120s | 40s |
-| 4 | 240s | 80s |
-| 5+ | 300s (cap) | 120s (cap) |
+| ------- | ----------- | --------------- |
+| 1       | 30s         | 10s             |
+| 2       | 60s         | 20s             |
+| 3       | 120s        | 40s             |
+| 4       | 240s        | 80s             |
+| 5+      | 300s (cap)  | 120s (cap)      |
 
 ## Lazy expiry
 

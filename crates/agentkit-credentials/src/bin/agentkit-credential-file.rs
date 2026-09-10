@@ -1,11 +1,11 @@
+use agentkit_path::data_dir;
+use fs2::FileExt;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use agentkit_path::data_dir;
-use fs2::FileExt;
-use serde_json::Value;
 
 struct LockGuard {
     file: File,
@@ -138,7 +138,9 @@ fn write_store(component: &str, store: &HashMap<String, Value>) -> std::io::Resu
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 3 {
-        eprintln!("usage: agentkit-credential-file <get|put|delete|location> <component> [<identity>]");
+        eprintln!(
+            "usage: agentkit-credential-file <get|put|delete|location> <component> [<identity>]"
+        );
         return ExitCode::from(2);
     }
 
@@ -151,7 +153,9 @@ fn main() -> ExitCode {
     }
 
     if args.len() < 4 {
-        eprintln!("usage: agentkit-credential-file <get|put|delete|location> <component> [<identity>]");
+        eprintln!(
+            "usage: agentkit-credential-file <get|put|delete|location> <component> [<identity>]"
+        );
         return ExitCode::from(2);
     }
 

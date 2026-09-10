@@ -1,10 +1,6 @@
 ---
-status: draft
-created: 2026-07-15
-updated: 2026-07-15
-author: adrian
-decision: pending
----
+
+## status: draft created: 2026-07-15 updated: 2026-07-15 author: adrian decision: pending
 
 # Specification: OpenTelemetry Implementation for Rust Services
 
@@ -40,6 +36,7 @@ The PoC must not crash when no OTLP receiver is available. Exporter errors must 
 The system must emit OTel spans representing timed operations with parent-child relationships.
 
 **Acceptance Criteria**:
+
 - Spans can be created with a name and automatic start/end timestamps
 - Child spans form a parent-child tree visible in a trace viewer
 - Spans carry user-defined attributes (string, int, float, bool values)
@@ -52,6 +49,7 @@ The system must emit OTel spans representing timed operations with parent-child 
 The system must emit OTel metrics of types counter, histogram, and gauge.
 
 **Acceptance Criteria**:
+
 - A counter can be incremented with optional attributes
 - A histogram can record observations with optional attributes
 - A gauge can be set to a value with optional attributes
@@ -62,6 +60,7 @@ The system must emit OTel metrics of types counter, histogram, and gauge.
 The system must emit structured OTel log records.
 
 **Acceptance Criteria**:
+
 - Log records carry a timestamp, severity level, message body, and attributes
 - Existing `tracing` log macros produce OTel log records without code changes at individual call sites
 - Logs are visible in otel-desktop-viewer's logs view with filterable attributes
@@ -72,6 +71,7 @@ The system must emit structured OTel log records.
 All three signals must be exportable via OTLP to a local receiver.
 
 **Acceptance Criteria**:
+
 - Traces, metrics, and logs are all exported over OTLP
 - The OTLP endpoint is configurable via environment variable
 - Exported data is visible in otel-desktop-viewer on all three tabs
@@ -81,6 +81,7 @@ All three signals must be exportable via OTLP to a local receiver.
 Existing `tracing` span and event macros must map to OTel signals without rewriting individual call sites.
 
 **Acceptance Criteria**:
+
 - `tracing::info_span!()` creates an OTel span with matching attributes
 - `tracing::info!()` / `tracing::warn!()` etc. create OTel log records with matching attributes
 - Tracing span nesting maps to OTel span parent-child relationships
@@ -91,6 +92,7 @@ Existing `tracing` span and event macros must map to OTel signals without rewrit
 All exported signals must carry consistent identifying attributes.
 
 **Acceptance Criteria**:
+
 - Service name is set once and appears on every span, metric, and log
 - Service version is set once and appears on every signal
 - Resource attributes are shared across all three signals from a single configuration point
@@ -102,6 +104,7 @@ All exported signals must carry consistent identifying attributes.
 If the OTLP receiver is unreachable, the application continues operating. Telemetry data loss is acceptable; application crash is not.
 
 **Acceptance Criteria**:
+
 - Export failures are non-fatal (logged as warnings, not panics)
 - Application produces correct output even when no OTLP receiver is running
 
@@ -110,6 +113,7 @@ If the OTLP receiver is unreachable, the application continues operating. Teleme
 The OTel dependency chain must not bloat compile times or binary size unnecessarily.
 
 **Acceptance Criteria**:
+
 - Adding OTel to an existing crate increases its stripped release binary by no more than 2MB
 - Full workspace build time with OTel dependencies increases by no more than 30% (cold build)
 
@@ -118,6 +122,7 @@ The OTel dependency chain must not bloat compile times or binary size unnecessar
 OTel SDK configuration must follow the OpenTelemetry environment variable specification.
 
 **Acceptance Criteria**:
+
 - OTLP endpoint is set via the standard env var
 - Service name resource attribute is set via the standard env var
 - Protocol (HTTP/protobuf vs gRPC) is set via the standard env var
@@ -127,6 +132,7 @@ OTel SDK configuration must follow the OpenTelemetry environment variable specif
 OTel instrumentation must be testable without a running OTLP receiver.
 
 **Acceptance Criteria**:
+
 - Tests can assert span names, attributes, status, and parent-child relationships in-memory
 - Tests can assert counter values and histogram distributions in-memory
 - Tests do not require `otel-desktop-viewer` or any external process
@@ -136,6 +142,7 @@ OTel instrumentation must be testable without a running OTLP receiver.
 Human-readable stdout logs and OTel signals must work simultaneously.
 
 **Acceptance Criteria**:
+
 - `tracing_subscriber::fmt()` output continues alongside OTel export
 - A single `tracing::info!()` call produces both a stdout log line and an OTel log record
 - The `RUST_LOG` env var continues to control stdout log filtering independent of OTel configuration

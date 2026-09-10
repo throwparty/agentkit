@@ -1,14 +1,11 @@
 ---
-status: draft
-created: 2026-04-28
-updated: 2026-04-29
-author: adrian
-decision: pending
----
+
+## status: draft created: 2026-04-28 updated: 2026-04-29 author: adrian decision: pending
 
 # ACP Server Specification
 
 ## Status Update
+
 - **Updated**: 2026-06-08
 
 ## Problem
@@ -28,29 +25,31 @@ We need a basic harness for an AI agent using the Agent Client Protocol (ACP). T
 ## User Journey
 
 1. User starts the ACP server with `acp-server --transport stdio|http`
-2. A client (e.g., Zed) connects via the selected transport
-3. Client sends `initialize` request
-4. Server responds with capabilities and protocol version
-5. Client creates a session via `session/new`
-6. Client sends `session/prompt` with user message
-7. Server sends `session/update` notification echoing the user message, then responds with `stopReason: "end_turn"`
-8. Client receives notifications, displays content, and processes the final response
-9. Client optionally closes the session
+1. A client (e.g., Zed) connects via the selected transport
+1. Client sends `initialize` request
+1. Server responds with capabilities and protocol version
+1. Client creates a session via `session/new`
+1. Client sends `session/prompt` with user message
+1. Server sends `session/update` notification echoing the user message, then responds with `stopReason: "end_turn"`
+1. Client receives notifications, displays content, and processes the final response
+1. Client optionally closes the session
 
 ## Requirements
 
 ### Transport Options
 
-| Transport | Endpoint | Behavior |
-|-----------|----------|----------|
-| `stdio` | stdin/stdout | Line-delimited JSON messages, single client, server blocks on read/write |
-| `http` | `{--bind}:{--http-port}` (default 3811) | Streamable HTTP with JSON-RPC, JSON request/response |
+| Transport | Endpoint                                | Behavior                                                                 |
+| --------- | --------------------------------------- | ------------------------------------------------------------------------ |
+| `stdio`   | stdin/stdout                            | Line-delimited JSON messages, single client, server blocks on read/write |
+| `http`    | `{--bind}:{--http-port}` (default 3811) | Streamable HTTP with JSON-RPC, JSON request/response                     |
 
 **Port Configuration:**
+
 - `--bind` (default `127.0.0.1`) - network interface to bind
 - `--http-port` (default 3811) - port for HTTP transport
 
 **Functional Requirements:**
+
 - `--transport` flag is required at startup; error if omitted or invalid
 - Each transport runs a single server instance
 - Server must handle graceful shutdown on SIGINT/SIGTERM
@@ -60,6 +59,7 @@ We need a basic harness for an AI agent using the Agent Client Protocol (ACP). T
 ACP messages use JSON-RPC 2.0 encoding. All messages must be UTF-8 encoded.
 
 **Request/Response Structure:**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -70,6 +70,7 @@ ACP messages use JSON-RPC 2.0 encoding. All messages must be UTF-8 encoded.
 ```
 
 **Response Structure:**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -79,6 +80,7 @@ ACP messages use JSON-RPC 2.0 encoding. All messages must be UTF-8 encoded.
 ```
 
 **Error Structure:**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -91,6 +93,7 @@ ACP messages use JSON-RPC 2.0 encoding. All messages must be UTF-8 encoded.
 ```
 
 **Notification Structure:**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -100,11 +103,13 @@ ACP messages use JSON-RPC 2.0 encoding. All messages must be UTF-8 encoded.
 ```
 
 **References:**
+
 - ACP Transports: Messages are UTF-8 encoded JSON-RPC 2.0 messages
 - ACP Overview: Protocol uses JSON-RPC 2.0 with two message types (requests and notifications)
 - ACP Schema: All method-specific request/response structures defined
 
 **Acceptance Criteria:**
+
 - All messages include `"jsonrpc": "2.0"` per ACP Transports
 - Request IDs match between request and response per JSON-RPC 2.0
 - Notifications have no `id` field per JSON-RPC 2.0
@@ -115,6 +120,7 @@ ACP messages use JSON-RPC 2.0 encoding. All messages must be UTF-8 encoded.
 The connection must begin with the `initialize` method before any session can be created.
 
 **`initialize` Request:**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -139,6 +145,7 @@ The connection must begin with the `initialize` method before any session can be
 ```
 
 **`initialize` Response:**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -173,12 +180,14 @@ The connection must begin with the `initialize` method before any session can be
 ```
 
 **References:**
+
 - ACP Initialization: Client MUST call `initialize` before creating sessions
 - ACP Initialization: Agent MUST respond with chosen protocol version and capabilities
 - ACP Initialization: `sessionCapabilities` contains nested capability objects for `list`, `close`, `resume`
 - ACP Schema: InitializeRequest and InitializeResponse structures
 
 **Acceptance Criteria:**
+
 - Server responds with protocol version 1 and capabilities
 - Server reports `loadSession: false` (basic harness does not replay conversation history)
 - Server reports `sessionCapabilities.list: {}` (supports `session/list`)
@@ -192,6 +201,7 @@ The connection must begin with the `initialize` method before any session can be
 Client sends authentication credentials. Not required for this harness (empty `authMethods` in initialize response).
 
 **`authenticate` Request:**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -204,10 +214,12 @@ Client sends authentication credentials. Not required for this harness (empty `a
 ```
 
 **References:**
+
 - ACP Authentication: Agent advertises `authMethods` in initialize response
 - ACP Authentication: Client calls `authenticate` only if a non-empty `authMethods` array is present
 
 **Acceptance Criteria:**
+
 - Not implemented; returns error `-32601 Method not found` (client should not call if `authMethods` is empty)
 
 ### Session Management
@@ -219,6 +231,7 @@ Sessions are stored in a simple in-memory `HashMap<SessionId, Session>`. No pers
 Clients create a new session by calling the `session/new` method.
 
 **`session/new` Request:**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -232,6 +245,7 @@ Clients create a new session by calling the `session/new` method.
 ```
 
 **`session/new` Response:**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -253,12 +267,14 @@ Clients create a new session by calling the `session/new` method.
 ```
 
 **References:**
+
 - ACP Session Setup: Clients MUST complete initialization before creating sessions
 - ACP Session Setup: Client sends `cwd` and optional `mcpServers`
 - ACP Session Setup: Agent responds with `sessionId` and optional `modes`
 - ACP Session Modes: Agent MAY return `modes` in response including `currentModeId` and `availableModes`
 
 **Acceptance Criteria:**
+
 - Server creates new session (UUIDv4) and returns session ID
 - Server returns `modes` with current mode and available modes
 - `cwd` is stored but not validated (basic harness)
@@ -269,6 +285,7 @@ Clients create a new session by calling the `session/new` method.
 Agents that support the `loadSession` capability allow Clients to restore previous conversations by replaying history.
 
 **`session/load` Request:**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -283,6 +300,7 @@ Agents that support the `loadSession` capability allow Clients to restore previo
 ```
 
 **`session/load` Response:**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -295,10 +313,12 @@ Agents that support the `loadSession` capability allow Clients to restore previo
 ```
 
 **References:**
+
 - ACP Session Setup: Client MUST verify `loadSession` capability before attempting load
 - ACP Session Setup: Agent replays conversation history as `session/update` notifications, then responds
 
 **Acceptance Criteria:**
+
 - Server returns error (loadSession capability is false)
 - Basic harness does NOT support session loading (returns error -32602)
 
@@ -307,6 +327,7 @@ Agents that support the `loadSession` capability allow Clients to restore previo
 Agents that support the `sessionCapabilities.resume` capability allow Clients to reconnect to an existing session without replaying conversation history.
 
 **`session/resume` Request:**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -321,12 +342,14 @@ Agents that support the `sessionCapabilities.resume` capability allow Clients to
 ```
 
 **`session/resume` flow:**
+
 1. Server receives `session/resume` with `sessionId`
-2. Server replays dummy conversation history as `session/update` notifications (user_message_chunk + agent_message_chunk)
-3. Server persists dummy messages to in-memory session store
-4. Server returns `{}`
+1. Server replays dummy conversation history as `session/update` notifications (user_message_chunk + agent_message_chunk)
+1. Server persists dummy messages to in-memory session store
+1. Server returns `{}`
 
 **`session/resume` Response:**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -336,6 +359,7 @@ Agents that support the `sessionCapabilities.resume` capability allow Clients to
 ```
 
 **`session/update` Notification (sent before response):**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -354,10 +378,12 @@ Agents that support the `sessionCapabilities.resume` capability allow Clients to
 ```
 
 **References:**
+
 - ACP Session Setup: Client MUST verify `sessionCapabilities.resume` before attempting resume
 - ACP Session Setup: Agent restores session context and reconnects to MCP servers, returns once ready (does NOT replay history)
 
 **Acceptance Criteria:**
+
 - Server returns empty result `{}` unconditionally (dummy resume — no persistent state)
 - Server replays dummy conversation as one or more `session/update` notifications before responding
 - Dummy messages are stored in-memory and compound across resumes within the same process lifetime
@@ -365,6 +391,7 @@ Agents that support the `sessionCapabilities.resume` capability allow Clients to
 #### `session/list` (ACP Lifecycle)
 
 **`session/list` Request:**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -378,6 +405,7 @@ Agents that support the `sessionCapabilities.resume` capability allow Clients to
 ```
 
 **`session/list` Response:**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -401,10 +429,12 @@ Agents that support the `sessionCapabilities.resume` capability allow Clients to
 ```
 
 **References:**
+
 - ACP Session List: Clients MUST verify `sessionCapabilities.list` capability before calling
 - ACP Session List: Response includes `sessions` array and optional `nextCursor` for pagination
 
 **Acceptance Criteria:**
+
 - Server returns list of all sessions (no pagination implemented)
 - `nextCursor` is absent (no more results)
 - Sessions include `sessionId`, `cwd`, `title`, `updatedAt`, `_meta`
@@ -412,6 +442,7 @@ Agents that support the `sessionCapabilities.resume` capability allow Clients to
 #### `session/close` (ACP Lifecycle)
 
 **`session/close` Request:**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -424,6 +455,7 @@ Agents that support the `sessionCapabilities.resume` capability allow Clients to
 ```
 
 **`session/close` Response:**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -433,10 +465,12 @@ Agents that support the `sessionCapabilities.resume` capability allow Clients to
 ```
 
 **References:**
+
 - ACP Session Close: Clients MUST verify `sessionCapabilities.close` capability before calling
 - ACP Session Close: Agent cancels ongoing work and frees resources
 
 **Acceptance Criteria:**
+
 - Server removes session from the in-memory map
 - Returns empty result `{}`
 - Errors gracefully if session doesn't exist
@@ -446,6 +480,7 @@ Agents that support the `sessionCapabilities.resume` capability allow Clients to
 Client requests a mode change for a session.
 
 **`session/set_mode` Request:**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -459,10 +494,12 @@ Client requests a mode change for a session.
 ```
 
 **References:**
+
 - ACP Session Modes: Client may request mode changes during session lifecycle
 - ACP Session Modes: Mode change notification `current_mode_update` is sent via `session/update` when mode changes
 
 **Acceptance Criteria:**
+
 - Server stores the mode on the session object
 - Returns `{}`
 - Session existence is validated before processing
@@ -472,6 +509,7 @@ Client requests a mode change for a session.
 Client requests a configuration change for a session.
 
 **`session/set_config_option` Request:**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -486,9 +524,11 @@ Client requests a configuration change for a session.
 ```
 
 **References:**
+
 - ACP Session Config: Client may request config changes during session lifecycle
 
 **Acceptance Criteria:**
+
 - Not implemented; returns error `-32601 Method not found` (config options are out of scope for text echo harness)
 
 ### Prompt Turn (ACP Lifecycle)
@@ -498,6 +538,7 @@ Client requests a configuration change for a session.
 The core conversation flow. Client sends a user message, agent responds.
 
 **`session/prompt` Request:**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -516,6 +557,7 @@ The core conversation flow. Client sends a user message, agent responds.
 ```
 
 **`session/prompt` Response:**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -527,6 +569,7 @@ The core conversation flow. Client sends a user message, agent responds.
 ```
 
 **`session/update` Notification (from agent to client):**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -545,12 +588,14 @@ The core conversation flow. Client sends a user message, agent responds.
 ```
 
 **References:**
+
 - ACP Prompt Turn: Core interaction cycle from user message to agent response
 - ACP Prompt Turn: Agent sends `session/update` notifications during processing
 - ACP Prompt Turn: Turn ends with `session/prompt` response containing `stopReason`
 - ACP Session Modes: `current_mode_update` sent via `session/update` when mode changes
 
 **Acceptance Criteria:**
+
 - Server sends `session/update` notification with `agent_message_chunk` echoing the user's text
 - Server responds with `stopReason: "end_turn"`
 - Session existence is validated before processing (returns error if missing)
@@ -560,6 +605,7 @@ The core conversation flow. Client sends a user message, agent responds.
 Client sends notification to cancel ongoing operations.
 
 **`session/cancel` Notification:**
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -571,32 +617,35 @@ Client sends notification to cancel ongoing operations.
 ```
 
 **References:**
+
 - ACP Prompt Turn Cancellation: Client sends notification (no `id`, no response expected for cancel itself)
 - ACP Prompt Turn Cancellation: Agent MUST respond to original `session/prompt` with `stopReason: "cancelled"`
 
 **Acceptance Criteria:**
+
 - Server processes cancellation notification (no response to cancel itself)
 - Server responds to the original pending `session/prompt` with `stopReason: "cancelled"`
 - No `session/update` notification sent for cancellation (the cancel notification itself carries the signal)
 
 ### Static Response Behavior
 
-| Method | Response Type | Behavior |
-|--------|--------------|----------|
-| `initialize` | response | Static capabilities and protocol version |
-| `authenticate` | error | Return `-32601 Method not found` (no auth methods advertised) |
-| `session/new` | response | Return unique session ID and modes |
-| `session/load` | error | Return error (loadSession capability false) |
-| `session/resume` | response | Return empty result `{}` (session restored) |
-| `session/list` | response | Return list of active sessions |
-| `session/close` | response | Close session, return `{}` |
-| `session/set_mode` | response | Store mode on session, return `{}` |
-| `session/set_config_option` | error | Return `-32601 Method not found` (config out of scope) |
-| `session/prompt` | response + notification | Echo user message, respond with `end_turn` |
-| `session/cancel` | notification | Process cancellation, respond to original prompt |
-| unknown | error | Return `-32601 Method not found` |
+| Method                      | Response Type           | Behavior                                                      |
+| --------------------------- | ----------------------- | ------------------------------------------------------------- |
+| `initialize`                | response                | Static capabilities and protocol version                      |
+| `authenticate`              | error                   | Return `-32601 Method not found` (no auth methods advertised) |
+| `session/new`               | response                | Return unique session ID and modes                            |
+| `session/load`              | error                   | Return error (loadSession capability false)                   |
+| `session/resume`            | response                | Return empty result `{}` (session restored)                   |
+| `session/list`              | response                | Return list of active sessions                                |
+| `session/close`             | response                | Close session, return `{}`                                    |
+| `session/set_mode`          | response                | Store mode on session, return `{}`                            |
+| `session/set_config_option` | error                   | Return `-32601 Method not found` (config out of scope)        |
+| `session/prompt`            | response + notification | Echo user message, respond with `end_turn`                    |
+| `session/cancel`            | notification            | Process cancellation, respond to original prompt              |
+| unknown                     | error                   | Return `-32601 Method not found`                              |
 
 **Acceptance Criteria:**
+
 - Responses are deterministic except for session IDs
 - Every supported method has a documented, reproducible behavior
 - Unsupported methods return `-32601 Method not found`
@@ -607,21 +656,21 @@ Client sends notification to cancel ongoing operations.
 
 All methods defined by the ACP spec (from `acp-spec/schema.mdx`). Methods marked "agent" are handled by the server; methods marked "client" are called by the agent on the client (not implemented in this harness).
 
-| Method | Direction | Status | Notes |
-|--------|-----------|--------|-------|
-| `initialize` | agent → client | ✅ implemented | Protocol version negotiation, capability exchange |
-| `authenticate` | agent → client | ❌ not implemented | Auth not required (empty `authMethods`) |
-| `session/new` | agent → client | ✅ implemented | Creates session, returns UUID |
-| `session/load` | agent → client | ❌ not implemented | Returns error `-32602` (loadSession capability is false) |
-| `session/resume` | agent → client | ❌ not implemented | Returns `{}` if session exists, error if not |
-| `session/list` | agent → client | ❌ not implemented | Returns list of active sessions |
-| `session/close` | agent → client | ✅ implemented | Closes session, returns `{}` |
-| `session/prompt` | agent → client | ✅ implemented | Echoes user message, returns `end_turn` |
-| `session/cancel` | agent → client | ❌ not implemented | Notification; responds to pending prompt with `cancelled` |
-| `session/set_mode` | agent → client | ❌ not implemented | Changes session mode |
-| `session/set_config_option` | agent → client | ❌ not implemented | Changes session config |
-| `session/update` | agent → client | ✅ implemented | Notification streamed to client during prompt turn |
-| `session/request_permission` | client → agent | ❌ not implemented | Agent requests user permission for tool calls |
-| `fs/read_text_file` | client → agent | ❌ not implemented | Client-side file read |
-| `fs/write_text_file` | client → agent | ❌ not implemented | Client-side file write |
-| `terminal/*` | client → agent | ❌ not implemented | Client-side terminal management |
+| Method                       | Direction      | Status             | Notes                                                     |
+| ---------------------------- | -------------- | ------------------ | --------------------------------------------------------- |
+| `initialize`                 | agent → client | ✅ implemented     | Protocol version negotiation, capability exchange         |
+| `authenticate`               | agent → client | ❌ not implemented | Auth not required (empty `authMethods`)                   |
+| `session/new`                | agent → client | ✅ implemented     | Creates session, returns UUID                             |
+| `session/load`               | agent → client | ❌ not implemented | Returns error `-32602` (loadSession capability is false)  |
+| `session/resume`             | agent → client | ❌ not implemented | Returns `{}` if session exists, error if not              |
+| `session/list`               | agent → client | ❌ not implemented | Returns list of active sessions                           |
+| `session/close`              | agent → client | ✅ implemented     | Closes session, returns `{}`                              |
+| `session/prompt`             | agent → client | ✅ implemented     | Echoes user message, returns `end_turn`                   |
+| `session/cancel`             | agent → client | ❌ not implemented | Notification; responds to pending prompt with `cancelled` |
+| `session/set_mode`           | agent → client | ❌ not implemented | Changes session mode                                      |
+| `session/set_config_option`  | agent → client | ❌ not implemented | Changes session config                                    |
+| `session/update`             | agent → client | ✅ implemented     | Notification streamed to client during prompt turn        |
+| `session/request_permission` | client → agent | ❌ not implemented | Agent requests user permission for tool calls             |
+| `fs/read_text_file`          | client → agent | ❌ not implemented | Client-side file read                                     |
+| `fs/write_text_file`         | client → agent | ❌ not implemented | Client-side file write                                    |
+| `terminal/*`                 | client → agent | ❌ not implemented | Client-side terminal management                           |

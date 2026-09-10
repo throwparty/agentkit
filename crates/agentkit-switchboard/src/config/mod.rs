@@ -1,9 +1,9 @@
 pub mod loader;
 
+use crate::auth::AuthConfig;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use serde::{Deserialize, Serialize};
-use crate::auth::AuthConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SwitchboardConfig {

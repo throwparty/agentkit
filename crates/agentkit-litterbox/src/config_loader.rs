@@ -7,11 +7,10 @@ use crate::domain::slugify_name;
 
 /// Loads and parses a single TOML configuration file into a Config struct.
 pub fn load_file(path: &Path) -> Result<Config, ConfigError> {
-    let contents = fs::read_to_string(path)
-        .map_err(|_| ConfigError::FileNotFound(path.to_path_buf()))?;
+    let contents =
+        fs::read_to_string(path).map_err(|_| ConfigError::FileNotFound(path.to_path_buf()))?;
 
-    toml::from_str(&contents)
-        .map_err(|e| ConfigError::ParseError(e.to_string()))
+    toml::from_str(&contents).map_err(|e| ConfigError::ParseError(e.to_string()))
 }
 
 /// Merges two Config structs, with values from `local` overriding `base`.
@@ -48,9 +47,7 @@ fn default_config() -> Config {
         .filter(|slug| !slug.is_empty());
 
     Config {
-        project: crate::config::ProjectConfig {
-            slug: project_slug,
-        },
+        project: crate::config::ProjectConfig { slug: project_slug },
         docker: crate::config::DockerConfig {
             image: None,
             setup_command: None,
@@ -93,8 +90,16 @@ pub fn load_final() -> Result<Config, ConfigError> {
     if merged.docker.image.as_deref().unwrap_or("").is_empty() {
         return Err(ConfigError::MissingRequiredKey("docker.image".to_string()));
     }
-    if merged.docker.setup_command.as_deref().unwrap_or("").is_empty() {
-        return Err(ConfigError::MissingRequiredKey("docker.setup-command".to_string()));
+    if merged
+        .docker
+        .setup_command
+        .as_deref()
+        .unwrap_or("")
+        .is_empty()
+    {
+        return Err(ConfigError::MissingRequiredKey(
+            "docker.setup-command".to_string(),
+        ));
     }
 
     validate_ports(&merged)?;
@@ -112,7 +117,8 @@ fn validate_ports(config: &Config) -> Result<(), ConfigError> {
                 port.target
             )));
         }
-        let slug = slugify_name(&port.name).map_err(|err| ConfigError::ParseError(err.to_string()))?;
+        let slug =
+            slugify_name(&port.name).map_err(|err| ConfigError::ParseError(err.to_string()))?;
         if !seen.insert(slug.clone()) {
             return Err(ConfigError::ParseError(format!(
                 "Duplicate forwarded port name after slugify: '{slug}'"
@@ -126,7 +132,9 @@ fn validate_ports(config: &Config) -> Result<(), ConfigError> {
 #[cfg(test)]
 mod tests {
     use super::validate_ports;
-    use crate::config::{Config, DockerConfig, GitConfig, PortsConfig, ProjectConfig, ForwardedPort};
+    use crate::config::{
+        Config, DockerConfig, ForwardedPort, GitConfig, PortsConfig, ProjectConfig,
+    };
 
     fn base_config(ports: Vec<ForwardedPort>) -> Config {
         Config {

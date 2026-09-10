@@ -53,13 +53,17 @@ impl SessionStore for InMemorySessionStore {
 
     async fn get_session(&self, id: &str) -> Result<Session, StoreError> {
         let sessions = self.sessions.read().await;
-        sessions.get(id).cloned().map(|mut s| {
-            s.prompt_turn_count = 0;
-            s
-        }).ok_or_else(|| StoreError::NotFound {
-            entity: "session",
-            id: id.to_string(),
-        })
+        sessions
+            .get(id)
+            .cloned()
+            .map(|mut s| {
+                s.prompt_turn_count = 0;
+                s
+            })
+            .ok_or_else(|| StoreError::NotFound {
+                entity: "session",
+                id: id.to_string(),
+            })
     }
 
     async fn list_sessions(&self) -> Result<Vec<Session>, StoreError> {
@@ -124,10 +128,7 @@ impl SessionStore for InMemorySessionStore {
         Ok(())
     }
 
-    async fn get_prompt_turn_children(
-        &self,
-        id: &str,
-    ) -> Result<Vec<PromptTurn>, StoreError> {
+    async fn get_prompt_turn_children(&self, id: &str) -> Result<Vec<PromptTurn>, StoreError> {
         let prompt_turns = self.prompt_turns.read().await;
         let mut children: Vec<PromptTurn> = prompt_turns
             .values()
@@ -185,10 +186,12 @@ impl SessionStore for InMemorySessionStore {
     ) -> Result<Vec<Message>, StoreError> {
         {
             let sessions = self.sessions.read().await;
-            sessions.get(session_id).ok_or_else(|| StoreError::NotFound {
-                entity: "session",
-                id: session_id.to_string(),
-            })?;
+            sessions
+                .get(session_id)
+                .ok_or_else(|| StoreError::NotFound {
+                    entity: "session",
+                    id: session_id.to_string(),
+                })?;
         }
 
         let turns = self.get_session_prompt_turns(session_id).await?;
@@ -213,10 +216,12 @@ impl SessionStore for InMemorySessionStore {
     ) -> Result<(), StoreError> {
         {
             let sessions = self.sessions.read().await;
-            sessions.get(source_session_id).ok_or_else(|| StoreError::NotFound {
-                entity: "session",
-                id: source_session_id.to_string(),
-            })?;
+            sessions
+                .get(source_session_id)
+                .ok_or_else(|| StoreError::NotFound {
+                    entity: "session",
+                    id: source_session_id.to_string(),
+                })?;
         }
 
         let source_turns = self.get_session_prompt_turns(source_session_id).await?;

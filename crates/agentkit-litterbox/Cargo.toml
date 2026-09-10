@@ -1,31 +1,31 @@
+[dependencies]
+agentkit-docgen = {path = "../agentkit-docgen"}
+bollard = "0.21.0"
+bytes = "1.7.2"
+clap = {version = "4.5.23", features = ["derive"]}
+diffy = "0.5.0"
+futures-util = "0.3.31"
+git2 = {version = "0.21.0", default-features = false}
+glob = "0.3.1"
+regex = "1.11.1"
+rmcp = {version = "3.1.2", features = ["macros", "schemars", "server", "transport-io"]}
+schemars = {version = "1.2.1", features = ["derive"]}
+serde = {version = "1.0.228", features = ["derive"]}
+tar = "0.4.46"
+tempfile = "3.13.0"
+thiserror = "2.0.18"
+tokio = {version = "1.52.3", features = ["macros", "rt-multi-thread"]}
+toml = "1.1.2"
+
+[lints.clippy]
+all = "warn"
+
+[lints.rust]
+warnings = "deny"
+
 [package]
 name = "agentkit-litterbox"
 version = "0.1.0"
 edition = "2024"
 publish = false
 license = "Apache-2.0"
-
-[lints.rust]
-warnings = "deny"
-
-[lints.clippy]
-all = "warn"
-
-[dependencies]
-agentkit-docgen = { path = "../agentkit-docgen" }
-bollard = "0.21.0"
-bytes = "1.7.2"
-clap = { version = "4.5.23", features = ["derive"] }
-diffy = "0.5.0"
-futures-util = "0.3.31"
-git2 = { version = "0.21.0", default-features = false }
-glob = "0.3.1"
-regex = "1.11.1"
-rmcp = { version = "3.1.2", features = ["macros", "schemars", "server", "transport-io"] }
-schemars = { version = "1.2.1", features = ["derive"] }
-serde = { version = "1.0.228", features = ["derive"] }
-tar = "0.4.46"
-tempfile = "3.13.0"
-thiserror = "2.0.18"
-tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread"] }
-toml = "1.1.2"

@@ -45,8 +45,12 @@ impl SearchRequest {
     }
 }
 
-fn default_page() -> u32 { 1 }
-fn default_max_results() -> u32 { 10 }
+fn default_page() -> u32 {
+    1
+}
+fn default_max_results() -> u32 {
+    10
+}
 
 impl Default for SearchRequest {
     fn default() -> Self {
@@ -126,7 +130,9 @@ impl Default for EngineRegistry {
 
 impl EngineRegistry {
     pub fn new() -> Self {
-        Self { engines: Vec::new() }
+        Self {
+            engines: Vec::new(),
+        }
     }
 
     pub fn register(&mut self, engine: Box<dyn SearchEngine>) {
@@ -134,15 +140,21 @@ impl EngineRegistry {
     }
 
     pub fn get(&self, name: &str) -> Option<&dyn SearchEngine> {
-        self.engines.iter().find(|e| e.name() == name).map(|e| e.as_ref())
+        self.engines
+            .iter()
+            .find(|e| e.name() == name)
+            .map(|e| e.as_ref())
     }
 
     pub fn list(&self) -> Vec<EngineInfo> {
-        self.engines.iter().map(|e| EngineInfo {
-            name: e.name().to_string(),
-            configured: e.is_configured(),
-            hint: e.config_hint(),
-        }).collect()
+        self.engines
+            .iter()
+            .map(|e| EngineInfo {
+                name: e.name().to_string(),
+                configured: e.is_configured(),
+                hint: e.config_hint(),
+            })
+            .collect()
     }
 }
 
@@ -159,8 +171,12 @@ pub type SearchEngineResult<T = SearchResponse> = std::result::Result<T, SearchE
 #[async_trait::async_trait]
 pub trait SearchEngine: Send + Sync {
     fn name(&self) -> &str;
-    fn is_configured(&self) -> bool { true }
-    fn config_hint(&self) -> Option<String> { None }
+    fn is_configured(&self) -> bool {
+        true
+    }
+    fn config_hint(&self) -> Option<String> {
+        None
+    }
     async fn search(&self, req: SearchRequest) -> SearchEngineResult;
 }
 
@@ -218,7 +234,9 @@ mod tests {
         let req = SearchRequest {
             query: "a".repeat(401),
             engine: "brave".to_string(),
-            page: 1, max_results: 10, region: None,
+            page: 1,
+            max_results: 10,
+            region: None,
         };
         assert!(req.validate().is_err());
     }
@@ -227,22 +245,32 @@ mod tests {
     fn test_query_validation_too_many_words() {
         let query: String = (0..51).map(|_| "word").collect::<Vec<_>>().join(" ");
         let req = SearchRequest {
-            query, engine: "brave".to_string(),
-            page: 1, max_results: 10, region: None,
+            query,
+            engine: "brave".to_string(),
+            page: 1,
+            max_results: 10,
+            region: None,
         };
         assert!(req.validate().is_err());
     }
 
     #[test]
     fn test_query_validation_valid() {
-        assert!(SearchRequest::new("valid query", "brave").validate().is_ok());
+        assert!(
+            SearchRequest::new("valid query", "brave")
+                .validate()
+                .is_ok()
+        );
     }
 
     #[test]
     fn test_query_validation_empty() {
         let req = SearchRequest {
-            query: String::new(), engine: "brave".to_string(),
-            page: 1, max_results: 10, region: None,
+            query: String::new(),
+            engine: "brave".to_string(),
+            page: 1,
+            max_results: 10,
+            region: None,
         };
         assert!(req.validate().is_err());
     }

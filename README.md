@@ -14,7 +14,7 @@ AgentKit provides a suite of tools for hosting, integrating, sandboxing and oper
 ## Tools
 
 - `lens`: provides `fetch` and `search` tools backed by various search engines.
-- `litterbox`: review *outputs*, not *actions*: give your AI agents litter trays to poop into.
+- `litterbox`: review _outputs_, not _actions_: give your AI agents litter trays to poop into.
 
 ## Installation
 

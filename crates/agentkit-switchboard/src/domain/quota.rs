@@ -1,10 +1,13 @@
-use std::time::{Duration, Instant};
 use std::fmt::Debug;
+use std::time::{Duration, Instant};
 
 pub trait ProviderQuotaBehaviour: Debug + Send + Sync {
     fn update_from_headers(&mut self, headers: &[(String, String)]);
-    fn handle_429(&mut self, headers: &[(String, String)], body: Option<&str>)
-        -> (DegradationReason, Option<Duration>);
+    fn handle_429(
+        &mut self,
+        headers: &[(String, String)],
+        body: Option<&str>,
+    ) -> (DegradationReason, Option<Duration>);
     fn clone_box(&self) -> Box<dyn ProviderQuotaBehaviour>;
 }
 
@@ -65,12 +68,10 @@ impl ProviderQuotaState {
 
     pub fn is_degraded(&self) -> bool {
         match &self.degradation {
-            Some(d) => {
-                match d.degraded_until {
-                    Some(until) => Instant::now() < until,
-                    None => true,
-                }
-            }
+            Some(d) => match d.degraded_until {
+                Some(until) => Instant::now() < until,
+                None => true,
+            },
             None => false,
         }
     }

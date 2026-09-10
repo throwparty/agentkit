@@ -39,6 +39,8 @@ impl Tool for EchoTool {
     }
 
     async fn call(&self, args: EchoArgs) -> Result<EchoOutput, Self::Error> {
-        Ok(EchoOutput { result: args.message })
+        Ok(EchoOutput {
+            result: args.message,
+        })
     }
 }

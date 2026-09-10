@@ -1,17 +1,17 @@
 use axum::{
-    routing::post,
     Router as AxumRouter,
     body::Body,
-    extract::{State, Request},
+    extract::{Request, State},
     http::StatusCode,
+    routing::post,
 };
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+use crate::handlers::Router;
 use crate::jsonrpc::JsonRpcRequest;
 use crate::session::store::SessionStore;
-use crate::handlers::Router;
 
 #[derive(Clone)]
 struct AppState {
@@ -39,13 +39,16 @@ async fn handle_request(
     State(state): State<Arc<Mutex<AppState>>>,
     request: Request<Body>,
 ) -> (StatusCode, String) {
-    let body_bytes = axum::body::to_bytes(request.into_body(), usize::MAX).await.unwrap();
+    let body_bytes = axum::body::to_bytes(request.into_body(), usize::MAX)
+        .await
+        .unwrap();
 
-    let json_body: serde_json::Value = serde_json::from_slice(&body_bytes)
-        .unwrap_or_else(|_| json!({}));
+    let json_body: serde_json::Value =
+        serde_json::from_slice(&body_bytes).unwrap_or_else(|_| json!({}));
 
     let id = json_body.get("id").cloned();
-    let method = json_body.get("method")
+    let method = json_body
+        .get("method")
         .and_then(|v| v.as_str())
         .unwrap_or("unknown")
         .to_string();

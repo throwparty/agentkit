@@ -19,6 +19,7 @@ flowchart LR
 ```
 
 Dependency highlights:
+
 - `agentkit-switchboard` depends on tokio, axum, reqwest, sqlx, serde, oauth2 — it does **not** depend on keyring or rig-core.
 - `agentkit-credentials` ships two binaries (`agentkit-credential-keychain` and `agentkit-credential-file`) sharing protocol types in a library module. Only the keychain binary depends on `keyring-core`.
 - `agentkit-models` bundles a models.dev snapshot at compile time via `build.rs`.
@@ -190,10 +191,10 @@ Credentials are **never** written to the config file, session database, or API r
 
 Uses `tracing` + `tracing-subscriber` with structured JSON output. Key events at each log level:
 
-| Level | Signal |
-|---|---|
-| `error` | All providers degraded for model, OAuth refresh failure |
-| `warn` | Provider degraded, session switched, credential helper not found |
-| `info` | Routing decision per request, proxy start/shutdown |
+| Level   | Signal                                                           |
+| ------- | ---------------------------------------------------------------- |
+| `error` | All providers degraded for model, OAuth refresh failure          |
+| `warn`  | Provider degraded, session switched, credential helper not found |
+| `info`  | Routing decision per request, proxy start/shutdown               |
 
 Filter with `RUST_LOG=switchboard=debug` or the `--log-level` flag.

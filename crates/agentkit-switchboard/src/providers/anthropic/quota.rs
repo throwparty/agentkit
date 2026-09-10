@@ -1,5 +1,5 @@
-use std::time::Duration;
 use crate::domain::quota::{DegradationReason, ProviderQuotaBehaviour};
+use std::time::Duration;
 
 #[derive(Debug, Clone, Default)]
 pub struct AnthropicQuota {
@@ -13,17 +13,25 @@ impl ProviderQuotaBehaviour for AnthropicQuota {
     fn update_from_headers(&mut self, headers: &[(String, String)]) {
         for (name, value) in headers {
             match (name.as_str(), value.parse::<u64>().ok()) {
-                ("anthropic-ratelimit-requests-remaining", Some(v)) => self.requests_remaining = Some(v as u32),
-                ("anthropic-ratelimit-input-tokens-remaining", Some(v)) => self.input_tokens_remaining = Some(v),
-                ("anthropic-ratelimit-output-tokens-remaining", Some(v)) => self.output_tokens_remaining = Some(v),
+                ("anthropic-ratelimit-requests-remaining", Some(v)) => {
+                    self.requests_remaining = Some(v as u32)
+                }
+                ("anthropic-ratelimit-input-tokens-remaining", Some(v)) => {
+                    self.input_tokens_remaining = Some(v)
+                }
+                ("anthropic-ratelimit-output-tokens-remaining", Some(v)) => {
+                    self.output_tokens_remaining = Some(v)
+                }
                 _ => {}
             }
         }
     }
 
-    fn handle_429(&mut self, headers: &[(String, String)], body: Option<&str>)
-        -> (DegradationReason, Option<Duration>)
-    {
+    fn handle_429(
+        &mut self,
+        headers: &[(String, String)],
+        body: Option<&str>,
+    ) -> (DegradationReason, Option<Duration>) {
         let retry_after = headers
             .iter()
             .find(|(name, _)| name.eq_ignore_ascii_case("retry-after"))

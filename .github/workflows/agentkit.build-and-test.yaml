@@ -17,7 +17,7 @@ jobs:
       run:
         shell: nix develop ./nix --command bash -euo pipefail {0} # zizmor: ignore[misfeature]
     permissions:
-      actions: write  # To manage cargo caches
+      actions: write # To manage cargo caches
       contents: read
     steps:
       - name: Checkout

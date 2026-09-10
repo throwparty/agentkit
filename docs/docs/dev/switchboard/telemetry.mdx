@@ -6,10 +6,10 @@ Switchboard ships OpenTelemetry instrumentation for traces, metrics, and logs, b
 
 The switchboard reads each signal's exporter selection in code via `otel::TelemetryConfig::from_env` — the Rust SDK does not auto-configure it. Each value maps to an upstream exporter:
 
-| Value | Exporter |
-|-------|----------|
-| `otlp` | `opentelemetry-otlp` (HTTP/protobuf) |
-| `console` | `opentelemetry-stdout` |
+| Value                    | Exporter                             |
+| ------------------------ | ------------------------------------ |
+| `otlp`                   | `opentelemetry-otlp` (HTTP/protobuf) |
+| `console`                | `opentelemetry-stdout`               |
 | unset / `none` / unknown | no exporter (unknown logs a warning) |
 
 `otel::build_providers` then builds only the enabled signals — batch processors for traces and logs, a periodic reader (60s) for metrics.
@@ -32,22 +32,22 @@ A single `tracing::info!()` therefore produces both the stdout line and the Open
 
 The request path is instrumented with `#[tracing::instrument]` spans. Each proxied request produces a tree rooted at `proxy_handler`, with child spans timing each phase:
 
-| Span | What it measures |
-|------|------------------|
-| `proxy_handler` | Total request handling (root span; carries `surface`) |
-| `get_states` | Routing: provider-state lock + scan |
-| `forward_request` | Upstream HTTP round trip (carries `provider_identity`) |
-| `record_response` | Quota/registry state update |
-| `log_routing_event` | `routing_events` SQLite insert |
+| Span                                | What it measures                                       |
+| ----------------------------------- | ------------------------------------------------------ |
+| `proxy_handler`                     | Total request handling (root span; carries `surface`)  |
+| `get_states`                        | Routing: provider-state lock + scan                    |
+| `forward_request`                   | Upstream HTTP round trip (carries `provider_identity`) |
+| `record_response`                   | Quota/registry state update                            |
+| `log_routing_event`                 | `routing_events` SQLite insert                         |
 | `lookup`, `assign`, `update_tokens` | Session DB reads/writes (when a session id is present) |
 
 ## Metrics
 
 Two instruments are recorded via the global meter:
 
-| Instrument | Type | Attributes | Recorded |
-|-----------|------|------------|----------|
-| `switchboard.http.requests` | Counter | `method`, `path`, `status_code` | After each HTTP response |
+| Instrument                     | Type      | Attributes                        | Recorded                    |
+| ------------------------------ | --------- | --------------------------------- | --------------------------- |
+| `switchboard.http.requests`    | Counter   | `method`, `path`, `status_code`   | After each HTTP response    |
 | `switchboard.provider.latency` | Histogram | `provider_identity`, `model_name` | After each upstream forward |
 
 No user IDs, session IDs, or request IDs are used as metric attributes (they belong on spans/logs only).

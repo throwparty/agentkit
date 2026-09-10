@@ -70,5 +70,3 @@ impl From<sqlx::Error> for SessionError {
         }
     }
 }
-
-

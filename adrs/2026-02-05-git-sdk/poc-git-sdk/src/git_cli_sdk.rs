@@ -38,7 +38,9 @@ impl GitCliSdk {
 
         if let Some(mut stdin) = child.stdin.take() {
             use std::io::Write;
-            stdin.write_all(input.as_bytes()).map_err(GitSdkError::from)?;
+            stdin
+                .write_all(input.as_bytes())
+                .map_err(GitSdkError::from)?;
         }
 
         let output = child.wait_with_output().map_err(GitSdkError::from)?;
@@ -100,7 +102,10 @@ impl GitSdk for GitCliSdk {
     fn status(&self, repo_path: &Path) -> GitSdkResult<Vec<StatusEntry>> {
         let output = Self::run_git(repo_path, &["status", "--porcelain=v1", "-z"])?;
         let mut entries = Vec::new();
-        let mut iter = output.split('\0').filter(|entry| !entry.is_empty()).peekable();
+        let mut iter = output
+            .split('\0')
+            .filter(|entry| !entry.is_empty())
+            .peekable();
         while let Some(entry) = iter.next() {
             if entry.len() < 3 {
                 continue;
@@ -128,12 +133,7 @@ impl GitSdk for GitCliSdk {
         Ok(entries)
     }
 
-    fn commit(
-        &self,
-        repo_path: &Path,
-        message: &str,
-        author: &AuthorInfo,
-    ) -> GitSdkResult<String> {
+    fn commit(&self, repo_path: &Path, message: &str, author: &AuthorInfo) -> GitSdkResult<String> {
         Self::run_git(repo_path, &["add", "-A"])?;
         let author_value = format!("{} <{}>", author.name, author.email);
         Self::run_git(

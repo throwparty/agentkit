@@ -4,7 +4,10 @@ use clap::Parser;
 
 /// Configuration for the Lens MCP server, parsed from CLI arguments.
 #[derive(Parser, Debug, Clone)]
-#[command(name = "agentkit-lens", about = "Lens MCP server for web search and fetch")]
+#[command(
+    name = "agentkit-lens",
+    about = "Lens MCP server for web search and fetch"
+)]
 pub struct Config {
     /// Brave Search API key (required for search functionality).
     #[arg(long = "brave-search-api-key")]
@@ -63,9 +66,7 @@ impl Config {
             DurationSuffix::Seconds(m) => m,
         };
 
-        let total = seconds
-            .checked_mul(multiplier)
-            .expect("cache-ttl overflow");
+        let total = seconds.checked_mul(multiplier).expect("cache-ttl overflow");
 
         // Duration::from_secs panics on overflow on some platforms, so check first
         if total > u64::MAX / 1_000_000_000 {

@@ -33,6 +33,7 @@ serde_json = "1.0.149"
 The Extism PDK types differ significantly from standard MCP types:
 
 **Tool Definition**:
+
 ```rust
 Tool {
     name: String,
@@ -45,6 +46,7 @@ Tool {
 ```
 
 **ToolSchema**: Must use structured `ToolSchema` type, not `serde_json::Value`:
+
 ```rust
 ToolSchema {
     r#type: ObjectType::Object,
@@ -54,12 +56,14 @@ ToolSchema {
 ```
 
 **CallToolRequest**: Arguments are nested:
+
 ```rust
 input.request.name  // NOT input.name
 input.request.arguments  // NOT input.arguments
 ```
 
 **CallToolResult**: Content is an enum:
+
 ```rust
 CallToolResult {
     content: Vec<ContentBlock>,  // NOT Vec<Content>
@@ -77,12 +81,14 @@ ContentBlock::Text(TextContent {
 ### 2. Build Process
 
 **Required steps**:
+
 1. Install wasm32-wasip1 target (via Nix in this project)
-2. Build with: `cargo build --release --target wasm32-wasip1`
-3. Output: `target/wasm32-wasip1/release/plugin.wasm` (391KB for this PoC)
-4. Build time: ~4.65s
+1. Build with: `cargo build --release --target wasm32-wasip1`
+1. Output: `target/wasm32-wasip1/release/plugin.wasm` (391KB for this PoC)
+1. Build time: ~4.65s
 
 **Nix environment** (see `nix/flake.nix`):
+
 ```nix
 rustToolchain = pkgs.rust-bin.stable.latest.default.override {
   targets = [ "wasm32-wasip1" ];
@@ -92,12 +98,15 @@ rustToolchain = pkgs.rust-bin.stable.latest.default.override {
 ### 3. Testing Challenges
 
 **Standard test harness doesn't work** because:
+
 - Plugin is not a standalone binary
 - Requires hyper-mcp runtime to load it
 - Standard MCP stdio communication happens through hyper-mcp, not the plugin directly
 
 **Custom test approach**:
+
 1. Create `config.json` pointing to plugin:
+
    ```json
    {
      "plugins": {
@@ -108,30 +117,34 @@ rustToolchain = pkgs.rust-bin.stable.latest.default.override {
    }
    ```
 
-2. Run hyper-mcp:
+1. Run hyper-mcp:
+
    ```bash
    hyper-mcp --config-file config.json --insecure-skip-signature true
    ```
 
-3. Communicate via JSON-RPC over stdio with hyper-mcp (not the plugin)
+1. Communicate via JSON-RPC over stdio with hyper-mcp (not the plugin)
 
 ### 4. Critical Limitation: WASM Sandbox
 
 **The write_file tool cannot actually write files!**
 
 Error encountered:
+
 ```
-Failed to call plugin: failed to find a pre-opened file descriptor 
+Failed to call plugin: failed to find a pre-opened file descriptor
 through which "/tmp" could be opened
 ```
 
 **Why?**:
+
 - WASM plugins run in a security sandbox
 - No direct filesystem access by design
 - This is a **fundamental security feature** of hyper-mcp
 - Plugins cannot perform arbitrary filesystem operations
 
 **Implications**:
+
 - hyper-mcp is excellent for compute/transform/analysis tools
 - NOT suitable for tools requiring filesystem access, network I/O, etc.
 - Host functions may provide limited capabilities (see template README)
@@ -139,36 +152,41 @@ through which "/tmp" could be opened
 ## Test Results
 
 ✅ **Test 1: Initialize** - PASS
+
 - Server: hyper-mcp v0.2.3
 - Protocol version: 2024-11-05
 
-✅ **Test 2: List Tools** - PASS  
+✅ **Test 2: List Tools** - PASS
+
 - Tool discovered: `write_file_plugin-write_file`
 - Note: hyper-mcp prefixes tool names with plugin name
 
 ❌ **Test 3: Write Absolute Path** - FAIL (Expected)
+
 - Error: No filesystem access from WASM sandbox
 - This is by design, not a bug
 
 ⚠️ **Test 4: Reject Relative Path** - CANNOT TEST
+
 - Would fail before validation due to sandbox restrictions
 
 ## Comparison Points
 
-| Aspect | hyper-mcp | rmcp (traditional SDK) |
-|--------|-----------|------------------------|
-| Binary Type | WASM plugin | Standalone executable |
-| Deployment | Requires hyper-mcp runtime | Self-contained |
-| File I/O | Blocked (sandboxed) | Full access |
-| Network | Limited/blocked | Full access |
-| Security | High (WASM sandbox) | Standard process isolation |
-| Distribution | OCI registries | Direct binary |
-| Build Complexity | Requires WASM target | Standard Rust build |
-| Runtime Deps | hyper-mcp runtime required | None (standalone) |
+| Aspect           | hyper-mcp                  | rmcp (traditional SDK)     |
+| ---------------- | -------------------------- | -------------------------- |
+| Binary Type      | WASM plugin                | Standalone executable      |
+| Deployment       | Requires hyper-mcp runtime | Self-contained             |
+| File I/O         | Blocked (sandboxed)        | Full access                |
+| Network          | Limited/blocked            | Full access                |
+| Security         | High (WASM sandbox)        | Standard process isolation |
+| Distribution     | OCI registries             | Direct binary              |
+| Build Complexity | Requires WASM target       | Standard Rust build        |
+| Runtime Deps     | hyper-mcp runtime required | None (standalone)          |
 
 ## Developer Experience
 
 **Positives**:
+
 - Clean PDK with good type definitions
 - Template provides excellent starting point
 - Build is fast (4.65s)
@@ -176,6 +194,7 @@ through which "/tmp" could be opened
 - Strong security guarantees
 
 **Negatives**:
+
 - Type system more complex than direct JSON
 - Sandbox restrictions limit use cases
 - Requires hyper-mcp runtime installation
@@ -185,6 +204,7 @@ through which "/tmp" could be opened
 ## Recommended Use Cases
 
 **Good fit**:
+
 - Data transformation/analysis tools
 - Computation-heavy operations
 - LLM prompt generation
@@ -192,6 +212,7 @@ through which "/tmp" could be opened
 - Environments requiring strong sandboxing
 
 **Poor fit**:
+
 - File system manipulation (write/delete/move)
 - Network operations
 - System administration tools
@@ -207,6 +228,7 @@ through which "/tmp" could be opened
 ## Conclusion
 
 hyper-mcp represents a **different paradigm** for MCP servers:
+
 - **Security-first**: WASM sandboxing prevents malicious behavior
 - **Composable**: Load multiple plugins into one runtime
 - **Portable**: WASM runs anywhere

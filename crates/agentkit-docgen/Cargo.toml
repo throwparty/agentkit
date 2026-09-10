@@ -1,15 +1,15 @@
+[dependencies]
+clap = {version = "4.5.23", features = ["derive"]}
+
+[lints.clippy]
+all = "warn"
+
+[lints.rust]
+warnings = "deny"
+
 [package]
 name = "agentkit-docgen"
 version = "0.1.0"
 edition = "2024"
 publish = false
 license = "Apache-2.0"
-
-[lints.rust]
-warnings = "deny"
-
-[lints.clippy]
-all = "warn"
-
-[dependencies]
-clap = { version = "4.5.23", features = ["derive"] }

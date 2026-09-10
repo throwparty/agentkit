@@ -7,8 +7,8 @@ use rs_docker::Docker;
 use tokio::task;
 use urlencoding::encode;
 
-use hyper::{Body, Client, Method, Request, Uri};
 use hyper::client::HttpConnector;
+use hyper::{Body, Client, Method, Request, Uri};
 use hyperlocal::UnixConnector;
 use serde_json::Value;
 use tar::{Archive, Builder};
@@ -20,7 +20,8 @@ pub struct RsDockerClient {
 
 impl RsDockerClient {
     pub fn connect_with_env() -> DockerResult<Self> {
-        let addr = std::env::var("DOCKER_HOST").unwrap_or_else(|_| "unix:///var/run/docker.sock".to_string());
+        let addr = std::env::var("DOCKER_HOST")
+            .unwrap_or_else(|_| "unix:///var/run/docker.sock".to_string());
         let docker = Docker::connect(&addr)?;
         let http = DockerHttp::new(&addr)?;
         Ok(Self {
@@ -129,18 +130,14 @@ impl DockerHttp {
             .map_err(|e| e.to_string())?;
 
         let response = match self.protocol {
-            Protocol::Unix => self
-                .hyperlocal_client
-                .as_ref()
-                .unwrap()
-                .request(request)
-                .await,
-            Protocol::Tcp => self
-                .hyper_client
-                .as_ref()
-                .unwrap()
-                .request(request)
-                .await,
+            Protocol::Unix => {
+                self.hyperlocal_client
+                    .as_ref()
+                    .unwrap()
+                    .request(request)
+                    .await
+            }
+            Protocol::Tcp => self.hyper_client.as_ref().unwrap().request(request).await,
         }
         .map_err(|e| e.to_string())?;
 
@@ -181,7 +178,12 @@ impl DockerClient for RsDockerClient {
         let url = format!("/containers/create?name={}", encode(&name));
         let response = self
             .http
-            .request_bytes(Method::POST, &url, serde_json::to_vec(&body)?, "application/json")
+            .request_bytes(
+                Method::POST,
+                &url,
+                serde_json::to_vec(&body)?,
+                "application/json",
+            )
             .await?;
         let value: Value = serde_json::from_slice(&response)?;
         let id = value
@@ -246,7 +248,12 @@ impl DockerClient for RsDockerClient {
         let exec_url = format!("/containers/{}/exec", _container_id);
         let exec_response = self
             .http
-            .request_bytes(Method::POST, &exec_url, serde_json::to_vec(&exec_body)?, "application/json")
+            .request_bytes(
+                Method::POST,
+                &exec_url,
+                serde_json::to_vec(&exec_body)?,
+                "application/json",
+            )
             .await?;
         let exec_value: Value = serde_json::from_slice(&exec_response)?;
         let exec_id = exec_value
@@ -261,7 +268,12 @@ impl DockerClient for RsDockerClient {
         let start_url = format!("/exec/{}/start", exec_id);
         let output = self
             .http
-            .request_bytes(Method::POST, &start_url, serde_json::to_vec(&start_body)?, "application/json")
+            .request_bytes(
+                Method::POST,
+                &start_url,
+                serde_json::to_vec(&start_body)?,
+                "application/json",
+            )
             .await?;
 
         Ok(ExecOutput {

@@ -1,13 +1,10 @@
 use rmcp::{
-    handler::server::{
-        router::tool::ToolRouter,
-        wrapper::Parameters,
-    },
+    ErrorData as McpError, ServerHandler,
+    handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{CallToolResult, ContentBlock, ServerCapabilities, ServerInfo},
     service::serve_server,
     tool, tool_handler, tool_router,
     transport::stdio,
-    ErrorData as McpError, ServerHandler,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -16,9 +13,9 @@ use tokio::sync::Mutex;
 use tracing::warn;
 
 use crate::brave;
-use crate::kagi;
 use crate::cache::Cache;
 use crate::config;
+use crate::kagi;
 use crate::safety;
 use crate::search::{EngineInfoOutput, EngineRegistry, SearchRequest};
 
@@ -37,8 +34,12 @@ pub struct SearchArgs {
     pub region: Option<String>,
 }
 
-fn default_page() -> u32 { 1 }
-fn default_max_results() -> u32 { 10 }
+fn default_page() -> u32 {
+    1
+}
+fn default_max_results() -> u32 {
+    10
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct SearchResultEntry {
@@ -69,9 +70,15 @@ pub struct FetchArgs {
     pub format: String,
 }
 
-fn default_max_length() -> usize { 8000 }
-fn default_start_index() -> usize { 0 }
-fn default_format() -> String { "markdown".to_string() }
+fn default_max_length() -> usize {
+    8000
+}
+fn default_start_index() -> usize {
+    0
+}
+fn default_format() -> String {
+    "markdown".to_string()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct FetchOutput {
@@ -116,9 +123,11 @@ impl LensServer {
         let mut registry = EngineRegistry::new();
 
         if let Some(ref api_key) = cfg.brave_search_api_key {
-            registry.register(Box::new(brave::BraveSearchEngine::new(brave::BraveOptions {
-                api_key: api_key.clone(),
-            })));
+            registry.register(Box::new(brave::BraveSearchEngine::new(
+                brave::BraveOptions {
+                    api_key: api_key.clone(),
+                },
+            )));
         }
 
         // Register Kagi search engine
@@ -150,14 +159,14 @@ impl LensServer {
     ) -> Result<CallToolResult, McpError> {
         // Validate query
         if args.query.len() > 400 {
-            return Ok(CallToolResult::error(vec![
-                ContentBlock::text("Query exceeds 400 character limit".to_string()),
-            ]));
+            return Ok(CallToolResult::error(vec![ContentBlock::text(
+                "Query exceeds 400 character limit".to_string(),
+            )]));
         }
         if args.query.split_whitespace().count() > 50 {
-            return Ok(CallToolResult::error(vec![
-                ContentBlock::text("Query exceeds 50 word limit".to_string()),
-            ]));
+            return Ok(CallToolResult::error(vec![ContentBlock::text(
+                "Query exceeds 50 word limit".to_string(),
+            )]));
         }
 
         // Build request
@@ -171,31 +180,34 @@ impl LensServer {
 
         // Resolve engine
         let registry = self.registry.lock().await;
-        let engine = registry.get(&args.engine)
-            .ok_or_else(|| {
-                McpError::invalid_params(format!("Unknown search engine: {}", args.engine), None)
-            })?;
+        let engine = registry.get(&args.engine).ok_or_else(|| {
+            McpError::invalid_params(format!("Unknown search engine: {}", args.engine), None)
+        })?;
 
         if !engine.is_configured() {
-            let hint = engine.config_hint().unwrap_or_else(|| "Engine is not configured".to_string());
-            return Ok(CallToolResult::error(vec![
-                ContentBlock::text(format!(
-                    "Search engine '{}' is not configured: {}",
-                    args.engine, hint
-                )),
-            ]));
+            let hint = engine
+                .config_hint()
+                .unwrap_or_else(|| "Engine is not configured".to_string());
+            return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                "Search engine '{}' is not configured: {}",
+                args.engine, hint
+            ))]));
         }
 
         // Execute search
         match engine.search(req).await {
             Ok(response) => {
                 let output = SearchOutput {
-                    results: response.results.into_iter().map(|r| SearchResultEntry {
-                        title: r.title,
-                        link: r.link,
-                        snippet: r.snippet,
-                        position: r.position,
-                    }).collect(),
+                    results: response
+                        .results
+                        .into_iter()
+                        .map(|r| SearchResultEntry {
+                            title: r.title,
+                            link: r.link,
+                            snippet: r.snippet,
+                            position: r.position,
+                        })
+                        .collect(),
                     query: response.query,
                     engine: response.engine,
                     page: response.page,
@@ -208,9 +220,10 @@ impl LensServer {
             }
             Err(e) => {
                 warn!("Search error: {}", e);
-                Ok(CallToolResult::error(vec![
-                    ContentBlock::text(format!("Search failed: {}", e)),
-                ]))
+                Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                    "Search failed: {}",
+                    e
+                ))]))
             }
         }
     }
@@ -253,9 +266,10 @@ impl LensServer {
             }
             Err(e) => {
                 warn!("Fetch error for {}: {}", url, e);
-                return Ok(CallToolResult::error(vec![
-                    ContentBlock::text(format!("Fetch failed: {}", e)),
-                ]));
+                return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                    "Fetch failed: {}",
+                    e
+                ))]));
             }
         };
 
@@ -263,7 +277,11 @@ impl LensServer {
         let markdown = html_to_markdown(&response);
 
         // Truncate to max_length
-        let content: String = markdown.chars().skip(args.start_index).take(args.max_length).collect();
+        let content: String = markdown
+            .chars()
+            .skip(args.start_index)
+            .take(args.max_length)
+            .collect();
 
         let output = FetchOutput {
             content,
@@ -283,9 +301,7 @@ impl LensServer {
         name = "list-search-engines",
         description = "List all available search engines and their configuration status"
     )]
-    async fn list_search_engines(
-        &self,
-    ) -> Result<CallToolResult, McpError> {
+    async fn list_search_engines(&self) -> Result<CallToolResult, McpError> {
         let registry = self.registry.lock().await;
         let outputs: Vec<EngineInfoOutput> = registry.list().into_iter().map(Into::into).collect();
         let output = EnginesResponseOutput { engines: outputs };
@@ -339,13 +355,24 @@ impl reqwest::dns::Resolve for SafeDnsResolver {
     fn resolve(
         &self,
         host: reqwest::dns::Name,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn Iterator<Item = SocketAddr> + Send>, Box<dyn std::error::Error + Send + Sync>>> + Send>> {
+    ) -> Pin<
+        Box<
+            dyn Future<
+                    Output = Result<
+                        Box<dyn Iterator<Item = SocketAddr> + Send>,
+                        Box<dyn std::error::Error + Send + Sync>,
+                    >,
+                > + Send,
+        >,
+    > {
         let host_str = host.as_str().to_string();
         Box::pin(async move {
-            let addrs: Vec<SocketAddr> = match tokio::net::lookup_host((host_str.as_str(), 0)).await {
+            let addrs: Vec<SocketAddr> = match tokio::net::lookup_host((host_str.as_str(), 0)).await
+            {
                 Ok(iter) => iter.collect(),
                 Err(e) => {
-                    let err: Box<dyn std::error::Error + Send + Sync> = std::io::Error::other(format!("DNS resolution failed: {e}")).into();
+                    let err: Box<dyn std::error::Error + Send + Sync> =
+                        std::io::Error::other(format!("DNS resolution failed: {e}")).into();
                     return Err(err);
                 }
             };
@@ -356,7 +383,10 @@ impl reqwest::dns::Resolve for SafeDnsResolver {
                 .collect();
 
             if safe_addrs.is_empty() {
-                let err: Box<dyn std::error::Error + Send + Sync> = std::io::Error::other("DNS resolved to private/localhost IP — blocked for safety").into();
+                let err: Box<dyn std::error::Error + Send + Sync> = std::io::Error::other(
+                    "DNS resolved to private/localhost IP — blocked for safety",
+                )
+                .into();
                 return Err(err);
             }
 
@@ -373,20 +403,38 @@ fn is_blocked_ip(ip: std::net::IpAddr) -> bool {
             let first = octets[0];
             let second = octets[1];
 
-            if first == 127 { return true; }
-            if first == 10 { return true; }
-            if first == 172 && (16..=31).contains(&second) { return true; }
-            if first == 192 && second == 168 { return true; }
-            if first == 169 && second == 254 { return true; }
-            if first == 0 { return true; }
+            if first == 127 {
+                return true;
+            }
+            if first == 10 {
+                return true;
+            }
+            if first == 172 && (16..=31).contains(&second) {
+                return true;
+            }
+            if first == 192 && second == 168 {
+                return true;
+            }
+            if first == 169 && second == 254 {
+                return true;
+            }
+            if first == 0 {
+                return true;
+            }
             false
         }
         std::net::IpAddr::V6(v6) => {
-            if v6.is_loopback() { return true; }
-            if v6.is_unicast_link_local() { return true; }
+            if v6.is_loopback() {
+                return true;
+            }
+            if v6.is_unicast_link_local() {
+                return true;
+            }
             let bytes = v6.octets();
             let first = bytes[0];
-            if (first & 0xFE) == 0xFC { return true; }
+            if (first & 0xFE) == 0xFC {
+                return true;
+            }
             if let Some(mapped) = v6.to_ipv4_mapped() {
                 return is_blocked_ip(std::net::IpAddr::V4(mapped));
             }
@@ -409,7 +457,10 @@ async fn fetch_content(uri: &str) -> Result<(String, usize), String> {
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
 
-    let response = client.get(uri).send().await
+    let response = client
+        .get(uri)
+        .send()
+        .await
         .map_err(|e| format!("HTTP request failed: {}", e))?;
 
     let status = response.status().as_u16();
@@ -418,7 +469,9 @@ async fn fetch_content(uri: &str) -> Result<(String, usize), String> {
         return Err(format!("HTTP {} {}", status, reason));
     }
 
-    let body = response.text().await
+    let body = response
+        .text()
+        .await
         .map_err(|e| format!("Failed to read response body: {}", e))?;
 
     let len = body.len();
@@ -448,7 +501,9 @@ fn html_to_markdown(html: &str) -> String {
 // ---------------------------------------------------------------------------
 
 /// Start the MCP server, blocking until the connection is closed.
-pub async fn run_stdio(cfg: config::Config) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+pub async fn run_stdio(
+    cfg: config::Config,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let server = LensServer::from_config(&cfg)?;
 
     let (stdin, stdout) = stdio();
@@ -665,12 +720,10 @@ mod tests {
 
     #[test]
     fn test_is_blocked_ip_v6_ipv4_mapped() {
-        let mapped: std::net::Ipv6Addr =
-            std::net::Ipv4Addr::new(127, 0, 0, 1).to_ipv6_mapped();
+        let mapped: std::net::Ipv6Addr = std::net::Ipv4Addr::new(127, 0, 0, 1).to_ipv6_mapped();
         assert!(is_blocked_ip(std::net::IpAddr::V6(mapped)));
 
-        let mapped: std::net::Ipv6Addr =
-            std::net::Ipv4Addr::new(192, 168, 1, 1).to_ipv6_mapped();
+        let mapped: std::net::Ipv6Addr = std::net::Ipv4Addr::new(192, 168, 1, 1).to_ipv6_mapped();
         assert!(is_blocked_ip(std::net::IpAddr::V6(mapped)));
     }
 
@@ -700,7 +753,10 @@ mod tests {
             "<p>Hello</p></body></html>",
         );
         let result = html_to_markdown(html);
-        assert!(!result.contains("alert"), "script content should be removed");
+        assert!(
+            !result.contains("alert"),
+            "script content should be removed"
+        );
         assert!(!result.contains(".cls"), "style content should be removed");
         assert!(!result.contains('<'), "no raw HTML tags should remain");
     }

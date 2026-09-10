@@ -1,18 +1,20 @@
 ---
-status: accepted
----
+
+## status: accepted
 
 # ADR: Docker SDK for Rust
 
 ## 1. Goals and User Journeys
 
 ### Goals
+
 - To provide a robust and idiomatic Rust interface for interacting with a local Docker Engine.
 - To enable programmatic creation, deletion, management, and interaction with Docker containers and images from Rust applications.
 - To facilitate the development of Rust applications that require comprehensive Docker container management capabilities.
 - To define a trait-based interface so multiple Docker client libraries can implement the same operations.
 
 ### User Journeys
+
 - **Developer creating a container:** A Rust developer needs to spin up a new Docker container from a specified image (e.g., `ubuntu:latest`, `nginx:stable`) with custom configurations (e.g., container name, environment variables, port mappings) for testing or application deployment.
 - **Developer deleting a container:** A Rust developer needs to remove an existing Docker container by its ID or name to clean up resources after a task or test suite has completed.
 - **Application managing test environments:** A Rust application automates the setup and teardown of test environments by creating and deleting multiple Docker containers as part of its CI/CD pipeline or local development workflow.
@@ -25,11 +27,11 @@ status: accepted
 
 - **FR1: Connect to Docker Engine:** The SDK MUST be able to establish a connection to a Docker Engine running on the local machine.
 - **FR2: Create Container:** The SDK MUST provide a function to create a Docker container. This function MUST accept at least an image name and SHOULD allow for optional configuration parameters such as:
-    - Container name
-    - Environment variables
-    - Port mappings
-    - Volume mounts
-    - Command to execute
+  - Container name
+  - Environment variables
+  - Port mappings
+  - Volume mounts
+  - Command to execute
 - **FR3: Delete Container:** The SDK MUST provide a function to delete a Docker container. This function MUST accept the container's ID or name as an identifier.
 - **FR4: List Containers (SHOULD):** The SDK SHOULD provide a function to list running and/or all Docker containers, returning relevant information such as container ID, name, image, and status.
 - **FR5: Start/Stop Containers (SHOULD):** The SDK SHOULD provide functions to start and stop existing Docker containers by their ID or name.

@@ -1,10 +1,6 @@
 ---
-status: draft
-created: 2026-04-29
-updated: 2026-04-29
-author: adrian
-decision: pending
----
+
+## status: draft created: 2026-04-29 updated: 2026-04-29 author: adrian decision: pending
 
 # `lens` MCP Server Tasks
 
@@ -29,12 +25,14 @@ decision: pending
 **Description**: Create the `crates/agentkit-lens/` directory structure with all source files, add `agentkit-lens` as a workspace member in the root `Cargo.toml`, and define dependencies: `rmcp`, `reqwest`, `clap`, `html-to-markdown-rs` (3.3.3), `serde`, `serde_json`, `tokio`, `schemars`.
 
 **Acceptance Criteria**:
+
 - `cargo build` succeeds from workspace root
 - All source files exist (listed in plan Module Structure)
 - `clap` derives for `--brave-api-key` and `--cache-ttl` args exist in stubbed `config.rs`
 - CI pipeline runs for new crate (lint, fmt, test)
 
 **Tests**:
+
 - `cargo clippy -- -D warnings` passes
 - `cargo fmt --check` passes
 
@@ -53,6 +51,7 @@ decision: pending
 **Description**: Define the `SearchEngine` trait in `src/search/mod.rs` with two methods: `name(&self) -> &str` and `search(&self, req: SearchRequest) -> SearchResponse`. Implement module re-exports. Create placeholder `SearchRequest` and `SearchResponse` structs with `serde` derives and JSON schema via `schemars`.
 
 **Acceptance Criteria**:
+
 - `SearchEngine` trait defined with `name()` and `search()` methods
 - `SearchRequest` struct includes: `query`, `engine`, `page`, `max_results`, `region` (all serde-serializable)
 - `SearchResponse` struct includes: `results`, `query`, `engine`, `page`, `total_pages`, `has_more`
@@ -61,6 +60,7 @@ decision: pending
 - Unit tests for struct serialization round-trip
 
 **Tests**:
+
 - Unit: serde round-trip for `SearchRequest` and `SearchResponse`
 - Unit: JSON schema generation succeeds
 
@@ -81,6 +81,7 @@ decision: pending
 **Description**: Split Brave implementation into three sub-modules. **`brave/api.rs`** is a centralized HTTP client (mirroring Brave's `BraveAPI/index.ts`): constructs API URLs, builds query params (`q`, `count`, `offset`, `country`, `search_lang`, etc.), sets auth headers (`X-Subscription-Token`), adds `Accept: application/json` and `Accept-Encoding: gzip`, and handles structured error parsing (JSON → text fallback). Sets `text_decorations=false` to avoid HTML markup in snippets. **`brave/types.rs`** defines Brave API response schemas (`WebSearchApiResponse`, `SearchError`) and error variants (`InvalidKey`, `RateLimited`, `HttpError`). **`brave/engine.rs`** implements `SearchEngine` trait: constructs `BraveOptions` from `--brave-api-key`, delegates HTTP calls to the API client, maps `web.results[]` to `SearchResponse`, and computes `has_more` from Brave's `more_results_available` field (not pagination arithmetic). Document the hard pagination cap: `offset` max is 9, so max 90 results per request (`count` × `offset`). Note: Brave uses `count` (1-20) + `offset` (0-9); our spec uses `page` + `max_results` — map: `offset = (page - 1) * count`, cap `offset` at 9.
 
 **Acceptance Criteria**:
+
 - `brave/api.rs` — centralized HTTP client with URL construction, query param building, auth headers, gzip support
 - `brave/types.rs` — Brave API response schema (`WebSearchApiResponse`), error schema (`RateLimitErrorResponse`), typed error enum
 - `brave/engine.rs` — `BraveSearchEngine` implements `SearchEngine` trait
@@ -93,6 +94,7 @@ decision: pending
 - Structured errors parsed: 401 → `InvalidKey`, 429 → `RateLimited`, other → `HttpError(status, detail)`
 
 **Tests**:
+
 - Unit: Brave response parsing (mocked JSON → `SearchResponse`) — verify field mapping
 - Unit: Brave API URL construction (mocked client) — verify query params
 - Unit: `has_more` from `more_results_available` (last page false, intermediate true)
@@ -118,6 +120,7 @@ decision: pending
 **Description**: Implement CLI argument parsing with `clap`. Define `Config` struct containing `brave_api_key: Option<String>` and `cache_ttl: Duration`. Parse `--cache-ttl` string (format: `1s`, `30m`, `4h`, `2d`, `1w`) into `Duration`. Validate at parse time; return error if invalid or zero/negative.
 
 **Acceptance Criteria**:
+
 - `Config` struct with `brave_api_key` and `cache_ttl` fields
 - `--brave-api-key <KEY>` parses correctly (optional string)
 - `--cache-ttl <DURATION>` parses: `1s`, `30m`, `4h`, `2d`, `1w`
@@ -126,6 +129,7 @@ decision: pending
 - Duration string parsed in descending order of size
 
 **Tests**:
+
 - Unit: Valid duration strings parse to correct `Duration`
 - Unit: Invalid duration strings fail with clear error
 - Unit: Zero/negative durations rejected
@@ -146,6 +150,7 @@ decision: pending
 **Description**: Implement URL validation and LAN IP blocking. Parse URL scheme and host. Resolve host to IP addresses via `std::net::ToSocketAddrs`. Check if any resolved IP is in RFC 1918 ranges (10.x, 172.16-31.x, 192.168.x), localhost (127.x, ::1), or link-local (169.254.x). Reject with error if LAN IP detected. Validate URL format (scheme, host, path) before resolution.
 
 **Acceptance Criteria**:
+
 - `validate_url(url: &str) -> Result<()>` function defined
 - Rejects URLs with invalid format (missing scheme, invalid host)
 - Resolves hostname to IP addresses before checking
@@ -156,6 +161,7 @@ decision: pending
 - Error messages include resolved IP and reason for rejection
 
 **Tests**:
+
 - Unit: Valid public URL passes validation
 - Unit: `192.168.1.1` rejected (private)
 - Unit: `10.0.0.1` rejected (private)
@@ -181,6 +187,7 @@ decision: pending
 **Description**: Implement in-memory TTL cache for HTTP responses. Key is normalized URL (lowercase scheme+host+path, remove fragments). Value is `FetchResponse` with content. On `get()`: check if key exists and not expired → return hit. If miss: fetch content, write to cache, return miss. Never update in place; stale entries expire naturally. Support configurable TTL via `Duration`.
 
 **Acceptance Criteria**:
+
 - `Cache` struct with configurable TTL
 - `get(uri: &str) -> Option<FetchResponse>` returns cached response if present and not expired
 - `put(uri: &str, response: FetchResponse)` stores response with expiry timestamp
@@ -190,6 +197,7 @@ decision: pending
 - TTL validation at startup (zero/negative rejected)
 
 **Tests**:
+
 - Unit: Fresh cache hit returns cached response
 - Unit: Expired cache entry returns `None`
 - Unit: New entry written on miss
@@ -213,6 +221,7 @@ decision: pending
 **Description**: Implement HTTP fetch with GET-only requests, redirect following (up to 10 hops), and HTML-to-markdown conversion using `html-to-markdown-rs` (3.3.3). Use `reqwest` for HTTP client. Set 30s timeout. Truncate content to `max_length` (default 8000). Preserve headings. Strip script, style, nav, header, footer tags before conversion. Handle Unicode content. Return `FetchResponse` with content, status, content_type, and content_length.
 
 **Acceptance Criteria**:
+
 - `fetch(uri: &str, max_length: usize) -> Result<FetchResponse>` defined
 - GET-only requests (no POST, PUT, PATCH, DELETE)
 - Follows redirects up to 10 hops
@@ -225,6 +234,7 @@ decision: pending
 - 403/404 returns error with status code
 
 **Tests**:
+
 - Unit: Valid HTML → markdown conversion (mocked HTML)
 - Unit: Redirect following (mocked redirect chain)
 - Unit: Content truncation at `max_length`
@@ -252,6 +262,7 @@ decision: pending
 **Description**: Implement three MCP tools using `rmcp` macros (`#[tool]`/`#[tool_router]`): `search`, `fetch`, and `list-search-engines`. Dispatch `search` to engine instance by name. Handle pagination with `has_more` field. Implement `fetch` with cache lookup, security validation, and markdown conversion. Implement `list-search-engines` to return list of registered engines with configured status. Wire all dependencies (search engines, cache, fetcher, security).
 
 **Acceptance Criteria**:
+
 - `search` tool: accepts `query`, `engine`, `page`, `max_results`, `region`; returns `SearchResponse`
 - `fetch` tool: accepts `uri`, `max_length`, `start_index`, `format`; returns `FetchResponse`
 - `list-search-engines` tool: accepts no args; returns `EnginesResponse` with engine names and configured status
@@ -263,6 +274,7 @@ decision: pending
 - Unit tests for tool handlers (mocked backends)
 
 **Tests**:
+
 - Unit: `search` tool dispatches to correct engine
 - Unit: `fetch` tool checks cache before HTTP call
 - Unit: `fetch` tool applies security validation
@@ -287,6 +299,7 @@ decision: pending
 **Description**: Implement CLI entry point with stdio transport via `rmcp`. Mirror Brave's reference implementation: parse CLI args (`--brave-api-key`, `--cache-ttl`) via T4 config parser. Validate `cache_ttl` at startup (fail fast if invalid, exit with clear error message). Construct search engine instances with options structs (Brave) at startup. Initialize cache with validated TTL. Set up `rmcp` server using `#[tool_router]` macro on `LensTools` struct from T8. Use `McpServer::builder().with_stdio_transport()` pattern. Start MCP server with stdio transport.
 
 **Acceptance Criteria**:
+
 - CLI args parsed and validated at startup
 - `--brave-api-key` passed to Brave engine constructor
 - `--cache-ttl` validated; binary exits with error if invalid
@@ -298,6 +311,7 @@ decision: pending
 - `list-search-engines` returns correct configured status
 
 **Tests**:
+
 - Integration: Full startup with valid config
 - Integration: Full startup with invalid cache TTL (exits with error)
 - Integration: Full startup with no Brave API key (starts but search fails)
@@ -305,6 +319,7 @@ decision: pending
 **Rollout**: Final integration step; requires all previous tasks.
 
 **Acceptance Criteria**:
+
 - CLI args parsed and validated at startup
 - `--brave-api-key` passed to Brave engine constructor
 - `--cache-ttl` validated; binary exits with error if invalid
@@ -314,6 +329,7 @@ decision: pending
 - `list-search-engines` returns correct configured status
 
 **Tests**:
+
 - Integration: Full startup with valid config
 - Integration: Full startup with invalid cache TTL (exits with error)
 - Integration: Full startup with no Brave API key (starts but search fails)

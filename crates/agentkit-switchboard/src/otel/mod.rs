@@ -1,21 +1,23 @@
 pub mod log_layer;
 pub mod metrics;
 
+use opentelemetry::KeyValue;
 use opentelemetry::logs::LoggerProvider;
 use opentelemetry::trace::TracerProvider;
-use opentelemetry::KeyValue;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::logs::{BatchConfigBuilder as LogBatchConfigBuilder, BatchLogProcessor};
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::resource::{
     EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector,
 };
-use opentelemetry_sdk::logs::{BatchLogProcessor, BatchConfigBuilder as LogBatchConfigBuilder};
-use opentelemetry_sdk::trace::{BatchSpanProcessor, BatchConfigBuilder as TraceBatchConfigBuilder, SdkTracerProvider};
-use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::trace::{
+    BatchConfigBuilder as TraceBatchConfigBuilder, BatchSpanProcessor, SdkTracerProvider,
+};
 use std::time::Duration;
+use tracing_subscriber::Layer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::Layer;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExporterKind {
@@ -97,19 +99,14 @@ pub fn init_telemetry(log_level: &str) -> ShutdownGuard {
     }
 
     let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-        tracing_subscriber::EnvFilter::new(format!(
-            "{}={}",
-            env!("CARGO_CRATE_NAME"),
-            log_level
-        ))
+        tracing_subscriber::EnvFilter::new(format!("{}={}", env!("CARGO_CRATE_NAME"), log_level))
     });
 
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_target(true)
         .with_level(true);
 
-    let mut layers: Vec<Box<dyn Layer<tracing_subscriber::Registry> + Send + Sync>> =
-        Vec::new();
+    let mut layers: Vec<Box<dyn Layer<tracing_subscriber::Registry> + Send + Sync>> = Vec::new();
     layers.push(Box::new(fmt_layer));
     if let Some(tp) = &providers.tracer_provider {
         let tracer = tp.tracer("agentkit-switchboard");
@@ -129,9 +126,8 @@ pub fn init_telemetry(log_level: &str) -> ShutdownGuard {
 fn init_fmt_only(log_level: &str) {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                format!("{}={}", env!("CARGO_CRATE_NAME"), log_level).into()
-            }),
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| format!("{}={}", env!("CARGO_CRATE_NAME"), log_level).into()),
         )
         .init();
 }
@@ -145,8 +141,8 @@ fn empty_providers() -> OtelProviders {
 }
 
 pub fn build_resource() -> Resource {
-    let service_name = std::env::var("OTEL_SERVICE_NAME")
-        .unwrap_or_else(|_| "agentkit-switchboard".to_string());
+    let service_name =
+        std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| "agentkit-switchboard".to_string());
 
     Resource::builder_empty()
         .with_detector(Box::new(SdkProvidedResourceDetector))

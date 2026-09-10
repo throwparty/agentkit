@@ -1,9 +1,9 @@
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::resource::{
     EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector,
 };
-use opentelemetry_sdk::Resource;
 use std::time::Duration;
 
 pub struct OtelSetup {
@@ -41,8 +41,8 @@ impl Drop for ShutdownGuard {
 }
 
 fn build_resource() -> Resource {
-    let service_name = std::env::var("OTEL_SERVICE_NAME")
-        .unwrap_or_else(|_| "poc-otel".to_string());
+    let service_name =
+        std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| "poc-otel".to_string());
 
     Resource::builder_empty()
         .with_detector(Box::new(SdkProvidedResourceDetector))

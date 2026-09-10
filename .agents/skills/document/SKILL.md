@@ -1,7 +1,6 @@
 ---
-name: document
-description: Writing, restructuring, or reviewing documentation in docs/docs/user/ or docs/docs/dev/.
----
+
+## name: document description: Writing, restructuring, or reviewing documentation in docs/docs/user/ or docs/docs/dev/.
 
 ## When to use me
 
@@ -12,6 +11,7 @@ Use me when the task involves writing new docs, restructuring existing ones, or 
 Each component (Litterbox, Switchboard, Lens) has its own directory under `docs/docs/user/<component>/`. Utilities shared across components go under `docs/docs/user/utilities/`.
 
 **Do not** reference one component's internals in another component's docs. For example:
+
 - Credential helpers are a utility — their docs live in `docs/docs/user/utilities/`, not under `switchboard/`.
 - The credential JSON format is a Switchboard convention — document it in `docs/docs/dev/switchboard/`, not in the credentials page.
 
@@ -44,16 +44,16 @@ Only document agents that actually exist. The set of supported agents is defined
 
 ## Emoji conventions
 
-| Location | Emoji |
-|---|---|
-| Component intro heading (`index.mdx`) | `👋` |
-| Category label for a component | `🔀` (Switchboard), `💩` (Litterbox) |
-| Category label for agents | `🛠️` |
-| Category label for reference | `📚` |
-| Category label for utilities | `🧰` |
-| Setup/providers page heading | `🔧` |
-| Usage page heading | `🚀` |
-| Roadmap page | `💭` |
+| Location                              | Emoji                                |
+| ------------------------------------- | ------------------------------------ |
+| Component intro heading (`index.mdx`) | `👋`                                 |
+| Category label for a component        | `🔀` (Switchboard), `💩` (Litterbox) |
+| Category label for agents             | `🛠️`                                 |
+| Category label for reference          | `📚`                                 |
+| Category label for utilities          | `🧰`                                 |
+| Setup/providers page heading          | `🔧`                                 |
+| Usage page heading                    | `🚀`                                 |
+| Roadmap page                          | `💭`                                 |
 
 ## Terminology
 
@@ -66,14 +66,14 @@ Document the actual implementation, not the ADR spec. Check the source code — 
 
 ## Sidebar positions
 
-| Section | Position |
-|---|---|
-| Component index | 1 |
-| Setting up providers | 2 |
-| Configuring agents (category) | 3 |
-| Reference (category) | 50 |
-| Roadmap | 100 |
-| Utilities (category) | 300 |
+| Section                       | Position |
+| ----------------------------- | -------- |
+| Component index               | 1        |
+| Setting up providers          | 2        |
+| Configuring agents (category) | 3        |
+| Reference (category)          | 50       |
+| Roadmap                       | 100      |
+| Utilities (category)          | 300      |
 
 Nested pages within a category don't need explicit `sidebar_position` unless ordering matters.
 
@@ -82,11 +82,12 @@ Nested pages within a category don't need explicit `sidebar_position` unless ord
 Each CLI crate should use `agentkit-docgen` to generate CLI and MCP reference docs from the actual code, not hand-write them. The pattern is:
 
 1. Add `agentkit-docgen` as a dependency in `Cargo.toml`.
-2. Add a `docgen` subcommand to the CLI enum.
-3. Call `agentkit_docgen::generate_cli_docs(&Cli::command())` (and `generate_mcp_docs()` if applicable).
-4. The generated output is written to the appropriate `reference/cli.mdx` file.
+1. Add a `docgen` subcommand to the CLI enum.
+1. Call `agentkit_docgen::generate_cli_docs(&Cli::command())` (and `generate_mcp_docs()` if applicable).
+1. The generated output is written to the appropriate `reference/cli.mdx` file.
 
 **Current status:**
+
 - `agentkit-litterbox`: has `docgen cli` subcommand.
 - `agentkit-lens`: has `docgen cli` and `docgen mcp` subcommands.
 - **`agentkit-switchboard`: missing `agentkit-docgen` dependency and `docgen` subcommand.** This needs to be added.
@@ -107,5 +108,5 @@ Note: `agentkit-docgen` only generates one level of subcommands. Nested sub-subc
 For Switchboard, configuring an agent means pointing its OpenAI-compatible endpoint at the proxy — not adding MCP tools. The endpoint is `http://127.0.0.1:3812`. Each agent page should:
 
 1. List prerequisites (proxy running, agent installed).
-2. Show the config snippet for pointing at Switchboard (provider config, env var, base URL, etc.).
-3. Suggest checking the proxy logs to verify routing.
+1. Show the config snippet for pointing at Switchboard (provider config, env var, base URL, etc.).
+1. Suggest checking the proxy logs to verify routing.

@@ -1,8 +1,8 @@
 use crate::config::ProviderConfig;
 use crate::credential;
-use crate::domain::quota::{handle_response_status, ProviderQuotaState};
+use crate::domain::quota::{ProviderQuotaState, handle_response_status};
 use crate::provider::{ProviderRuntime, ProviderStatus, ProviderView};
-use crate::providers::{build_provider_map, ProviderMap, ProviderPack};
+use crate::providers::{ProviderMap, ProviderPack, build_provider_map};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -47,7 +47,9 @@ impl ProviderRegistry {
                 .get(identity)
                 .map(|p| ProviderQuotaState::new(p.new_quota.clone_box()))
                 .unwrap_or_else(|| {
-                    ProviderQuotaState::new(Box::new(crate::providers::openai::quota::OpenAiQuota::default()))
+                    ProviderQuotaState::new(Box::new(
+                        crate::providers::openai::quota::OpenAiQuota::default(),
+                    ))
                 });
             quotas.insert(identity.clone(), quota);
         }

@@ -40,7 +40,11 @@ async fn create_running_container(
     let spec = ContainerSpec {
         image: IMAGE_NAME.to_string(),
         name: Some(container_name.clone()),
-        cmd: vec!["tail".to_string(), "-f".to_string(), "/dev/null".to_string()],
+        cmd: vec![
+            "tail".to_string(),
+            "-f".to_string(),
+            "/dev/null".to_string(),
+        ],
     };
 
     let container_id = client.create_container(spec).await?;
@@ -239,5 +243,9 @@ macro_rules! docker_client_test_suite {
 }
 
 docker_client_test_suite!(bollard, bollard_client);
-docker_client_test_suite!(rs_docker, rs_docker_client, skip = "rs-docker unmaintained and not actively maintained");
+docker_client_test_suite!(
+    rs_docker,
+    rs_docker_client,
+    skip = "rs-docker unmaintained and not actively maintained"
+);
 docker_client_test_suite!(docker_wrapper, docker_wrapper_client);

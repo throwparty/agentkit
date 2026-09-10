@@ -1,10 +1,6 @@
 ---
-status: draft
-created: 2026-04-29
-updated: 2026-04-30
-author: adrian
-decision: pending
----
+
+## status: draft created: 2026-04-29 updated: 2026-04-30 author: adrian decision: pending
 
 # `lens` MCP Server Plan
 
@@ -35,16 +31,16 @@ crates/agentkit-lens/
 
 ### Component Responsibilities
 
-| Module | Responsibility | Dependencies |
-|--------|---------------|--------------|
-| `main.rs` | CLI entry, stdio transport, engine registration | `rmcp`, `config.rs`, `search/mod.rs` |
-| `mcp.rs` | Tool handlers (search, fetch, list-search-engines), JSON schema | `search/mod.rs`, `fetcher.rs`, `cache.rs`, `security.rs` |
-| `search/mod.rs` | SearchEngine trait, engine registry | `serde`, `schemars` |
-| `search/brave.rs` | Brave Search API calls, result parsing | `reqwest`, `serde` |
-| `fetcher.rs` | HTTP GET, redirect following, HTML-to-markdown | `reqwest`, `html-to-markdown-rs` |
-| `cache.rs` | Look-aside TTL cache, key normalization | `std::collections::HashMap` |
-| `security.rs` | URL validation, DNS resolution, LAN IP blocking | `std::net::ToSocketAddrs` |
-| `config.rs` | CLI arg parsing, duration validation | `clap`, `std::time::Duration` |
+| Module            | Responsibility                                                  | Dependencies                                             |
+| ----------------- | --------------------------------------------------------------- | -------------------------------------------------------- |
+| `main.rs`         | CLI entry, stdio transport, engine registration                 | `rmcp`, `config.rs`, `search/mod.rs`                     |
+| `mcp.rs`          | Tool handlers (search, fetch, list-search-engines), JSON schema | `search/mod.rs`, `fetcher.rs`, `cache.rs`, `security.rs` |
+| `search/mod.rs`   | SearchEngine trait, engine registry                             | `serde`, `schemars`                                      |
+| `search/brave.rs` | Brave Search API calls, result parsing                          | `reqwest`, `serde`                                       |
+| `fetcher.rs`      | HTTP GET, redirect following, HTML-to-markdown                  | `reqwest`, `html-to-markdown-rs`                         |
+| `cache.rs`        | Look-aside TTL cache, key normalization                         | `std::collections::HashMap`                              |
+| `security.rs`     | URL validation, DNS resolution, LAN IP blocking                 | `std::net::ToSocketAddrs`                                |
+| `config.rs`       | CLI arg parsing, duration validation                            | `clap`, `std::time::Duration`                            |
 
 ### Data Flow
 
@@ -92,15 +88,15 @@ Accept-Encoding: gzip
 
 ### Query Parameters
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `q` | string | Yes | — | Search query (400 chars max, 50 words max) |
-| `count` | int | No | 20 | Number of results (1-20) |
-| `offset` | int | No | 0 | Zero-based offset for pagination (0-9) |
-| `country` | enum&lt;string> | No | "US" | 2-char country code (ISO 3166-1) |
-| `safesearch` | enum&lt;string> | No | "moderate" | "off", "moderate", "strict" |
-| `spellcheck` | boolean | No | true | Enable spell checking |
-| `freshness` | enum&lt;string> | No | "" | "pd" (24h), "pw" (7d), "pm" (31d), "py" (365d) |
+| Parameter    | Type          | Required | Default    | Description                                    |
+| ------------ | ------------- | -------- | ---------- | ---------------------------------------------- |
+| `q`          | string        | Yes      | —          | Search query (400 chars max, 50 words max)     |
+| `count`      | int           | No       | 20         | Number of results (1-20)                       |
+| `offset`     | int           | No       | 0          | Zero-based offset for pagination (0-9)         |
+| `country`    | enum\<string> | No       | "US"       | 2-char country code (ISO 3166-1)               |
+| `safesearch` | enum\<string> | No       | "moderate" | "off", "moderate", "strict"                    |
+| `spellcheck` | boolean       | No       | true       | Enable spell checking                          |
+| `freshness`  | enum\<string> | No       | ""         | "pd" (24h), "pw" (7d), "pm" (31d), "py" (365d) |
 
 ### Response Schema (WebSearchApiResponse)
 
@@ -139,16 +135,16 @@ Accept-Encoding: gzip
 
 ### Mapping: Brave → `SearchResponse`
 
-| Brave Field | Our Field | Notes |
-|-------------|-----------|-------|
-| `query.original` | `query` | Original search query |
-| `query.more_results_available` | `has_more` | Boolean flag for pagination |
-| `web.results[i].title` | `results[i].title` | Result title |
-| `web.results[i].url` | `results[i].link` | Result URL |
-| `web.results[i].description` | `results[i].snippet` | Result description/snippet |
-| `web.results[i].page_age` | optional metadata | Human-readable age |
-| `web.results[i].language` | optional metadata | ISO 639 language code |
-| `web.results[i].family_friendly` | optional metadata | Boolean flag |
+| Brave Field                      | Our Field            | Notes                       |
+| -------------------------------- | -------------------- | --------------------------- |
+| `query.original`                 | `query`              | Original search query       |
+| `query.more_results_available`   | `has_more`           | Boolean flag for pagination |
+| `web.results[i].title`           | `results[i].title`   | Result title                |
+| `web.results[i].url`             | `results[i].link`    | Result URL                  |
+| `web.results[i].description`     | `results[i].snippet` | Result description/snippet  |
+| `web.results[i].page_age`        | optional metadata    | Human-readable age          |
+| `web.results[i].language`        | optional metadata    | ISO 639 language code       |
+| `web.results[i].family_friendly` | optional metadata    | Boolean flag                |
 
 ### Pagination Strategy
 
@@ -195,10 +191,10 @@ Authorization: Bot <kagi_api_key>
 
 ### Query Parameters
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `q` | string | Yes | — | Search query |
-| `limit` | int | No | — | Max number of results |
+| Parameter | Type   | Required | Default | Description           |
+| --------- | ------ | -------- | ------- | --------------------- |
+| `q`       | string | Yes      | —       | Search query          |
+| `limit`   | int    | No       | —       | Max number of results |
 
 ### Response Schema
 
@@ -233,20 +229,20 @@ Authorization: Bot <kagi_api_key>
 
 ### Type Field (`t`)
 
-| t | Type | Description | Included in results |
-|---|------|-------------|---------------------|
-| 0 | Search Result | Main search result | Yes |
-| 1 | Related Searches | Suggested follow-ups | No (filtered out) |
+| t   | Type             | Description          | Included in results |
+| --- | ---------------- | -------------------- | ------------------- |
+| 0   | Search Result    | Main search result   | Yes                 |
+| 1   | Related Searches | Suggested follow-ups | No (filtered out)   |
 
 ### Mapping: Kagi → `SearchResponse`
 
-| Kagi Field | Our Field | Notes |
-|------------|-----------|-------|
-| `data[i].url` | `results[i].link` | Result URL |
-| `data[i].title` | `results[i].title` | Result title |
-| `data[i].snippet` | `results[i].snippet` | Result snippet |
-| `data[i].published` | optional metadata | ISO 8601 timestamp |
-| `data[i].thumbnail.url` | optional metadata | Proxied image URL |
+| Kagi Field              | Our Field            | Notes              |
+| ----------------------- | -------------------- | ------------------ |
+| `data[i].url`           | `results[i].link`    | Result URL         |
+| `data[i].title`         | `results[i].title`   | Result title       |
+| `data[i].snippet`       | `results[i].snippet` | Result snippet     |
+| `data[i].published`     | optional metadata    | ISO 8601 timestamp |
+| `data[i].thumbnail.url` | optional metadata    | Proxied image URL  |
 
 ### Kagi Implementation Notes
 
@@ -282,6 +278,7 @@ pub struct EngineInfo {
 ```
 
 At startup in `main.rs`:
+
 ```rust
 let mut registry = EngineRegistry::new();
 if let Some(api_key) = config.brave_api_key {
@@ -291,6 +288,7 @@ if let Some(api_key) = config.brave_api_key {
 ```
 
 `list-search-engines` returns:
+
 ```json
 {
   "engines": [
@@ -302,37 +300,37 @@ if let Some(api_key) = config.brave_api_key {
 
 ## Traceability: Spec → Plan
 
-| Spec Req | Plan Section | Implementation |
-|----------|-------------|----------------|
-| F1: Brave search | `search/brave.rs` | Structured API calls, Brave API mapping |
-| F2: Search format | `search/brave.rs` → `mcp.rs` | Brave `web.results[]` → unified `SearchResponse` |
-| F3: Pagination | `search/brave.rs` | `offset` + `count` → `page` + `has_more` mapping |
-| F4: list-search-engines | `mcp.rs` → `search/mod.rs` | Registry iteration, configured status check |
-| F5: GET-only fetch | `fetcher.rs` | No POST/PUT/PATCH/DELETE |
-| F6: HTML-to-markdown | `fetcher.rs` | html-to-markdown-rs, tag stripping |
-| F7: Redirects | `fetcher.rs` | reqwest redirect config (10 hops) |
-| F8: LAN blocking | `security.rs` | DNS resolve → RFC 1918 check |
-| F10: Look-aside cache | `cache.rs` | Check on `get()`, write on miss, natural expiry |
-| F11: Markdown format | `fetcher.rs` | html-to-markdown-rs (3.3.3) |
-| F12: Search engine trait | `search/mod.rs` | `name()`, `search()` methods, engine registry |
-| NF1: Timeout | `fetcher.rs`, `search/brave.rs` | 30s reqwest timeout |
-| NF2: Max size | `fetcher.rs` | Truncate to `max_length` |
-| NF3: Transport | `main.rs` | rmcp stdio |
-| NF4: Dependencies | `Cargo.toml` | reqwest, html-to-markdown-rs (3.3.3), rmcp |
-| NF5: No auth | `main.rs` | No auth middleware |
-| NF6: No env diff | `main.rs` | Single binary, no env checks |
+| Spec Req                 | Plan Section                    | Implementation                                   |
+| ------------------------ | ------------------------------- | ------------------------------------------------ |
+| F1: Brave search         | `search/brave.rs`               | Structured API calls, Brave API mapping          |
+| F2: Search format        | `search/brave.rs` → `mcp.rs`    | Brave `web.results[]` → unified `SearchResponse` |
+| F3: Pagination           | `search/brave.rs`               | `offset` + `count` → `page` + `has_more` mapping |
+| F4: list-search-engines  | `mcp.rs` → `search/mod.rs`      | Registry iteration, configured status check      |
+| F5: GET-only fetch       | `fetcher.rs`                    | No POST/PUT/PATCH/DELETE                         |
+| F6: HTML-to-markdown     | `fetcher.rs`                    | html-to-markdown-rs, tag stripping               |
+| F7: Redirects            | `fetcher.rs`                    | reqwest redirect config (10 hops)                |
+| F8: LAN blocking         | `security.rs`                   | DNS resolve → RFC 1918 check                     |
+| F10: Look-aside cache    | `cache.rs`                      | Check on `get()`, write on miss, natural expiry  |
+| F11: Markdown format     | `fetcher.rs`                    | html-to-markdown-rs (3.3.3)                      |
+| F12: Search engine trait | `search/mod.rs`                 | `name()`, `search()` methods, engine registry    |
+| NF1: Timeout             | `fetcher.rs`, `search/brave.rs` | 30s reqwest timeout                              |
+| NF2: Max size            | `fetcher.rs`                    | Truncate to `max_length`                         |
+| NF3: Transport           | `main.rs`                       | rmcp stdio                                       |
+| NF4: Dependencies        | `Cargo.toml`                    | reqwest, html-to-markdown-rs (3.3.3), rmcp       |
+| NF5: No auth             | `main.rs`                       | No auth middleware                               |
+| NF6: No env diff         | `main.rs`                       | Single binary, no env checks                     |
 
 ## Risks & Mitigations
 
-| Risk | Impact | Mitigation |
-|------|--------|-----------|
-| Brave API changes | Search breaks | Mock tests in CI, version pinning |
-| HTML parsing fragility | Markdown output garbled | html-to-markdown-rs stable; fallback to raw text on parse error |
-| LAN IP evasion | Security bypass | Validate after DNS resolve, not before |
-| Cache stale data | Fetch returns outdated | TTL-based look-aside; configurable |
-| Rate limit exceeded | 429 from Brave | Brave handles rate limiting; log and retry with backoff |
-| Kagi not released | Kagi unavailable | Engine not registered until release; `list-search-engines` shows unconfigured |
-| Brave API key expired | Search fails | Fail on first use, clear error message |
+| Risk                   | Impact                  | Mitigation                                                                    |
+| ---------------------- | ----------------------- | ----------------------------------------------------------------------------- |
+| Brave API changes      | Search breaks           | Mock tests in CI, version pinning                                             |
+| HTML parsing fragility | Markdown output garbled | html-to-markdown-rs stable; fallback to raw text on parse error               |
+| LAN IP evasion         | Security bypass         | Validate after DNS resolve, not before                                        |
+| Cache stale data       | Fetch returns outdated  | TTL-based look-aside; configurable                                            |
+| Rate limit exceeded    | 429 from Brave          | Brave handles rate limiting; log and retry with backoff                       |
+| Kagi not released      | Kagi unavailable        | Engine not registered until release; `list-search-engines` shows unconfigured |
+| Brave API key expired  | Search fails            | Fail on first use, clear error message                                        |
 
 ## Testing Strategy
 
@@ -346,19 +344,19 @@ Since Brave Search and external websites are unreliable in CI, all integration t
 
 ### Test Coverage
 
-| Test Type | Coverage | Location |
-|-----------|----------|----------|
-| Unit: Brave response parsing | Brave API response → `SearchResponse` | `search/brave.rs` |
-| Unit: Brave API URL construction | Query params, auth header | `search/brave.rs` |
-| Unit: Pagination mapping | `page` → `offset`, `has_more` | `search/brave.rs` |
-| Unit: list-search-engines | Engine registry iteration | `mcp.rs` |
-| Unit: HTML-to-markdown | Tag stripping, semantic preservation | `fetcher.rs` (html-to-markdown-rs) |
-| Unit: LAN IP blocking | RFC 1918, localhost, link-local ranges | `security.rs` |
-| Unit: Cache look-aside | Check hit, write miss, natural expiry | `cache.rs` |
-| Unit: CLI duration parsing | `1s`, `30m`, `4h`, `2d`, `1w` | `config.rs` |
-| Integration: search tool | Full search flow (mocked Brave) | `tests/mock_search.rs` |
-| Integration: fetch tool | Full fetch flow (mocked HTTP) | `tests/mock_fetch.rs` |
-| Integration: Edge cases | Empty results, timeout, invalid URL | `tests/integration.rs` |
+| Test Type                        | Coverage                               | Location                           |
+| -------------------------------- | -------------------------------------- | ---------------------------------- |
+| Unit: Brave response parsing     | Brave API response → `SearchResponse`  | `search/brave.rs`                  |
+| Unit: Brave API URL construction | Query params, auth header              | `search/brave.rs`                  |
+| Unit: Pagination mapping         | `page` → `offset`, `has_more`          | `search/brave.rs`                  |
+| Unit: list-search-engines        | Engine registry iteration              | `mcp.rs`                           |
+| Unit: HTML-to-markdown           | Tag stripping, semantic preservation   | `fetcher.rs` (html-to-markdown-rs) |
+| Unit: LAN IP blocking            | RFC 1918, localhost, link-local ranges | `security.rs`                      |
+| Unit: Cache look-aside           | Check hit, write miss, natural expiry  | `cache.rs`                         |
+| Unit: CLI duration parsing       | `1s`, `30m`, `4h`, `2d`, `1w`          | `config.rs`                        |
+| Integration: search tool         | Full search flow (mocked Brave)        | `tests/mock_search.rs`             |
+| Integration: fetch tool          | Full fetch flow (mocked HTTP)          | `tests/mock_fetch.rs`              |
+| Integration: Edge cases          | Empty results, timeout, invalid URL    | `tests/integration.rs`             |
 
 ### Test Harness
 
@@ -399,7 +397,7 @@ async fn test_brave_search_valid() {
 
 These documents are pulled from upstream sources and stored in `adrs/2026-04-29-lens/refs/` for future implementation reference:
 
-| File | Source | Content |
-|------|--------|---------|
-| `refs/brave-api.html` | Brave Search API docs | Full API reference (endpoint, params, response schema) |
-| `refs/kagi-api.md` | Kagi API docs (GitHub) | Search API spec (currently closed beta) |
+| File                  | Source                 | Content                                                |
+| --------------------- | ---------------------- | ------------------------------------------------------ |
+| `refs/brave-api.html` | Brave Search API docs  | Full API reference (endpoint, params, response schema) |
+| `refs/kagi-api.md`    | Kagi API docs (GitHub) | Search API spec (currently closed beta)                |

@@ -35,7 +35,9 @@ impl RecordingClient {
     pub fn new(recording: bool, cassette_path: String) -> Self {
         Self {
             inner: ReqwestClient::new(),
-            cassette: Arc::new(Mutex::new(Cassette { entries: Vec::new() })),
+            cassette: Arc::new(Mutex::new(Cassette {
+                entries: Vec::new(),
+            })),
             recording,
             cassette_path,
             replay_index: Arc::new(Mutex::new(0)),
@@ -46,7 +48,9 @@ impl RecordingClient {
     pub fn new_passthrough(recording: bool, cassette_path: String) -> Self {
         Self {
             inner: ReqwestClient::new(),
-            cassette: Arc::new(Mutex::new(Cassette { entries: Vec::new() })),
+            cassette: Arc::new(Mutex::new(Cassette {
+                entries: Vec::new(),
+            })),
             recording,
             cassette_path,
             replay_index: Arc::new(Mutex::new(0)),

@@ -5,14 +5,15 @@ Providers using the Responses API (e.g. Codex subscription at `chatgpt.com/backe
 ## Chat Completions -> Responses API (request)
 
 **Input (Chat Completions):**
+
 ```json
 {
   "model": "gpt-4o",
   "messages": [
-    {"role": "system", "content": "You are a helpful assistant."},
-    {"role": "user", "content": "Hello!"},
-    {"role": "assistant", "content": "Hi there!"},
-    {"role": "user", "content": "How are you?"}
+    { "role": "system", "content": "You are a helpful assistant." },
+    { "role": "user", "content": "Hello!" },
+    { "role": "assistant", "content": "Hi there!" },
+    { "role": "user", "content": "How are you?" }
   ],
   "stream": false,
   "temperature": 0.7,
@@ -21,6 +22,7 @@ Providers using the Responses API (e.g. Codex subscription at `chatgpt.com/backe
 ```
 
 **Output (Responses API):**
+
 ```json
 {
   "model": "gpt-4o",
@@ -28,17 +30,17 @@ Providers using the Responses API (e.g. Codex subscription at `chatgpt.com/backe
     {
       "type": "message",
       "role": "user",
-      "content": [{"type": "input_text", "text": "Hello!"}]
+      "content": [{ "type": "input_text", "text": "Hello!" }]
     },
     {
       "type": "message",
       "role": "assistant",
-      "content": [{"type": "output_text", "text": "Hi there!"}]
+      "content": [{ "type": "output_text", "text": "Hi there!" }]
     },
     {
       "type": "message",
       "role": "user",
-      "content": [{"type": "input_text", "text": "How are you?"}]
+      "content": [{ "type": "input_text", "text": "How are you?" }]
     }
   ],
   "instructions": "You are a helpful assistant.",
@@ -46,11 +48,12 @@ Providers using the Responses API (e.g. Codex subscription at `chatgpt.com/backe
   "temperature": 0.7,
   "max_tokens": 1024,
   "store": false,
-  "reasoning": {"effort": "medium"}
+  "reasoning": { "effort": "medium" }
 }
 ```
 
 **Transformations:**
+
 - System message (`role: "system"`) is extracted to the `instructions` field and removed from the `input` array.
 - The `messages` array is converted to `input` with appropriate content types:
   - `user` messages -> `input_text`
@@ -62,13 +65,14 @@ Providers using the Responses API (e.g. Codex subscription at `chatgpt.com/backe
 ## Responses API -> Chat Completions (response)
 
 **Input (Responses API):**
+
 ```json
 {
   "output": [
     {
       "type": "message",
       "role": "assistant",
-      "content": [{"type": "output_text", "text": "I'm doing well!"}]
+      "content": [{ "type": "output_text", "text": "I'm doing well!" }]
     }
   ],
   "usage": {
@@ -79,6 +83,7 @@ Providers using the Responses API (e.g. Codex subscription at `chatgpt.com/backe
 ```
 
 **Output (Chat Completions):**
+
 ```json
 {
   "choices": [
@@ -100,6 +105,7 @@ Providers using the Responses API (e.g. Codex subscription at `chatgpt.com/backe
 ```
 
 **Transformations:**
+
 - `output` array -> `choices` array with `index`, `message`, and `finish_reason: "stop"`.
 - Content blocks are concatenated into a single `content` string.
 - `usage` passed through with `total_tokens` calculated as `input_tokens + output_tokens`.

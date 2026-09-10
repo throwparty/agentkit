@@ -1,6 +1,6 @@
 #![allow(unused)]
 use super::types::*;
-use extism_pdk::{host_fn, Error, Json};
+use extism_pdk::{Error, Json, host_fn};
 use std::result::Result;
 
 /// create_elicitation Request user input through the client's elicitation interface.

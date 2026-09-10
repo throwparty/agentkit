@@ -72,12 +72,7 @@ pub trait GitSdk {
     fn init(&self, path: &Path) -> GitSdkResult<()>;
     fn add(&self, repo_path: &Path, paths: &[String]) -> GitSdkResult<()>;
     fn status(&self, repo_path: &Path) -> GitSdkResult<Vec<StatusEntry>>;
-    fn commit(
-        &self,
-        repo_path: &Path,
-        message: &str,
-        author: &AuthorInfo,
-    ) -> GitSdkResult<String>;
+    fn commit(&self, repo_path: &Path, message: &str, author: &AuthorInfo) -> GitSdkResult<String>;
     fn log(&self, repo_path: &Path, max: usize) -> GitSdkResult<Vec<CommitInfo>>;
     fn branch(&self, repo_path: &Path, name: &str, target: Option<&str>) -> GitSdkResult<()>;
     fn checkout(&self, repo_path: &Path, reference: &str) -> GitSdkResult<()>;
@@ -88,8 +83,7 @@ pub trait GitSdk {
         message: &str,
         author: &AuthorInfo,
     ) -> GitSdkResult<String>;
-    fn diff(&self, repo_path: &Path, from: Option<&str>, to: Option<&str>)
-        -> GitSdkResult<String>;
+    fn diff(&self, repo_path: &Path, from: Option<&str>, to: Option<&str>) -> GitSdkResult<String>;
     fn apply_patch(&self, repo_path: &Path, patch: &str) -> GitSdkResult<()>;
 }
 

@@ -1,7 +1,7 @@
 mod config;
 mod error;
-mod jsonrpc;
 mod handlers;
+mod jsonrpc;
 mod session;
 mod transports;
 

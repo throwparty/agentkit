@@ -2,7 +2,7 @@ use crate::auth::OAuthEndpointConfig;
 use crate::config::SwitchboardConfig;
 use crate::credential::helper;
 use crate::credential::{CredentialSource, OAuthState, ResolvedCredential};
-use axum::{extract::Query, response::IntoResponse, routing::get, Router};
+use axum::{Router, extract::Query, response::IntoResponse, routing::get};
 use base64::Engine;
 use oauth2::PkceCodeChallenge;
 use serde::Deserialize;
@@ -109,7 +109,8 @@ pub async fn login(identity: &str, config: &SwitchboardConfig) -> Result<String,
 
     shutdown_tx.notify_one();
 
-    let token_response = exchange_code(&callback.code, pkce_verifier.secret(), token_url, client_id).await?;
+    let token_response =
+        exchange_code(&callback.code, pkce_verifier.secret(), token_url, client_id).await?;
 
     let helper_name = config.credential_helper.as_deref().unwrap_or("keychain");
     let account_id = token_response.account_id.clone();
@@ -167,7 +168,8 @@ pub async fn refresh_if_needed(
     })?;
 
     let client_id = &oauth_cfg.client_id;
-    let token_response = exchange_refresh_token(refresh_token, &oauth_cfg.token_url, client_id).await?;
+    let token_response =
+        exchange_refresh_token(refresh_token, &oauth_cfg.token_url, client_id).await?;
     let refreshed = ResolvedCredential {
         value: token_response.access_token,
         source: CredentialSource::Helper {

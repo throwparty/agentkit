@@ -10,9 +10,9 @@ use opentelemetry::trace::TracerProvider;
 async fn main() {
     let setup = setup::init_otel().expect("failed to initialise OTel SDK");
 
+    use tracing_subscriber::Registry;
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
-    use tracing_subscriber::Registry;
 
     let env_filter = tracing_subscriber::EnvFilter::try_from_env("OTEL_LOG_LEVEL")
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));

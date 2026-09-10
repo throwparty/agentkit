@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use pmcp::server::auth::{NoOpAuthProvider, ScopeBasedAuthorizer};
-use pmcp::{Server, ToolHandler, RequestHandlerExtra, ServerCapabilities};
+use pmcp::{RequestHandlerExtra, Server, ServerCapabilities, ToolHandler};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::Path;
@@ -37,12 +37,16 @@ impl ToolHandler for WriteFileTool {
             })?;
         }
 
-        fs::write(&params.path, &params.content).await.map_err(|e| {
-            pmcp::Error::internal(format!("Failed to write file: {}", e))
-        })?;
+        fs::write(&params.path, &params.content)
+            .await
+            .map_err(|e| pmcp::Error::internal(format!("Failed to write file: {}", e)))?;
 
         Ok(serde_json::to_value(WriteFileResult {
-            message: format!("Successfully wrote {} bytes to {}", params.content.len(), params.path),
+            message: format!(
+                "Successfully wrote {} bytes to {}",
+                params.content.len(),
+                params.path
+            ),
             bytes_written: params.content.len(),
         })?)
     }
@@ -51,9 +55,9 @@ impl ToolHandler for WriteFileTool {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("🚀 Server starting...");
-    
+
     let authorizer = ScopeBasedAuthorizer::new()
-        .require_scopes("write_file", Vec::<String>::new())  // No scopes required
+        .require_scopes("write_file", Vec::<String>::new()) // No scopes required
         .default_scopes(vec!["mcp:tools:use".to_string()]);
 
     let server = Server::builder()
@@ -64,10 +68,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .tool_authorizer(authorizer)
         .tool("write_file", WriteFileTool)
         .build()?;
-    
+
     eprintln!("✅ Server built, starting stdio...");
     server.run_stdio().await?;
     eprintln!("❌ run_stdio() unexpectedly returned");
-    
+
     Ok(())
 }

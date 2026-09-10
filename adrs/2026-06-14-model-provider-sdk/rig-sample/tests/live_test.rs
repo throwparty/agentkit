@@ -43,5 +43,8 @@ async fn test_live_agent_tool_call() {
         "response should contain the echoed message: {}",
         result
     );
-    assert!(history.len() >= 2, "history should contain user+assistant messages");
+    assert!(
+        history.len() >= 2,
+        "history should contain user+assistant messages"
+    );
 }

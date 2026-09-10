@@ -1,9 +1,9 @@
 use std::fs;
 
-use poc_git_sdk::git2_sdk::Git2Sdk;
 use poc_git_sdk::git_cli_sdk::GitCliSdk;
-use poc_git_sdk::git_sdk::{AuthorInfo, CommitRange, GitSdk, StatusEntry, StatusKind};
 use poc_git_sdk::git_sdk::DummyGitSdk;
+use poc_git_sdk::git_sdk::{AuthorInfo, CommitRange, GitSdk, StatusEntry, StatusKind};
+use poc_git_sdk::git2_sdk::Git2Sdk;
 use poc_git_sdk::gix_sdk::{GixNativeSdk, GixSdk};
 use poc_git_sdk::test_repo::TestRepo;
 
@@ -33,7 +33,10 @@ mod cases {
         fs::write(&file_path, "hello").expect("write failed");
 
         let status = sdk.status(repo.path()).expect("status failed");
-        assert_eq!(expect_status(&status, "file.txt"), Some(StatusKind::Untracked));
+        assert_eq!(
+            expect_status(&status, "file.txt"),
+            Some(StatusKind::Untracked)
+        );
 
         sdk.add(repo.path(), &["file.txt".to_string()])
             .expect("add failed");

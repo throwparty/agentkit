@@ -17,11 +17,11 @@ fn select_provider(
 
 Requests are dispatched by URL path prefix:
 
-| Path | API Surface | Handler |
-|---|---|---|
-| `POST /openai/v1/chat/completions` | OpenAI | Chat completions proxy |
-| `GET /openai/v1/models` | OpenAI | Return merged model list |
-| `GET /health` | General | Health check |
+| Path                               | API Surface | Handler                  |
+| ---------------------------------- | ----------- | ------------------------ |
+| `POST /openai/v1/chat/completions` | OpenAI      | Chat completions proxy   |
+| `GET /openai/v1/models`            | OpenAI      | Return merged model list |
+| `GET /health`                      | General     | Health check             |
 
 Future API surfaces would add their own prefixes: `POST /anthropic/v1/messages`, `POST /ollama/v1/chat`.
 
@@ -63,12 +63,12 @@ Providers are ranked by score (lower is better):
 
 ## Error cases
 
-| Condition | Result |
-|---|---|
-| Unknown model | `RoutingError::ModelNotFound` -> 503 |
-| Model not served by any configured provider | `RoutingError::NoProvider` -> 503 |
-| All candidates degraded | `RoutingError::AllDegraded` -> 503 with provider status details |
-| Session affinity breaks on degradation | Re-route, `switch_count` incremented |
+| Condition                                   | Result                                                          |
+| ------------------------------------------- | --------------------------------------------------------------- |
+| Unknown model                               | `RoutingError::ModelNotFound` -> 503                            |
+| Model not served by any configured provider | `RoutingError::NoProvider` -> 503                               |
+| All candidates degraded                     | `RoutingError::AllDegraded` -> 503 with provider status details |
+| Session affinity breaks on degradation      | Re-route, `switch_count` incremented                            |
 
 ## Response headers
 

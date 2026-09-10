@@ -32,7 +32,10 @@ impl ToolHandler for CalculatorTool {
 
         Ok(serde_json::to_value(CalculatorResult {
             result,
-            expression: format!("{} {} {} = {}", params.a, params.operation, params.b, result),
+            expression: format!(
+                "{} {} {} = {}",
+                params.a, params.operation, params.b, result
+            ),
         })?)
     }
 }

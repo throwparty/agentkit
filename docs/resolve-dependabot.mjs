@@ -35,14 +35,17 @@ if (!num) {
 
 // ── helpers ─────────────────────────────────────────────────────
 function $(cmd) {
-  return execSync(cmd, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }).trim();
+  return execSync(cmd, {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "inherit"],
+  }).trim();
 }
 
 function cmp(a, b) {
   const parseCore = (v) =>
     (v.split(/[+-]/, 1)[0].match(/^\d+(?:\.\d+){0,2}/)?.[0] ?? "")
       .split(".")
-      .map(n => Number(n) || 0);
+      .map((n) => Number(n) || 0);
 
   const pa = parseCore(a);
   const pb = parseCore(b);
@@ -56,7 +59,7 @@ function cmp(a, b) {
 
 function parseVulnRange(r) {
   const c = {};
-  for (const p of r.split(",").map(s => s.trim())) {
+  for (const p of r.split(",").map((s) => s.trim())) {
     const m = p.match(/^([<>=]+)\s*(.+)$/);
     if (!m) continue;
     c[m[1]] = m[2];
@@ -66,15 +69,17 @@ function parseVulnRange(r) {
 
 function isVuln(ver, c) {
   if (c[">="] && cmp(ver, c[">="]) < 0) return false;
-  if (c[">"]  && cmp(ver, c[">"])  <= 0) return false;
+  if (c[">"] && cmp(ver, c[">"]) <= 0) return false;
   if (c["<="] && cmp(ver, c["<="]) > 0) return false;
-  if (c["<"]  && cmp(ver, c["<"])  >= 0) return false;
+  if (c["<"] && cmp(ver, c["<"]) >= 0) return false;
   return true;
 }
 
 // ── fetch alert ─────────────────────────────────────────────────
 console.log("[1/4] Fetching Dependabot alert #" + num + " …");
-const raw = $(`gh api repos/${$("gh repo view --json nameWithOwner --jq .nameWithOwner")}/dependabot/alerts/${num}`);
+const raw = $(
+  `gh api repos/${$("gh repo view --json nameWithOwner --jq .nameWithOwner")}/dependabot/alerts/${num}`,
+);
 const alert = JSON.parse(raw);
 const pkg = alert.dependency.package;
 
@@ -85,9 +90,14 @@ if (pkg.ecosystem !== "npm") {
 
 const pkgName = pkg.name;
 const vulnRange = alert.security_vulnerability.vulnerable_version_range;
-const firstPatched = alert.security_vulnerability.first_patched_version?.identifier;
+const firstPatched =
+  alert.security_vulnerability.first_patched_version?.identifier;
 if (!firstPatched) {
-  console.log("No first patched version is available for alert #" + num + "; cannot safely auto-resolve.");
+  console.log(
+    "No first patched version is available for alert #" +
+      num +
+      "; cannot safely auto-resolve.",
+  );
   process.exit(1);
 }
 
@@ -112,11 +122,13 @@ while ((m = re.exec(yarnlock)) !== null) {
   const resolvedVer = m[2].trim();
   if (!isVuln(resolvedVer, constraints)) continue;
 
-  for (const r of rawRanges.split(",").map(s => s.trim())) {
+  for (const r of rawRanges.split(",").map((s) => s.trim())) {
     const rangeKey = pkgName + "@" + r;
     const rangeVal = "^" + firstPatched;
     toAdd.push([rangeKey, rangeVal]);
-    console.log("  " + rangeKey + " → " + rangeVal + "  (was " + resolvedVer + ")");
+    console.log(
+      "  " + rangeKey + " → " + rangeVal + "  (was " + resolvedVer + ")",
+    );
   }
 }
 
@@ -127,7 +139,10 @@ if (toAdd.length === 0) {
 
 if (!pj.resolutions) pj.resolutions = {};
 for (const [k, v] of toAdd) pj.resolutions[k] = v;
-writeFileSync(resolve(HERE, "package.json"), JSON.stringify(pj, null, 2) + "\n");
+writeFileSync(
+  resolve(HERE, "package.json"),
+  JSON.stringify(pj, null, 2) + "\n",
+);
 console.log("\n  → " + toAdd.length + " resolution(s) written to package.json");
 
 // ── apply ───────────────────────────────────────────────────────

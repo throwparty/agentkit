@@ -1,10 +1,6 @@
 ---
-status: draft
-created: 2026-06-13
-updated: 2026-06-13
-author: adrian
-decision: pending
----
+
+## status: draft created: 2026-06-13 updated: 2026-06-13 author: adrian decision: pending
 
 # ACP Server Session Storage Specification
 
@@ -13,8 +9,8 @@ decision: pending
 The current ACP server stores sessions in an in-memory `HashMap`. All state is lost on restart. Sessions cannot be forked (branched) because the data model has no concept of parent-child relationships between messages. As we move toward a production-grade ACP server, we need:
 
 1. **Persistence** — sessions and their message history survive server restarts.
-2. **Forking** — a client can fork a session at a specific message, creating a new session that shares ancestor history without duplicating messages.
-3. **Context assembly** — when resuming a session, all ancestor messages (potentially spanning multiple sessions) are assembled into the conversation context.
+1. **Forking** — a client can fork a session at a specific message, creating a new session that shares ancestor history without duplicating messages.
+1. **Context assembly** — when resuming a session, all ancestor messages (potentially spanning multiple sessions) are assembled into the conversation context.
 
 ## Scope
 
@@ -37,6 +33,7 @@ Session                        (client-facing via sessionId)
 - **Sessions** are opaque handles for prompt turn pointers — internally, a session record stores a `head_prompt_turn_id` pointing to the latest prompt turn in that session's view.
 
 **Client-facing IDs carry a type prefix** so clients treat them as opaque:
+
 - Session IDs: `sess_<uuid>` (e.g., `sess_a1b2c3d4`)
 - Message IDs: `msg_<uuid>` (e.g., `msg_a1b2c3d4`) — matches the `messageId` field in ACP `session/update` notifications
 
@@ -66,28 +63,29 @@ gitGraph
 When a client calls [`session/fork`](https://agentclientprotocol.com/rfds/session-fork#implementation-details-and-plan) (per the ACP draft RFD) with a source `sessionId` and optionally a `messageId`:
 
 1. If no `messageId` is given, the fork point is the source session's current head (its latest message, which maps to the containing prompt turn internally).
-2. If a `messageId` is given, the storage layer resolves it to its containing prompt turn — the fork point is that prompt turn. (Splitting a prompt turn at an interior message is a future extension.)
-3. A new session is created with `head_prompt_turn_id` pointing to the fork point prompt turn. The new session has its own `sess_`-prefixed ID, its own metadata (cwd, MCP server configuration, etc.), and records its origin as `forked_from_session_id` and `fork_point_turn_id` — just like `session/new`, but with lineage metadata.
-4. **No ancestor prompt turns are copied.** The fork shares the existing prompt turn DAG — the new session's context walk follows parent pointers into the source session's history. This is the core storage invariant: the DAG structure means forks are free, storage-wise.
-4. The handler may optionally seed the forked session with a new system prompt turn (e.g., to configure the agent for the fork's purpose). This prompt turn is created with `parent_id` = fork point turn, and the session's `head_prompt_turn_id` is updated to point to it — same as any other prompt turn append.
-5. When the client subsequently sends a prompt to the new session, a new prompt turn is created with `parent_id` = current head (which may be the seeded turn from step 4, or the fork point if no seed was used), and the session's head is updated again.
+1. If a `messageId` is given, the storage layer resolves it to its containing prompt turn — the fork point is that prompt turn. (Splitting a prompt turn at an interior message is a future extension.)
+1. A new session is created with `head_prompt_turn_id` pointing to the fork point prompt turn. The new session has its own `sess_`-prefixed ID, its own metadata (cwd, MCP server configuration, etc.), and records its origin as `forked_from_session_id` and `fork_point_turn_id` — just like `session/new`, but with lineage metadata.
+1. **No ancestor prompt turns are copied.** The fork shares the existing prompt turn DAG — the new session's context walk follows parent pointers into the source session's history. This is the core storage invariant: the DAG structure means forks are free, storage-wise.
+1. The handler may optionally seed the forked session with a new system prompt turn (e.g., to configure the agent for the fork's purpose). This prompt turn is created with `parent_id` = fork point turn, and the session's `head_prompt_turn_id` is updated to point to it — same as any other prompt turn append.
+1. When the client subsequently sends a prompt to the new session, a new prompt turn is created with `parent_id` = current head (which may be the seeded turn from step 4, or the fork point if no seed was used), and the session's head is updated again.
 
 The fork relationship is stored directly on the sessions table — `forked_from_session_id` and `fork_point_turn_id` are set at creation time and never modified. A session forks exactly once; these two columns capture its origin atomically in the INSERT.
 
 **Client UX: "branches within one view"** — The client presents forked sessions as branches of a single conversation view. The storage supports this by enabling the client to:
+
 1. Find fork points: `SELECT id, fork_point_turn_id FROM sessions WHERE forked_from_session_id = ?` — indexed lookup, O(k) where k = number of forks.
-2. Navigate the fork tree: use recursive CTEs on the sessions table to walk parent or child fork chains.
-3. Switch branches: load a different session by its session ID (same ancestors, different head path).
+1. Navigate the fork tree: use recursive CTEs on the sessions table to walk parent or child fork chains.
+1. Switch branches: load a different session by its session ID (same ancestors, different head path).
 
 ### Context Assembly
 
 Given a session ID:
 
 1. Load the session record → get `head_prompt_turn_id`.
-2. Walk `parent_id` pointers from `head_prompt_turn_id` up to the root (a prompt turn with `parent_id IS NULL`) using a recursive CTE on `prompt_turns`.
-3. For each prompt turn in the chain, load its messages ordered by `position`.
-4. Flatten into a single ordered message list as the conversation context.
-5. Prompt turns from ancestor sessions are included — the graph does not track session boundaries during context assembly. Only the single parent chain is followed, which naturally excludes sibling branches.
+1. Walk `parent_id` pointers from `head_prompt_turn_id` up to the root (a prompt turn with `parent_id IS NULL`) using a recursive CTE on `prompt_turns`.
+1. For each prompt turn in the chain, load its messages ordered by `position`.
+1. Flatten into a single ordered message list as the conversation context.
+1. Prompt turns from ancestor sessions are included — the graph does not track session boundaries during context assembly. Only the single parent chain is followed, which naturally excludes sibling branches.
 
 Implementation note: SQLite recursive CTEs (`WITH RECURSIVE`) make step 2 a single query. Steps 3–4 can be done with a second query (`SELECT * FROM messages WHERE prompt_turn_id IN (...) ORDER BY prompt_turn_id, position`) or a join on the recursive CTE.
 
@@ -97,41 +95,41 @@ Three candidates were evaluated. All are embedded (no external service required)
 
 ### Option A: SQLite via `sqlx` (Recommended)
 
-| Property | Detail |
-|----------|--------|
-| **Crate** | [`sqlx`](https://crates.io/crates/sqlx) 0.9.0 |
-| **Status** | Very actively maintained (May 2026 release). 106M downloads, 2,800+ dependents, 16K GitHub stars. |
-| **Async** | Native async with tokio runtime support (`runtime-tokio` feature). |
-| **SQLite** | Bundled SQLite via `sqlite` feature. No system dependency. |
-| **Migrations** | Built-in migration runner using timestamped SQL files in `migrations/`. |
-| **DAG support** | Recursive CTEs for parent-chain traversal. |
-| **Type safety** | `FromRow` derive for row mapping; optional compile-time checked queries. |
-| **Testability** | In-memory SQLite (`:memory:`) for tests. |
+| Property        | Detail                                                                                            |
+| --------------- | ------------------------------------------------------------------------------------------------- |
+| **Crate**       | [`sqlx`](https://crates.io/crates/sqlx) 0.9.0                                                     |
+| **Status**      | Very actively maintained (May 2026 release). 106M downloads, 2,800+ dependents, 16K GitHub stars. |
+| **Async**       | Native async with tokio runtime support (`runtime-tokio` feature).                                |
+| **SQLite**      | Bundled SQLite via `sqlite` feature. No system dependency.                                        |
+| **Migrations**  | Built-in migration runner using timestamped SQL files in `migrations/`.                           |
+| **DAG support** | Recursive CTEs for parent-chain traversal.                                                        |
+| **Type safety** | `FromRow` derive for row mapping; optional compile-time checked queries.                          |
+| **Testability** | In-memory SQLite (`:memory:`) for tests.                                                          |
 
 **Why it wins**: Async-native (matches the existing tokio codebase), built-in migration engine, recursive CTEs handle the DAG traversal in a single query, in-memory mode for tests, and it's the most widely used Rust SQL toolkit.
 
 ### Option B: SQLite via `rusqlite`
 
-| Property | Detail |
-|----------|--------|
-| **Crate** | [`rusqlite`](https://crates.io/crates/rusqlite) 0.39.0 |
-| **Status** | Very actively maintained (March 2026 release). 54M downloads, 4K GitHub stars. |
-| **Async** | Sync-only. Requires `tokio::task::spawn_blocking` wrappers for async use. |
-| **Migrations** | No built-in migration engine. Would need `refinery` crate or manual version table. |
-| **DAG support** | Same as Option A (SQLite recursive CTEs). |
+| Property        | Detail                                                                             |
+| --------------- | ---------------------------------------------------------------------------------- |
+| **Crate**       | [`rusqlite`](https://crates.io/crates/rusqlite) 0.39.0                             |
+| **Status**      | Very actively maintained (March 2026 release). 54M downloads, 4K GitHub stars.     |
+| **Async**       | Sync-only. Requires `tokio::task::spawn_blocking` wrappers for async use.          |
+| **Migrations**  | No built-in migration engine. Would need `refinery` crate or manual version table. |
+| **DAG support** | Same as Option A (SQLite recursive CTEs).                                          |
 
 **Why it's second**: A solid choice, but the sync API adds friction in an async codebase. Every DB operation needs `spawn_blocking`, which complicates connection pooling and error handling. The lack of built-in migrations means another dependency (`refinery`) or custom tooling.
 
 ### Option C: `oxigraph` (SPARQL/ RDF Graph Database)
 
-| Property | Detail |
-|----------|--------|
-| **Crate** | [`oxigraph`](https://crates.io/crates/oxigraph) 0.5.8 |
-| **Status** | Actively maintained (April 2026 release). 212K total downloads, 51K in 90 days, 1,700 GitHub stars. |
-| **Async** | Sync-only. |
-| **Persistence** | RocksDB-backed (requires C++20 compiler, system `libclang` for bindgen). |
-| **Query** | SPARQL 1.1 with property paths (supports transitive closure via `(^:hasParent)*`). |
-| **Model** | RDF triples (subject-predicate-object). Data modeled as statements, not rows. |
+| Property        | Detail                                                                                              |
+| --------------- | --------------------------------------------------------------------------------------------------- |
+| **Crate**       | [`oxigraph`](https://crates.io/crates/oxigraph) 0.5.8                                               |
+| **Status**      | Actively maintained (April 2026 release). 212K total downloads, 51K in 90 days, 1,700 GitHub stars. |
+| **Async**       | Sync-only.                                                                                          |
+| **Persistence** | RocksDB-backed (requires C++20 compiler, system `libclang` for bindgen).                            |
+| **Query**       | SPARQL 1.1 with property paths (supports transitive closure via `(^:hasParent)*`).                  |
+| **Model**       | RDF triples (subject-predicate-object). Data modeled as statements, not rows.                       |
 
 **Why it doesn't fit**, despite being well-maintained:
 
@@ -207,7 +205,7 @@ CREATE INDEX idx_sessions_updated ON sessions(updated_at DESC);
 Even though context assembly walks parent pointers (ignoring session boundaries), `session_id` on prompt turns serves two purposes:
 
 1. **Listing prompt turns "owned" by a session** for UI display.
-2. **Session-level cleanup** when a session is closed and garbage-collected.
+1. **Session-level cleanup** when a session is closed and garbage-collected.
 
 Fork lineage is tracked by `sessions.forked_from_session_id`, not by scanning turns.
 
@@ -251,6 +249,7 @@ We use `sqlx`'s built-in migration system:
 - The migration runner creates a `_sqlx_migrations` table to track applied migrations.
 
 **Future migrations** (anticipated but not committed):
+
 - Adding columns for new ACP features (e.g., `temperature` setting per session).
 - Adding indexes for query patterns that emerge from production use.
 
@@ -258,9 +257,9 @@ We use `sqlx`'s built-in migration system:
 
 The `SqliteSessionStore::connect(path)` method accepts any path string:
 
-| Path | Behavior |
-|------|----------|
-| `:memory:` | In-memory SQLite database (no file) |
+| Path                | Behavior                               |
+| ------------------- | -------------------------------------- |
+| `:memory:`          | In-memory SQLite database (no file)    |
 | `./acp-sessions.db` | File-based database, created if absent |
 
 Consumers decide the default path and CLI flag in their own configuration.
@@ -273,6 +272,7 @@ The crate's test suite uses `:memory:` to avoid filesystem dependencies.
 **Description**: The server creates or opens the SQLite database at the configured path on startup. If the database file does not exist, it is created with the initial schema.
 
 **Acceptance Criteria**:
+
 - Server starts with `--db-path ./sessions.db`; creates the file and tables if absent.
 - Server starts with `--db-path :memory:`; uses an in-memory database (no file created).
 - Server starts with an existing database; tables are verified (not recreated).
@@ -284,6 +284,7 @@ The crate's test suite uses `:memory:` to avoid filesystem dependencies.
 **Description**: The store supports create, read, update (mode, title, head), close (mark inactive), and list operations.
 
 **Acceptance Criteria**:
+
 - `create_session(id, head_prompt_turn_id, cwd, title, mode)` inserts a row and returns the session.
 - `get_session(id)` returns the session row or `None` if not found.
 - `close_session(id)` sets `active = 0` and `updated_at`.
@@ -296,6 +297,7 @@ The crate's test suite uses `:memory:` to avoid filesystem dependencies.
 **Description**: The store supports appending prompt turns (with messages) to a session and reading context.
 
 **Acceptance Criteria**:
+
 - `append_prompt_turn(id, session_id, parent_id, position)` inserts a prompt turn row and returns it.
 - `append_message(id, prompt_turn_id, role, content, position)` inserts a message row within a prompt turn.
 - `get_context(session_id)` returns all ancestor messages in chronological order (root first, by turn then position) by walking the prompt turn DAG.
@@ -309,6 +311,7 @@ The crate's test suite uses `:memory:` to avoid filesystem dependencies.
 **Description**: The store can create a new session forked from an existing session.
 
 **Acceptance Criteria**:
+
 - `fork_session(new_session_id, source_session_id, source_prompt_turn_id)` creates a new session with `head_prompt_turn_id`, `forked_from_session_id`, and `fork_point_turn_id` all set from the source.
 - Returns the new session.
 - The source session is unaffected (its head and prompt turns are unchanged).
@@ -320,6 +323,7 @@ The crate's test suite uses `:memory:` to avoid filesystem dependencies.
 **Description**: Multiple handlers can read/write the database concurrently without data corruption.
 
 **Acceptance Criteria**:
+
 - Two concurrent `append_turn` calls on different sessions succeed.
 - Two concurrent `get_context` calls on the same session both return correct results.
 - A `close_session` concurrent with a `get_session` does not produce stale data.
@@ -353,11 +357,11 @@ The crate is a library — it has no binary, no CLI, no transport. A consumer
 (such as the existing ACP server at `adrs/2026-04-28-acp-server/`) would:
 
 1. Add `acp-storage` with the `sqlite` feature to its `Cargo.toml`.
-2. Call `SqliteSessionStore::connect(path)` at startup, where `path` comes
+1. Call `SqliteSessionStore::connect(path)` at startup, where `path` comes
    from its own CLI (e.g., a `--db-path` flag defaulting to
    `./acp-sessions.db`).
-3. Use `Arc<dyn SessionStore>` to share the store across handlers.
-4. Use `SessionId::decode()` to strip `sess_` on incoming requests and
+1. Use `Arc<dyn SessionStore>` to share the store across handlers.
+1. Use `SessionId::decode()` to strip `sess_` on incoming requests and
    `SessionId::encode()` to add it on outgoing responses (same for
    `MessageId`).
 
@@ -409,9 +413,9 @@ If the storage library introduces unacceptable complexity or bugs:
 
 1. Consumers can drop the `sqlite` feature from `acp-storage` and use
    only `InMemorySessionStore` (no SQLite dependency).
-2. The `SessionStore` trait interface remains stable regardless of backend,
+1. The `SessionStore` trait interface remains stable regardless of backend,
    so consumer code does not change.
-3. The migration files are harmless if unused — they only run when
+1. The migration files are harmless if unused — they only run when
    `SqliteSessionStore::connect()` is called.
 
 ## References

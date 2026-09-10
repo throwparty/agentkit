@@ -76,14 +76,12 @@ mod tests {
                 ms: 213,
             },
             data: KagiData {
-                search: vec![
-                    KagiItem {
-                        url: "https://example.com".to_string(),
-                        title: "Example".to_string(),
-                        snippet: Some("Description".to_string()),
-                        time: Some("2024-09-30T00:00:00Z".to_string()),
-                    },
-                ],
+                search: vec![KagiItem {
+                    url: "https://example.com".to_string(),
+                    title: "Example".to_string(),
+                    snippet: Some("Description".to_string()),
+                    time: Some("2024-09-30T00:00:00Z".to_string()),
+                }],
             },
         };
 
@@ -142,10 +140,7 @@ mod tests {
             status: 500,
             detail: "Internal error".to_string(),
         };
-        assert_eq!(
-            err.to_string(),
-            "Kagi API HTTP error: 500, Internal error"
-        );
+        assert_eq!(err.to_string(), "Kagi API HTTP error: 500, Internal error");
 
         let err = SearchError::Parse("bad json".to_string());
         assert_eq!(err.to_string(), "Kagi API parse error: bad json");
