@@ -1,10 +1,6 @@
 ---
-status: draft
-created: 2026-04-29
-updated: 2026-04-29
-author: adrian
-decision: pending
----
+
+## status: draft created: 2026-04-29 updated: 2026-04-29 author: adrian decision: pending
 
 # `lens` MCP Server Specification
 
@@ -133,62 +129,63 @@ sequenceDiagram
 
 ## Functional Requirements
 
-| ID | Requirement | Acceptance Criteria |
-|----|-------------|---------------------|
-| F1 | `search` tool with Brave backend | Accepts `query` (string), `engine` (string, e.g., "brave"), optional `page` (int, default 1), optional `max_results` (1-20, default 10), optional `region` (ISO 3166-1 alpha-2) |
-| F2 | Search result format | Each result includes `title` (string), `link` (URL), `snippet` (string), `position` (int) |
-| F3 | Pagination handling | Response includes `has_more` (bool). If omitted, defaults to `page: 1`. |
-| F4 | `list-search-engines` tool | Accepts no arguments. Returns list of all supported search engines with `name` and `configured` (bool) |
-| F5 | `fetch` tool | Accepts `uri` (string), optional `max_length` (int, default 8000), optional `start_index` (int, default 0), optional `format` (enum: "markdown") |
-| F6 | GET-only HTTP requests | No POST, PUT, PATCH, DELETE support; tool signature reflects GET semantics only |
-| F7 | HTML-to-markdown parsing | Strips `<script>`, `<style>`, `<nav>`, `<header>`, `<footer>` tags; preserves structure and semantic meaning |
-| F8 | Redirect following | Follows HTTP redirects (up to 10 hops) |
-| F9 | LAN IP blocking | DNS resolution for any IP in RFC 1918 (10.x, 172.16-31.x, 192.168.x), 127.x, 169.254.x, or ::1 must be rejected before connection |
-| F10 | Look-aside caching | HTTP 200 responses cached with TTL (default 300s) keyed by normalized URL. On fetch: check cache first (cache hit → return), if miss → fetch, write to cache, return. Cache never updates in place; stale entries expire naturally. |
-| F11 | Output format selection | `format` parameter: "markdown" |
-| F12 | Search engine abstraction | A trait/interface must exist for search engine backends. Engine instances are constructed at startup with an options struct. Adding a new engine requires only implementing the trait and wiring it up — no changes to tool handlers or MCP layer. |
+| ID  | Requirement                      | Acceptance Criteria                                                                                                                                                                                                                                |
+| --- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F1  | `search` tool with Brave backend | Accepts `query` (string), `engine` (string, e.g., "brave"), optional `page` (int, default 1), optional `max_results` (1-20, default 10), optional `region` (ISO 3166-1 alpha-2)                                                                    |
+| F2  | Search result format             | Each result includes `title` (string), `link` (URL), `snippet` (string), `position` (int)                                                                                                                                                          |
+| F3  | Pagination handling              | Response includes `has_more` (bool). If omitted, defaults to `page: 1`.                                                                                                                                                                            |
+| F4  | `list-search-engines` tool       | Accepts no arguments. Returns list of all supported search engines with `name` and `configured` (bool)                                                                                                                                             |
+| F5  | `fetch` tool                     | Accepts `uri` (string), optional `max_length` (int, default 8000), optional `start_index` (int, default 0), optional `format` (enum: "markdown")                                                                                                   |
+| F6  | GET-only HTTP requests           | No POST, PUT, PATCH, DELETE support; tool signature reflects GET semantics only                                                                                                                                                                    |
+| F7  | HTML-to-markdown parsing         | Strips `<script>`, `<style>`, `<nav>`, `<header>`, `<footer>` tags; preserves structure and semantic meaning                                                                                                                                       |
+| F8  | Redirect following               | Follows HTTP redirects (up to 10 hops)                                                                                                                                                                                                             |
+| F9  | LAN IP blocking                  | DNS resolution for any IP in RFC 1918 (10.x, 172.16-31.x, 192.168.x), 127.x, 169.254.x, or ::1 must be rejected before connection                                                                                                                  |
+| F10 | Look-aside caching               | HTTP 200 responses cached with TTL (default 300s) keyed by normalized URL. On fetch: check cache first (cache hit → return), if miss → fetch, write to cache, return. Cache never updates in place; stale entries expire naturally.                |
+| F11 | Output format selection          | `format` parameter: "markdown"                                                                                                                                                                                                                     |
+| F12 | Search engine abstraction        | A trait/interface must exist for search engine backends. Engine instances are constructed at startup with an options struct. Adding a new engine requires only implementing the trait and wiring it up — no changes to tool handlers or MCP layer. |
 
 ## Non-Functional Requirements
 
-| ID | Requirement | Acceptance Criteria |
-|----|-------------|---------------------|
-| NF1 | Timeout | HTTP requests timeout after 30s |
-| NF2 | Max content size | Fetch returns max 8000 characters by default; configurable via `max_length` |
-| NF3 | Transport | stdio (MCP standard); no network listening |
-| NF4 | Dependencies | Minimal: only `reqwest` for HTTP, `html-to-markdown-rs` (3.3.3) for HTML-to-markdown conversion |
-| NF5 | No authentication | No auth checks; anyone who can reach the MCP server can call tools |
-| NF6 | No environment differentiation | Single binary, no environment-specific behavior beyond CLI arguments |
+| ID  | Requirement                    | Acceptance Criteria                                                                             |
+| --- | ------------------------------ | ----------------------------------------------------------------------------------------------- |
+| NF1 | Timeout                        | HTTP requests timeout after 30s                                                                 |
+| NF2 | Max content size               | Fetch returns max 8000 characters by default; configurable via `max_length`                     |
+| NF3 | Transport                      | stdio (MCP standard); no network listening                                                      |
+| NF4 | Dependencies                   | Minimal: only `reqwest` for HTTP, `html-to-markdown-rs` (3.3.3) for HTML-to-markdown conversion |
+| NF5 | No authentication              | No auth checks; anyone who can reach the MCP server can call tools                              |
+| NF6 | No environment differentiation | Single binary, no environment-specific behavior beyond CLI arguments                            |
 
 ## Edge Cases & Error Handling
 
-| Scenario | Behavior |
-|----------|----------|
-| Brave API error | Return error message with hint to retry |
-| Invalid URL format | Return parse error before making HTTP request |
-| DNS resolves to LAN IP | Reject with error; do not attempt connection |
-| 403/404 response | Return error with status code and message |
-| Timeout | Return error with "timed out after 30s" |
-| Cached response expired | Bypass cache, fetch fresh, update cache |
-| Empty search results | Return empty array, not error |
-| Fetch returns 0 bytes | Return empty string, not error |
-| Markdown parse failure | Return raw HTML body or sanitized text as fallback |
-| Cache TTL invalid | Fail fast at startup with clear error message |
+| Scenario                | Behavior                                           |
+| ----------------------- | -------------------------------------------------- |
+| Brave API error         | Return error message with hint to retry            |
+| Invalid URL format      | Return parse error before making HTTP request      |
+| DNS resolves to LAN IP  | Reject with error; do not attempt connection       |
+| 403/404 response        | Return error with status code and message          |
+| Timeout                 | Return error with "timed out after 30s"            |
+| Cached response expired | Bypass cache, fetch fresh, update cache            |
+| Empty search results    | Return empty array, not error                      |
+| Fetch returns 0 bytes   | Return empty string, not error                     |
+| Markdown parse failure  | Return raw HTML body or sanitized text as fallback |
+| Cache TTL invalid       | Fail fast at startup with clear error message      |
 
 ## Architecture Decisions
 
-| ID | Decision | Rationale |
-|----|----------|-----------|
-| AD1 | Standalone binary at `crates/agentkit-lens` | Keeps lens logic isolated from sandbox logic |
-| AD2 | `rmcp` crate as MCP framework | Consistent with existing agentkit-litterbox conventions |
-| AD3 | Brave Search | Structured, reliable JSON API; no scraping fragility |
-| AD4 | In-memory cache | Simple, no persistence needed; TTL-based eviction |
-| AD5 | Mock implementations for testing | Real web scraping is unreliable in CI; mocks ensure deterministic tests |
-| AD6 | Search engine trait abstraction | Single interface (`SearchEngine`) for all backends. New engines add only a module, no changes to tools. |
-| AD7 | CLI args over env vars | Explicit, inspectable configuration; aligns with user requirement |
+| ID  | Decision                                    | Rationale                                                                                               |
+| --- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| AD1 | Standalone binary at `crates/agentkit-lens` | Keeps lens logic isolated from sandbox logic                                                            |
+| AD2 | `rmcp` crate as MCP framework               | Consistent with existing agentkit-litterbox conventions                                                 |
+| AD3 | Brave Search                                | Structured, reliable JSON API; no scraping fragility                                                    |
+| AD4 | In-memory cache                             | Simple, no persistence needed; TTL-based eviction                                                       |
+| AD5 | Mock implementations for testing            | Real web scraping is unreliable in CI; mocks ensure deterministic tests                                 |
+| AD6 | Search engine trait abstraction             | Single interface (`SearchEngine`) for all backends. New engines add only a module, no changes to tools. |
+| AD7 | CLI args over env vars                      | Explicit, inspectable configuration; aligns with user requirement                                       |
 
 ## Data Models
 
 ### SearchRequest
+
 ```json
 {
   "query": "rust async runtime",
@@ -200,6 +197,7 @@ sequenceDiagram
 ```
 
 ### SearchResponse
+
 ```json
 {
   "results": [
@@ -219,6 +217,7 @@ sequenceDiagram
 ```
 
 ### EnginesResponse
+
 ```json
 {
   "engines": [
@@ -231,6 +230,7 @@ sequenceDiagram
 ```
 
 ### FetchRequest
+
 ```json
 {
   "uri": "https://example.com/article",
@@ -241,6 +241,7 @@ sequenceDiagram
 ```
 
 ### FetchResponse
+
 ```json
 {
   "content": "Cleaned markdown content...",

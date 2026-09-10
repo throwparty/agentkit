@@ -11,15 +11,8 @@ use tokio::time::sleep;
 
 use crate::compute::{Compute, ContainerInspection, ContainerSpec};
 use crate::domain::{
-    slugify_name,
-    ComputeError,
-    ExecutionResult,
-    ForwardedPortMapping,
-    SandboxConfig,
-    SandboxError,
-    SandboxMetadata,
-    SandboxStatus,
-    ScmMode,
+    ComputeError, ExecutionResult, ForwardedPortMapping, SandboxConfig, SandboxError,
+    SandboxMetadata, SandboxStatus, ScmMode, slugify_name,
 };
 use crate::scm::{GitScm, Scm};
 use crate::vcs_store::VcsStore;
@@ -40,12 +33,12 @@ pub trait SandboxProvider {
         &'a self,
         container_id: &'a str,
     ) -> BoxFuture<'a, Result<ContainerInspection, SandboxError>>;
-    fn pause<'a>(&'a self, container_id: &'a str)
-        -> BoxFuture<'a, Result<(), SandboxError>>;
-    fn resume<'a>(&'a self, container_id: &'a str)
-        -> BoxFuture<'a, Result<(), SandboxError>>;
-    fn delete<'a>(&'a self, metadata: &'a SandboxMetadata)
-        -> BoxFuture<'a, Result<(), SandboxError>>;
+    fn pause<'a>(&'a self, container_id: &'a str) -> BoxFuture<'a, Result<(), SandboxError>>;
+    fn resume<'a>(&'a self, container_id: &'a str) -> BoxFuture<'a, Result<(), SandboxError>>;
+    fn delete<'a>(
+        &'a self,
+        metadata: &'a SandboxMetadata,
+    ) -> BoxFuture<'a, Result<(), SandboxError>>;
     fn shell<'a>(
         &'a self,
         metadata: &'a SandboxMetadata,
@@ -118,13 +111,16 @@ where
                 return Err(error);
             }
 
-            let (env, port_bindings, forwarded_ports) =
-                build_forwarded_ports(config).await?;
+            let (env, port_bindings, forwarded_ports) = build_forwarded_ports(config).await?;
 
             let spec = ContainerSpec {
                 name: container_name_for_slug(&repo_prefix, &slug),
                 image: config.image.clone(),
-                command: vec!["sh".to_string(), "-c".to_string(), "tail -f /dev/null".to_string()],
+                command: vec![
+                    "sh".to_string(),
+                    "-c".to_string(),
+                    "tail -f /dev/null".to_string(),
+                ],
                 working_dir: Some(DEFAULT_WORKDIR.to_string()),
                 env,
                 port_bindings,
@@ -193,10 +189,7 @@ where
         })
     }
 
-    fn pause<'a>(
-        &'a self,
-        container_id: &'a str,
-    ) -> BoxFuture<'a, Result<(), SandboxError>> {
+    fn pause<'a>(&'a self, container_id: &'a str) -> BoxFuture<'a, Result<(), SandboxError>> {
         Box::pin(async move { self.compute.pause_container(container_id).await })
     }
 
@@ -207,10 +200,7 @@ where
         Box::pin(async move { self.compute.inspect_container(container_id).await })
     }
 
-    fn resume<'a>(
-        &'a self,
-        container_id: &'a str,
-    ) -> BoxFuture<'a, Result<(), SandboxError>> {
+    fn resume<'a>(&'a self, container_id: &'a str) -> BoxFuture<'a, Result<(), SandboxError>> {
         Box::pin(async move { self.compute.resume_container(container_id).await })
     }
 
@@ -219,7 +209,9 @@ where
         metadata: &'a SandboxMetadata,
     ) -> BoxFuture<'a, Result<(), SandboxError>> {
         Box::pin(async move {
-            self.compute.delete_container(&metadata.container_id).await?;
+            self.compute
+                .delete_container(&metadata.container_id)
+                .await?;
 
             match metadata.mode {
                 ScmMode::Direct => {
@@ -290,14 +282,24 @@ fn is_container_name_conflict(error: &SandboxError) -> bool {
     matches!(
         error,
         SandboxError::Compute(ComputeError::ContainerProvision {
-            source: bollard::errors::Error::DockerResponseServerError { status_code: 409, .. }
+            source: bollard::errors::Error::DockerResponseServerError {
+                status_code: 409,
+                ..
+            }
         })
     )
 }
 
 async fn build_forwarded_ports(
     config: &SandboxConfig,
-) -> Result<(Vec<String>, HashMap<String, Vec<bollard::models::PortBinding>>, Vec<ForwardedPortMapping>), SandboxError> {
+) -> Result<
+    (
+        Vec<String>,
+        HashMap<String, Vec<bollard::models::PortBinding>>,
+        Vec<ForwardedPortMapping>,
+    ),
+    SandboxError,
+> {
     if config.forwarded_ports.is_empty() {
         return Ok((Vec::new(), HashMap::new(), Vec::new()));
     }
@@ -309,7 +311,8 @@ async fn build_forwarded_ports(
     for port in &config.forwarded_ports {
         let slug = slugify_name(&port.name)?;
         let env_key = env_var_for_slug(&slug);
-        let host_port = allocate_host_port(DEFAULT_PORT_RANGE_START, DEFAULT_PORT_RANGE_END).await?;
+        let host_port =
+            allocate_host_port(DEFAULT_PORT_RANGE_START, DEFAULT_PORT_RANGE_END).await?;
         env.push(format!("{env_key}={host_port}"));
         port_bindings.insert(
             format!("{}/tcp", port.target),
@@ -405,8 +408,7 @@ mod tests {
         index.write().expect("index write");
         let tree_id = index.write_tree().expect("write tree");
 
-        let signature = Signature::now("Litterbox", "noreply@example.com")
-            .expect("signature");
+        let signature = Signature::now("Litterbox", "noreply@example.com").expect("signature");
         {
             let tree = repo.find_tree(tree_id).expect("find tree");
             repo.commit(Some("HEAD"), &signature, &signature, "init", &tree, &[])
@@ -487,7 +489,9 @@ mod tests {
         assert_eq!(forwarded.len(), 1);
         assert_eq!(forwarded[0].env_var, "LITTERBOX_FWD_PORT_WEB");
         assert_eq!(forwarded[0].target, 8080);
-        assert!((DEFAULT_PORT_RANGE_START..=DEFAULT_PORT_RANGE_END).contains(&forwarded[0].host_port));
+        assert!(
+            (DEFAULT_PORT_RANGE_START..=DEFAULT_PORT_RANGE_END).contains(&forwarded[0].host_port)
+        );
     }
 
     #[tokio::test]
@@ -548,7 +552,9 @@ mod tests {
             .await?;
 
         let client = provider.compute.client();
-        let container = client.inspect_container(&metadata.container_id, None).await?;
+        let container = client
+            .inspect_container(&metadata.container_id, None)
+            .await?;
         let running = container
             .state
             .and_then(|state| state.running)
@@ -596,7 +602,9 @@ mod tests {
             .await?;
 
         let client = provider.compute.client();
-        let container = client.inspect_container(&metadata.container_id, None).await?;
+        let container = client
+            .inspect_container(&metadata.container_id, None)
+            .await?;
         let env = container
             .config
             .and_then(|config| config.env)
@@ -605,7 +613,7 @@ mod tests {
             .iter()
             .find(|entry| entry.starts_with("LITTERBOX_FWD_PORT_WEB="))
             .expect("env var present")
-            .split('=' )
+            .split('=')
             .nth(1)
             .expect("env var value");
 
@@ -662,7 +670,9 @@ mod tests {
 
         provider.pause(&metadata.container_id).await?;
         let client = provider.compute.client();
-        let container = client.inspect_container(&metadata.container_id, None).await?;
+        let container = client
+            .inspect_container(&metadata.container_id, None)
+            .await?;
         let paused = container
             .state
             .and_then(|state| state.paused)
@@ -670,7 +680,9 @@ mod tests {
         assert!(paused);
 
         provider.resume(&metadata.container_id).await?;
-        let container = client.inspect_container(&metadata.container_id, None).await?;
+        let container = client
+            .inspect_container(&metadata.container_id, None)
+            .await?;
         let running = container
             .state
             .and_then(|state| state.running)
@@ -678,12 +690,18 @@ mod tests {
         assert!(running);
 
         provider.delete(&metadata).await?;
-        assert!(client.inspect_container(&metadata.container_id, None).await.is_err());
+        assert!(
+            client
+                .inspect_container(&metadata.container_id, None)
+                .await
+                .is_err()
+        );
 
         let repo = Repository::open(tempdir.path())?;
-        assert!(repo
-            .find_branch(&metadata.branch_name, git2::BranchType::Local)
-            .is_err());
+        assert!(
+            repo.find_branch(&metadata.branch_name, git2::BranchType::Local)
+                .is_err()
+        );
 
         Ok(())
     }
@@ -714,11 +732,7 @@ mod tests {
         let result = provider
             .shell(
                 &metadata,
-                &[
-                    "sh".to_string(),
-                    "-c".to_string(),
-                    "echo hello".to_string(),
-                ],
+                &["sh".to_string(), "-c".to_string(), "echo hello".to_string()],
             )
             .await?;
         assert_eq!(result.exit_code, 0);

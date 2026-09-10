@@ -22,6 +22,7 @@ The merge is field-level: if the user's TOML override only specifies `context_wi
 ## Model lookup
 
 Used by the routing algorithm to:
+
 1. Verify the requested model is known (unknown -> 503).
 2. Determine provider pricing for cost comparison during ranking.
 3. Assemble the `GET /openai/v1/models` response.

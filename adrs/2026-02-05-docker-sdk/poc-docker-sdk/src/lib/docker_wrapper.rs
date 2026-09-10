@@ -97,9 +97,7 @@ impl DockerClient for DockerWrapperClient {
             let id = value
                 .get("ID")
                 .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::Other, "docker ps output missing ID")
-                })?
+                .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "docker ps output missing ID"))?
                 .to_string();
 
             let names = value

@@ -120,61 +120,136 @@ pub enum SandboxError {
 #[derive(Error, Debug)]
 pub enum ScmError {
     #[error("Git repository open failed: {source}")]
-    Open { #[source] source: git2::Error },
+    Open {
+        #[source]
+        source: git2::Error,
+    },
     #[error("Git branch listing failed: {source}")]
-    BranchList { #[source] source: git2::Error },
+    BranchList {
+        #[source]
+        source: git2::Error,
+    },
     #[error("Git branch creation failed: {source}")]
-    BranchCreate { #[source] source: git2::Error },
+    BranchCreate {
+        #[source]
+        source: git2::Error,
+    },
     #[error("Git branch deletion failed: {source}")]
-    BranchDelete { #[source] source: git2::Error },
+    BranchDelete {
+        #[source]
+        source: git2::Error,
+    },
     #[error("Git archive failed: {source}")]
-    Archive { #[source] source: git2::Error },
+    Archive {
+        #[source]
+        source: git2::Error,
+    },
     #[error("Git status failed: {source}")]
-    Status { #[source] source: git2::Error },
+    Status {
+        #[source]
+        source: git2::Error,
+    },
     #[error("Git index add failed: {source}")]
-    IndexAdd { #[source] source: git2::Error },
+    IndexAdd {
+        #[source]
+        source: git2::Error,
+    },
     #[error("Git index write failed: {source}")]
-    IndexWrite { #[source] source: git2::Error },
+    IndexWrite {
+        #[source]
+        source: git2::Error,
+    },
     #[error("Git index write tree failed: {source}")]
-    IndexWriteTree { #[source] source: git2::Error },
+    IndexWriteTree {
+        #[source]
+        source: git2::Error,
+    },
     #[error("Git commit failed: {source}")]
-    Commit { #[source] source: git2::Error },
+    Commit {
+        #[source]
+        source: git2::Error,
+    },
     #[error("Git signature failed: {source}")]
-    Signature { #[source] source: git2::Error },
+    Signature {
+        #[source]
+        source: git2::Error,
+    },
     #[error("Git head failed: {source}")]
-    Head { #[source] source: git2::Error },
+    Head {
+        #[source]
+        source: git2::Error,
+    },
     #[error("Git reference failed: {source}")]
-    Reference { #[source] source: git2::Error },
+    Reference {
+        #[source]
+        source: git2::Error,
+    },
     #[error("failed to apply patch: {message}")]
     ApplyPatch { message: String },
     #[error("Git clone failed: {source}")]
-    Clone { #[source] source: git2::Error },
+    Clone {
+        #[source]
+        source: git2::Error,
+    },
 }
 
 #[derive(Error, Debug)]
 pub enum ComputeError {
     #[error("Docker client connection failed: {source}")]
-    Connection { #[source] source: bollard::errors::Error },
+    Connection {
+        #[source]
+        source: bollard::errors::Error,
+    },
     #[error("Docker image inspection failed: {source}")]
-    ImageInspect { #[source] source: bollard::errors::Error },
+    ImageInspect {
+        #[source]
+        source: bollard::errors::Error,
+    },
     #[error("Docker image pull failed: {source}")]
-    ImagePull { #[source] source: bollard::errors::Error },
+    ImagePull {
+        #[source]
+        source: bollard::errors::Error,
+    },
     #[error("Docker container provisioning failed: {source}")]
-    ContainerProvision { #[source] source: bollard::errors::Error },
+    ContainerProvision {
+        #[source]
+        source: bollard::errors::Error,
+    },
     #[error("Docker container inspection failed: {source}")]
-    ContainerInspect { #[source] source: bollard::errors::Error },
+    ContainerInspect {
+        #[source]
+        source: bollard::errors::Error,
+    },
     #[error("Docker pause failed: {source}")]
-    ContainerPause { #[source] source: bollard::errors::Error },
+    ContainerPause {
+        #[source]
+        source: bollard::errors::Error,
+    },
     #[error("Docker resume failed: {source}")]
-    ContainerResume { #[source] source: bollard::errors::Error },
+    ContainerResume {
+        #[source]
+        source: bollard::errors::Error,
+    },
     #[error("Docker delete failed: {source}")]
-    ContainerDelete { #[source] source: bollard::errors::Error },
+    ContainerDelete {
+        #[source]
+        source: bollard::errors::Error,
+    },
     #[error("Docker exec failed: {source}")]
-    ContainerExec { #[source] source: bollard::errors::Error },
+    ContainerExec {
+        #[source]
+        source: bollard::errors::Error,
+    },
     #[error("Docker upload failed: {source}")]
-    ContainerUpload { #[source] source: bollard::errors::Error },
+    ContainerUpload {
+        #[source]
+        source: bollard::errors::Error,
+    },
     #[error("Docker download failed: {source}")]
-    ContainerDownload { #[source] source: bollard::errors::Error },
+    ContainerDownload {
+        #[source]
+        source: bollard::errors::Error,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

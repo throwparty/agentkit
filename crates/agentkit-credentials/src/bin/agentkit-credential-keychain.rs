@@ -35,7 +35,9 @@ fn main() -> ExitCode {
 
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
-        eprintln!("usage: agentkit-credential-keychain <get|put|delete|location> [<component>] [<identity>]");
+        eprintln!(
+            "usage: agentkit-credential-keychain <get|put|delete|location> [<component>] [<identity>]"
+        );
         return ExitCode::from(2);
     }
 
@@ -47,7 +49,9 @@ fn main() -> ExitCode {
     }
 
     if args.len() < 4 {
-        eprintln!("usage: agentkit-credential-keychain <get|put|delete|location> <component> <identity>");
+        eprintln!(
+            "usage: agentkit-credential-keychain <get|put|delete|location> <component> <identity>"
+        );
         return ExitCode::from(2);
     }
 

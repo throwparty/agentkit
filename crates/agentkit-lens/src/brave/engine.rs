@@ -69,7 +69,11 @@ impl BraveSearchEngine {
     }
 
     /// Parse the Brave API response into our unified SearchResponse.
-    fn parse_response(&self, api_response: WebSearchApiResponse, req: &SearchRequest) -> SearchResponse {
+    fn parse_response(
+        &self,
+        api_response: WebSearchApiResponse,
+        req: &SearchRequest,
+    ) -> SearchResponse {
         let query = api_response.query;
         let results: Vec<SearchResult> = api_response
             .web
@@ -160,11 +164,16 @@ impl SearchEngine for BraveSearchEngine {
 
         if status >= 400 {
             // Try to parse error response, fall back to raw text
-            let detail = if let Ok(error_resp) = serde_json::from_str::<RateLimitErrorResponse>(&body) {
-                format!("{}: {}", error_resp.title, error_resp.detail.unwrap_or_default())
-            } else {
-                body.clone()
-            };
+            let detail =
+                if let Ok(error_resp) = serde_json::from_str::<RateLimitErrorResponse>(&body) {
+                    format!(
+                        "{}: {}",
+                        error_resp.title,
+                        error_resp.detail.unwrap_or_default()
+                    )
+                } else {
+                    body.clone()
+                };
 
             return Err(SearchError::HttpError { status, detail }.into());
         }
@@ -414,29 +423,27 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/res/v1/web/search"))
             .and(query_param("q", "rust async"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "type": "search",
+                "query": {
+                    "original": "rust async",
+                    "more_results_available": true,
+                    "altered": null,
+                    "country": null,
+                    "safesearch": null,
+                    "bad_results": null
+                },
+                "web": {
                     "type": "search",
-                    "query": {
-                        "original": "rust async",
-                        "more_results_available": true,
-                        "altered": null,
-                        "country": null,
-                        "safesearch": null,
-                        "bad_results": null
-                    },
-                    "web": {
-                        "type": "search",
-                        "results": [
-                            {
-                                "title": "Rust Async Book",
-                                "url": "https://example.com/async",
-                                "description": "A book about async Rust"
-                            }
-                        ]
-                    }
-                })),
-            )
+                    "results": [
+                        {
+                            "title": "Rust Async Book",
+                            "url": "https://example.com/async",
+                            "description": "A book about async Rust"
+                        }
+                    ]
+                }
+            })))
             .mount(&mock_server)
             .await;
 
@@ -460,19 +467,17 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/res/v1/web/search"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "type": "search",
+                "query": {
+                    "original": "xyznonexistent",
+                    "more_results_available": false
+                },
+                "web": {
                     "type": "search",
-                    "query": {
-                        "original": "xyznonexistent",
-                        "more_results_available": false
-                    },
-                    "web": {
-                        "type": "search",
-                        "results": []
-                    }
-                })),
-            )
+                    "results": []
+                }
+            })))
             .mount(&mock_server)
             .await;
 
@@ -558,13 +563,11 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/res/v1/web/search"))
             .and(header("X-Subscription-Token", "secret-key-42"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                    "type": "search",
-                    "query": { "original": "test", "more_results_available": false },
-                    "web": { "type": "search", "results": [] }
-                })),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "type": "search",
+                "query": { "original": "test", "more_results_available": false },
+                "web": { "type": "search", "results": [] }
+            })))
             .mount(&mock_server)
             .await;
 

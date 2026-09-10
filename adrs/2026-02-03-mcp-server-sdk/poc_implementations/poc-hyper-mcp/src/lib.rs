@@ -1,6 +1,6 @@
 mod pdk;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use pdk::types::*;
 use serde_json::json;
 use std::fs;
@@ -8,17 +8,23 @@ use std::path::Path;
 
 pub(crate) fn list_tools(_input: ListToolsRequest) -> Result<ListToolsResult> {
     use serde_json::Map;
-    
+
     let mut properties = Map::new();
-    properties.insert("path".to_string(), json!({
-        "type": "string",
-        "description": "Absolute path to the target file"
-    }));
-    properties.insert("content".to_string(), json!({
-        "type": "string",
-        "description": "Content to write to the file"
-    }));
-    
+    properties.insert(
+        "path".to_string(),
+        json!({
+            "type": "string",
+            "description": "Absolute path to the target file"
+        }),
+    );
+    properties.insert(
+        "content".to_string(),
+        json!({
+            "type": "string",
+            "description": "Content to write to the file"
+        }),
+    );
+
     Ok(ListToolsResult {
         tools: vec![Tool {
             name: "write_file".to_string(),
@@ -72,10 +78,7 @@ pub(crate) fn call_tool(input: CallToolRequest) -> Result<CallToolResult> {
 
             Ok(CallToolResult {
                 content: vec![ContentBlock::Text(TextContent {
-                    text: format!(
-                        "Successfully wrote {} bytes to {}",
-                        bytes_written, path_str
-                    ),
+                    text: format!("Successfully wrote {} bytes to {}", bytes_written, path_str),
                     r#type: TextType::Text,
                     meta: None,
                     annotations: None,

@@ -1,8 +1,12 @@
-use std::path::PathBuf;
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "switchboard", version, about = "Cost-aware model provider proxy")]
+#[command(
+    name = "switchboard",
+    version,
+    about = "Cost-aware model provider proxy"
+)]
 pub struct Cli {
     #[arg(long, required = true)]
     pub config: PathBuf,

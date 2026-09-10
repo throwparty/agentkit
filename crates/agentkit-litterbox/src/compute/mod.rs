@@ -4,23 +4,20 @@ use std::io::Cursor;
 use std::path::Path;
 use std::process::Command;
 
+use bollard::body_full;
 use bollard::container::LogOutput;
+use bollard::errors::Error as BollardError;
 use bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
 use bollard::models::{ContainerCreateBody, HostConfig, PortBinding};
 use bollard::query_parameters::{
-    CreateContainerOptionsBuilder,
-    CreateImageOptions,
-    DownloadFromContainerOptionsBuilder,
-    RemoveContainerOptions,
-    UploadToContainerOptionsBuilder,
+    CreateContainerOptionsBuilder, CreateImageOptions, DownloadFromContainerOptionsBuilder,
+    RemoveContainerOptions, UploadToContainerOptionsBuilder,
 };
-use bollard::body_full;
+use bollard::{API_DEFAULT_VERSION, Docker};
 use bytes::Bytes;
-use tar::{Archive, Builder};
-use bollard::errors::Error as BollardError;
-use bollard::{Docker, API_DEFAULT_VERSION};
-use futures_util::future::BoxFuture;
 use futures_util::StreamExt;
+use futures_util::future::BoxFuture;
+use tar::{Archive, Builder};
 
 use crate::domain::{ComputeError, ExecutionResult, SandboxError};
 
@@ -34,9 +31,18 @@ pub trait Compute {
         &'a self,
         container_id: &'a str,
     ) -> BoxFuture<'a, Result<ContainerInspection, SandboxError>>;
-    fn pause_container<'a>(&'a self, container_id: &'a str) -> BoxFuture<'a, Result<(), SandboxError>>;
-    fn resume_container<'a>(&'a self, container_id: &'a str) -> BoxFuture<'a, Result<(), SandboxError>>;
-    fn delete_container<'a>(&'a self, container_id: &'a str) -> BoxFuture<'a, Result<(), SandboxError>>;
+    fn pause_container<'a>(
+        &'a self,
+        container_id: &'a str,
+    ) -> BoxFuture<'a, Result<(), SandboxError>>;
+    fn resume_container<'a>(
+        &'a self,
+        container_id: &'a str,
+    ) -> BoxFuture<'a, Result<(), SandboxError>>;
+    fn delete_container<'a>(
+        &'a self,
+        container_id: &'a str,
+    ) -> BoxFuture<'a, Result<(), SandboxError>>;
     fn exec<'a>(
         &'a self,
         container_id: &'a str,
@@ -108,7 +114,9 @@ impl DockerCompute {
         match self.client.inspect_image(image).await {
             Ok(_) => Ok(()),
             Err(error) if is_not_found(&error) => self.pull_image(image).await,
-            Err(error) => Err(SandboxError::Compute(ComputeError::ImageInspect { source: error })),
+            Err(error) => Err(SandboxError::Compute(ComputeError::ImageInspect {
+                source: error,
+            })),
         }
     }
 
@@ -214,20 +222,24 @@ impl DockerCompute {
     pub async fn pause_container(&self, container_id: &str) -> Result<(), SandboxError> {
         match self.client.pause_container(container_id).await {
             Ok(()) => Ok(()),
-            Err(bollard::errors::Error::DockerResponseServerError { status_code: 409, .. }) => {
-                Ok(())
-            }
-            Err(source) => Err(SandboxError::Compute(ComputeError::ContainerPause { source })),
+            Err(bollard::errors::Error::DockerResponseServerError {
+                status_code: 409, ..
+            }) => Ok(()),
+            Err(source) => Err(SandboxError::Compute(ComputeError::ContainerPause {
+                source,
+            })),
         }
     }
 
     pub async fn resume_container(&self, container_id: &str) -> Result<(), SandboxError> {
         match self.client.unpause_container(container_id).await {
             Ok(()) => Ok(()),
-            Err(bollard::errors::Error::DockerResponseServerError { status_code: 409, .. }) => {
-                Ok(())
-            }
-            Err(source) => Err(SandboxError::Compute(ComputeError::ContainerResume { source })),
+            Err(bollard::errors::Error::DockerResponseServerError {
+                status_code: 409, ..
+            }) => Ok(()),
+            Err(source) => Err(SandboxError::Compute(ComputeError::ContainerResume {
+                source,
+            })),
         }
     }
 
@@ -244,10 +256,12 @@ impl DockerCompute {
             .await
         {
             Ok(()) => Ok(()),
-            Err(bollard::errors::Error::DockerResponseServerError { status_code: 404, .. }) => {
-                Ok(())
-            }
-            Err(source) => Err(SandboxError::Compute(ComputeError::ContainerDelete { source })),
+            Err(bollard::errors::Error::DockerResponseServerError {
+                status_code: 404, ..
+            }) => Ok(()),
+            Err(source) => Err(SandboxError::Compute(ComputeError::ContainerDelete {
+                source,
+            })),
         }
     }
 
@@ -283,7 +297,9 @@ impl DockerCompute {
 
         if let StartExecResults::Attached { mut output, .. } = results {
             while let Some(item) = output.next().await {
-                match item.map_err(|source| SandboxError::Compute(ComputeError::ContainerExec { source }))? {
+                match item.map_err(|source| {
+                    SandboxError::Compute(ComputeError::ContainerExec { source })
+                })? {
                     LogOutput::StdOut { message } | LogOutput::Console { message } => {
                         stdout.extend_from_slice(&message)
                     }
@@ -363,8 +379,9 @@ impl DockerCompute {
         let mut stream = self.client.download_from_container(container_id, options);
         let mut buffer = Vec::new();
         while let Some(chunk) = stream.next().await {
-            let chunk = chunk
-                .map_err(|source| SandboxError::Compute(ComputeError::ContainerDownload { source }))?;
+            let chunk = chunk.map_err(|source| {
+                SandboxError::Compute(ComputeError::ContainerDownload { source })
+            })?;
             buffer.extend_from_slice(&chunk);
         }
         Ok(buffer)
@@ -414,12 +431,7 @@ fn connect_with_host(host: &str) -> Result<Docker, SandboxError> {
 
 fn docker_host_from_context() -> Option<String> {
     let output = Command::new("docker")
-        .args([
-            "context",
-            "inspect",
-            "-f",
-            "{{.Endpoints.docker.Host}}",
-        ])
+        .args(["context", "inspect", "-f", "{{.Endpoints.docker.Host}}"])
         .output()
         .ok()?;
     if !output.status.success() {
@@ -451,7 +463,10 @@ impl Compute for DockerCompute {
         Box::pin(async move { DockerCompute::inspect_container(self, container_id).await })
     }
 
-    fn pause_container<'a>(&'a self, container_id: &'a str) -> BoxFuture<'a, Result<(), SandboxError>> {
+    fn pause_container<'a>(
+        &'a self,
+        container_id: &'a str,
+    ) -> BoxFuture<'a, Result<(), SandboxError>> {
         Box::pin(async move { DockerCompute::pause_container(self, container_id).await })
     }
 
@@ -462,7 +477,10 @@ impl Compute for DockerCompute {
         Box::pin(async move { DockerCompute::resume_container(self, container_id).await })
     }
 
-    fn delete_container<'a>(&'a self, container_id: &'a str) -> BoxFuture<'a, Result<(), SandboxError>> {
+    fn delete_container<'a>(
+        &'a self,
+        container_id: &'a str,
+    ) -> BoxFuture<'a, Result<(), SandboxError>> {
         Box::pin(async move { DockerCompute::delete_container(self, container_id).await })
     }
 
@@ -547,44 +565,50 @@ fn append_dir(builder: &mut Builder<Vec<u8>>, root: &Path, dir: &Path) -> Result
 fn extract_tar(dest_path: &Path, tar: &[u8]) -> Result<(), SandboxError> {
     fs::create_dir_all(dest_path)?;
     let mut archive = Archive::new(Cursor::new(tar));
-    
+
     for entry in archive.entries()? {
         let mut entry = entry?;
         let path = entry.path()?;
-        
+
         // Skip .git directory to prevent repository corruption
         if path.starts_with(".git") || path.starts_with("src/.git") {
             continue;
         }
-        
+
         // Strip leading "src/" or "/src/" from paths to avoid replicating the /src directory
         let stripped_path = path
             .strip_prefix("src/")
             .or_else(|_| path.strip_prefix("/src/"))
             .or_else(|_| path.strip_prefix("src"))
             .unwrap_or(&path);
-        
+
         // Skip if stripping results in empty path (e.g., if path was exactly "src")
         if stripped_path.as_os_str().is_empty() {
             continue;
         }
-        
+
         let dest = dest_path.join(stripped_path);
-        
+
         // Create parent directories if needed
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent)?;
         }
-        
+
         // Extract the entry to the stripped path
         entry.unpack(&dest)?;
     }
-    
+
     Ok(())
 }
 
 fn is_not_found(error: &BollardError) -> bool {
-    matches!(error, BollardError::DockerResponseServerError { status_code: 404, .. })
+    matches!(
+        error,
+        BollardError::DockerResponseServerError {
+            status_code: 404,
+            ..
+        }
+    )
 }
 
 #[cfg(test)]

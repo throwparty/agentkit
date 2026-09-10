@@ -1,8 +1,8 @@
-use std::io::{self, BufRead};
 use serde_json::json;
+use std::io::{self, BufRead};
 
-use crate::jsonrpc::JsonRpcRequest;
 use crate::handlers::Router;
+use crate::jsonrpc::JsonRpcRequest;
 use crate::session::store::SessionStore;
 
 pub async fn run_stdio() {

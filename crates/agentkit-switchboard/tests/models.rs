@@ -38,7 +38,10 @@ fn models_lookup_found() {
     let model = db.lookup("gpt-4o").expect("gpt-4o should be found");
     assert_eq!(model.id, "gpt-4o");
     assert!(
-        model.providers.iter().any(|p| p.identity == "test_provider"),
+        model
+            .providers
+            .iter()
+            .any(|p| p.identity == "test_provider"),
         "test_provider should be listed among gpt-4o providers"
     );
 }

@@ -234,10 +234,7 @@ impl ThreadSafeScm {
         })
     }
 
-    pub fn open_with_prefix(
-        path: &Path,
-        prefix: Option<String>,
-    ) -> Result<Self, SandboxError> {
+    pub fn open_with_prefix(path: &Path, prefix: Option<String>) -> Result<Self, SandboxError> {
         GitScm::open_direct(path).map(|scm| Self {
             inner: Mutex::new(scm),
             prefix_override: prefix,
@@ -255,7 +252,7 @@ impl ThreadSafeScm {
             prefix_override: prefix,
         })
     }
- 
+
     pub fn for_sandbox(
         path: &Path,
         prefix: Option<String>,
@@ -271,10 +268,7 @@ impl ThreadSafeScm {
         })
     }
 
-    pub fn set_snapshot_branch(
-        &self,
-        branch: String,
-    ) -> Result<(), SandboxError> {
+    pub fn set_snapshot_branch(&self, branch: String) -> Result<(), SandboxError> {
         self.lock()?.set_snapshot_branch(branch);
         Ok(())
     }
@@ -386,9 +380,8 @@ impl Scm for GitScm {
         let repo = match self.mode {
             ScmMode::Remote => {
                 if let Some(ref host_path) = self.host_repo_path {
-                    &Repository::open(host_path).map_err(|source| {
-                        SandboxError::Scm(ScmError::Open { source })
-                    })?
+                    &Repository::open(host_path)
+                        .map_err(|source| SandboxError::Scm(ScmError::Open { source }))?
                 } else {
                     &self.repo
                 }
@@ -1398,7 +1391,9 @@ mod tests {
             host_repo_path: None,
         };
 
-        let result = scm.commit_snapshot("test message").expect("commit_snapshot");
+        let result = scm
+            .commit_snapshot("test message")
+            .expect("commit_snapshot");
         assert!(result.is_none());
     }
 }

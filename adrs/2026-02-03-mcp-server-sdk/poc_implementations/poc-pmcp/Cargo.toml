@@ -1,15 +1,15 @@
+[dependencies]
+anyhow = "1.0.100"
+async-trait = "0.1.89"
+chrono = {version = "0.4.43", features = ["serde"]}
+pmcp = {git = "https://github.com/paiml/rust-mcp-sdk", branch = "main", version = "1.9.4"}
+schemars = {version = "1.2.1", features = ["derive"]}
+serde = {version = "1.0.228", features = ["derive"]}
+serde_json = "1.0.149"
+tokio = {version = "1.49", features = ["full"]}
+tracing-subscriber = {version = "0.3.22", features = ["env-filter"]}
+
 [package]
 name = "poc-pmcp"
 version = "0.1.0"
 edition = "2021"
-
-[dependencies]
-anyhow = "1.0.100"
-async-trait = "0.1.89"
-chrono = { version = "0.4.43", features = ["serde"] }
-pmcp = { git = "https://github.com/paiml/rust-mcp-sdk", branch = "main", version = "1.9.4" }
-schemars = { version = "1.2.1", features = ["derive"] }
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
-tokio = { version = "1.49", features = ["full"] }
-tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }

@@ -7,8 +7,8 @@ use agentkit_switchboard::config::{
 };
 use agentkit_switchboard::models::db::ModelDb;
 use agentkit_switchboard::provider::registry::ProviderRegistry;
-use agentkit_switchboard::session::sqlite::SqliteSessionManager;
 use agentkit_switchboard::server::routes;
+use agentkit_switchboard::session::sqlite::SqliteSessionManager;
 use opentelemetry::trace::{SpanId, TracerProvider};
 use opentelemetry_sdk::trace::InMemorySpanExporter;
 use sqlx::SqlitePool;
@@ -48,7 +48,10 @@ async fn test_state(mock_base_url: &str) -> Arc<routes::AppState> {
     };
 
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-    sqlx::migrate!("src/db/migrations").run(&pool).await.unwrap();
+    sqlx::migrate!("src/db/migrations")
+        .run(&pool)
+        .await
+        .unwrap();
     let registry = ProviderRegistry::new(&config.providers, "none")
         .expect("none-auth provider needs no credential");
     let model_db = ModelDb::new(config.models.clone(), &config.providers);
@@ -112,7 +115,8 @@ async fn request_produces_phase_span_tree() {
         .find(|s| s.name.as_ref() == "proxy_handler")
         .expect("a proxy_handler root span should be exported");
     assert_eq!(
-        root.parent_span_id, SpanId::INVALID,
+        root.parent_span_id,
+        SpanId::INVALID,
         "proxy_handler should be the trace root"
     );
 

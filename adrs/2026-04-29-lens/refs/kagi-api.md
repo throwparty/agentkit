@@ -6,20 +6,18 @@ The Search API gives programmable access to Kagi's premium search results.
 >
 > We plan to release this API to all Kagi members after the beta period.
 
-
 ## Quick start
 
 1. Get the [API key](https://kagi.com/settings/api) (requires a Kagi account)
-2. Call the API. See below for example.
+1. Call the API. See below for example.
 
 ## API key
 
-To obtain an API key you will first need to [create a Kagi account](https://kagi.com/signup?plan_id=trial). 
+To obtain an API key you will first need to [create a Kagi account](https://kagi.com/signup?plan_id=trial).
 
 Then, navigate to Settings -> Advanced -> API portal, or click [here](https://kagi.com/settings/api) to go directly.
 
 Click "Generate API Token".
-
 
 ## Pricing
 
@@ -222,11 +220,10 @@ curl -v \
 
 #### Query Parameters
 
-Field     | Type                        | Description
+Field | Type | Description
 ----------|-----------------------------|-----------
-q         | string                      | query
-limit     | int                         | limit number of [Search Result](#search-result) items
-
+q | string | query
+limit | int | limit number of [Search Result](#search-result) items
 
 #### Additional settings
 
@@ -234,7 +231,6 @@ Search API will inherit the setting in your account. For example you can:
 
 - Block or promote websites ([results personalization](https://help.kagi.com/kagi/getting-started/index.html)).
 - Select to receive longer or shorter search snippets (under [Settings -> Search](https://help.kagi.com/kagi/settings/search.html))
-
 
 ## Objects
 
@@ -245,31 +241,31 @@ field, `t`. This will dictate the remainder of the object structure.
 
 #### Search Object Type ID
 
-t     | Type
+t | Type
 ------|-------------------------------
-0     | [Search Result](#search-result)
-1     | [Related Searches](#related-searches)
+0 | [Search Result](#search-result)
+1 | [Related Searches](#related-searches)
 
 #### Search Result
 
-Field     | Type                        | Description
+Field | Type | Description
 ----------|-----------------------------|-----------
-url       | string                      | URL
-title     | string                      | Result title
-snippet   | string?                     | Result snippet
-published | timestamp?                  | When the result was published, if known
-thumbnail | [Image](#image)?             | An image associated with the result
+url | string | URL
+title | string | Result title
+snippet | string? | Result snippet
+published | timestamp? | When the result was published, if known
+thumbnail | [Image](#image)? | An image associated with the result
 
 #### Image
 
-Field     | Type                        | Description
+Field | Type | Description
 ----------|-----------------------------|-----------
-url       | string                      | [proxied image URL](intro/image-proxy-urls.md)
-height    | int?                         | Image height
-width     | int?                         | Image width
+url | string | [proxied image URL](intro/image-proxy-urls.md)
+height | int? | Image height
+width | int? | Image width
 
 #### Related Searches
 
-Field     | Type                        | Description
+Field | Type | Description
 ----------|-----------------------------|-----------
-list      | array of strings            | Related search terms
+list | array of strings | Related search terms

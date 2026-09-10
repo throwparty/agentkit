@@ -1,22 +1,18 @@
 ---
-status: draft
-created: 2026-07-15
-updated: 2026-07-16
-author: adrian
-decision: pending
----
+
+## status: draft created: 2026-07-15 updated: 2026-07-16 author: adrian decision: pending
 
 # Tasks: OpenTelemetry Implementation for Rust Services
 
 ## Task List
 
-| # | Task | Est. | Depends On | Spec | Plan |
-|---|------|------|------------|------|------|
-| 1 | Scaffold PoC crate and OTel SDK wiring | 1 day | — | §2.1, FR4, FR6, NFR1 | §3.1, §3.2, §5.2 |
-| 2 | Build tracing-to-OTel log layer | 1 day | Task 1 | FR3, FR5 | §3.3.3 |
-| 3 | Wire traces and metrics, compose subscriber | 1 day | Task 1, Task 2 | FR1, FR2, FR5, NFR5, NFR1 | §3.3.1, §3.3.2, §3.3.4, §3.5 |
-| 4 | Write offline in-memory unit tests | 1 day | Task 3 | FR1–FR6, NFR4 | §4.1 |
-| 5 | Manual integration test with otel-desktop-viewer | 1 day | Task 4 | All FRs, NFR1–NFR5 | §4.2, §4.4, §4.5 |
+| #   | Task                                             | Est.  | Depends On     | Spec                      | Plan                         |
+| --- | ------------------------------------------------ | ----- | -------------- | ------------------------- | ---------------------------- |
+| 1   | Scaffold PoC crate and OTel SDK wiring           | 1 day | —              | §2.1, FR4, FR6, NFR1      | §3.1, §3.2, §5.2             |
+| 2   | Build tracing-to-OTel log layer                  | 1 day | Task 1         | FR3, FR5                  | §3.3.3                       |
+| 3   | Wire traces and metrics, compose subscriber      | 1 day | Task 1, Task 2 | FR1, FR2, FR5, NFR5, NFR1 | §3.3.1, §3.3.2, §3.3.4, §3.5 |
+| 4   | Write offline in-memory unit tests               | 1 day | Task 3         | FR1–FR6, NFR4             | §4.1                         |
+| 5   | Manual integration test with otel-desktop-viewer | 1 day | Task 4         | All FRs, NFR1–NFR5        | §4.2, §4.4, §4.5             |
 
 ---
 
@@ -32,6 +28,7 @@ decision: pending
 **Depends on**: Nothing.
 
 **Acceptance Criteria**:
+
 - `adrs/2026-07-15-otel-impl/poc-otel/Cargo.toml` exists with pinned versions matching plan §2.5
 - `cargo build` succeeds in the crate directory
 - `setup.rs` exports `init_otel()` returning `(TracerProvider, MeterProvider, LoggerProvider, ShutdownGuard)`
@@ -43,6 +40,7 @@ decision: pending
 **Test expectations**: Not yet — Task 4 covers all tests. Verify by compiling.
 
 **Files to create**:
+
 - `poc-otel/Cargo.toml` — dependencies from plan §3.1.1, pin exact versions
 - `poc-otel/src/setup.rs` — `init_otel()`, `ShutdownGuard`
 - `poc-otel/src/main.rs` — minimal entry that calls `init_otel()` and exits (placeholder for Task 3)
@@ -58,6 +56,7 @@ decision: pending
 **Depends on**: Task 1 (needs `LoggerProvider` type).
 
 **Acceptance Criteria**:
+
 - `OtelLogLayer` implements `tracing_subscriber::Layer<S>` for `S: Subscriber + for<'a> LookupSpan<'a>`
 - `on_event()` extracts severity by mapping `tracing::Level` → `opentelemetry::Severity`:
   - `ERROR` → `Severity::Error`
@@ -74,6 +73,7 @@ decision: pending
 **Test expectations**: Not yet — tested in Task 4 with in-memory exporter.
 
 **Files to create**:
+
 - `poc-otel/src/log_layer.rs` — the `OtelLogLayer` implementation
 
 **Rollout**: Same as Task 1 — throwaway crate.
@@ -87,6 +87,7 @@ decision: pending
 **Depends on**: Task 1 (setup.rs), Task 2 (log_layer.rs).
 
 **Acceptance Criteria**:
+
 - **Traces** (`traces.rs`):
   - Uses `tracing::info_span!()` to create a root span `process_batch`
   - Creates child span `fetch_users` with attributes `db.table="users"`, `db.system="postgres"`
@@ -111,6 +112,7 @@ decision: pending
 **Test expectations**: Not yet — Task 4 covers all tests. Verify by running `cargo run` (will fail export since no viewer running, but must not crash — NFR1).
 
 **Files to create**:
+
 - `poc-otel/src/traces.rs` — span construction functions
 - `poc-otel/src/metrics.rs` — instrument creation and recording
 - `poc-otel/src/main.rs` — update from placeholder to full orchestration
@@ -128,17 +130,18 @@ decision: pending
 **Acceptance Criteria**:
 All tests pass with `cargo test` (no network, no external processes):
 
-| Test | What it asserts | Spec req |
-|------|----------------|----------|
-| `test_trace_emission` | Span names match, parent-child correct, attributes present, status set | FR1 |
-| `test_metric_emission` | Counter=1, histogram count=1 with value 42, gauge=7 | FR2 |
-| `test_log_emission` | Log severity, body, and attributes match expected values | FR3 |
-| `test_trace_log_correlation` | Log record's `trace_id` == active span's `trace_id` | §5 edge cases |
-| `test_resource_attributes` | All three signals carry same `service.name` from shared Resource | FR6 |
-| `test_dual_output` | Stdout captured AND log record in exporter from single `tracing::info!()` call | FR5, NFR5 |
-| `test_no_crash_on_no_receiver` | OTLP exporter pointed at unreachable port, all signal functions run, process exits 0, stderr contains `warn` not `panic` | NFR1 |
+| Test                           | What it asserts                                                                                                          | Spec req      |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------ | ------------- |
+| `test_trace_emission`          | Span names match, parent-child correct, attributes present, status set                                                   | FR1           |
+| `test_metric_emission`         | Counter=1, histogram count=1 with value 42, gauge=7                                                                      | FR2           |
+| `test_log_emission`            | Log severity, body, and attributes match expected values                                                                 | FR3           |
+| `test_trace_log_correlation`   | Log record's `trace_id` == active span's `trace_id`                                                                      | §5 edge cases |
+| `test_resource_attributes`     | All three signals carry same `service.name` from shared Resource                                                         | FR6           |
+| `test_dual_output`             | Stdout captured AND log record in exporter from single `tracing::info!()` call                                           | FR5, NFR5     |
+| `test_no_crash_on_no_receiver` | OTLP exporter pointed at unreachable port, all signal functions run, process exits 0, stderr contains `warn` not `panic` | NFR1          |
 
 **Files to create**:
+
 - `poc-otel/tests/in_memory.rs` — all seven tests
 - `poc-otel/tests/mod.rs` (if needed)
 
@@ -153,6 +156,7 @@ All tests pass with `cargo test` (no network, no external processes):
 **Depends on**: Task 4 (tests pass).
 
 **Acceptance Criteria**:
+
 - **Integration test**: Run `otel-desktop-viewer` via Docker, run `cargo run` with `OTEL_SERVICE_NAME="test-poc"`. All three tabs (traces, metrics, logs) contain data in `otel-desktop-viewer`.
   - Traces tab: `process_batch` root span with children `fetch_users` and `send_notifications`. Attributes visible. `cache_miss` event visible.
   - Metrics tab: `requests_total` counter appears, `request_duration_ms` histogram appears, `active_connections` gauge appears.
@@ -168,10 +172,10 @@ All tests pass with `cargo test` (no network, no external processes):
 
 ## Baseline Measurements (2026-07-16)
 
-| Binary | Profile | Size | Build Time |
-|--------|---------|------|------------|
-| `agentkit-switchboard` (pre-OTel) | release | 13 MB | 15.52s (warm) |
-| `poc-otel` (standalone OTel) | release | 5.5 MB | 30.90s (warm) |
+| Binary                            | Profile | Size   | Build Time    |
+| --------------------------------- | ------- | ------ | ------------- |
+| `agentkit-switchboard` (pre-OTel) | release | 13 MB  | 15.52s (warm) |
+| `poc-otel` (standalone OTel)      | release | 5.5 MB | 30.90s (warm) |
 
 **NFR2 target**: Delta < 2 MB, compile time increase < 30%.
 

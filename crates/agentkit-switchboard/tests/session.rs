@@ -1,5 +1,5 @@
-use agentkit_switchboard::session::sqlite::SqliteSessionManager;
 use agentkit_switchboard::session::RoutingEvent;
+use agentkit_switchboard::session::sqlite::SqliteSessionManager;
 use sqlx::SqlitePool;
 
 async fn test_session_manager(sm: &SqliteSessionManager) {

@@ -2,7 +2,7 @@
 
 **Status**: ✅ **PASS** - All tests passing with patched version
 
-**Date**: 2026-02-04  
+**Date**: 2026-02-04\
 **SDK**: ultrafast-mcp v202506018.1.0 (patched)
 
 ## Summary
@@ -40,16 +40,17 @@ The implementation follows ultrafast-mcp's documented pattern:
    - `handle_tool_call(&self, call: ToolCall) -> MCPResult<ToolResult>` - Execute tool logic
    - `list_tools(&self, request: ListToolsRequest) -> MCPResult<ListToolsResponse>` - List available tools
 
-2. **Server Setup**: Create `UltraFastServer` with:
+1. **Server Setup**: Create `UltraFastServer` with:
    - `ServerInfo` (name, version, description)
    - `ServerCapabilities` (advertise tools capability)
    - Tool handler registered via `.with_tool_handler(Arc::new(handler))`
 
-3. **Transport**: Use `.run_stdio().await` to start STDIO transport
+1. **Transport**: Use `.run_stdio().await` to start STDIO transport
 
 ### API Ergonomics
 
 ultrafast-mcp provides:
+
 - **Comprehensive prelude**: `use ultrafast_mcp::prelude::*` imports all common types
 - **Type-safe errors**: `MCPError` enum with helpers like `invalid_params()`, `internal_error()`
 - **Builder patterns**: `ServerCapabilities::builder()`, tool configuration
@@ -58,13 +59,13 @@ ultrafast-mcp provides:
 
 ### Comparison with rmcp
 
-| Feature | ultrafast-mcp | rmcp |
-|---------|---------------|------|
-| Macros | No macros (trait-based) | `#[tool_router]`, `#[tool]` macros |
-| Boilerplate | Medium (manual trait impl) | Low (macros generate code) |
-| Type safety | Excellent | Excellent |
-| Documentation | Very comprehensive | Good |
-| Complexity | Higher (more explicit) | Lower (macro magic) |
+| Feature       | ultrafast-mcp              | rmcp                               |
+| ------------- | -------------------------- | ---------------------------------- |
+| Macros        | No macros (trait-based)    | `#[tool_router]`, `#[tool]` macros |
+| Boilerplate   | Medium (manual trait impl) | Low (macros generate code)         |
+| Type safety   | Excellent                  | Excellent                          |
+| Documentation | Very comprehensive         | Good                               |
+| Complexity    | Higher (more explicit)     | Lower (macro magic)                |
 
 ## Test Results
 
@@ -93,7 +94,7 @@ pub use ultrafast_mcp_transport::{
     create_transport,
     // ❌ BUG: These imports require the http feature!
     streamable_http::middleware::{
-        LoggingMiddleware, MiddlewareTransport, ProgressMiddleware, 
+        LoggingMiddleware, MiddlewareTransport, ProgressMiddleware,
         RateLimitMiddleware, TransportMiddleware, ValidationMiddleware,
     },
     stdio::StdioTransport,
@@ -114,7 +115,7 @@ pub mod streamable_http;
 **Patch applied to local clone** at `~/Code/techgopal/ultrafast-mcp`:
 
 1. **Removed** middleware imports from stdio block (lines 487-490)
-2. **Moved** middleware imports to http block where they belong
+1. **Moved** middleware imports to http block where they belong
 
 ```rust
 // BEFORE (broken)
@@ -157,7 +158,7 @@ ultrafast-mcp uses trait-based handlers:
 ```rust
 use ultrafast_mcp::{
     ListToolsRequest, ListToolsResponse, MCPError, MCPResult,
-    ServerCapabilities, ServerInfo, Tool, ToolCall, ToolContent, 
+    ServerCapabilities, ServerInfo, Tool, ToolCall, ToolContent,
     ToolHandler, ToolResult, ToolsCapability, UltraFastServer,
 };
 
@@ -178,6 +179,7 @@ impl ToolHandler for WriteFileHandler {
 ```
 
 **Key differences from rmcp**:
+
 - **No macros** - Manual trait implementation
 - **More verbose** - Explicit error types and constructors
 - **Type-safe errors** - `MCPError::serialization_error()`, etc.
@@ -190,45 +192,46 @@ impl ToolHandler for WriteFileHandler {
 ### Why Not Recommended (Yet)
 
 1. **Published version is broken** - v202506018.1.0 on crates.io doesn't compile for stdio-only use
-2. **Requires local patch** - Must clone and patch locally, or wait for PR merge
-3. **No release timeline** - Unknown when fix will be published to crates.io
-4. **Same issue as pmcp** - Requires using unreleased code (git dependency or local path)
+1. **Requires local patch** - Must clone and patch locally, or wait for PR merge
+1. **No release timeline** - Unknown when fix will be published to crates.io
+1. **Same issue as pmcp** - Requires using unreleased code (git dependency or local path)
 
 ### After PR #6 is Merged and Released
 
 ultrafast-mcp would be **worth reconsidering** if:
+
 - The fix is merged and a new version published to crates.io
 - stdio-only features work without the http feature
 - You value its strengths over rmcp's simplicity
 
 ### ultrafast-mcp Strengths (vs rmcp)
 
-✅ **Comprehensive documentation** - Extensive API docs and examples  
-✅ **Production features** - Monitoring, auth, multiple transports  
-✅ **Feature modularity** - Fine-grained feature flags  
-✅ **Type-safe errors** - Domain-specific error constructors  
-✅ **Latest MCP spec** - MCP 2025-06-18 compliant  
+✅ **Comprehensive documentation** - Extensive API docs and examples\
+✅ **Production features** - Monitoring, auth, multiple transports\
+✅ **Feature modularity** - Fine-grained feature flags\
+✅ **Type-safe errors** - Domain-specific error constructors\
+✅ **Latest MCP spec** - MCP 2025-06-18 compliant
 
 ### ultrafast-mcp Weaknesses (vs rmcp)
 
-⚠️ **More verbose** - Trait implementations vs macros  
-⚠️ **Larger dependency tree** - More crates to compile  
-⚠️ **No macros** - More boilerplate code required  
-⚠️ **Broken release** - Currently requires patch for stdio use  
+⚠️ **More verbose** - Trait implementations vs macros\
+⚠️ **Larger dependency tree** - More crates to compile\
+⚠️ **No macros** - More boilerplate code required\
+⚠️ **Broken release** - Currently requires patch for stdio use
 
 ## Comparison: ultrafast-mcp vs rmcp
 
-| Feature | rmcp | ultrafast-mcp (patched) |
-|---------|------|-------------------------|
-| **STDIO support** | ✅ Works out of box | ✅ Works with patch |
-| **Stable release** | ✅ v0.14.0 | ❌ v202506018.1.0 broken |
-| **Macros** | ✅ `#[tool]`, `#[tool_router]` | ❌ Manual traits |
-| **Boilerplate** | Low | Medium-High |
-| **Error handling** | Good | Excellent (typed) |
-| **Documentation** | Good | Excellent |
-| **Production features** | Basic | Advanced (monitoring, auth) |
-| **Feature flags** | Basic | Modular (stdio/http/oauth) |
-| **Use case** | Simple servers | Production services |
+| Feature                 | rmcp                           | ultrafast-mcp (patched)     |
+| ----------------------- | ------------------------------ | --------------------------- |
+| **STDIO support**       | ✅ Works out of box            | ✅ Works with patch         |
+| **Stable release**      | ✅ v0.14.0                     | ❌ v202506018.1.0 broken    |
+| **Macros**              | ✅ `#[tool]`, `#[tool_router]` | ❌ Manual traits            |
+| **Boilerplate**         | Low                            | Medium-High                 |
+| **Error handling**      | Good                           | Excellent (typed)           |
+| **Documentation**       | Good                           | Excellent                   |
+| **Production features** | Basic                          | Advanced (monitoring, auth) |
+| **Feature flags**       | Basic                          | Modular (stdio/http/oauth)  |
+| **Use case**            | Simple servers                 | Production services         |
 
 ## Files
 

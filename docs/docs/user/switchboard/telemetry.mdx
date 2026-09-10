@@ -14,11 +14,11 @@ Switchboard ships OpenTelemetry instrumentation for **traces, metrics, and logs*
 
 Set the exporter for each signal individually:
 
-| Variable | Values | Default |
-|----------|--------|---------|
-| `OTEL_TRACES_EXPORTER` | `otlp` \| `console` \| `none` | `none` |
-| `OTEL_METRICS_EXPORTER` | `otlp` \| `console` \| `none` | `none` |
-| `OTEL_LOGS_EXPORTER` | `otlp` \| `console` \| `none` | `none` |
+| Variable                | Values                        | Default |
+| ----------------------- | ----------------------------- | ------- |
+| `OTEL_TRACES_EXPORTER`  | `otlp` \| `console` \| `none` | `none`  |
+| `OTEL_METRICS_EXPORTER` | `otlp` \| `console` \| `none` | `none`  |
+| `OTEL_LOGS_EXPORTER`    | `otlp` \| `console` \| `none` | `none`  |
 
 - **`otlp`** sends to an OTLP receiver (e.g. a collector or viewer) at `OTEL_EXPORTER_OTLP_ENDPOINT` (default `http://localhost:4318`).
 - **`console`** prints the signal to standard output; no collector needed.

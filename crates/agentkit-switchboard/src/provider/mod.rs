@@ -1,6 +1,6 @@
-pub mod router;
 pub mod quota;
 pub mod registry;
+pub mod router;
 
 use crate::config::{ApiSurface, BillingModel, PricingConfig};
 

@@ -1,7 +1,8 @@
 use crate::session::{RoutingEvent, SessionAffinity, SessionError, SessionStats};
 use sqlx::SqlitePool;
 
-const SQL_LOOKUP: &str = "SELECT provider_identity, model_name, api_surface FROM session_affinity WHERE session_id = ?";
+const SQL_LOOKUP: &str =
+    "SELECT provider_identity, model_name, api_surface FROM session_affinity WHERE session_id = ?";
 
 const SQL_ASSIGN: &str = "\
 INSERT INTO session_affinity (session_id, provider_identity, model_name, api_surface, assigned_at, last_used_at) \
@@ -62,12 +63,14 @@ impl SqliteSessionManager {
             .fetch_optional(&self.pool)
             .await?;
 
-        Ok(row.map(|(provider_identity, model_name, api_surface)| SessionAffinity {
-            session_id: session_id.to_string(),
-            provider_identity,
-            model_name,
-            api_surface,
-        }))
+        Ok(row.map(
+            |(provider_identity, model_name, api_surface)| SessionAffinity {
+                session_id: session_id.to_string(),
+                provider_identity,
+                model_name,
+                api_surface,
+            },
+        ))
     }
 
     #[tracing::instrument(skip_all, fields(session_id = %session_id, provider = %provider))]
@@ -143,11 +146,10 @@ impl SqliteSessionManager {
         // Active = sessions touched within last 30 minutes. The legacy `is_active`
         // column is never cleared, so we derive activity from `last_used_at`.
         let cutoff = now_epoch() - 30 * 60;
-        let (active_sessions, total_sessions) =
-            sqlx::query_as::<_, (i64, i64)>(SQL_STATS)
-                .bind(cutoff)
-                .fetch_one(&self.pool)
-                .await?;
+        let (active_sessions, total_sessions) = sqlx::query_as::<_, (i64, i64)>(SQL_STATS)
+            .bind(cutoff)
+            .fetch_one(&self.pool)
+            .await?;
 
         Ok(SessionStats {
             active_sessions: active_sessions as u64,

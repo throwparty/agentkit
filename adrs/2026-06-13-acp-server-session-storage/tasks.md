@@ -1,10 +1,6 @@
 ---
-status: in-progress
-created: 2026-06-13
-updated: 2026-06-13
-author: adrian
-decision: pending
----
+
+## status: in-progress created: 2026-06-13 updated: 2026-06-13 author: adrian decision: pending
 
 # Tasks: ACP Server Session Storage
 
@@ -18,13 +14,13 @@ its own migration. Task 5 completes the cross-entity operations.
 
 ## Summary
 
-| # | Task | Effort | Depends on | Entity | Status |
-|---|------|--------|------------|--------|--------|
-| 1 | Scaffold + ID types + core types + trait | medium | — | Foundation | ✅ |
-| 2 | Session entity (both backends) | medium | 1 | Session | |
-| 3 | PromptTurn entity (both backends) | medium | 2 | PromptTurn | |
-| 4 | Message entity (both backends) | medium | 3 | Message | |
-| 5 | Context assembly + fork (both backends) | medium | 4 | Cross-entity | |
+| #   | Task                                     | Effort | Depends on | Entity       | Status |
+| --- | ---------------------------------------- | ------ | ---------- | ------------ | ------ |
+| 1   | Scaffold + ID types + core types + trait | medium | —          | Foundation   | ✅     |
+| 2   | Session entity (both backends)           | medium | 1          | Session      |        |
+| 3   | PromptTurn entity (both backends)        | medium | 2          | PromptTurn   |        |
+| 4   | Message entity (both backends)           | medium | 3          | Message      |        |
+| 5   | Context assembly + fork (both backends)  | medium | 4          | Cross-entity |        |
 
 Total: 5 tasks, estimated 1–3 days each.
 
@@ -42,8 +38,7 @@ Create the `acp-storage` library crate at
 1. **Cargo.toml** with dependencies (tokio, uuid, thiserror, async-trait,
    serde optional, sqlx optional behind `sqlite` feature).
 
-2. **`src/id.rs`** — Three ID types as standalone structs (not an enum):
-
+1. **`src/id.rs`** — Three ID types as standalone structs (not an enum):
    - `SessionId` — encodes as `sess_<uuid>`, decodes by stripping `sess_`
    - `TurnId` — encodes as `turn_<uuid>`, decodes by stripping `turn_`
    - `MessageId` — encodes as `msg_<uuid>`, decodes by stripping `msg_`
@@ -59,14 +54,15 @@ Create the `acp-storage` library crate at
    `IdError` with variants `InvalidFormat` and `WrongPrefix`.
    Bare UUIDs (no prefix) are accepted for backward compatibility.
 
-3. **`src/types.rs`** — `Session`, `PromptTurn`, `Message` structs.
+1. **`src/types.rs`** — `Session`, `PromptTurn`, `Message` structs.
    All IDs are bare `String` fields (no ID wrappers). Includes
    `prompt_turn_count` on Session and fork lineage fields
    (`forked_from_session_id`, `fork_point_turn_id`).
 
-4. **`src/store/mod.rs`** — `SessionStore` trait and `StoreError` enum.
+1. **`src/store/mod.rs`** — `SessionStore` trait and `StoreError` enum.
 
    `StoreError`:
+
    ```rust
    pub enum StoreError {
        NotFound { entity: &'static str, id: String },
@@ -98,7 +94,7 @@ Create the `acp-storage` library crate at
    }
    ```
 
-5. **Module wiring** in `src/lib.rs`:
+1. **Module wiring** in `src/lib.rs`:
 
    ```rust
    pub mod id;
@@ -108,26 +104,26 @@ Create the `acp-storage` library crate at
 
 ### Tests (inline in `src/id.rs`)
 
-| Test name | What it validates |
-|-----------|-------------------|
-| `session_id_new_roundtrip` | Create new SessionId, encode, decode back to original UUID |
-| `session_id_from_uuid` | Wrap bare UUID, encode produces "sess_<uuid>", decode strips |
-| `session_id_wrong_prefix_turn` | Decoding `turn_xxx` as SessionId → `IdError::WrongPrefix` |
-| `session_id_wrong_prefix_msg` | Decoding `msg_xxx` as SessionId → `IdError::WrongPrefix` |
-| `session_id_bare_uuid_accepted` | Decoding `abc` (no prefix) → `Ok("abc")` |
-| `session_id_empty_rejected` | Decoding `""` → `IdError::InvalidFormat` |
-| `session_id_prefix_only_rejected` | Decoding `"sess_"` → `IdError::InvalidFormat` |
-| `turn_id_roundtrip` | Same for TurnId |
-| `turn_id_decode_as_session_rejected` | Decoding `turn_xxx` via SessionId::decode → error |
-| `message_id_roundtrip` | Same for MessageId |
-| `message_id_decode_as_session_rejected` | Decoding `msg_xxx` via SessionId::decode → error |
+| Test name                               | What it validates                                             |
+| --------------------------------------- | ------------------------------------------------------------- |
+| `session_id_new_roundtrip`              | Create new SessionId, encode, decode back to original UUID    |
+| `session_id_from_uuid`                  | Wrap bare UUID, encode produces "sess\_<uuid>", decode strips |
+| `session_id_wrong_prefix_turn`          | Decoding `turn_xxx` as SessionId → `IdError::WrongPrefix`     |
+| `session_id_wrong_prefix_msg`           | Decoding `msg_xxx` as SessionId → `IdError::WrongPrefix`      |
+| `session_id_bare_uuid_accepted`         | Decoding `abc` (no prefix) → `Ok("abc")`                      |
+| `session_id_empty_rejected`             | Decoding `""` → `IdError::InvalidFormat`                      |
+| `session_id_prefix_only_rejected`       | Decoding `"sess_"` → `IdError::InvalidFormat`                 |
+| `turn_id_roundtrip`                     | Same for TurnId                                               |
+| `turn_id_decode_as_session_rejected`    | Decoding `turn_xxx` via SessionId::decode → error             |
+| `message_id_roundtrip`                  | Same for MessageId                                            |
+| `message_id_decode_as_session_rejected` | Decoding `msg_xxx` via SessionId::decode → error              |
 
 ### Acceptance criteria
 
 1. `cargo build` succeeds for the new crate (no binary).
-2. `cargo test` passes — all ID prefix tests green.
-3. The crate compiles without sqlx or serde features enabled.
-4. `cargo test --features sqlite,serde` also compiles.
+1. `cargo test` passes — all ID prefix tests green.
+1. The crate compiles without sqlx or serde features enabled.
+1. `cargo test --features sqlite,serde` also compiles.
 
 ---
 
@@ -153,15 +149,15 @@ pub struct InMemorySessionStore {
 
 Implement:
 
-| Method | Behavior |
-|--------|----------|
-| `create_session` | Insert session into HashMap. Return AlreadyExists if ID taken. |
-| `get_session` | Return cloned session with prompt_turn_count = 0 (turns populated later by get_context). Return NotFound if missing. |
-| `list_sessions` | Return all sessions cloned, each with prompt_turn_count = 0. |
-| `close_session` | Set `active = false`, update `updated_at`. Return NotFound if missing. |
-| `set_session_mode` | Set `mode`, update `updated_at`. Return NotFound if missing. |
-| `set_session_head` | Set `head_prompt_turn_id`, update `updated_at`. Return NotFound if missing. |
-| All other trait methods | Return `Err(StoreError::Database("not implemented"))` |
+| Method                  | Behavior                                                                                                             |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `create_session`        | Insert session into HashMap. Return AlreadyExists if ID taken.                                                       |
+| `get_session`           | Return cloned session with prompt_turn_count = 0 (turns populated later by get_context). Return NotFound if missing. |
+| `list_sessions`         | Return all sessions cloned, each with prompt_turn_count = 0.                                                         |
+| `close_session`         | Set `active = false`, update `updated_at`. Return NotFound if missing.                                               |
+| `set_session_mode`      | Set `mode`, update `updated_at`. Return NotFound if missing.                                                         |
+| `set_session_head`      | Set `head_prompt_turn_id`, update `updated_at`. Return NotFound if missing.                                          |
+| All other trait methods | Return `Err(StoreError::Database("not implemented"))`                                                                |
 
 The `clear()` method drops and recreates the HashMap.
 
@@ -201,6 +197,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 Implement the same session methods as InMemorySessionStore, using sqlx.
 
 Error mapping for sqlx errors:
+
 - `RowNotFound` → `StoreError::NotFound { entity: "session" }`
 - `Database(SQLITE_CONSTRAINT_UNIQUE)` → `StoreError::AlreadyExists`
 - Any other `Database` → `StoreError::Database`
@@ -248,24 +245,24 @@ mod tests {
 pub async fn run_session_tests<S: SessionStore>(store: &S);
 ```
 
-| Scenario | Steps | Expects |
-|----------|-------|---------|
-| `session_create_and_get` | Create session, get it | Same session returned, fields match |
-| `session_create_duplicate` | Create same session twice | Second create → `AlreadyExists` |
-| `session_list` | Create 3 sessions, list | List contains exactly 3 |
-| `session_get_missing` | Get nonexistent ID | `NotFound` |
-| `session_close` | Create, close, get | `active == false`, `updated_at` updated |
-| `session_close_missing` | Close nonexistent ID | `NotFound` |
-| `session_set_mode` | Create, set mode to "ask" | `mode == Some("ask")` |
-| `session_set_head` | Create, set head to "some-turn-id" | `head_prompt_turn_id == "some-turn-id"` |
-| `session_clear` | Create several, clear, list | List is empty |
+| Scenario                   | Steps                              | Expects                                 |
+| -------------------------- | ---------------------------------- | --------------------------------------- |
+| `session_create_and_get`   | Create session, get it             | Same session returned, fields match     |
+| `session_create_duplicate` | Create same session twice          | Second create → `AlreadyExists`         |
+| `session_list`             | Create 3 sessions, list            | List contains exactly 3                 |
+| `session_get_missing`      | Get nonexistent ID                 | `NotFound`                              |
+| `session_close`            | Create, close, get                 | `active == false`, `updated_at` updated |
+| `session_close_missing`    | Close nonexistent ID               | `NotFound`                              |
+| `session_set_mode`         | Create, set mode to "ask"          | `mode == Some("ask")`                   |
+| `session_set_head`         | Create, set head to "some-turn-id" | `head_prompt_turn_id == "some-turn-id"` |
+| `session_clear`            | Create several, clear, list        | List is empty                           |
 
 ### Acceptance criteria
 
 1. All session test scenarios pass against `InMemorySessionStore`.
-2. All session test scenarios pass against `SqliteSessionStore` with `:memory:`.
-3. `SqliteSessionStore::connect(":memory:")` creates tables without error.
-4. Duplicate session IDs produce `StoreError::AlreadyExists` on both backends.
+1. All session test scenarios pass against `SqliteSessionStore` with `:memory:`.
+1. `SqliteSessionStore::connect(":memory:")` creates tables without error.
+1. Duplicate session IDs produce `StoreError::AlreadyExists` on both backends.
 
 ---
 
@@ -292,11 +289,11 @@ pub struct InMemorySessionStore {
 
 Implement:
 
-| Method | Behavior |
-|--------|----------|
-| `append_prompt_turn` | Insert prompt turn. Validate session exists (NotFound if missing). Track parent_id correctly. |
-| `get_prompt_turn_children` | Return all turns whose `parent_id` matches the given ID. |
-| `get_session_prompt_turns` | Return all turns with matching `session_id`, ordered by `position`. |
+| Method                     | Behavior                                                                                      |
+| -------------------------- | --------------------------------------------------------------------------------------------- |
+| `append_prompt_turn`       | Insert prompt turn. Validate session exists (NotFound if missing). Track parent_id correctly. |
+| `get_prompt_turn_children` | Return all turns whose `parent_id` matches the given ID.                                      |
+| `get_session_prompt_turns` | Return all turns with matching `session_id`, ordered by `position`.                           |
 
 All previously-implemented session methods unchanged.
 
@@ -331,22 +328,22 @@ Implement the same three methods via SQL queries on pool.
 pub async fn run_prompt_turn_tests<S: SessionStore>(store: &S);
 ```
 
-| Scenario | Steps | Expects |
-|----------|-------|---------|
-| `prompt_turn_append` | Create session, append turn | Turn stored, retrievable |
-| `prompt_turn_append_first` | Append turn to session with no existing turns | Succeeds (head NULL) |
-| `prompt_turn_append_missing_session` | Append turn with bad session_id | `NotFound` |
-| `prompt_turn_dag_parent` | Append turn A, append turn B with parent=A | B.parent_id == A.id |
-| `prompt_turn_children` | Append A, B (child of A), C (child of A) | get_children(A) returns [B, C] |
-| `prompt_turn_session_list` | Append turns to session, get_session_prompt_turns | Returns in position order |
-| `prompt_turn_position_increments` | Append 3 turns | Positions 0, 1, 2 |
+| Scenario                             | Steps                                             | Expects                        |
+| ------------------------------------ | ------------------------------------------------- | ------------------------------ |
+| `prompt_turn_append`                 | Create session, append turn                       | Turn stored, retrievable       |
+| `prompt_turn_append_first`           | Append turn to session with no existing turns     | Succeeds (head NULL)           |
+| `prompt_turn_append_missing_session` | Append turn with bad session_id                   | `NotFound`                     |
+| `prompt_turn_dag_parent`             | Append turn A, append turn B with parent=A        | B.parent_id == A.id            |
+| `prompt_turn_children`               | Append A, B (child of A), C (child of A)          | get_children(A) returns [B, C] |
+| `prompt_turn_session_list`           | Append turns to session, get_session_prompt_turns | Returns in position order      |
+| `prompt_turn_position_increments`    | Append 3 turns                                    | Positions 0, 1, 2              |
 
 ### Acceptance criteria
 
 1. All prompt turn scenarios pass against both backends.
-2. Existing session CRUD tests still pass (regression).
-3. `get_prompt_turn_children` returns only direct children.
-4. Appending with a nonexistent session_id returns `NotFound`.
+1. Existing session CRUD tests still pass (regression).
+1. `get_prompt_turn_children` returns only direct children.
+1. Appending with a nonexistent session_id returns `NotFound`.
 
 ---
 
@@ -374,9 +371,9 @@ pub struct InMemorySessionStore {
 
 Implement:
 
-| Method | Behavior |
-|--------|----------|
-| `append_message` | Insert message. Validate prompt_turn exists (NotFound if missing). |
+| Method                  | Behavior                                                                   |
+| ----------------------- | -------------------------------------------------------------------------- |
+| `append_message`        | Insert message. Validate prompt_turn exists (NotFound if missing).         |
 | `get_messages_for_turn` | Return all messages with matching `prompt_turn_id`, ordered by `position`. |
 
 #### SqliteSessionStore additions
@@ -407,20 +404,20 @@ CREATE INDEX IF NOT EXISTS idx_sessions_updated
 pub async fn run_message_tests<S: SessionStore>(store: &S);
 ```
 
-| Scenario | Steps | Expects |
-|----------|-------|---------|
-| `message_append` | Create session + turn, append message | Message stored |
-| `message_append_missing_turn` | Append message with bad turn_id | `NotFound` |
-| `message_get_by_turn` | Append 3 messages to same turn, get_messages_for_turn | Returns 3 in position order |
-| `message_position_order` | Append messages with positions 2, 0, 1 | get returns in order 0, 1, 2 |
-| `message_multiple_turns` | Append messages to two different turns | get_messages_for_turn returns correct subset |
+| Scenario                      | Steps                                                 | Expects                                      |
+| ----------------------------- | ----------------------------------------------------- | -------------------------------------------- |
+| `message_append`              | Create session + turn, append message                 | Message stored                               |
+| `message_append_missing_turn` | Append message with bad turn_id                       | `NotFound`                                   |
+| `message_get_by_turn`         | Append 3 messages to same turn, get_messages_for_turn | Returns 3 in position order                  |
+| `message_position_order`      | Append messages with positions 2, 0, 1                | get returns in order 0, 1, 2                 |
+| `message_multiple_turns`      | Append messages to two different turns                | get_messages_for_turn returns correct subset |
 
 ### Acceptance criteria
 
 1. All message scenarios pass against both backends.
-2. Existing session + prompt turn tests still pass.
-3. Appending to a nonexistent prompt_turn returns `NotFound`.
-4. Messages for a turn are returned in position order.
+1. Existing session + prompt turn tests still pass.
+1. Appending to a nonexistent prompt_turn returns `NotFound`.
+1. Messages for a turn are returned in position order.
 
 ---
 
@@ -493,13 +490,13 @@ the existing DAG, naturally including the source session's ancestor turns.
 pub async fn run_context_tests<S: SessionStore>(store: &S);
 ```
 
-| Scenario | Setup | Expects |
-|----------|-------|---------|
-| `context_linear_chain` | Session with 3 turns (A→B→C), each with 2 messages | Context returns [A1, A2, B1, B2, C1, C2] |
-| `context_empty_session` | Session with no turns | Empty vec |
-| `context_max_turns` | Session with 5 turns, max_turns=3 | Returns messages from turns 3,4,5 only |
-| `context_no_max_turns` | Session with 5 turns, max_turns=None | Returns messages from all 5 turns |
-| `context_single_message_turn` | Turn with 1 message | Returns that message |
+| Scenario                      | Setup                                              | Expects                                  |
+| ----------------------------- | -------------------------------------------------- | ---------------------------------------- |
+| `context_linear_chain`        | Session with 3 turns (A→B→C), each with 2 messages | Context returns [A1, A2, B1, B2, C1, C2] |
+| `context_empty_session`       | Session with no turns                              | Empty vec                                |
+| `context_max_turns`           | Session with 5 turns, max_turns=3                  | Returns messages from turns 3,4,5 only   |
+| `context_no_max_turns`        | Session with 5 turns, max_turns=None               | Returns messages from all 5 turns        |
+| `context_single_message_turn` | Turn with 1 message                                | Returns that message                     |
 
 #### Fork
 
@@ -507,24 +504,24 @@ pub async fn run_context_tests<S: SessionStore>(store: &S);
 pub async fn run_fork_tests<S: SessionStore>(store: &S);
 ```
 
-| Scenario | Setup | Expects |
-|----------|-------|---------|
-| `fork_session_basic` | Session A with turns, fork to Session B | B.head_prompt_turn_id == A's head |
-| `fork_context_includes_ancestors` | Fork B from A, get_context for B | Same messages as A's context |
-| `fork_preserves_source` | Fork B from A, add turn to B | A's context unchanged |
-| `fork_independent_evolution` | Fork B from A, add turns to both | Each has independent context after fork |
-| `fork_nonexistent_source` | Fork from bad session_id | `NotFound` |
-| `fork_list_children` | Fork B and C from A | Query indexed by forked_from_session_id |
+| Scenario                          | Setup                                   | Expects                                 |
+| --------------------------------- | --------------------------------------- | --------------------------------------- |
+| `fork_session_basic`              | Session A with turns, fork to Session B | B.head_prompt_turn_id == A's head       |
+| `fork_context_includes_ancestors` | Fork B from A, get_context for B        | Same messages as A's context            |
+| `fork_preserves_source`           | Fork B from A, add turn to B            | A's context unchanged                   |
+| `fork_independent_evolution`      | Fork B from A, add turns to both        | Each has independent context after fork |
+| `fork_nonexistent_source`         | Fork from bad session_id                | `NotFound`                              |
+| `fork_list_children`              | Fork B and C from A                     | Query indexed by forked_from_session_id |
 
 ### Acceptance criteria
 
 1. Context assembly returns messages in chronological order (root turn
    messages first, then children).
-2. `max_turns=N` limits the output to the most recent N turns.
-3. Empty session returns empty context.
-4. Forked session's context includes ancestor messages from source session.
-5. Forked and source sessions evolve independently after fork.
-6. All existing entity-level tests still pass.
+1. `max_turns=N` limits the output to the most recent N turns.
+1. Empty session returns empty context.
+1. Forked session's context includes ancestor messages from source session.
+1. Forked and source sessions evolve independently after fork.
+1. All existing entity-level tests still pass.
 
 ---
 

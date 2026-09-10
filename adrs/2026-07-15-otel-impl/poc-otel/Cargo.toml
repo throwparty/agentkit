@@ -1,14 +1,14 @@
+[dependencies]
+opentelemetry = {version = "0.32", features = ["trace", "metrics", "logs"]}
+opentelemetry_sdk = {version = "0.32", features = ["trace", "metrics", "logs", "testing", "rt-tokio"]}
+opentelemetry-otlp = {version = "0.32", features = ["http-proto", "reqwest-blocking-client", "trace", "metrics", "logs"]}
+tracing = "0.1"
+tracing-opentelemetry = "0.33"
+tracing-subscriber = {version = "0.3", features = ["registry", "env-filter"]}
+tokio = {version = "1", features = ["macros", "rt-multi-thread"]}
+
 [package]
 name = "poc-otel"
 version = "0.1.0"
 edition = "2021"
 publish = false
-
-[dependencies]
-opentelemetry = { version = "0.32", features = ["trace", "metrics", "logs"] }
-opentelemetry_sdk = { version = "0.32", features = ["trace", "metrics", "logs", "testing", "rt-tokio"] }
-opentelemetry-otlp = { version = "0.32", features = ["http-proto", "reqwest-blocking-client", "trace", "metrics", "logs"] }
-tracing = "0.1"
-tracing-opentelemetry = "0.33"
-tracing-subscriber = { version = "0.3", features = ["registry", "env-filter"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

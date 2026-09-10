@@ -1,17 +1,17 @@
 use std::sync::Once;
 
+use opentelemetry::KeyValue;
 use opentelemetry::logs::{LogRecord, Logger, LoggerProvider, Severity};
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry::trace::{Span, TraceContextExt, Tracer, TracerProvider};
-use opentelemetry::KeyValue;
+use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::{InMemoryLogExporter, SimpleLogProcessor};
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader};
 use opentelemetry_sdk::trace::{InMemorySpanExporter, SimpleSpanProcessor};
-use opentelemetry_sdk::Resource;
 use poc_otel::log_layer::OtelLogLayer;
+use tracing_subscriber::Registry;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::Registry;
 
 static INIT: Once = Once::new();
 
@@ -56,19 +56,23 @@ async fn test_trace_emission() {
     assert!(root_span.span_context.trace_flags().is_sampled());
 
     let fetch = spans.iter().find(|s| s.name == "fetch_users").unwrap();
-    assert!(fetch
-        .attributes
-        .iter()
-        .any(|kv| kv.key.as_str() == "db.table"));
+    assert!(
+        fetch
+            .attributes
+            .iter()
+            .any(|kv| kv.key.as_str() == "db.table")
+    );
 
     let notif = spans
         .iter()
         .find(|s| s.name == "send_notifications")
         .unwrap();
-    assert!(notif
-        .attributes
-        .iter()
-        .any(|kv| kv.key.as_str() == "notification.type"));
+    assert!(
+        notif
+            .attributes
+            .iter()
+            .any(|kv| kv.key.as_str() == "notification.type")
+    );
 }
 
 #[tokio::test]
@@ -85,8 +89,20 @@ async fn test_metric_emission() {
     let histogram = meter.f64_histogram("request_duration_ms").build();
     let gauge = meter.u64_gauge("active_connections").build();
 
-    counter.add(1, &[KeyValue::new("endpoint", "/batch"), KeyValue::new("status", "success")]);
-    counter.add(1, &[KeyValue::new("endpoint", "/batch"), KeyValue::new("status", "error")]);
+    counter.add(
+        1,
+        &[
+            KeyValue::new("endpoint", "/batch"),
+            KeyValue::new("status", "success"),
+        ],
+    );
+    counter.add(
+        1,
+        &[
+            KeyValue::new("endpoint", "/batch"),
+            KeyValue::new("status", "error"),
+        ],
+    );
     histogram.record(42.0, &[KeyValue::new("endpoint", "/batch")]);
     histogram.record(137.5, &[KeyValue::new("endpoint", "/batch")]);
     gauge.record(7, &[KeyValue::new("pool", "upstream")]);

@@ -1,9 +1,9 @@
-use std::time::Duration;
 use agentkit_switchboard::domain::quota::{
-    handle_response_status, ProviderQuotaState, DegradationReason,
+    DegradationReason, ProviderQuotaState, handle_response_status,
 };
-use agentkit_switchboard::providers::openai::quota::OpenAiQuota;
 use agentkit_switchboard::providers::anthropic::quota::AnthropicQuota;
+use agentkit_switchboard::providers::openai::quota::OpenAiQuota;
+use std::time::Duration;
 
 fn make_payg() -> ProviderQuotaState {
     ProviderQuotaState::new(Box::new(OpenAiQuota::default()))
@@ -124,7 +124,10 @@ fn quota_subscription_429() {
 #[test]
 fn quota_degradation_expired() {
     let mut state = make_payg();
-    state.degrade(DegradationReason::RateLimitExceeded, Some(Duration::from_nanos(1)));
+    state.degrade(
+        DegradationReason::RateLimitExceeded,
+        Some(Duration::from_nanos(1)),
+    );
     std::thread::sleep(Duration::from_micros(10));
     state.check_expired();
     assert!(!state.is_degraded());

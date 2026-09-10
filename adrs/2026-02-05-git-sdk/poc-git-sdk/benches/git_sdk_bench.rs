@@ -1,4 +1,4 @@
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 
 use poc_git_sdk::git_sdk::{AuthorInfo, DummyGitSdk, GitSdk};
 use poc_git_sdk::test_repo::TestRepo;

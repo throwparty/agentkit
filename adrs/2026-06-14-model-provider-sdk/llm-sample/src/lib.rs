@@ -1,5 +1,5 @@
-use llm::chat::ChatMessage;
 use llm::builder::{FunctionBuilder, ParamBuilder};
+use llm::chat::ChatMessage;
 use llm::{FunctionCall, ToolCall};
 
 pub fn echo_function_builder() -> FunctionBuilder {
@@ -14,8 +14,7 @@ pub fn echo_function_builder() -> FunctionBuilder {
 }
 
 pub fn execute_echo(arguments: &str) -> String {
-    let args: serde_json::Value =
-        serde_json::from_str(arguments).unwrap_or(serde_json::json!({}));
+    let args: serde_json::Value = serde_json::from_str(arguments).unwrap_or(serde_json::json!({}));
     let message = args
         .get("message")
         .and_then(|v| v.as_str())

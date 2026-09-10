@@ -27,7 +27,7 @@ jobs:
     name: Update
     runs-on: ubuntu-24.04
     permissions:
-      contents: write  # To push cargo hash updates
+      contents: write # To push cargo hash updates
     defaults:
       run:
         shell: nix develop ./nix --command bash -euo pipefail {0} # zizmor: ignore[misfeature]

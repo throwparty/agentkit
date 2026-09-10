@@ -1,6 +1,6 @@
 ---
-status: accepted
----
+
+## status: accepted
 
 # Specification: Project Configuration
 
@@ -20,30 +20,34 @@ This specification outlines the design for configuring Litterbox projects. The p
 ### 2.1. New Project Setup
 
 A user initializes a new project and wants to integrate Litterbox.
+
 1. The user creates a `.litterbox.toml` file in the project root.
-2. They define essential configuration keys: `project.slug`, `docker.image`, and `docker.setup-command` within this file.
-3. Litterbox reads and applies these configurations when operating on the project.
+1. They define essential configuration keys: `project.slug`, `docker.image`, and `docker.setup-command` within this file.
+1. Litterbox reads and applies these configurations when operating on the project.
 
 ### 2.2. Existing Project Configuration and Local Customization
 
 A user joins an existing project that already has a `.litterbox.toml` file.
+
 1. The user wants to test a different Docker image or change the project ID for their local development environment without committing these changes to the shared repository.
-2. They create a `.litterbox.local.toml` file in the project root.
-3. They specify their desired overrides (e.g., `docker.image = "my-custom-image:dev"`) in `.litterbox.local.toml`.
-4. Litterbox merges the configurations, prioritizing values from `.litterbox.local.toml`, and uses the customized settings for the user's local operations.
+1. They create a `.litterbox.local.toml` file in the project root.
+1. They specify their desired overrides (e.g., `docker.image = "my-custom-image:dev"`) in `.litterbox.local.toml`.
+1. Litterbox merges the configurations, prioritizing values from `.litterbox.local.toml`, and uses the customized settings for the user's local operations.
 
 ### 2.3. Updating Shared Configuration
 
 A project maintainer decides to update the default `docker.image` for the project.
+
 1. The maintainer modifies the `docker.image` value in the `.litterbox.toml` file and commits the change.
-2. Other users, upon pulling the latest changes, automatically pick up the new default `docker.image` when running Litterbox, unless they have a specific override in their `.litterbox.local.toml`.
+1. Other users, upon pulling the latest changes, automatically pick up the new default `docker.image` when running Litterbox, unless they have a specific override in their `.litterbox.local.toml`.
 
 ### 2.4. Migrating Static Values
 
 During the implementation of this feature, existing hardcoded configuration values in the sandboxing logic need to be replaced.
+
 1. The development team identifies all statically assigned values related to `project.slug`, `docker.image`, and `docker.setup-command`.
-2. These static values are replaced with dynamic lookups from the newly implemented configuration system.
-3. The sandboxing implementation now relies entirely on the `.litterbox.toml` (and `.litterbox.local.toml`) for these settings.
+1. These static values are replaced with dynamic lookups from the newly implemented configuration system.
+1. The sandboxing implementation now relies entirely on the `.litterbox.toml` (and `.litterbox.local.toml`) for these settings.
 
 ## 3. Functional Requirements
 
@@ -51,9 +55,9 @@ During the implementation of this feature, existing hardcoded configuration valu
 - **F2: Local Override File Discovery:** The system SHALL search for a file named `.litterbox.local.toml` in the root directory of the current project.
 - **F3: Configuration Merging:** If both `.litterbox.toml` and `.litterbox.local.toml` are found, the system SHALL merge their contents. Values defined in `.litterbox.local.toml` SHALL take precedence over (override) identical keys in `.litterbox.toml`.
 - **F4: Required Configuration Keys:** The final merged configuration SHALL contain the following keys:
-    - `project.slug` (String): A unique identifier for the project, used in naming conventions (e.g., container names).
-    - `docker.image` (String): The Docker image to be used for the project's sandbox environment.
-    - `docker.setup-command` (String): A command or script to be executed to set up the environment within the Docker container.
+  - `project.slug` (String): A unique identifier for the project, used in naming conventions (e.g., container names).
+  - `docker.image` (String): The Docker image to be used for the project's sandbox environment.
+  - `docker.setup-command` (String): A command or script to be executed to set up the environment within the Docker container.
 - **F5: Configuration Access:** The sandboxing implementation SHALL be able to retrieve the values of `project.slug`, `docker.image`, and `docker.setup-command` from the merged configuration.
 - **F6: Extensibility:** The configuration parsing logic SHALL be designed to gracefully handle and ignore unknown keys, allowing for future additions to the configuration schema without requiring changes to existing parsing logic.
 

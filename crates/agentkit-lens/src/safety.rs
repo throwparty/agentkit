@@ -43,7 +43,11 @@ pub fn validate_url(url: &str) -> Result<String, SafetyError> {
     // If the host is already a bare IP (IPv4 or IPv6), validate it immediately.
     // Domain names are deferred to the HTTP client's connection-time connector.
     // Strip brackets for IPv6 literals (e.g. `[::1]` → `::1`).
-    let host_clean = host.strip_prefix('[').unwrap_or(host).strip_suffix(']').unwrap_or(host);
+    let host_clean = host
+        .strip_prefix('[')
+        .unwrap_or(host)
+        .strip_suffix(']')
+        .unwrap_or(host);
     if let Ok(ip) = host_clean.parse::<IpAddr>()
         && let Some(reason) = is_blocked_ip(ip)
     {
@@ -293,6 +297,8 @@ mod tests {
 
     #[test]
     fn test_ipv6_allowed() {
-        assert!(is_blocked_ipv6(std::net::Ipv6Addr::new(0x2606, 0x4700, 0, 0, 0, 0, 0, 1)).is_none());
+        assert!(
+            is_blocked_ipv6(std::net::Ipv6Addr::new(0x2606, 0x4700, 0, 0, 0, 0, 0, 1)).is_none()
+        );
     }
 }

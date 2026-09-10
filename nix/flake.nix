@@ -21,7 +21,8 @@
       throwparty,
       self,
     }:
-    flake-utils.lib.eachDefaultSystem (system:
+    flake-utils.lib.eachDefaultSystem (
+      system:
       let
         pkgs = import nixpkgs {
           inherit system;
@@ -137,42 +138,50 @@
                 export PATH="$CARGO_HOME/bin:$PATH"
               '';
             };
-          in (mergeShells [ commonTools githubActions nodejs_24 rustShell ]);
+          in
+          (mergeShells [
+            commonTools
+            githubActions
+            nodejs_24
+            rustShell
+          ]);
 
         packages =
-            let
-              lib = nixpkgs.lib;
-              mkAgentkitBin =
-                bin:
-                let
-                  qualifiedBin = "agentkit-${bin}";
-                  commonCargoFlags = [
-                    "--package" qualifiedBin
-                    "--bin" qualifiedBin
-                  ];
-                in
-                pkgs.rustPlatform.buildRustPackage {
-                  pname = qualifiedBin;
-                  version = "0.1.0";
+          let
+            lib = nixpkgs.lib;
+            mkAgentkitBin =
+              bin:
+              let
+                qualifiedBin = "agentkit-${bin}";
+                commonCargoFlags = [
+                  "--package"
+                  qualifiedBin
+                  "--bin"
+                  qualifiedBin
+                ];
+              in
+              pkgs.rustPlatform.buildRustPackage {
+                pname = qualifiedBin;
+                version = "0.1.0";
 
-                  src = ../.;
-                  cargoBuildFlags = commonCargoFlags;
-                  cargoTestFlags = commonCargoFlags;
-                  cargoDepsName = "agentkit";
-                  cargoHash = "sha256-v+brLhI9hbiSNwuPSEW1WZ6rbeJcyYysKyO/9D3ttG0=";
+                src = ../.;
+                cargoBuildFlags = commonCargoFlags;
+                cargoTestFlags = commonCargoFlags;
+                cargoDepsName = "agentkit";
+                cargoHash = "sha256-v+brLhI9hbiSNwuPSEW1WZ6rbeJcyYysKyO/9D3ttG0=";
 
-                  meta = {
-                    description = "Provides fetch and search tools backed by various search engines.";
-                    homepage = "https://agentkit.throw.party/docs/user/${bin}/";
-                    license = lib.licenses.asl20;
-                    mainProgram = "agentkit-${bin}";
-                  };
+                meta = {
+                  description = "Provides fetch and search tools backed by various search engines.";
+                  homepage = "https://agentkit.throw.party/docs/user/${bin}/";
+                  license = lib.licenses.asl20;
+                  mainProgram = "agentkit-${bin}";
                 };
-            in
-            {
-              agentkit-lens = mkAgentkitBin "lens";
-              agentkit-litterbox = mkAgentkitBin "litterbox";
-            };
+              };
+          in
+          {
+            agentkit-lens = mkAgentkitBin "lens";
+            agentkit-litterbox = mkAgentkitBin "litterbox";
+          };
         checks = {
           inherit (self.packages.${system})
             agentkit-lens
@@ -182,13 +191,11 @@
       }
     )
     // {
-      overlays.default =
-        final: prev:
-        {
-          inherit (self.packages.${final.system})
-            agentkit-lens
-            agentkit-litterbox
-            ;
-        };
+      overlays.default = final: prev: {
+        inherit (self.packages.${final.system})
+          agentkit-lens
+          agentkit-litterbox
+          ;
       };
+    };
 }

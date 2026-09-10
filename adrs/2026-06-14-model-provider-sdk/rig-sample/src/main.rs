@@ -2,8 +2,8 @@ use clap::Parser;
 use rig_core::completion::{Chat, Message};
 use rig_core::prelude::*;
 use rig_core::providers::openai;
-use rig_sample::recording_client::RecordingClient;
 use rig_sample::EchoTool;
+use rig_sample::recording_client::RecordingClient;
 
 #[derive(Parser)]
 struct Args {

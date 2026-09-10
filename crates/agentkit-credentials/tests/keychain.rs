@@ -63,7 +63,10 @@ fn keychain_get_put_delete() {
         return;
     }
     let output = result.unwrap();
-    assert!(output.contains("tok_kc"), "output should contain access_token: {output}");
+    assert!(
+        output.contains("tok_kc"),
+        "output should contain access_token: {output}"
+    );
 
     assert!(run_delete(&test_id), "delete should succeed");
     let result = run_get(&test_id);

@@ -20,6 +20,7 @@ trait SessionManager: Send + Sync {
 ```
 
 Two implementations exist:
+
 - `MemorySessionManager` — `HashMap`-backed, used in tests.
 - `SqliteSessionManager` — `sqlx`-backed with migrations, used in production. Both pass the same parameterized test suite.
 
@@ -83,11 +84,11 @@ Session-to-provider mappings must survive restarts for two reasons:
 
 The default path follows platform conventions via `agentkit-path`:
 
-| Platform | Path |
-|---|---|
-| Linux | `~/.local/state/agentkit/switchboard/sessions.db` |
-| macOS | `~/Library/Application Support/AgentKit/switchboard/sessions.db` |
-| Windows | `~/AppData/LocalLow/AgentKit/switchboard/sessions.db` |
+| Platform | Path                                                             |
+| -------- | ---------------------------------------------------------------- |
+| Linux    | `~/.local/state/agentkit/switchboard/sessions.db`                |
+| macOS    | `~/Library/Application Support/AgentKit/switchboard/sessions.db` |
+| Windows  | `~/AppData/LocalLow/AgentKit/switchboard/sessions.db`            |
 
 Overridable via `--session-db` flag or `session_db_path` in config.
 

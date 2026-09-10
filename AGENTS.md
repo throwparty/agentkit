@@ -27,4 +27,5 @@ When working on features related to project configuration or sandbox management,
 - **`src/sandbox/mod.rs`**: This module defines the core `SandboxProvider` trait and its `DockerSandboxProvider` implementation. It orchestrates the creation, management, and tearing down of sandboxes, including Docker container interactions, source code provisioning, and command execution. Features involving sandbox lifecycle or container specifics will heavily utilize this module.
 
 - **`src/config.rs`**: Defines the data structures for various configuration types. Modifications to project configuration schemas should start here.
+
 - **`src/mcp.rs`**: Implements the Model Control Protocol server, exposing tools like `sandbox-create`. Changes to tool inputs, outputs, or new MCP tools will involve this module.

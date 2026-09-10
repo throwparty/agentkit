@@ -29,10 +29,10 @@ Use the `zed: open settings file` or `zed: open project settings file` command i
       "remote": false,
       "command": "/path/to/agentkit-litterbox",
       "args": ["stdio"],
-      "env": {},
-    },
+      "env": {}
+    }
     // snip
-  },
+  }
   // snip
 }
 ```
@@ -64,7 +64,7 @@ In the same file, create a new `litterbox` key in the `agent.profiles` object:
           "fetch": true,
           "diagnostics": true,
           "copy_path": true,
-          "create_directory": false,
+          "create_directory": false
         },
         "enable_all_context_servers": false,
         "context_servers": {
@@ -81,19 +81,19 @@ In the same file, create a new `litterbox` key in the `agent.profiles` object:
               "bash": true
             }
           }
-        },
-      },
+        }
+      }
       // snip
-    },
+    }
     // snip
-  },
+  }
   // snip
 }
 ```
 
 ## Adding a rule
 
-Use the `agent: open rules library` command, click *+* (*New Rule*). Enter the name `Litterbox` and the body:
+Use the `agent: open rules library` command, click _+_ (_New Rule_). Enter the name `Litterbox` and the body:
 
 ```markdown
 ALWAYS use Litterbox sandboxes for all file, code, and shell tasks---NO EXCEPTIONS.
@@ -107,4 +107,4 @@ When creating a sandbox, note that an HTTP server starts and is port‑forwarded
 
 ## Testing
 
-Verify that the agent selector now shows a *Litterbox* option. You're now ready to [set up your project](../project-setup).
+Verify that the agent selector now shows a _Litterbox_ option. You're now ready to [set up your project](../project-setup).

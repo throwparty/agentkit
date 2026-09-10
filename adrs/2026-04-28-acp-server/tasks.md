@@ -1,10 +1,6 @@
 ---
-status: draft
-created: 2026-04-29
-updated: 2026-06-08
-author: adrian
-decision: pending
----
+
+## status: draft created: 2026-04-29 updated: 2026-06-08 author: adrian decision: pending
 
 # ACP Server Tasks
 
@@ -17,6 +13,7 @@ decision: pending
 **Dependencies**: None
 
 **Acceptance Criteria**:
+
 - `cargo init` creates project
 - `Cargo.toml` includes all dependencies: tokio, serde, serde_json, clap, axum (http1), uuid, thiserror, anyhow
 - `cargo build` succeeds without warnings
@@ -35,6 +32,7 @@ decision: pending
 **Dependencies**: Task 1
 
 **Acceptance Criteria**:
+
 - `--transport` flag accepts `stdio` or `http`; required flag
 - `--bind` defaults to `127.0.0.1`
 - `--http-port` defaults to 3811
@@ -54,6 +52,7 @@ decision: pending
 **Dependencies**: Task 1
 
 **Acceptance Criteria**:
+
 - Parses valid JSON-RPC 2.0 messages (requests, responses, notifications, errors)
 - Rejects invalid JSON with `-32700 Parse error`
 - Rejects missing `jsonrpc` field with `-32600 Invalid Request`
@@ -75,6 +74,7 @@ decision: pending
 **Dependencies**: Task 1
 
 **Acceptance Criteria**:
+
 - `create(id, cwd)` creates new session with timestamp
 - `load(id)` returns `None` (not implemented in basic harness)
 - `resume(id)` returns `true` if session exists, `false` otherwise
@@ -96,6 +96,7 @@ decision: pending
 **Dependencies**: Task 1, Task 3
 
 **Acceptance Criteria**:
+
 - Transport trait defines `send(message) -> Result`, `recv() -> Result<Message>`
 - Stdio transport reads newline-delimited JSON from stdin
 - Stdio transport writes newline-delimited JSON to stdout
@@ -116,6 +117,7 @@ decision: pending
 **Dependencies**: Task 5
 
 **Acceptance Criteria**:
+
 - HTTP transport listens on `--bind` and `--http-port` (default `127.0.0.1:3811`)
 - HTTP endpoint `POST /` accepts JSON-RPC messages
 - HTTP transport follows streamable HTTP format (JSON-RPC over HTTP POST)
@@ -135,6 +137,7 @@ decision: pending
 **Dependencies**: Task 3, Task 4, Task 5, Task 6
 
 **Acceptance Criteria**:
+
 - Routes `initialize` → initialize handler
 - Routes `authenticate` → error handler (`-32601`, not required)
 - Routes `session/new`, `session/load`, `session/resume`, `session/list`, `session/close`, `session/set_mode`, `session/prompt`, `session/cancel` → respective handlers
@@ -158,6 +161,7 @@ decision: pending
 **Acceptance Criteria**:
 
 ### `initialize`
+
 - Returns protocol version 1 and capabilities
 - `loadSession: false` in agentCapabilities
 - `sessionCapabilities.list: {}`, `sessionCapabilities.close: {}`, `sessionCapabilities.resume: {}`
@@ -167,42 +171,52 @@ decision: pending
 - `agentInfo` with name `acp-server`, title `ACP Server Harness`, version `0.1.0`
 
 ### `session/new`
+
 - Creates session via SessionManager
 - Returns `sessionId` (UUIDv4) and `modes` (current mode + available modes)
 - Echoes `cwd` in result
 
 ### `session/load`
+
 - Returns `-32602` error (loadSession capability is false)
 
 ### `session/resume`
+
 - Returns empty result `{}` unconditionally (dummy resume — no persistent state)
 - No session validation — session may have been lost on host restart
 
 ### `session/list`
+
 - Returns list of active sessions with `sessionId`, `cwd`, `title`, `updatedAt`, `_meta`
 - No pagination (`nextCursor` absent)
 
 ### `session/close`
+
 - Destroys session via SessionManager
 - Returns empty result `{}`
 
 ### `session/set_mode`
+
 - Stores mode on session object
 - Returns empty result `{}`
 - Returns error if session doesn't exist
 
 ### `session/set_config_option`
+
 - Returns `-32601` error (config options out of scope for text-echo harness)
 
 ### `session/prompt`
+
 - Sends `session/update` notification with user message echo (user_message_chunk)
 - Responds with `stopReason: "end_turn"`
 
 ### `session/cancel`
+
 - Processes cancellation notification (no response to cancel itself, no `session/update` sent)
 - Responds to the original pending `session/prompt` with `stopReason: "cancelled"`
 
 ### Error handler
+
 - Unknown methods return `-32601`
 - Missing params return `-32602`
 - Invalid request returns `-32600`
@@ -221,6 +235,7 @@ decision: pending
 **Dependencies**: Task 2, Task 5, Task 6, Task 7, Task 8
 
 **Acceptance Criteria**:
+
 - `cargo run -- --transport stdio` starts stdio transport
 - `cargo run -- --transport http --bind 127.0.0.1 --http-port 9999` starts HTTP on custom port
 - SIGINT/SIGTERM triggers graceful shutdown (close sessions, drain connections)
@@ -239,6 +254,7 @@ decision: pending
 **Dependencies**: Task 7, Task 8, Task 9
 
 **Acceptance Criteria**:
+
 - `tests/integration/lifecycle.rs` tests full flow: initialize → session/new → session/prompt → session/close
 - Stdio roundtrip tests: 5+ message exchanges verified
 - HTTP roundtrip tests: 3+ message exchanges verified

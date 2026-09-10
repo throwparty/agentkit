@@ -1,17 +1,10 @@
 use rmcp::{
-    ServerHandler,
-    ServiceExt,
-    handler::server::tool::ToolRouter,
-    handler::server::wrapper::Parameters,
-    model::*,
-    tool,
-    tool_handler,
-    tool_router,
+    ErrorData as McpError, ServerHandler, ServiceExt, handler::server::tool::ToolRouter,
+    handler::server::wrapper::Parameters, model::*, tool, tool_handler, tool_router,
     transport::stdio,
-    ErrorData as McpError,
 };
-use serde::Deserialize;
 use schemars::JsonSchema;
+use serde::Deserialize;
 use std::path::Path;
 use tokio::fs;
 
@@ -50,14 +43,17 @@ impl WriteFileServer {
         // Create parent directories if they don't exist
         if let Some(parent) = path_buf.parent() {
             fs::create_dir_all(parent).await.map_err(|e| {
-                McpError::internal_error(format!("Failed to create parent directories: {}", e), None)
+                McpError::internal_error(
+                    format!("Failed to create parent directories: {}", e),
+                    None,
+                )
             })?;
         }
 
         // Write content to file
-        fs::write(&args.path, &args.content).await.map_err(|e| {
-            McpError::internal_error(format!("Failed to write file: {}", e), None)
-        })?;
+        fs::write(&args.path, &args.content)
+            .await
+            .map_err(|e| McpError::internal_error(format!("Failed to write file: {}", e), None))?;
 
         Ok(CallToolResult::success(vec![Content::text(format!(
             "Successfully wrote {} bytes to {}",
@@ -80,9 +76,12 @@ impl ServerHandler for WriteFileServer {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let service = WriteFileServer::new().serve(stdio()).await.inspect_err(|e| {
-        eprintln!("Error starting server: {}", e);
-    })?;
+    let service = WriteFileServer::new()
+        .serve(stdio())
+        .await
+        .inspect_err(|e| {
+            eprintln!("Error starting server: {}", e);
+        })?;
     service.waiting().await?;
     Ok(())
 }

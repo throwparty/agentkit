@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use gix::bstr::ByteSlice;
 use gix::Repository;
+use gix::bstr::ByteSlice;
 
 use crate::git_cli_sdk::GitCliSdk;
 use crate::git_sdk::{
@@ -70,7 +70,12 @@ impl GitSdk for GixSdk {
         self.cli().squash(_repo_path, _range, _message, _author)
     }
 
-    fn diff(&self, _repo_path: &Path, _from: Option<&str>, _to: Option<&str>) -> GitSdkResult<String> {
+    fn diff(
+        &self,
+        _repo_path: &Path,
+        _from: Option<&str>,
+        _to: Option<&str>,
+    ) -> GitSdkResult<String> {
         self.cli().diff(_repo_path, _from, _to)
     }
 
@@ -118,7 +123,9 @@ impl GitSdk for GixNativeSdk {
         let mut commits = Vec::new();
         for info in walk.take(max) {
             let info = info.map_err(|err| GitSdkError::Git(err.to_string()))?;
-            let commit = info.object().map_err(|err| GitSdkError::Git(err.to_string()))?;
+            let commit = info
+                .object()
+                .map_err(|err| GitSdkError::Git(err.to_string()))?;
             let commit_ref = gix::objs::CommitRef::from_bytes(&commit.data)
                 .map_err(|err| GitSdkError::Git(err.to_string()))?;
             let author = commit_ref.author();
@@ -153,7 +160,12 @@ impl GitSdk for GixNativeSdk {
         Err(GitSdkError::Unsupported("gix squash not implemented"))
     }
 
-    fn diff(&self, _repo_path: &Path, _from: Option<&str>, _to: Option<&str>) -> GitSdkResult<String> {
+    fn diff(
+        &self,
+        _repo_path: &Path,
+        _from: Option<&str>,
+        _to: Option<&str>,
+    ) -> GitSdkResult<String> {
         Err(GitSdkError::Unsupported("gix diff not implemented"))
     }
 

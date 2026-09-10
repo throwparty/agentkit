@@ -20,15 +20,27 @@ fn home_dir() -> PathBuf {
 }
 
 fn macos_data_dir() -> PathBuf {
-    home_dir().join("Library").join("Application Support").join("AgentKit").join("Litterbox")
+    home_dir()
+        .join("Library")
+        .join("Application Support")
+        .join("AgentKit")
+        .join("Litterbox")
 }
 
 fn linux_data_dir() -> PathBuf {
-    home_dir().join(".local").join("state").join("agentkit").join("litterbox")
+    home_dir()
+        .join(".local")
+        .join("state")
+        .join("agentkit")
+        .join("litterbox")
 }
 
 fn windows_data_dir() -> PathBuf {
-    home_dir().join("AppData").join("LocalLow").join("AgentKit").join("Litterbox")
+    home_dir()
+        .join("AppData")
+        .join("LocalLow")
+        .join("AgentKit")
+        .join("Litterbox")
 }
 
 #[cfg(test)]
@@ -53,8 +65,13 @@ mod tests {
         let base = data_dir();
         let lossy = base.to_string_lossy();
         match std::env::consts::OS {
-            "macos" => assert!(lossy.contains("Application Support/AgentKit/Litterbox") || lossy.contains("Application Support")),
-            "windows" => assert!(lossy.contains("AppData/LocalLow/AgentKit/Litterbox") || lossy.contains("AppData")),
+            "macos" => assert!(
+                lossy.contains("Application Support/AgentKit/Litterbox")
+                    || lossy.contains("Application Support")
+            ),
+            "windows" => assert!(
+                lossy.contains("AppData/LocalLow/AgentKit/Litterbox") || lossy.contains("AppData")
+            ),
             _ => assert!(lossy.contains(".local/state/agentkit/litterbox")),
         }
     }
@@ -62,6 +79,9 @@ mod tests {
     #[test]
     fn data_dir_is_absolute() {
         let base = data_dir();
-        assert!(base.is_absolute(), "data_dir must be absolute, got: {base:?}");
+        assert!(
+            base.is_absolute(),
+            "data_dir must be absolute, got: {base:?}"
+        );
     }
 }

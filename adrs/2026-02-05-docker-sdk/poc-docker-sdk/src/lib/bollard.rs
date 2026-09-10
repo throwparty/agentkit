@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use bollard::Docker;
 use bollard::body_full;
 use bollard::container::LogOutput;
 use bollard::exec::{CreateExecOptions, StartExecResults};
@@ -8,7 +9,6 @@ use bollard::query_parameters::{
     ListContainersOptionsBuilder, RemoveContainerOptionsBuilder, StopContainerOptionsBuilder,
     UploadToContainerOptionsBuilder,
 };
-use bollard::Docker;
 use futures::StreamExt;
 use std::fs::File;
 use std::io;
@@ -34,7 +34,11 @@ impl BollardClient {
 #[async_trait]
 impl DockerClient for BollardClient {
     async fn pull_image(&self, image: &str) -> DockerResult<()> {
-        let options = Some(CreateImageOptionsBuilder::default().from_image(image).build());
+        let options = Some(
+            CreateImageOptionsBuilder::default()
+                .from_image(image)
+                .build(),
+        );
         let mut stream = self.docker.create_image(options, None, None);
         while let Some(msg) = stream.next().await {
             msg?;
@@ -43,13 +47,18 @@ impl DockerClient for BollardClient {
     }
 
     async fn create_container(&self, spec: ContainerSpec) -> DockerResult<String> {
-        let options = spec.name.as_ref().map(|name| {
-            CreateContainerOptionsBuilder::default().name(name).build()
-        });
+        let options = spec
+            .name
+            .as_ref()
+            .map(|name| CreateContainerOptionsBuilder::default().name(name).build());
 
         let config = ContainerCreateBody {
             image: Some(spec.image),
-            cmd: if spec.cmd.is_empty() { None } else { Some(spec.cmd) },
+            cmd: if spec.cmd.is_empty() {
+                None
+            } else {
+                Some(spec.cmd)
+            },
             ..Default::default()
         };
 
@@ -69,7 +78,11 @@ impl DockerClient for BollardClient {
     }
 
     async fn remove_container(&self, container_id: &str, force: bool) -> DockerResult<()> {
-        let options = Some(RemoveContainerOptionsBuilder::default().force(force).build());
+        let options = Some(
+            RemoveContainerOptionsBuilder::default()
+                .force(force)
+                .build(),
+        );
         self.docker.remove_container(container_id, options).await?;
         Ok(())
     }
@@ -94,7 +107,11 @@ impl DockerClient for BollardClient {
             attach_stderr: Some(true),
             ..Default::default()
         };
-        let exec_id = self.docker.create_exec(container_id, exec_options).await?.id;
+        let exec_id = self
+            .docker
+            .create_exec(container_id, exec_options)
+            .await?
+            .id;
         let exec_result = self.docker.start_exec(&exec_id, None).await?;
 
         let mut stdout = Vec::new();

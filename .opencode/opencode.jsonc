@@ -5,7 +5,7 @@
     "switchboard": {
       "api": "openai",
       "options": {
-        "baseURL": "http://127.0.0.1:3812/openai/v1"
+        "baseURL": "http://127.0.0.1:3812/openai/v1",
       },
       "models": {
         "big-pickle": { "name": "big-pickle" },
@@ -24,7 +24,9 @@
         "minimax-m2.7": { "name": "minimax-m2.7" },
         "minimax-m3": { "name": "minimax-m3" },
         "nemotron-3-ultra-free": { "name": "nemotron-3-ultra-free" },
-        "nemotron-3.5-lightning-free": { "name": "nemotron-3.5-lightning-free" },
+        "nemotron-3.5-lightning-free": {
+          "name": "nemotron-3.5-lightning-free",
+        },
         "gpt-5": { "name": "gpt-5" },
         "gpt-5-codex": { "name": "gpt-5-codex" },
         "gpt-5-nano": { "name": "gpt-5-nano" },
@@ -49,7 +51,9 @@
         "grok-4.6": { "name": "grok-4.6" },
         "grok-build-0.1": { "name": "grok-build-0.1" },
         "muse-spark-1.2": { "name": "muse-spark-1.2" },
-        "muse-spark-1.2-contributor-free": { "name": "muse-spark-1.2-contributor-free" },
+        "muse-spark-1.2-contributor-free": {
+          "name": "muse-spark-1.2-contributor-free",
+        },
         "claude-fable-5": { "name": "claude-fable-5" },
         "claude-haiku-4-5": { "name": "claude-haiku-4-5" },
         "claude-opus-4-5": { "name": "claude-opus-4-5" },
@@ -63,21 +67,33 @@
         "claude-sonnet-5": { "name": "claude-sonnet-5" },
         "qwen3.5-plus": { "name": "qwen3.5-plus" },
         "qwen3.6-plus": { "name": "qwen3.6-plus" },
-        "aeon-7-qwen3.6-35b-a3b-heretic-nvfp4": { "name": "aeon-7-qwen3.6-35b-a3b-heretic-nvfp4" },
-        "davidau-glm-4.7-flash-uncensored-heretic-neo-code-imatrix-max-gguf": { "name": "davidau-glm-4.7-flash-uncensored-heretic-neo-code-imatrix-max-gguf" },
+        "aeon-7-qwen3.6-35b-a3b-heretic-nvfp4": {
+          "name": "aeon-7-qwen3.6-35b-a3b-heretic-nvfp4",
+        },
+        "davidau-glm-4.7-flash-uncensored-heretic-neo-code-imatrix-max-gguf": {
+          "name": "davidau-glm-4.7-flash-uncensored-heretic-neo-code-imatrix-max-gguf",
+        },
         "google-gemma-4-26b-a4b-it": { "name": "google-gemma-4-26b-a4b-it" },
         "gemma4-26b-bf16-256k": { "name": "gemma4-26b-bf16-256k" },
         "glm4.7-flash-30b-q8-200k": { "name": "glm4.7-flash-30b-q8-200k" },
         "nemotron3-120b-nvfp4-128k": { "name": "nemotron3-120b-nvfp4-128k" },
         "qwen3-30b-bf16-40k": { "name": "qwen3-30b-bf16-40k" },
         "qwen3-30b-fp8-128k": { "name": "qwen3-30b-fp8-128k" },
-        "qwen3.6-35b-nvfp4-256k": { "name": "qwen3.6-35b-nvfp4-256k" }
-      }
-    }
+        "qwen3.6-35b-nvfp4-256k": { "name": "qwen3.6-35b-nvfp4-256k" },
+      },
+    },
   },
   "mcp": {
     "agentkit-lens-dev": {
-      "command": ["cargo", "run", "--manifest-path", "Cargo.toml", "--bin", "agentkit-lens", "stdio"],
+      "command": [
+        "cargo",
+        "run",
+        "--manifest-path",
+        "Cargo.toml",
+        "--bin",
+        "agentkit-lens",
+        "stdio",
+      ],
       "type": "local",
     },
     "agentkit-litterbox-dev": {

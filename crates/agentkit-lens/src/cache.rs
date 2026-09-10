@@ -52,13 +52,7 @@ impl Cache {
     }
 
     /// Store a response in the cache with the default TTL.
-    pub fn put(
-        &mut self,
-        uri: &str,
-        content: String,
-        content_type: String,
-        content_length: usize,
-    ) {
+    pub fn put(&mut self, uri: &str, content: String, content_type: String, content_length: usize) {
         let key = normalize_url(uri);
         self.entries.insert(
             key,
@@ -127,7 +121,12 @@ mod tests {
     #[test]
     fn test_cache_hit() {
         let mut cache = Cache::new(Duration::from_secs(60));
-        cache.put("https://example.com/page", "content".into(), "text/html".into(), 7);
+        cache.put(
+            "https://example.com/page",
+            "content".into(),
+            "text/html".into(),
+            7,
+        );
 
         let entry = cache.get("https://example.com/page").unwrap();
         assert_eq!(entry.content, "content");
@@ -144,7 +143,12 @@ mod tests {
     #[test]
     fn test_cache_normalization_fragments() {
         let mut cache = Cache::new(Duration::from_secs(60));
-        cache.put("https://example.com/page#section", "content".into(), "text/html".into(), 7);
+        cache.put(
+            "https://example.com/page#section",
+            "content".into(),
+            "text/html".into(),
+            7,
+        );
 
         // Should hit without the fragment
         let entry = cache.get("https://example.com/page").unwrap();
@@ -154,7 +158,12 @@ mod tests {
     #[test]
     fn test_cache_normalization_lowercase() {
         let mut cache = Cache::new(Duration::from_secs(60));
-        cache.put("https://Example.COM/Page", "content".into(), "text/html".into(), 7);
+        cache.put(
+            "https://Example.COM/Page",
+            "content".into(),
+            "text/html".into(),
+            7,
+        );
 
         // Should hit with different case
         let entry = cache.get("https://example.com/page").unwrap();
@@ -164,7 +173,12 @@ mod tests {
     #[test]
     fn test_cache_normalization_trailing_slash() {
         let mut cache = Cache::new(Duration::from_secs(60));
-        cache.put("https://example.com/page/", "content".into(), "text/html".into(), 7);
+        cache.put(
+            "https://example.com/page/",
+            "content".into(),
+            "text/html".into(),
+            7,
+        );
 
         // Should hit without trailing slash
         let entry = cache.get("https://example.com/page").unwrap();
@@ -184,8 +198,18 @@ mod tests {
     #[test]
     fn test_cache_multiple_keys() {
         let mut cache = Cache::new(Duration::from_secs(60));
-        cache.put("https://example.com/page1", "content1".into(), "text/html".into(), 8);
-        cache.put("https://example.com/page2", "content2".into(), "text/html".into(), 8);
+        cache.put(
+            "https://example.com/page1",
+            "content1".into(),
+            "text/html".into(),
+            8,
+        );
+        cache.put(
+            "https://example.com/page2",
+            "content2".into(),
+            "text/html".into(),
+            8,
+        );
 
         let entry1 = cache.get("https://example.com/page1").unwrap();
         assert_eq!(entry1.content, "content1");
@@ -200,7 +224,12 @@ mod tests {
         assert!(cache.is_empty());
         assert_eq!(cache.len(), 0);
 
-        cache.put("https://example.com/page", "content".into(), "text/html".into(), 7);
+        cache.put(
+            "https://example.com/page",
+            "content".into(),
+            "text/html".into(),
+            7,
+        );
         assert!(!cache.is_empty());
         assert_eq!(cache.len(), 1);
     }
@@ -214,8 +243,18 @@ mod tests {
     #[test]
     fn test_evict_expired() {
         let mut cache = Cache::new(Duration::from_millis(50));
-        cache.put("https://example.com/page1", "content1".into(), "text/html".into(), 8);
-        cache.put("https://example.com/page2", "content2".into(), "text/html".into(), 8);
+        cache.put(
+            "https://example.com/page1",
+            "content1".into(),
+            "text/html".into(),
+            8,
+        );
+        cache.put(
+            "https://example.com/page2",
+            "content2".into(),
+            "text/html".into(),
+            8,
+        );
 
         // Wait for entries to expire
         std::thread::sleep(Duration::from_millis(100));
@@ -245,7 +284,12 @@ mod tests {
         use tokio::time::sleep;
 
         let mut cache = Cache::new(Duration::from_millis(50));
-        cache.put("https://example.com/page", "content".into(), "text/html".into(), 7);
+        cache.put(
+            "https://example.com/page",
+            "content".into(),
+            "text/html".into(),
+            7,
+        );
 
         // Should hit immediately
         assert!(cache.get("https://example.com/page").is_some());

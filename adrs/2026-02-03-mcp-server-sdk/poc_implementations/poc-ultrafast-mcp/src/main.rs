@@ -1,12 +1,11 @@
-use ultrafast_mcp::{
-    ListToolsRequest, ListToolsResponse, MCPError, MCPResult,
-    ServerCapabilities, ServerInfo, Tool, ToolCall, ToolContent, ToolHandler, ToolResult,
-    ToolsCapability, UltraFastServer,
-};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Arc;
 use tokio::fs;
+use ultrafast_mcp::{
+    ListToolsRequest, ListToolsResponse, MCPError, MCPResult, ServerCapabilities, ServerInfo, Tool,
+    ToolCall, ToolContent, ToolHandler, ToolResult, ToolsCapability, UltraFastServer,
+};
 
 #[derive(Debug, Deserialize)]
 struct WriteFileArgs {
@@ -27,20 +26,26 @@ impl ToolHandler for WriteFileHandler {
     async fn handle_tool_call(&self, call: ToolCall) -> MCPResult<ToolResult> {
         match call.name.as_str() {
             "write_file" => {
-                let args: WriteFileArgs = serde_json::from_value(
-                    call.arguments.unwrap_or_default()
-                ).map_err(|e| MCPError::serialization_error(format!("Invalid arguments: {}", e)))?;
+                let args: WriteFileArgs =
+                    serde_json::from_value(call.arguments.unwrap_or_default()).map_err(|e| {
+                        MCPError::serialization_error(format!("Invalid arguments: {}", e))
+                    })?;
 
                 // Validate absolute path
                 let path_buf = Path::new(&args.path);
                 if !path_buf.is_absolute() {
-                    return Err(MCPError::serialization_error("path must be absolute".to_string()));
+                    return Err(MCPError::serialization_error(
+                        "path must be absolute".to_string(),
+                    ));
                 }
 
                 // Create parent directories
                 if let Some(parent) = path_buf.parent() {
                     fs::create_dir_all(parent).await.map_err(|e| {
-                        MCPError::serialization_error(format!("Failed to create parent directories: {}", e))
+                        MCPError::serialization_error(format!(
+                            "Failed to create parent directories: {}",
+                            e
+                        ))
                     })?;
                 }
 
@@ -50,7 +55,11 @@ impl ToolHandler for WriteFileHandler {
                 })?;
 
                 let response = WriteFileResponse {
-                    message: format!("Successfully wrote {} bytes to {}", args.content.len(), args.path),
+                    message: format!(
+                        "Successfully wrote {} bytes to {}",
+                        args.content.len(),
+                        args.path
+                    ),
                     bytes_written: args.content.len(),
                 };
 
@@ -59,7 +68,10 @@ impl ToolHandler for WriteFileHandler {
                     is_error: Some(false),
                 })
             }
-            _ => Err(MCPError::serialization_error(format!("Unknown tool: {}", call.name))),
+            _ => Err(MCPError::serialization_error(format!(
+                "Unknown tool: {}",
+                call.name
+            ))),
         }
     }
 
@@ -103,7 +115,9 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let capabilities = ServerCapabilities {
-        tools: Some(ToolsCapability { list_changed: Some(true) }),
+        tools: Some(ToolsCapability {
+            list_changed: Some(true),
+        }),
         ..Default::default()
     };
 

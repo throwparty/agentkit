@@ -3,10 +3,10 @@
 This directory contains ADRs organized by status. ADRs follow a structured workflow:
 
 1. `/adr.specify` - Define goals and requirements
-2. `/adr.plan` - Architect the solution
-3. `/adr.tasks` - Break down into implementable tasks
-4. `/adr.implement` - Execute the plan
-5. `/adr.reflect` - Capture learnings
+1. `/adr.plan` - Architect the solution
+1. `/adr.tasks` - Break down into implementable tasks
+1. `/adr.implement` - Execute the plan
+1. `/adr.reflect` - Capture learnings
 
 ## Accepted
 

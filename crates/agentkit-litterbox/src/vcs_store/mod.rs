@@ -76,11 +76,7 @@ impl VcsStore {
         }
     }
 
-    fn try_clone_bare(
-        url: &str,
-        bare_path: &Path,
-        depth: Option<i32>,
-    ) -> Result<(), git2::Error> {
+    fn try_clone_bare(url: &str, bare_path: &Path, depth: Option<i32>) -> Result<(), git2::Error> {
         let mut fetch_opts = FetchOptions::new();
         if let Some(d) = depth {
             fetch_opts.depth(d);
@@ -186,13 +182,10 @@ mod tests {
 
     #[test]
     fn clone_bare_creates_bare_repo() {
-        
-        
         let (tempdir, _repo) = init_host_repo();
         let slug = "test-bare-clone";
 
-        let bare_path = VcsStore::clone_bare(tempdir.path(), slug)
-            .expect("clone bare");
+        let bare_path = VcsStore::clone_bare(tempdir.path(), slug).expect("clone bare");
 
         assert!(bare_path.exists());
         assert!(bare_path.join("HEAD").exists());
@@ -209,13 +202,10 @@ mod tests {
 
     #[test]
     fn clone_bare_sets_depth_option() {
-        
-        
         let (tempdir, _repo) = init_host_repo();
         let slug = "test-depth-clone";
 
-        let bare_path =
-            VcsStore::clone_bare(tempdir.path(), slug).expect("clone bare");
+        let bare_path = VcsStore::clone_bare(tempdir.path(), slug).expect("clone bare");
 
         // libgit2 does not support local shallow clones (remote only).
         // We verify the repo clones successfully with depth(1) set.
@@ -228,15 +218,11 @@ mod tests {
 
     #[test]
     fn clone_bare_skips_existing_path() {
-        
-        
         let (tempdir, _repo) = init_host_repo();
         let slug = "test-skip-clone";
 
-        let first_path =
-            VcsStore::clone_bare(tempdir.path(), slug).expect("first clone");
-        let second_path =
-            VcsStore::clone_bare(tempdir.path(), slug).expect("second clone");
+        let first_path = VcsStore::clone_bare(tempdir.path(), slug).expect("first clone");
+        let second_path = VcsStore::clone_bare(tempdir.path(), slug).expect("second clone");
 
         assert_eq!(first_path, second_path);
 
@@ -245,13 +231,10 @@ mod tests {
 
     #[test]
     fn self_heal_destroys_corrupt_repo() {
-        
-        
         let (tempdir, _repo) = init_host_repo();
         let slug = "test-self-heal";
 
-        let bare_path =
-            VcsStore::clone_bare(tempdir.path(), slug).expect("clone bare");
+        let bare_path = VcsStore::clone_bare(tempdir.path(), slug).expect("clone bare");
 
         // Corrupt: remove objects
         let objects = bare_path.join("objects");
@@ -266,8 +249,7 @@ mod tests {
         assert!(!healed_path.exists(), "self_heal should destroy the repo");
 
         // clone_bare should re-create it
-        let recloned_path =
-            VcsStore::clone_bare(tempdir.path(), slug).expect("re-clone");
+        let recloned_path = VcsStore::clone_bare(tempdir.path(), slug).expect("re-clone");
         assert_eq!(healed_path, recloned_path);
         let bare_repo = Repository::open_bare(&recloned_path).expect("open healed");
         assert!(bare_repo.head().is_ok());
@@ -277,14 +259,11 @@ mod tests {
 
     #[test]
     fn clone_bare_self_heals_corrupt_repo() {
-        
-        
         let (tempdir, _repo) = init_host_repo();
         let slug = "test-self-heal-clone";
 
         // Initial clone
-        let bare_path =
-            VcsStore::clone_bare(tempdir.path(), slug).expect("first clone");
+        let bare_path = VcsStore::clone_bare(tempdir.path(), slug).expect("first clone");
 
         // Corrupt: remove objects directory
         let objects = bare_path.join("objects");
@@ -306,13 +285,10 @@ mod tests {
 
     #[test]
     fn destroy_bare_removes_directory() {
-        
-        
         let (tempdir, _repo) = init_host_repo();
         let slug = "test-destroy-bare";
 
-        let bare_path = VcsStore::clone_bare(tempdir.path(), slug)
-            .expect("clone bare");
+        let bare_path = VcsStore::clone_bare(tempdir.path(), slug).expect("clone bare");
         assert!(bare_path.exists());
 
         VcsStore::destroy_bare(slug).expect("destroy bare");
@@ -321,8 +297,6 @@ mod tests {
 
     #[test]
     fn destroy_bare_noop_when_missing() {
-        
-        
         let slug = "test-destroy-missing";
         let bare_path = VcsStore::resolve_path(slug);
         assert!(!bare_path.exists());
@@ -333,8 +307,6 @@ mod tests {
 
     #[test]
     fn remote_mode_operations_use_bare_clone_not_host() {
-        
-        
         // Minimal reproducer: remote mode SCM operates on bare clone,
         // not the host repo. Branch appears in bare clone, archive
         // reads from host repo, litterbox remote is installed.
@@ -365,8 +337,7 @@ mod tests {
         let slug = "remote-mode-test";
 
         // Clone bare repo (this is what build_provider_with_config does)
-        let bare_path =
-            VcsStore::clone_bare(tempdir.path(), slug).expect("clone bare");
+        let bare_path = VcsStore::clone_bare(tempdir.path(), slug).expect("clone bare");
 
         // Install litterbox remote on host repo
         VcsStore::install_remote(tempdir.path(), &bare_path).expect("install remote");
@@ -393,10 +364,7 @@ mod tests {
 
         // Verify branch is NOT in host repo
         let host_branch = host_repo.find_branch(&branch_name, git2::BranchType::Local);
-        assert!(
-            host_branch.is_err(),
-            "branch should NOT exist in host repo"
-        );
+        assert!(host_branch.is_err(), "branch should NOT exist in host repo");
 
         // Verify branch IS in bare clone
         let bare_repo = git2::Repository::open_bare(&bare_path).expect("open bare");
@@ -411,7 +379,10 @@ mod tests {
         let entries: Vec<String> = ar
             .entries()
             .expect("entries")
-            .filter_map(|e| e.ok().and_then(|e| e.path().ok().map(|p| p.to_string_lossy().to_string())))
+            .filter_map(|e| {
+                e.ok()
+                    .and_then(|e| e.path().ok().map(|p| p.to_string_lossy().to_string()))
+            })
             .collect();
         assert!(
             entries.contains(&"hello.txt".to_string()),
@@ -431,7 +402,10 @@ mod tests {
 
         // Verify sandbox list is now empty
         let remaining = scm.list_sandboxes().expect("list sandboxes");
-        assert!(remaining.is_empty(), "bare clone should be empty after delete");
+        assert!(
+            remaining.is_empty(),
+            "bare clone should be empty after delete"
+        );
 
         // Destroy bare clone
         VcsStore::destroy_bare(slug).expect("destroy bare");

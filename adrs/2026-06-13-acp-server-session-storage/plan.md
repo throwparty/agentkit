@@ -1,10 +1,6 @@
 ---
-status: draft
-created: 2026-06-13
-updated: 2026-06-13
-author: adrian
-decision: pending
----
+
+## status: draft created: 2026-06-13 updated: 2026-06-13 author: adrian decision: pending
 
 # ACP Server Session Storage Implementation Plan
 
@@ -53,6 +49,7 @@ flowchart TD
 ```
 
 The crate is a library with no binary. It exposes:
+
 - Three ID types: `SessionId`, `TurnId`, `MessageId`
 - Three data types: `Session`, `PromptTurn`, `Message`
 - A `SessionStore` trait with two implementations
@@ -113,6 +110,7 @@ pub enum IdError {
 ```
 
 **Prefix rules**:
+
 - `SessionId.encode()` prepends `sess_`
 - `TurnId.encode()` prepends `turn_` (internal — never exposed to ACP clients)
 - `MessageId.encode()` prepends `msg_`
@@ -120,6 +118,7 @@ pub enum IdError {
 - Bare UUIDs (no prefix) are accepted for backward compatibility during migration
 
 **Tests (inline in each struct's test module)**:
+
 - Round-trip: `decode(encode(x)) == x`
 - Wrong prefix rejected: decoding `turn_xxx` as a SessionId produces `IdError`
 - Bare UUID accepted: decoding `abc` as any type succeeds
@@ -222,11 +221,11 @@ pub enum StoreError {
 
 Error mapping (sqlx → StoreError):
 
-| sqlx error | StoreError |
-|------------|------------|
-| `RowNotFound` | `NotFound { entity, id }` |
+| sqlx error                           | StoreError                     |
+| ------------------------------------ | ------------------------------ |
+| `RowNotFound`                        | `NotFound { entity, id }`      |
 | `Database(SQLITE_CONSTRAINT_UNIQUE)` | `AlreadyExists { entity, id }` |
-| any other `Database` | `Database(description)` |
+| any other `Database`                 | `Database(description)`        |
 
 The `entity` field is a static string (`"session"`, `"prompt_turn"`,
 `"message"`) set by the caller, making errors self-describing without
@@ -245,10 +244,11 @@ pub struct InMemorySessionStore {
 ```
 
 Context assembly walks the prompt turn DAG:
+
 1. Load session → get `head_prompt_turn_id`
-2. Walk `parent_id` from head to root, collecting turn IDs
-3. For each turn (root first), collect messages sorted by `position`
-4. Apply `max_turns` limit by truncating the turn chain
+1. Walk `parent_id` from head to root, collecting turn IDs
+1. For each turn (root first), collect messages sorted by `position`
+1. Apply `max_turns` limit by truncating the turn chain
 
 ## SqliteSessionStore
 
@@ -280,6 +280,7 @@ LIMIT ?;
 Three migration files, one per entity, applied in order:
 
 **`migrations/001_sessions.sql`**:
+
 ```sql
 CREATE TABLE IF NOT EXISTS sessions (
     id                    TEXT PRIMARY KEY,
@@ -297,6 +298,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 ```
 
 **`migrations/002_prompt_turns.sql`**:
+
 ```sql
 CREATE TABLE IF NOT EXISTS prompt_turns (
     id         TEXT PRIMARY KEY,
@@ -317,6 +319,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_forked_from
 ```
 
 **`migrations/003_messages.sql`**:
+
 ```sql
 CREATE TABLE IF NOT EXISTS messages (
     id             TEXT PRIMARY KEY,
@@ -359,14 +362,14 @@ acp-storage/
 
 ### ID prefix tests (inline in `id.rs`)
 
-| Test | What it validates |
-|------|-------------------|
-| `session_id_roundtrip` | `SessionId::decode(&SessionId::new().encode())` succeeds |
-| `session_id_wrong_prefix` | Decoding `msg_xxx` as SessionId returns `IdError::WrongPrefix` |
-| `session_id_internal_prefix` | Decoding `turn_xxx` as SessionId returns error |
-| `session_id_bare_uuid` | Decoding `abc` (no prefix) returns `Ok("abc")` |
-| `turn_id_roundtrip` | Same for TurnId |
-| `message_id_roundtrip` | Same for MessageId |
+| Test                         | What it validates                                              |
+| ---------------------------- | -------------------------------------------------------------- |
+| `session_id_roundtrip`       | `SessionId::decode(&SessionId::new().encode())` succeeds       |
+| `session_id_wrong_prefix`    | Decoding `msg_xxx` as SessionId returns `IdError::WrongPrefix` |
+| `session_id_internal_prefix` | Decoding `turn_xxx` as SessionId returns error                 |
+| `session_id_bare_uuid`       | Decoding `abc` (no prefix) returns `Ok("abc")`                 |
+| `turn_id_roundtrip`          | Same for TurnId                                                |
+| `message_id_roundtrip`       | Same for MessageId                                             |
 
 ### Store tests (parameterized by backend)
 
@@ -376,56 +379,56 @@ All tests run against both `InMemorySessionStore` and
 
 #### Session entity
 
-| Test | What it validates | Spec |
-|------|-------------------|------|
-| `session_create_and_get` | Create then get returns matching session | FR2 |
-| `session_create_duplicate` | Second create with same ID returns AlreadyExists | FR2 |
-| `session_list` | List returns all created sessions | FR2 |
-| `session_close` | Close sets active=false; can still get | FR2 |
-| `session_close_missing` | Close on nonexistent session returns NotFound | FR2 |
+| Test                       | What it validates                                | Spec |
+| -------------------------- | ------------------------------------------------ | ---- |
+| `session_create_and_get`   | Create then get returns matching session         | FR2  |
+| `session_create_duplicate` | Second create with same ID returns AlreadyExists | FR2  |
+| `session_list`             | List returns all created sessions                | FR2  |
+| `session_close`            | Close sets active=false; can still get           | FR2  |
+| `session_close_missing`    | Close on nonexistent session returns NotFound    | FR2  |
 
 #### PromptTurn entity
 
-| Test | What it validates | Spec |
-|------|-------------------|------|
-| `prompt_turn_append` | Append turn to existing session succeeds | FR3 |
-| `prompt_turn_append_missing_session` | Append with bad session_id returns NotFound | FR3 |
-| `prompt_turn_dag_parent` | Turn with parent_id correctly links | FR3 |
-| `prompt_turn_children` | `get_prompt_turn_children` returns direct children | FR3 |
-| `prompt_turn_session_list` | `get_session_prompt_turns` returns turns in order | FR3 |
+| Test                                 | What it validates                                  | Spec |
+| ------------------------------------ | -------------------------------------------------- | ---- |
+| `prompt_turn_append`                 | Append turn to existing session succeeds           | FR3  |
+| `prompt_turn_append_missing_session` | Append with bad session_id returns NotFound        | FR3  |
+| `prompt_turn_dag_parent`             | Turn with parent_id correctly links                | FR3  |
+| `prompt_turn_children`               | `get_prompt_turn_children` returns direct children | FR3  |
+| `prompt_turn_session_list`           | `get_session_prompt_turns` returns turns in order  | FR3  |
 
 #### Message entity
 
-| Test | What it validates | Spec |
-|------|-------------------|------|
-| `message_append` | Append message to existing turn succeeds | FR3 |
-| `message_append_missing_turn` | Append with bad turn_id returns NotFound | FR3 |
-| `message_get_by_turn` | `get_messages_for_turn` returns messages in position order | FR3 |
+| Test                          | What it validates                                          | Spec |
+| ----------------------------- | ---------------------------------------------------------- | ---- |
+| `message_append`              | Append message to existing turn succeeds                   | FR3  |
+| `message_append_missing_turn` | Append with bad turn_id returns NotFound                   | FR3  |
+| `message_get_by_turn`         | `get_messages_for_turn` returns messages in position order | FR3  |
 
 #### Context assembly
 
-| Test | What it validates | Spec |
-|------|-------------------|------|
-| `context_linear` | Single chain of turns → messages in chronological order | FR3 |
-| `context_after_fork` | Forked session's context includes source session's ancestor messages | FR4 |
-| `context_max_turns` | Limit of N turns returns at most N turns | FR3 |
-| `context_no_messages` | Session with zero turns returns empty vec | FR3 |
+| Test                  | What it validates                                                    | Spec |
+| --------------------- | -------------------------------------------------------------------- | ---- |
+| `context_linear`      | Single chain of turns → messages in chronological order              | FR3  |
+| `context_after_fork`  | Forked session's context includes source session's ancestor messages | FR4  |
+| `context_max_turns`   | Limit of N turns returns at most N turns                             | FR3  |
+| `context_no_messages` | Session with zero turns returns empty vec                            | FR3  |
 
 #### Fork
 
-| Test | What it validates | Spec |
-|------|-------------------|------|
-| `fork_session` | Fork creates new session with shared head prompt turn | FR4 |
-| `fork_preserves_source` | Source session's head and messages are unchanged | FR4 |
-| `fork_list_children` | Querying source session returns forked session IDs | FR4 |
-| `fork_independent_append` | Adding turn to forked session does not affect source | FR4 |
+| Test                      | What it validates                                     | Spec |
+| ------------------------- | ----------------------------------------------------- | ---- |
+| `fork_session`            | Fork creates new session with shared head prompt turn | FR4  |
+| `fork_preserves_source`   | Source session's head and messages are unchanged      | FR4  |
+| `fork_list_children`      | Querying source session returns forked session IDs    | FR4  |
+| `fork_independent_append` | Adding turn to forked session does not affect source  | FR4  |
 
 #### Concurrency (SQLite only)
 
-| Test | What it validates | Spec |
-|------|-------------------|------|
-| `concurrent_creates` | Two concurrent create_session calls on different IDs succeed | FR5 |
-| `concurrent_appends` | Two concurrent append_prompt_turn calls to same session succeed | FR5 |
+| Test                 | What it validates                                               | Spec |
+| -------------------- | --------------------------------------------------------------- | ---- |
+| `concurrent_creates` | Two concurrent create_session calls on different IDs succeed    | FR5  |
+| `concurrent_appends` | Two concurrent append_prompt_turn calls to same session succeed | FR5  |
 
 ## Data Flow
 
@@ -510,24 +513,24 @@ for consumers that need JSON serialization.
 
 ## Risks and Mitigations
 
-| Risk | Impact | Likelihood | Mitigation |
-|------|--------|------------|------------|
-| **sqlx MSRV 1.94** is newer than project's toolchain | Build failure | Medium | Pin version in rust-toolchain.toml. The crate uses runtime queries only, so sqlx's own MSRV check is the only constraint. |
-| **Schema chicken-egg**: session head references prompt_turn, prompt_turn references session | Insert ordering | High (design) | `sessions.head_prompt_turn_id` is nullable. Create session first, then prompt turns, then update head. |
-| **Fork point resolution**: client provides `messageId` at protocol level, but store operates on prompt turns | Extra lookup needed | Low | Handler resolves `messageId → prompt_turn_id` via a single SELECT before calling `fork_session()`. The store only sees prompt turn IDs. |
-| **Concurrent head updates** race on `head_prompt_turn_id` | Lost update | Low | Compare-and-swap `UPDATE sessions SET head_prompt_turn_id=? WHERE id=? AND head_prompt_turn_id=OLD`. SQLite serializes writes, so this is safe. |
+| Risk                                                                                                         | Impact              | Likelihood    | Mitigation                                                                                                                                      |
+| ------------------------------------------------------------------------------------------------------------ | ------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| **sqlx MSRV 1.94** is newer than project's toolchain                                                         | Build failure       | Medium        | Pin version in rust-toolchain.toml. The crate uses runtime queries only, so sqlx's own MSRV check is the only constraint.                       |
+| **Schema chicken-egg**: session head references prompt_turn, prompt_turn references session                  | Insert ordering     | High (design) | `sessions.head_prompt_turn_id` is nullable. Create session first, then prompt turns, then update head.                                          |
+| **Fork point resolution**: client provides `messageId` at protocol level, but store operates on prompt turns | Extra lookup needed | Low           | Handler resolves `messageId → prompt_turn_id` via a single SELECT before calling `fork_session()`. The store only sees prompt turn IDs.         |
+| **Concurrent head updates** race on `head_prompt_turn_id`                                                    | Lost update         | Low           | Compare-and-swap `UPDATE sessions SET head_prompt_turn_id=? WHERE id=? AND head_prompt_turn_id=OLD`. SQLite serializes writes, so this is safe. |
 
 ## Traceability: Spec Requirements → Plan
 
-| Spec Requirement | Plan Coverage |
-|-----------------|---------------|
-| FR1: Database initialization | Migration files, `SqliteSessionStore::connect()` |
-| FR2: Session CRUD | `SessionStore` trait: `create_session`, `get_session`, `list_sessions`, `close_session` |
+| Spec Requirement                  | Plan Coverage                                                                                                                                                |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| FR1: Database initialization      | Migration files, `SqliteSessionStore::connect()`                                                                                                             |
+| FR2: Session CRUD                 | `SessionStore` trait: `create_session`, `get_session`, `list_sessions`, `close_session`                                                                      |
 | FR3: Prompt Turn and Message CRUD | `SessionStore` trait: `append_prompt_turn`, `get_prompt_turn_children`, `get_session_prompt_turns`, `append_message`, `get_messages_for_turn`, `get_context` |
-| FR4: Fork storage support | `fork_session` method + `get_context` after fork |
-| FR5: Concurrent access | sqlx pool, compare-and-swap head updates |
-| NFR1: File-based persistence | Single SQLite file |
-| NFR4: Async-first | sqlx with runtime-tokio; no spawn_blocking in in-memory store |
-| NFR5: Testability | `:memory:` SQLite, shared trait test suite |
-| ID prefix (sess_/turn_/msg_) | Three standalone structs: `SessionId`, `TurnId`, `MessageId` |
-| Turn is internal-only | `TurnId` exists in the crate but is not used at the ACP protocol boundary |
+| FR4: Fork storage support         | `fork_session` method + `get_context` after fork                                                                                                             |
+| FR5: Concurrent access            | sqlx pool, compare-and-swap head updates                                                                                                                     |
+| NFR1: File-based persistence      | Single SQLite file                                                                                                                                           |
+| NFR4: Async-first                 | sqlx with runtime-tokio; no spawn_blocking in in-memory store                                                                                                |
+| NFR5: Testability                 | `:memory:` SQLite, shared trait test suite                                                                                                                   |
+| ID prefix (sess\_/turn\_/msg\_)   | Three standalone structs: `SessionId`, `TurnId`, `MessageId`                                                                                                 |
+| Turn is internal-only             | `TurnId` exists in the crate but is not used at the ACP protocol boundary                                                                                    |

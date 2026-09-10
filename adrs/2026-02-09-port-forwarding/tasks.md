@@ -22,20 +22,14 @@ This document outlines the implementable tasks for the Port Forwarding feature, 
 
 **Description**: Modify `src/config_loader.rs` to parse the `[[ports]]` table from `.litterbox.toml` and `.litterbox.local.toml` into the `PortsConfig` struct. This includes slugifying the `name` field for environment variable generation and detecting conflicts in slugified names.
 **Success Criteria**: `config_loader` successfully parses valid port configurations and reports errors for invalid ones (e.g., duplicate slugified names, invalid port numbers).
-**Test Requirements**:
-    *   Unit tests for `config_loader` to parse valid `PortsConfig`.
-    *   Unit tests for `config_loader` to correctly slugify names (e.g., "Web Server" -> "WEB_SERVER").
-    *   Unit tests for `config_loader` to detect and report errors on duplicate slugified names.
-    *   Unit tests for `config_loader` to detect and report errors on invalid port numbers (ee.g. 0 or > 65535).
+**Test Requirements**: \* Unit tests for `config_loader` to parse valid `PortsConfig`. \* Unit tests for `config_loader` to correctly slugify names (e.g., "Web Server" -> "WEB_SERVER"). \* Unit tests for `config_loader` to detect and report errors on duplicate slugified names. \* Unit tests for `config_loader` to detect and report errors on invalid port numbers (ee.g. 0 or > 65535).
 **References**: `spec.md` (Functional Requirement 4), `plan.md` (Section 3.1)
 
 ## 2. Sandbox Module (`src/domain.rs`, `src/sandbox/mod.rs`, `src/compute/mod.rs`)
 
 ### [x] Task 2.1: Extend `SandboxConfig` and `SandboxMetadata`
 
-**Description**:
-    *   Extend `SandboxConfig` (defined in `src/domain.rs`) to include the parsed `PortsConfig`.
-    *   Extend `SandboxMetadata` (defined in `src/domain.rs`) to store the generated host port forwarding information and environment variable names.
+**Description**: \* Extend `SandboxConfig` (defined in `src/domain.rs`) to include the parsed `PortsConfig`. \* Extend `SandboxMetadata` (defined in `src/domain.rs`) to store the generated host port forwarding information and environment variable names.
 **Success Criteria**: `SandboxConfig` and `SandboxMetadata` structs are updated and compile.
 **Test Requirements**: Unit tests for instantiation and field access of updated structs.
 **References**: `plan.md` (Section 3.2)
@@ -49,28 +43,16 @@ This document outlines the implementable tasks for the Port Forwarding feature, 
 
 ### [x] Task 2.3: Implement Dynamic Port Allocation and Env Var Generation
 
-**Description**: Implement the logic within `DockerSandboxProvider::create` in `src/sandbox/mod.rs` to:
-    *   Access the `PortsConfig` from `SandboxConfig`.
-    *   For each `ForwardedPort`, dynamically find an available host port within the default range of 3000-8000.
-    *   Generate the `LITTERBOX_FWD_PORT_<SLUGIFIED_NAME>` environment variables.
-    *   Handle concurrency conflicts during port allocation using a simple retry mechanism with a small back-off.
+**Description**: Implement the logic within `DockerSandboxProvider::create` in `src/sandbox/mod.rs` to: \* Access the `PortsConfig` from `SandboxConfig`. \* For each `ForwardedPort`, dynamically find an available host port within the default range of 3000-8000. \* Generate the `LITTERBOX_FWD_PORT_<SLUGIFIED_NAME>` environment variables. \* Handle concurrency conflicts during port allocation using a simple retry mechanism with a small back-off.
 **Success Criteria**: Host ports are successfully allocated, environment variables are generated, and a list of `bollard::models::PortBinding` is created. Retry mechanism for port allocation is functional.
-**Test Requirements**:
-    *   Unit tests for host port allocation logic, ensuring unique and available ports are selected from the default range.
-    *   Unit tests for environment variable generation.
-    *   Unit tests for the retry mechanism in port allocation.
+**Test Requirements**: \* Unit tests for host port allocation logic, ensuring unique and available ports are selected from the default range. \* Unit tests for environment variable generation. \* Unit tests for the retry mechanism in port allocation.
 **References**: `spec.md` (Functional Requirements 1, 5), `plan.md` (Section 3.2)
 
 ### [x] Task 2.4: Modify `DockerCompute::create_container` for Port Bindings and Env Vars
 
-**Description**: Update `DockerCompute::create_container` in `src/compute/mod.rs` to:
-    *   Accept the extended `ContainerSpec`.
-    *   Populate `bollard::models::ContainerCreateBody.Env` from `spec.env`.
-    *   Construct `bollard::models::HostConfig` and populate `HostConfig.PortBindings` from `spec.port_bindings`. Set `HostIp` to "0.0.0.0" and `HostPort` to the allocated host port (as a `String`) within `PortBinding`.
+**Description**: Update `DockerCompute::create_container` in `src/compute/mod.rs` to: \* Accept the extended `ContainerSpec`. \* Populate `bollard::models::ContainerCreateBody.Env` from `spec.env`. \* Construct `bollard::models::HostConfig` and populate `HostConfig.PortBindings` from `spec.port_bindings`. Set `HostIp` to "0.0.0.0" and `HostPort` to the allocated host port (as a `String`) within `PortBinding`.
 **Success Criteria**: Docker containers are created with correct port forwarding rules and environment variables.
-**Test Requirements**:
-    *   Integration tests to verify Docker containers are created with the specified port bindings and environment variables.
-    *   Note: `bollard`-specific errors during container creation are expected to propagate up the call stack for handling by `DockerSandboxProvider`.
+**Test Requirements**: \* Integration tests to verify Docker containers are created with the specified port bindings and environment variables. \* Note: `bollard`-specific errors during container creation are expected to propagate up the call stack for handling by `DockerSandboxProvider`.
 **References**: `spec.md` (Functional Requirements 2, 5), `plan.md` (Section 3.3)
 
 ### [x] Task 2.5: Populate `SandboxMetadata`

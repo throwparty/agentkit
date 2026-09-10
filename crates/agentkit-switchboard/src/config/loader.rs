@@ -1,6 +1,6 @@
+use crate::config::{ModelConfig, ProviderConfig, SwitchboardConfig};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use crate::config::{ModelConfig, ProviderConfig, SwitchboardConfig};
 use thiserror::Error;
 
 #[derive(Error, Debug)]

@@ -63,9 +63,10 @@ pub async fn handle_auth(cmd: AuthCommand, config: &SwitchboardConfig) -> Result
         AuthCommand::Status { identity } => Ok(status_output(config, identity.as_deref())),
         AuthCommand::Token { identity } => {
             let helper_name = config.credential_helper.as_deref().unwrap_or("keychain");
-            let provider = config.providers.get(&identity).ok_or_else(|| {
-                format!("provider '{identity}' not found in config")
-            })?;
+            let provider = config
+                .providers
+                .get(&identity)
+                .ok_or_else(|| format!("provider '{identity}' not found in config"))?;
             credential::resolve_provider(helper_name, &identity, provider)
                 .map(|credential| credential.value)
                 .ok_or_else(|| format!("credential for '{identity}' not found"))
@@ -118,7 +119,9 @@ fn add_credential(
 fn status_output(config: &SwitchboardConfig, filter: Option<&str>) -> String {
     let mut out = String::new();
     let helper_name = config.credential_helper.as_deref().unwrap_or("keychain");
-    out.push_str(&format!("Credential helper: agentkit-credential-{helper_name}\n"));
+    out.push_str(&format!(
+        "Credential helper: agentkit-credential-{helper_name}\n"
+    ));
     for (id, provider) in &config.providers {
         if let Some(f) = filter {
             if id != f {

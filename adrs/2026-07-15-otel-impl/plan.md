@@ -1,31 +1,27 @@
 ---
-status: draft
-created: 2026-07-15
-updated: 2026-07-15
-author: adrian
-decision: pending
----
+
+## status: draft created: 2026-07-15 updated: 2026-07-15 author: adrian decision: pending
 
 # Plan: OpenTelemetry Implementation for Rust Services
 
 ## 1. Requirements Traceability
 
-| Spec Requirement | Plan Coverage | Verification |
-|---|---|---|
-| **§2.1** PoC binary emitting all three signals | §3.1 PoC crate structure, §3.2 SDK wiring, §3.3 data flow | `cargo run` with otel-desktop-viewer running |
-| **§2.2** Survival with no collector | §5.3 exporter failure behaviour, tested in §4.3 | `cargo run` without receiver, clean exit |
-| **§2.3** Switchboard integration, no rewrite | §6 switchboard integration plan | Existing `tracing` calls produce OTel data |
-| **FR1** Trace emission | §3.2.1 tracer setup, §3.3.1 span creation, §3.4.1 tracing bridge | In-memory exporter tests + viewer check |
-| **FR2** Metric emission | §3.2.2 meter setup, §3.3.2 instrument creation | In-memory exporter tests + viewer check |
-| **FR3** Log emission | §3.2.3 logger setup, §3.3.3 log emission | In-memory exporter tests + viewer check |
-| **FR4** OTLP export | §3.2.4 OTLP exporter config, §5.1 transport choice | All three signals visible in viewer |
-| **FR5** No rewrite | §3.4 tracing bridge (tracing-opentelemetry + custom layer) | Stdout + OTel from same macro call |
-| **FR6** Consistent identity | §3.2.5 shared Resource | Single `Resource` instance asserted in tests |
-| **NFR1** No crash on failure | §5.3 batch processor defaults | Run without receiver, assert clean exit |
-| **NFR2** Dependency overhead | §3.1.2 dependency list, §5.1 HTTP/protobuf choice, §4.4 binary size measurement | Measure delta vs switchboard baseline |
-| **NFR3** Env var config | §5.2 env var mapping table | Test with `OTEL_EXPORTER_OTLP_ENDPOINT` override |
-| **NFR4** Offline testability | §4.3 in-memory exporter tests | `cargo test` with no external deps |
-| **NFR5** Dual output | §4.3 dual subscriber test | Both outputs present on single log call |
+| Spec Requirement                               | Plan Coverage                                                                   | Verification                                     |
+| ---------------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------ |
+| **§2.1** PoC binary emitting all three signals | §3.1 PoC crate structure, §3.2 SDK wiring, §3.3 data flow                       | `cargo run` with otel-desktop-viewer running     |
+| **§2.2** Survival with no collector            | §5.3 exporter failure behaviour, tested in §4.3                                 | `cargo run` without receiver, clean exit         |
+| **§2.3** Switchboard integration, no rewrite   | §6 switchboard integration plan                                                 | Existing `tracing` calls produce OTel data       |
+| **FR1** Trace emission                         | §3.2.1 tracer setup, §3.3.1 span creation, §3.4.1 tracing bridge                | In-memory exporter tests + viewer check          |
+| **FR2** Metric emission                        | §3.2.2 meter setup, §3.3.2 instrument creation                                  | In-memory exporter tests + viewer check          |
+| **FR3** Log emission                           | §3.2.3 logger setup, §3.3.3 log emission                                        | In-memory exporter tests + viewer check          |
+| **FR4** OTLP export                            | §3.2.4 OTLP exporter config, §5.1 transport choice                              | All three signals visible in viewer              |
+| **FR5** No rewrite                             | §3.4 tracing bridge (tracing-opentelemetry + custom layer)                      | Stdout + OTel from same macro call               |
+| **FR6** Consistent identity                    | §3.2.5 shared Resource                                                          | Single `Resource` instance asserted in tests     |
+| **NFR1** No crash on failure                   | §5.3 batch processor defaults                                                   | Run without receiver, assert clean exit          |
+| **NFR2** Dependency overhead                   | §3.1.2 dependency list, §5.1 HTTP/protobuf choice, §4.4 binary size measurement | Measure delta vs switchboard baseline            |
+| **NFR3** Env var config                        | §5.2 env var mapping table                                                      | Test with `OTEL_EXPORTER_OTLP_ENDPOINT` override |
+| **NFR4** Offline testability                   | §4.3 in-memory exporter tests                                                   | `cargo test` with no external deps               |
+| **NFR5** Dual output                           | §4.3 dual subscriber test                                                       | Both outputs present on single log call          |
 
 ## 2. Technology Choices
 
@@ -33,12 +29,12 @@ decision: pending
 
 **Choose**: `opentelemetry-otlp` with `http-proto` feature (reqwest-based, not tonic/gRPC).
 
-| Factor | HTTP/protobuf | gRPC (tonic) |
-|---|---|---|
-| New dependencies | reqwest (already in workspace) + prost | tonic + prost + http-body + tower |
-| Binary size impact | ~500KB | ~2-3MB |
-| Compile time | Moderate | Significantly longer (tonic build scripts, codegen) |
-| otel-desktop-viewer support | Port 4318 | Port 4317 |
+| Factor                      | HTTP/protobuf                          | gRPC (tonic)                                        |
+| --------------------------- | -------------------------------------- | --------------------------------------------------- |
+| New dependencies            | reqwest (already in workspace) + prost | tonic + prost + http-body + tower                   |
+| Binary size impact          | ~500KB                                 | ~2-3MB                                              |
+| Compile time                | Moderate                               | Significantly longer (tonic build scripts, codegen) |
+| otel-desktop-viewer support | Port 4318                              | Port 4317                                           |
 
 The workspace already depends on `reqwest` (lens, switchboard). Adding tonic would introduce a ~2MB+ dependency with build-time code generation for a protocol we don't need. HTTP/protobuf is sufficient for the PoC and for switchboard's local-only deployment. If gRPC streaming becomes a requirement later, it can be added as an optional feature — the `opentelemetry-otlp` crate supports both transports behind feature flags.
 
@@ -62,14 +58,14 @@ The `tracing-opentelemetry` bridge does not support metrics. Metrics are created
 
 ### 2.5 Crate Versions (Target)
 
-| Crate | Version | Features |
-|---|---|---|
-| `opentelemetry` | 0.28 | `metrics`, `logs` |
-| `opentelemetry_sdk` | 0.28 | `metrics`, `logs`, `testing` |
-| `opentelemetry-otlp` | 0.28 | `http-proto`, `trace`, `metrics`, `logs` |
-| `tracing` | 0.1 | (already in workspace) |
-| `tracing-opentelemetry` | 0.28 | (compatible with opentelemetry 0.28) |
-| `tracing-subscriber` | 0.3 | `registry`, `env-filter` (already in workspace) |
+| Crate                   | Version | Features                                        |
+| ----------------------- | ------- | ----------------------------------------------- |
+| `opentelemetry`         | 0.28    | `metrics`, `logs`                               |
+| `opentelemetry_sdk`     | 0.28    | `metrics`, `logs`, `testing`                    |
+| `opentelemetry-otlp`    | 0.28    | `http-proto`, `trace`, `metrics`, `logs`        |
+| `tracing`               | 0.1     | (already in workspace)                          |
+| `tracing-opentelemetry` | 0.28    | (compatible with opentelemetry 0.28)            |
+| `tracing-subscriber`    | 0.3     | `registry`, `env-filter` (already in workspace) |
 
 Pin exact versions in `Cargo.toml`. These are pre-1.0 crates that may have breaking changes. The PoC validates that this specific version set works together.
 
@@ -143,12 +139,13 @@ graph TD
 ```
 
 **Initialization sequence**:
+
 1. Build `Resource` from `OTEL_SERVICE_NAME` (fallback: `"poc-otel"`), `OTEL_RESOURCE_ATTRIBUTES`, and SDK telemetry attributes.
-2. Build OTLP exporter using `opentelemetry_otlp::new_exporter_http()` reading `OTEL_EXPORTER_OTLP_ENDPOINT` (default `http://localhost:4318`).
-3. Build `TracerProvider` with batch span processor using the OTLP exporter.
-4. Build `MeterProvider` with periodic metric reader using the OTLP exporter.
-5. Build `LoggerProvider` with batch log processor using the OTLP exporter.
-6. Return a `ShutdownGuard` that calls `shutdown()` on all three providers on drop.
+1. Build OTLP exporter using `opentelemetry_otlp::new_exporter_http()` reading `OTEL_EXPORTER_OTLP_ENDPOINT` (default `http://localhost:4318`).
+1. Build `TracerProvider` with batch span processor using the OTLP exporter.
+1. Build `MeterProvider` with periodic metric reader using the OTLP exporter.
+1. Build `LoggerProvider` with batch log processor using the OTLP exporter.
+1. Return a `ShutdownGuard` that calls `shutdown()` on all three providers on drop.
 
 ### 3.3 Data Flow
 
@@ -174,11 +171,11 @@ All spans go through `tracing::info_span!()` macros, which the `tracing-opentele
 
 Create one `Meter` from the `MeterProvider` and register three instruments:
 
-| Instrument | Type | Attributes | Purpose |
-|---|---|---|---|
-| `requests_total` | Counter (u64) | `endpoint`, `status` | Count of simulated requests |
-| `request_duration_ms` | Histogram (f64) | `endpoint` | Simulated latency distribution |
-| `active_connections` | Gauge (u64) | `pool` | Simulated concurrent connections |
+| Instrument            | Type            | Attributes           | Purpose                          |
+| --------------------- | --------------- | -------------------- | -------------------------------- |
+| `requests_total`      | Counter (u64)   | `endpoint`, `status` | Count of simulated requests      |
+| `request_duration_ms` | Histogram (f64) | `endpoint`           | Simulated latency distribution   |
+| `active_connections`  | Gauge (u64)     | `pool`               | Simulated concurrent connections |
 
 These use the direct OTel `Meter` API — not the tracing bridge.
 
@@ -191,7 +188,7 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for OtelLogLayer {
     fn on_event(&self, event: &tracing::Event<'_>, _ctx: Context<'_, S>) {
         // 1. Extract severity from tracing::Level → opentelemetry::Severity
         // 2. Extract current span context (trace_id, span_id) from parent span
-        // 3. Build OTel LogRecord with timestamp, severity, body (event message), 
+        // 3. Build OTel LogRecord with timestamp, severity, body (event message),
         //    and fields as attributes
         // 4. Call logger_provider.logger("poc-otel").emit(log_record)
     }
@@ -480,20 +477,20 @@ time cargo build --workspace 2>&1
 
 The Rust OTel SDK does **not** implement the full OTel environment variable specification. Some env vars promoted by tools like `otel-desktop-viewer` have no effect and must be handled in code.
 
-| Env Var | Rust SDK Support | Purpose | Default | Spec Section |
-|---|---|---|---|---|
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | ✅ Read by OTLP exporter HTTP client | OTLP receiver URL | `http://localhost:4318` | FR4, NFR3 |
-| `OTEL_EXPORTER_OTLP_PROTOCOL` | ✅ Read by OTLP exporter | Transport protocol | `http/protobuf` | NFR3 |
-| `OTEL_SERVICE_NAME` | ✅ Read by `SdkResource::from_env()` / manual | Service identity | crate-dependent | FR6, NFR3 |
-| `OTEL_RESOURCE_ATTRIBUTES` | ✅ Read by `SdkResource::from_env()` | Additional resource attrs | (empty) | FR6 |
-| `OTEL_BSP_SCHEDULE_DELAY` | ✅ Read by `BatchSpanProcessor` | Trace export interval (ms) | 5000 | NFR1 |
-| `OTEL_BSP_MAX_QUEUE_SIZE` | ✅ Read by `BatchSpanProcessor` | Trace buffer capacity | 2048 | §5 edge cases |
-| `OTEL_METRIC_EXPORT_INTERVAL` | ✅ Read by `PeriodicReader` | Metric export interval (ms) | 60000 | NFR1 |
-| `OTEL_BLRP_SCHEDULE_DELAY` | ✅ Read by `BatchLogProcessor` | Log export interval (ms) | 5000 | NFR1 |
-| `RUST_LOG` | ✅ Read by `EnvFilter` (tracing, not OTel) | Tracing filter for stdout | `info` | NFR5 |
-| `OTEL_TRACES_EXPORTER` | ❌ **Not auto-detected.** Must be wired in code. See §5.1.1. | Selects trace exporter | N/A | NFR3 |
-| `OTEL_METRICS_EXPORTER` | ❌ **Not auto-detected.** | Selects metrics exporter | N/A | NFR3 |
-| `OTEL_LOGS_EXPORTER` | ❌ **Not auto-detected.** | Selects logs exporter | N/A | NFR3 |
+| Env Var                       | Rust SDK Support                                             | Purpose                     | Default                 | Spec Section  |
+| ----------------------------- | ------------------------------------------------------------ | --------------------------- | ----------------------- | ------------- |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | ✅ Read by OTLP exporter HTTP client                         | OTLP receiver URL           | `http://localhost:4318` | FR4, NFR3     |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | ✅ Read by OTLP exporter                                     | Transport protocol          | `http/protobuf`         | NFR3          |
+| `OTEL_SERVICE_NAME`           | ✅ Read by `SdkResource::from_env()` / manual                | Service identity            | crate-dependent         | FR6, NFR3     |
+| `OTEL_RESOURCE_ATTRIBUTES`    | ✅ Read by `SdkResource::from_env()`                         | Additional resource attrs   | (empty)                 | FR6           |
+| `OTEL_BSP_SCHEDULE_DELAY`     | ✅ Read by `BatchSpanProcessor`                              | Trace export interval (ms)  | 5000                    | NFR1          |
+| `OTEL_BSP_MAX_QUEUE_SIZE`     | ✅ Read by `BatchSpanProcessor`                              | Trace buffer capacity       | 2048                    | §5 edge cases |
+| `OTEL_METRIC_EXPORT_INTERVAL` | ✅ Read by `PeriodicReader`                                  | Metric export interval (ms) | 60000                   | NFR1          |
+| `OTEL_BLRP_SCHEDULE_DELAY`    | ✅ Read by `BatchLogProcessor`                               | Log export interval (ms)    | 5000                    | NFR1          |
+| `RUST_LOG`                    | ✅ Read by `EnvFilter` (tracing, not OTel)                   | Tracing filter for stdout   | `info`                  | NFR5          |
+| `OTEL_TRACES_EXPORTER`        | ❌ **Not auto-detected.** Must be wired in code. See §5.1.1. | Selects trace exporter      | N/A                     | NFR3          |
+| `OTEL_METRICS_EXPORTER`       | ❌ **Not auto-detected.**                                    | Selects metrics exporter    | N/A                     | NFR3          |
+| `OTEL_LOGS_EXPORTER`          | ❌ **Not auto-detected.**                                    | Selects logs exporter       | N/A                     | NFR3          |
 
 #### 5.1.1 The Exporter Selection Gap
 
@@ -546,12 +543,12 @@ The exporter reads `OTEL_EXPORTER_OTLP_ENDPOINT` automatically. If the env var i
 
 The SDK's default batch processor settings provide reasonable behaviour for a local dev tool:
 
-| Parameter | Default | Notes |
-|---|---|---|
-| `max_queue_size` | 2048 | Oldest items dropped when full |
-| `scheduled_delay` | 5000ms | Export every 5 seconds |
-| `max_export_batch_size` | 512 | Max items per export request |
-| `max_concurrent_exports` | 1 | Serial exports |
+| Parameter                | Default | Notes                          |
+| ------------------------ | ------- | ------------------------------ |
+| `max_queue_size`         | 2048    | Oldest items dropped when full |
+| `scheduled_delay`        | 5000ms  | Export every 5 seconds         |
+| `max_export_batch_size`  | 512     | Max items per export request   |
+| `max_concurrent_exports` | 1       | Serial exports                 |
 
 These are acceptable for the PoC and switchboard. No tuning needed.
 
@@ -559,19 +556,19 @@ These are acceptable for the PoC and switchboard. No tuning needed.
 
 The plan covers all spec requirements. No contradictions or gaps.
 
-| Spec | Plan | Status |
-|---|---|---|
-| §2.1 PoC binary | §3.1 crate structure, §3.3 data flow | Covered |
-| §2.2 Survival with no collector | §3.5.1 failure path, §4.3 test | Covered |
-| FR1 Traces | §3.2.1 tracer, §3.3.1 spans, §3.4.1 bridge | Covered |
-| FR2 Metrics | §3.2.2 meter, §3.3.2 instruments | Covered |
-| FR3 Logs | §3.2.3 logger, §3.3.3 log layer | Covered |
-| FR4 OTLP export | §3.2.4 exporter, §5.1 transport | Covered |
-| FR5 No rewrite | §3.4 tracing bridge, §3.3.4 composition | Covered |
-| FR6 Consistent identity | §3.2.5 shared Resource | Covered |
-| NFR1 No crash | §3.5.1, §5.3 batch defaults | Covered |
-| NFR2 Dependency overhead | §2.5 pinned versions, §4.4 measurement | Covered |
-| NFR3 Env var config | §5.1 mapping table | Covered |
-| NFR4 Offline testability | §4.1 in-memory exporters | Covered |
-| NFR5 Dual output | §3.3.4 subscriber composition, §4.3 test | Covered |
-| Edge cases | §3.5 failure paths, §3.6 lifecycle | Covered |
+| Spec                            | Plan                                       | Status  |
+| ------------------------------- | ------------------------------------------ | ------- |
+| §2.1 PoC binary                 | §3.1 crate structure, §3.3 data flow       | Covered |
+| §2.2 Survival with no collector | §3.5.1 failure path, §4.3 test             | Covered |
+| FR1 Traces                      | §3.2.1 tracer, §3.3.1 spans, §3.4.1 bridge | Covered |
+| FR2 Metrics                     | §3.2.2 meter, §3.3.2 instruments           | Covered |
+| FR3 Logs                        | §3.2.3 logger, §3.3.3 log layer            | Covered |
+| FR4 OTLP export                 | §3.2.4 exporter, §5.1 transport            | Covered |
+| FR5 No rewrite                  | §3.4 tracing bridge, §3.3.4 composition    | Covered |
+| FR6 Consistent identity         | §3.2.5 shared Resource                     | Covered |
+| NFR1 No crash                   | §3.5.1, §5.3 batch defaults                | Covered |
+| NFR2 Dependency overhead        | §2.5 pinned versions, §4.4 measurement     | Covered |
+| NFR3 Env var config             | §5.1 mapping table                         | Covered |
+| NFR4 Offline testability        | §4.1 in-memory exporters                   | Covered |
+| NFR5 Dual output                | §3.3.4 subscriber composition, §4.3 test   | Covered |
+| Edge cases                      | §3.5 failure paths, §3.6 lifecycle         | Covered |

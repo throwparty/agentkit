@@ -1,10 +1,10 @@
-use std::io::Write;
-use serde_json::{json, Value};
-use uuid::Uuid;
 use crate::error::AcpError;
 use crate::jsonrpc::{JsonRpcRequest, JsonRpcResponse};
 use crate::session::session::Session;
 use crate::session::store::SessionStore;
+use serde_json::{Value, json};
+use std::io::Write;
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct Router {
@@ -36,7 +36,9 @@ impl Router {
     }
 
     fn get_session_id(request: &JsonRpcRequest) -> Result<String, (i64, String)> {
-        let map = request.params.as_ref()
+        let map = request
+            .params
+            .as_ref()
             .and_then(|p| p.as_object())
             .ok_or((-32602, "No params".into()))?;
         map.get("sessionId")
@@ -57,7 +59,10 @@ impl Router {
         if client_version != 1 {
             return request.to_error_response(
                 -32602,
-                format!("Unsupported protocol version: {}. Server supports: 1", client_version),
+                format!(
+                    "Unsupported protocol version: {}. Server supports: 1",
+                    client_version
+                ),
             );
         }
 
@@ -128,7 +133,11 @@ impl Router {
         ];
 
         for (role, text) in &dummy_updates {
-            let kind = if *role == "user" { "user_message_chunk" } else { "agent_message_chunk" };
+            let kind = if *role == "user" {
+                "user_message_chunk"
+            } else {
+                "agent_message_chunk"
+            };
             let notification = json!({
                 "jsonrpc": "2.0",
                 "method": "session/update",
@@ -151,7 +160,9 @@ impl Router {
         // resumes/loads within the same process lifetime
         if store.get(session_id).await.is_ok() {
             for (role, text) in &dummy_updates {
-                let _ = store.add_message(session_id, role.to_string(), text.to_string()).await;
+                let _ = store
+                    .add_message(session_id, role.to_string(), text.to_string())
+                    .await;
             }
         } else {
             let mut session = Session::new(session_id.to_string(), "".to_string());
@@ -184,19 +195,22 @@ impl Router {
 
     async fn handle_session_list(&self, request: &JsonRpcRequest) -> JsonRpcResponse {
         let sessions = self.session_store.list().await;
-        let session_list: Vec<Value> = sessions.iter().map(|s| {
-            let has_errors = s.messages.iter().any(|m| m.role == "error");
-            json!({
-                "sessionId": s.id,
-                "cwd": s.cwd,
-                "title": s.title,
-                "updatedAt": s.updated_at,
-                "_meta": {
-                    "messageCount": s.messages.len(),
-                    "hasErrors": has_errors
-                }
+        let session_list: Vec<Value> = sessions
+            .iter()
+            .map(|s| {
+                let has_errors = s.messages.iter().any(|m| m.role == "error");
+                json!({
+                    "sessionId": s.id,
+                    "cwd": s.cwd,
+                    "title": s.title,
+                    "updatedAt": s.updated_at,
+                    "_meta": {
+                        "messageCount": s.messages.len(),
+                        "hasErrors": has_errors
+                    }
+                })
             })
-        }).collect();
+            .collect();
 
         request.to_response(json!({"sessions": session_list}))
     }
@@ -219,7 +233,9 @@ impl Router {
             Err((code, msg)) => return request.to_error_response(code, msg),
         };
 
-        let mode = match request.params.as_ref()
+        let mode = match request
+            .params
+            .as_ref()
             .and_then(|p| p.get("mode"))
             .and_then(|v| v.as_str())
         {
@@ -244,7 +260,8 @@ impl Router {
             _ => return request.to_error_response(-32602, "No params".into()),
         };
 
-        let prompt = params_map.get("prompt")
+        let prompt = params_map
+            .get("prompt")
             .or_else(|| params_map.get("message"))
             .and_then(|v| v.as_array())
             .cloned()
@@ -287,7 +304,11 @@ impl Router {
         println!("{}", serde_json::to_string(&notification).unwrap());
         std::io::stdout().flush().unwrap();
 
-        match self.session_store.add_message(&session_id, "user".into(), full_text).await {
+        match self
+            .session_store
+            .add_message(&session_id, "user".into(), full_text)
+            .await
+        {
             Ok(()) => request.to_response(json!({"stopReason": "end_turn"})),
             Err(e) => request.to_error_response(-32602, e),
         }

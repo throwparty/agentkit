@@ -5,14 +5,17 @@
 The `rmcp` (Rust Model Context Protocol) PoC has been successfully implemented and compiles.
 
 ## Location
+
 `poc_implementations/poc-rmcp/`
 
 ## Key Learnings
 
 ### Critical Discovery: The `schemars` Feature Flag
+
 The most important finding: **`rmcp` requires the `schemars` feature flag** for the `#[tool]` macro to function correctly.
 
 Without this feature:
+
 - The macro generates incomplete code
 - `CallToolHandler` trait implementation fails
 - Compilation error: "trait bound not satisfied"
@@ -20,6 +23,7 @@ Without this feature:
 ### Working Configuration
 
 **Cargo.toml:**
+
 ```toml
 [dependencies]
 rmcp = { version = "0.14.0", features = ["server", "transport-io", "macros", "schemars"] }
@@ -31,6 +35,7 @@ serde_json = "1.0.149"
 ```
 
 **Code Pattern:**
+
 ```rust
 // Input struct - Note: Do NOT derive Serialize, only Deserialize
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -76,6 +81,7 @@ impl ServerHandler for WriteFileServer {
 ## Implementation Details
 
 ### File Structure
+
 ```
 poc-rmcp/
 ├── Cargo.toml
@@ -87,6 +93,7 @@ poc-rmcp/
 ```
 
 ### Features Implemented
+
 - ✅ MCP protocol initialization
 - ✅ Tool discovery (tools/list)
 - ✅ `write_file` tool with:
@@ -96,24 +103,27 @@ poc-rmcp/
   - Proper MCP response formatting
 
 ### Debugging Journey
+
 1. **Initial error:** Missing imports and feature flags
-2. **Second error:** Macro compilation failures with custom argument types
-3. **Multiple attempts:**
+1. **Second error:** Macro compilation failures with custom argument types
+1. **Multiple attempts:**
    - Tried removing `Parameters` wrapper ❌
    - Tried destructuring arguments ❌
    - Tried different error return types ❌
    - Added `Clone` derive ❌
-4. **Solution:** Added `schemars` feature + `Parameters` wrapper ✅
+1. **Solution:** Added `schemars` feature + `Parameters` wrapper ✅
 
 ## Developer Experience Notes
 
 ### Positives
+
 - Official SDK with active maintenance
 - Good documentation once you know the patterns
 - Powerful macro system (when it works)
 - Comprehensive examples in repo
 
 ### Negatives
+
 - **Non-obvious feature flag requirement** - `schemars` is critical but not well documented
 - **Cryptic macro errors** - Hard to debug when things go wrong
 - **Steep learning curve** - Multiple attempts needed to get it working
@@ -122,10 +132,12 @@ poc-rmcp/
 ## Testing
 
 Test harnesses are available in `poc_implementations/`:
+
 - `test_mcp_server.py` - Python-based test client
 - `test_mcp_server.sh` - Bash-based test script
 
 **Run tests:**
+
 ```bash
 cd poc_implementations
 python3 test_mcp_server.py poc-rmcp

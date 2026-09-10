@@ -1,9 +1,8 @@
 # Switchboard: OpenTelemetry Integration
 
-**Status:** implemented  **Created:** 2026-09-06  **Author:** adrian
+**Status:** implemented **Created:** 2026-09-06 **Author:** adrian
 
 The switchboard (crates/agentkit-switchboard) has no structured observability: a plain tracing_subscriber::fmt() logger, no spans, no metrics, and no trace context. The OTel PoC (adrs/2026-07-15-otel-impl/poc-otel) validated the toolchain (opentelemetry 0.32, opentelemetry_sdk 0.32, opentelemetry-otlp 0.32, tracing-opentelemetry 0.33) with in-memory tests and otel-desktop-viewer; that ADR is complete. This ADR integrates the validated stack into the switchboard. Exporter selection follows the OTel SDK environment variable specification (OTEL_TRACES_EXPORTER, OTEL_METRICS_EXPORTER, OTEL_LOGS_EXPORTER with values otlp, console, none); the console exporter uses the upstream opentelemetry-stdout crate, and unset variables default to none (no export) so telemetry is fully opt-in. Separately, switchboard per-request latency is suspected to be dominated by synchronous SQLite writes and exclusive RwLock scans on the response path (routes.rs proxy_handler); hot-path spans will make each phase's duration visible so the hypothesis can be confirmed or refuted.
-
 
 ## Problem
 
@@ -23,7 +22,6 @@ The switchboard cannot measure where request time goes (upstream vs SQLite write
 - Distributed trace propagation across service boundaries
 - Prometheus metrics endpoint
 - OTel integration into other workspace crates
-
 
 ## Functional Requirements
 
@@ -140,24 +138,27 @@ cargo clippy --all-targets -- -D warnings is clean and cargo test passes
 When the OTLP receiver is unreachable at startup or mid-run, data is buffered and dropped oldest-first; the application continues without stalling
 
 **Slug:** `collector-unavailable`
+
 ### EC-002: OTel Init Failure
 
 If OTel initialisation fails, the subscriber falls back to fmt-only and metric instruments become no-ops via the global meter
 
 **Slug:** `otel-init-failure`
+
 ### EC-003: Path Cardinality
 
 The path metric attribute stays bounded because switchboard routes are fixed; no dynamic identifiers are used as metric attributes
 
 **Slug:** `path-cardinality`
+
 ### EC-004: Unknown Exporter Value
 
 An unrecognised exporter value (e.g. zipkin or prometheus) logs a warning and selects no exporter for that signal
 
 **Slug:** `unknown-exporter-value`
+
 ### EC-005: Mixed Signal Selection
 
 Exporter selection is per signal, so traces, metrics, and logs may target different sinks independently
 
 **Slug:** `mixed-signal-selection`
-

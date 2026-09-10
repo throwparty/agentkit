@@ -8,13 +8,13 @@ use agentkit_switchboard::config::{
 use agentkit_switchboard::credential::{CredentialSource, ResolvedCredential};
 use agentkit_switchboard::models::db::ModelDb;
 use agentkit_switchboard::provider::registry::ProviderRegistry;
-use agentkit_switchboard::proxy::forwarder::{forward_request, ForwardRequest};
 use agentkit_switchboard::providers::openai::OpenAiChatCompletionsProvider;
-use agentkit_switchboard::session::sqlite::SqliteSessionManager;
+use agentkit_switchboard::proxy::forwarder::{ForwardRequest, forward_request};
 use agentkit_switchboard::server::routes;
-use sqlx::SqlitePool;
+use agentkit_switchboard::session::sqlite::SqliteSessionManager;
 use axum::http::{HeaderMap, Method};
 use serde_json::json;
+use sqlx::SqlitePool;
 
 async fn test_state(mock_base_url: &str) -> Arc<routes::AppState> {
     test_state_with(
@@ -64,7 +64,10 @@ async fn test_state_with(
     };
 
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-    sqlx::migrate!("src/db/migrations").run(&pool).await.unwrap();
+    sqlx::migrate!("src/db/migrations")
+        .run(&pool)
+        .await
+        .unwrap();
     let registry = ProviderRegistry::new(&config.providers, "none")
         .expect("AuthType::None providers always resolve a credential");
     let model_db = ModelDb::new(config.models.clone(), &config.providers);
@@ -185,8 +188,7 @@ async fn proxy_streams_response() {
     wiremock::Mock::given(wiremock::matchers::method("POST"))
         .and(wiremock::matchers::path("/chat/completions"))
         .respond_with(
-            wiremock::ResponseTemplate::new(200)
-                .set_body_raw(sse_body, "text/event-stream"),
+            wiremock::ResponseTemplate::new(200).set_body_raw(sse_body, "text/event-stream"),
         )
         .mount(&mock_server)
         .await;
@@ -218,10 +220,7 @@ async fn proxy_streams_response() {
             .and_then(|v| v.to_str().ok()),
         Some("text/event-stream")
     );
-    assert!(response
-        .headers()
-        .get("x-switchboard-provider")
-        .is_some());
+    assert!(response.headers().get("x-switchboard-provider").is_some());
     assert!(response.headers().get("x-switchboard-billing").is_some());
 
     let body_bytes = http_body_util::BodyExt::collect(response.into_body())
@@ -276,10 +275,7 @@ async fn proxy_non_streaming_response() {
             .and_then(|v| v.to_str().ok()),
         Some("application/json")
     );
-    assert!(response
-        .headers()
-        .get("x-switchboard-provider")
-        .is_some());
+    assert!(response.headers().get("x-switchboard-provider").is_some());
 
     let body_bytes = http_body_util::BodyExt::collect(response.into_body())
         .await

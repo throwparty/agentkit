@@ -120,9 +120,7 @@ impl SearchEngine for KagiSearchEngine {
             .body(body)
             .send()
             .await
-            .map_err(|e| {
-                SearchError::Network(e)
-            })?;
+            .map_err(|e| SearchError::Network(e))?;
 
         let status = response.status().as_u16();
 
@@ -136,13 +134,15 @@ impl SearchEngine for KagiSearchEngine {
         }
 
         if status >= 400 {
-            return Err(SearchError::HttpError { status, detail: response_body }.into());
+            return Err(SearchError::HttpError {
+                status,
+                detail: response_body,
+            }
+            .into());
         }
 
         let api_response: KagiResponse =
-            serde_json::from_str(&response_body).map_err(|e| {
-                SearchError::Parse(e.to_string())
-            })?;
+            serde_json::from_str(&response_body).map_err(|e| SearchError::Parse(e.to_string()))?;
 
         let search_response = self.parse_response(api_response, &req);
         Ok(search_response)
@@ -203,14 +203,12 @@ mod tests {
                 ms: 213,
             },
             data: KagiData {
-                search: vec![
-                    KagiItem {
-                        url: "https://example.com".to_string(),
-                        title: "Example Result".to_string(),
-                        snippet: Some("An example description".to_string()),
-                        time: None,
-                    },
-                ],
+                search: vec![KagiItem {
+                    url: "https://example.com".to_string(),
+                    title: "Example Result".to_string(),
+                    snippet: Some("An example description".to_string()),
+                    time: None,
+                }],
             },
         };
 
@@ -248,14 +246,12 @@ mod tests {
                 ms: 150,
             },
             data: KagiData {
-                search: vec![
-                    KagiItem {
-                        url: "https://example.com/no-snippet".to_string(),
-                        title: "No Snippet".to_string(),
-                        snippet: None,
-                        time: None,
-                    },
-                ],
+                search: vec![KagiItem {
+                    url: "https://example.com/no-snippet".to_string(),
+                    title: "No Snippet".to_string(),
+                    snippet: None,
+                    time: None,
+                }],
             },
         };
 
@@ -285,9 +281,7 @@ mod tests {
                 node: "us-central1".to_string(),
                 ms: 100,
             },
-            data: KagiData {
-                search: vec![],
-            },
+            data: KagiData { search: vec![] },
         };
 
         let req = SearchRequest {
@@ -311,29 +305,27 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/api/v1/search"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                    "meta": {
-                        "trace": "t1",
-                        "node": "us-central1",
-                        "ms": 150
-                    },
-                    "data": {
-                        "search": [
-                            {
-                                "url": "https://example.com/result1",
-                                "title": "Kagi Result 1",
-                                "snippet": "First result from Kagi"
-                            },
-                            {
-                                "url": "https://example.com/result2",
-                                "title": "Kagi Result 2",
-                                "snippet": "Second result from Kagi"
-                            }
-                        ]
-                    }
-                })),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "meta": {
+                    "trace": "t1",
+                    "node": "us-central1",
+                    "ms": 150
+                },
+                "data": {
+                    "search": [
+                        {
+                            "url": "https://example.com/result1",
+                            "title": "Kagi Result 1",
+                            "snippet": "First result from Kagi"
+                        },
+                        {
+                            "url": "https://example.com/result2",
+                            "title": "Kagi Result 2",
+                            "snippet": "Second result from Kagi"
+                        }
+                    ]
+                }
+            })))
             .mount(&mock_server)
             .await;
 
@@ -359,18 +351,16 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/api/v1/search"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                    "meta": {
-                        "trace": "t2",
-                        "node": "us-central1",
-                        "ms": 100
-                    },
-                    "data": {
-                        "search": []
-                    }
-                })),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "meta": {
+                    "trace": "t2",
+                    "node": "us-central1",
+                    "ms": 100
+                },
+                "data": {
+                    "search": []
+                }
+            })))
             .mount(&mock_server)
             .await;
 
@@ -455,23 +445,21 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/api/v1/search"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                    "meta": {
-                        "trace": "t3",
-                        "node": "us-central1",
-                        "ms": 80
-                    },
-                    "data": {
-                        "search": [
-                            {
-                                "url": "https://example.com/no-snippet",
-                                "title": "No Snippet Here"
-                            }
-                        ]
-                    }
-                })),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "meta": {
+                    "trace": "t3",
+                    "node": "us-central1",
+                    "ms": 80
+                },
+                "data": {
+                    "search": [
+                        {
+                            "url": "https://example.com/no-snippet",
+                            "title": "No Snippet Here"
+                        }
+                    ]
+                }
+            })))
             .mount(&mock_server)
             .await;
 
@@ -491,18 +479,16 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/api/v1/search"))
             .and(header("Authorization", "Bearer secret-kagi-key"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                    "meta": {
-                        "trace": "t4",
-                        "node": "us-central1",
-                        "ms": 50
-                    },
-                    "data": {
-                        "search": []
-                    }
-                })),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "meta": {
+                    "trace": "t4",
+                    "node": "us-central1",
+                    "ms": 50
+                },
+                "data": {
+                    "search": []
+                }
+            })))
             .mount(&mock_server)
             .await;
 

@@ -522,7 +522,11 @@ pub fn generate_mcp_docs() -> String {
 
         output.push_str("Parameters:\n\n");
         for param in tool.params {
-            let requirement = if param.required { "required" } else { "optional" };
+            let requirement = if param.required {
+                "required"
+            } else {
+                "optional"
+            };
             output.push_str(&format!(
                 "- `{}` ({}, {}) {}\n",
                 param.name, param.type_name, requirement, param.description
@@ -572,7 +576,9 @@ fn build_provider_with_config(
 
             let bare_path = VcsStore::clone_bare(host_path, &slug)?;
             VcsStore::install_remote(host_path, &bare_path)?;
-            let host_abs = host_path.canonicalize().unwrap_or_else(|_| host_path.to_path_buf());
+            let host_abs = host_path
+                .canonicalize()
+                .unwrap_or_else(|_| host_path.to_path_buf());
             ThreadSafeScm::open_with_mode_and_prefix(
                 &bare_path,
                 mode,
@@ -639,13 +645,12 @@ fn is_container_missing(error: &SandboxError) -> bool {
                 status_code: 404,
                 ..
             }
+        }) | SandboxError::Compute(ComputeError::ContainerInspect {
+            source: bollard::errors::Error::DockerResponseServerError {
+                status_code: 404,
+                ..
+            }
         })
-            | SandboxError::Compute(ComputeError::ContainerInspect {
-                source: bollard::errors::Error::DockerResponseServerError {
-                    status_code: 404,
-                    ..
-                }
-            })
     )
 }
 
@@ -923,13 +928,9 @@ async fn snapshot_after<P: SandboxProvider>(
 ) -> Result<(), SandboxError> {
     let scm = match metadata.mode {
         ScmMode::Direct => {
-            let config = config_loader::load_final()
-                .map_err(|e| SandboxError::Config(e.to_string()))?;
-            ThreadSafeScm::for_sandbox(
-                Path::new("."),
-                config.project.slug,
-                sandbox,
-            )?
+            let config =
+                config_loader::load_final().map_err(|e| SandboxError::Config(e.to_string()))?;
+            ThreadSafeScm::for_sandbox(Path::new("."), config.project.slug, sandbox)?
         }
         ScmMode::Remote => {
             let host_path = Path::new(".");
@@ -1620,7 +1621,7 @@ mod tests {
         }
     }
 
-impl SandboxProvider for MultiResultProvider {
+    impl SandboxProvider for MultiResultProvider {
         fn create<'a>(
             &'a self,
             _name: &'a str,
@@ -1633,24 +1634,24 @@ impl SandboxProvider for MultiResultProvider {
             })
         }
 
-    fn pause<'a>(&'a self, _container_id: &'a str) -> BoxFuture<'a, Result<(), SandboxError>> {
-        Box::pin(async move {
-            Err(SandboxError::SandboxNotFound {
-                name: "unused".to_string(),
+        fn pause<'a>(&'a self, _container_id: &'a str) -> BoxFuture<'a, Result<(), SandboxError>> {
+            Box::pin(async move {
+                Err(SandboxError::SandboxNotFound {
+                    name: "unused".to_string(),
+                })
             })
-        })
-    }
+        }
 
-    fn inspect_container<'a>(
-        &'a self,
-        _container_id: &'a str,
-    ) -> BoxFuture<'a, Result<ContainerInspection, SandboxError>> {
-        Box::pin(async move {
-            Err(SandboxError::SandboxNotFound {
-                name: "unused".to_string(),
+        fn inspect_container<'a>(
+            &'a self,
+            _container_id: &'a str,
+        ) -> BoxFuture<'a, Result<ContainerInspection, SandboxError>> {
+            Box::pin(async move {
+                Err(SandboxError::SandboxNotFound {
+                    name: "unused".to_string(),
+                })
             })
-        })
-    }
+        }
 
         fn resume<'a>(&'a self, _container_id: &'a str) -> BoxFuture<'a, Result<(), SandboxError>> {
             Box::pin(async move {
@@ -1715,7 +1716,7 @@ impl SandboxProvider for MultiResultProvider {
         }
     }
 
-impl SandboxProvider for TestProvider {
+    impl SandboxProvider for TestProvider {
         fn create<'a>(
             &'a self,
             _name: &'a str,
@@ -1728,24 +1729,24 @@ impl SandboxProvider for TestProvider {
             })
         }
 
-    fn pause<'a>(&'a self, _container_id: &'a str) -> BoxFuture<'a, Result<(), SandboxError>> {
-        Box::pin(async move {
-            Err(SandboxError::SandboxNotFound {
-                name: "unused".to_string(),
+        fn pause<'a>(&'a self, _container_id: &'a str) -> BoxFuture<'a, Result<(), SandboxError>> {
+            Box::pin(async move {
+                Err(SandboxError::SandboxNotFound {
+                    name: "unused".to_string(),
+                })
             })
-        })
-    }
+        }
 
-    fn inspect_container<'a>(
-        &'a self,
-        _container_id: &'a str,
-    ) -> BoxFuture<'a, Result<ContainerInspection, SandboxError>> {
-        Box::pin(async move {
-            Err(SandboxError::SandboxNotFound {
-                name: "unused".to_string(),
+        fn inspect_container<'a>(
+            &'a self,
+            _container_id: &'a str,
+        ) -> BoxFuture<'a, Result<ContainerInspection, SandboxError>> {
+            Box::pin(async move {
+                Err(SandboxError::SandboxNotFound {
+                    name: "unused".to_string(),
+                })
             })
-        })
-    }
+        }
 
         fn resume<'a>(&'a self, _container_id: &'a str) -> BoxFuture<'a, Result<(), SandboxError>> {
             Box::pin(async move {

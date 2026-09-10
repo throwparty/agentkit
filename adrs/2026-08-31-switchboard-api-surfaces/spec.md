@@ -1,17 +1,17 @@
 # Switchboard: API Surfaces
 
-**Status:** implemented  **Created:** 2026-08-31  **Author:** adrian
+**Status:** implemented **Created:** 2026-08-31 **Author:** adrian
 
 The switchboard (adrs/2026-06-14-switchboard) conflates three orthogonal concepts: wire format (API surface), billing model, and provider identity. ApiSurface::Openai selects /responses vs /chat/completions by billing model, and ProviderConfig forces one surface per provider. This makes it impossible to represent a gateway provider like OpenCode Zen (https://opencode.ai/docs/zen/), which serves models across three wire formats under one base URL and API key.
 
 Zen's four endpoints map to wire formats:
+
 1. /zen/v1/chat/completions - OpenAI Chat Completions
-2. /zen/v1/responses - OpenAI Responses
-3. /zen/v1/messages - Anthropic Messages
-4. /zen/v1/models/gemini-* - Gemini (no client; deferred)
+1. /zen/v1/responses - OpenAI Responses
+1. /zen/v1/messages - Anthropic Messages
+1. /zen/v1/models/gemini-\* - Gemini (no client; deferred)
 
 The switchboard already ships clients for the first three formats. The translation layer (ConversationHandler) is lossy and unnecessary: each format has native semantics (instructions, cache_control, reasoning effort) that cannot be faithfully mapped to Chat Completions. The switchboard should proxy native formats within a surface, not translate between surfaces.
-
 
 ## Problem
 
@@ -30,7 +30,6 @@ The switchboard cannot represent a provider that serves models across multiple w
 - Gemini API surface (no client; deferred)
 - Cross-surface translation (dropped by design)
 - Zen team/workspace features (roles, model access control, bring-your-own-key)
-
 
 ## Functional Requirements
 
@@ -129,14 +128,15 @@ Request and response bodies pass through unchanged (no translation)
 Zen's single key must be presented correctly per surface (Bearer for OpenAI surfaces, x-api-key for the Anthropic surface); verify Zen's /messages endpoint accepts the expected header
 
 **Slug:** `auth-presentation`
+
 ### EC-002: Model Deprecation
 
 Zen deprecates models on a schedule; deprecated models must not be advertised as routable
 
 **Slug:** `model-deprecation`
+
 ### EC-003: Cross-Provider Surface Variance
 
 The same model may be served via different surfaces by different providers; surface is a property of the (provider, model) pair
 
 **Slug:** `cross-provider-surface-variance`
-

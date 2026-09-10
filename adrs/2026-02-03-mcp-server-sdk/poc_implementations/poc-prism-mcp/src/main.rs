@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use prism_mcp_rs::prelude::*;
 use prism_mcp_rs::server::McpServer;
 use prism_mcp_rs::transport::StdioServerTransport;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::Path;
 use tokio::fs;
@@ -38,9 +38,9 @@ impl ToolHandler for WriteFileHandler {
         }
 
         // Write the file
-        fs::write(path, content.as_bytes()).await.map_err(|e| {
-            McpError::internal(&format!("Failed to write file: {}", e))
-        })?;
+        fs::write(path, content.as_bytes())
+            .await
+            .map_err(|e| McpError::internal(&format!("Failed to write file: {}", e)))?;
 
         let bytes_written = content.len();
 

@@ -1,7 +1,6 @@
 ---
-name: skill-authoring
-description: Authoring opencode skills for this project
----
+
+## name: skill-authoring description: Authoring opencode skills for this project
 
 ## When to use me
 
@@ -25,6 +24,7 @@ description: <one-line description of when to use>
 ```
 
 Required fields:
+
 - `name` — kebab-case identifier, unique within the project
 - `description` — concise sentence telling an agent when this skill applies
 
@@ -42,6 +42,7 @@ Clear conditions for when an agent should load this skill. Be specific — the a
 ## Content
 
 Write instructions, conventions, and examples. Use:
+
 - Short sections with `##` headings
 - Code blocks with language annotations
 - Bullet lists for conventions
@@ -51,9 +52,9 @@ Write instructions, conventions, and examples. Use:
 ## Best practices
 
 1. **Single concern** — each skill covers one topic.
-2. **Project-specific** — capture conventions and patterns unique to this repo.
-3. **Actionable** — write so an agent can follow the instructions without guessing.
-4. **Concise** — short sections, minimal prose, lots of examples.
-5. **Concrete** — show real file paths and patterns from this repo.
-6. **Idempotent** — loading the same skill twice is harmless.
-7. **No orchestration logic** — skills are reference material, not scripts.
+1. **Project-specific** — capture conventions and patterns unique to this repo.
+1. **Actionable** — write so an agent can follow the instructions without guessing.
+1. **Concise** — short sections, minimal prose, lots of examples.
+1. **Concrete** — show real file paths and patterns from this repo.
+1. **Idempotent** — loading the same skill twice is harmless.
+1. **No orchestration logic** — skills are reference material, not scripts.

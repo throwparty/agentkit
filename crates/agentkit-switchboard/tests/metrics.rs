@@ -7,12 +7,10 @@ use agentkit_switchboard::config::{
 };
 use agentkit_switchboard::models::db::ModelDb;
 use agentkit_switchboard::provider::registry::ProviderRegistry;
-use agentkit_switchboard::session::sqlite::SqliteSessionManager;
 use agentkit_switchboard::server::routes;
+use agentkit_switchboard::session::sqlite::SqliteSessionManager;
 use opentelemetry::KeyValue;
-use opentelemetry_sdk::metrics::data::{
-    AggregatedMetrics, Metric, MetricData, ResourceMetrics,
-};
+use opentelemetry_sdk::metrics::data::{AggregatedMetrics, Metric, MetricData, ResourceMetrics};
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
 use sqlx::SqlitePool;
 
@@ -49,7 +47,10 @@ async fn test_state(mock_base_url: &str) -> Arc<routes::AppState> {
     };
 
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-    sqlx::migrate!("src/db/migrations").run(&pool).await.unwrap();
+    sqlx::migrate!("src/db/migrations")
+        .run(&pool)
+        .await
+        .unwrap();
     let registry = ProviderRegistry::new(&config.providers, "none")
         .expect("none-auth provider needs no credential");
     let model_db = ModelDb::new(config.models.clone(), &config.providers);
@@ -74,10 +75,9 @@ fn find_metric<'a>(rm: &'a ResourceMetrics, name: &str) -> Option<&'a Metric> {
 
 fn collect_data_point_attrs<T>(data: &MetricData<T>, out: &mut Vec<Vec<KeyValue>>) {
     match data {
-        MetricData::Sum(sum) => out.extend(
-            sum.data_points()
-                .map(|p| p.attributes().cloned().collect()),
-        ),
+        MetricData::Sum(sum) => {
+            out.extend(sum.data_points().map(|p| p.attributes().cloned().collect()))
+        }
         MetricData::Histogram(hist) => out.extend(
             hist.data_points()
                 .map(|p| p.attributes().cloned().collect()),

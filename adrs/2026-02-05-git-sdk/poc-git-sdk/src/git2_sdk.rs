@@ -1,7 +1,10 @@
 use std::path::{Path, PathBuf};
 
-use git2::{ApplyLocation, Diff, DiffFormat, DiffOptions, IndexAddOption, Oid, Repository, ResetType, Signature, Sort, Status, StatusOptions};
 use git2::build::CheckoutBuilder;
+use git2::{
+    ApplyLocation, Diff, DiffFormat, DiffOptions, IndexAddOption, Oid, Repository, ResetType,
+    Signature, Sort, Status, StatusOptions,
+};
 
 use crate::git_sdk::{
     AuthorInfo, CommitInfo, CommitRange, GitSdk, GitSdkError, GitSdkResult, StatusEntry, StatusKind,
@@ -65,7 +68,9 @@ impl From<git2::Error> for GitSdkError {
 
 impl GitSdk for Git2Sdk {
     fn init(&self, path: &Path) -> GitSdkResult<()> {
-        Repository::init(path).map(|_| ()).map_err(GitSdkError::from)
+        Repository::init(path)
+            .map(|_| ())
+            .map_err(GitSdkError::from)
     }
 
     fn add(&self, repo_path: &Path, paths: &[String]) -> GitSdkResult<()> {
@@ -83,7 +88,9 @@ impl GitSdk for Git2Sdk {
         let repo = self.open_repo(repo_path)?;
         let mut options = StatusOptions::new();
         options.include_untracked(true).recurse_untracked_dirs(true);
-        let statuses = repo.statuses(Some(&mut options)).map_err(GitSdkError::from)?;
+        let statuses = repo
+            .statuses(Some(&mut options))
+            .map_err(GitSdkError::from)?;
         let mut entries = Vec::new();
         for entry in statuses.iter() {
             let Some(path) = entry.path() else {
@@ -99,12 +106,7 @@ impl GitSdk for Git2Sdk {
         Ok(entries)
     }
 
-    fn commit(
-        &self,
-        repo_path: &Path,
-        message: &str,
-        author: &AuthorInfo,
-    ) -> GitSdkResult<String> {
+    fn commit(&self, repo_path: &Path, message: &str, author: &AuthorInfo) -> GitSdkResult<String> {
         let repo = self.open_repo(repo_path)?;
         let mut index = repo.index().map_err(GitSdkError::from)?;
         index
@@ -168,7 +170,9 @@ impl GitSdk for Git2Sdk {
             obj.peel_to_commit().map_err(GitSdkError::from)?
         } else {
             let head = repo.head().map_err(GitSdkError::from)?;
-            let oid = head.target().ok_or_else(|| GitSdkError::Git("HEAD missing".to_string()))?;
+            let oid = head
+                .target()
+                .ok_or_else(|| GitSdkError::Git("HEAD missing".to_string()))?;
             repo.find_commit(oid).map_err(GitSdkError::from)?
         };
         repo.branch(name, &target_commit, false)
@@ -185,7 +189,9 @@ impl GitSdk for Git2Sdk {
             format!("refs/heads/{reference}")
         };
 
-        let reference = repo.find_reference(&reference_name).map_err(GitSdkError::from)?;
+        let reference = repo
+            .find_reference(&reference_name)
+            .map_err(GitSdkError::from)?;
         let target = reference.peel_to_tree().map_err(GitSdkError::from)?;
         let mut checkout = CheckoutBuilder::new();
         checkout.force();
@@ -222,7 +228,14 @@ impl GitSdk for Git2Sdk {
         let parent_refs: Vec<&git2::Commit<'_>> = parents.iter().collect();
 
         let commit_id = repo
-            .commit(None, &signature, &signature, message, &end_tree, &parent_refs)
+            .commit(
+                None,
+                &signature,
+                &signature,
+                message,
+                &end_tree,
+                &parent_refs,
+            )
             .map_err(GitSdkError::from)?;
 
         let commit = repo.find_commit(commit_id).map_err(GitSdkError::from)?;

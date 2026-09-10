@@ -1,7 +1,6 @@
 ---
-name: fetch-remote
-description: Fetching the latest remote branches before switching or inspecting
----
+
+## name: fetch-remote description: Fetching the latest remote branches before switching or inspecting
 
 ## When to use me
 

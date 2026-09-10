@@ -12,7 +12,11 @@ fn binary_path() -> PathBuf {
 
 fn test_dir() -> PathBuf {
     let count = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
-    std::env::temp_dir().join(format!("agentkit-cred-file-test-{}-{}", std::process::id(), count))
+    std::env::temp_dir().join(format!(
+        "agentkit-cred-file-test-{}-{}",
+        std::process::id(),
+        count
+    ))
 }
 
 fn run_get(home: &PathBuf, identity: &str) -> (String, bool) {
@@ -64,8 +68,14 @@ fn file_get_put_delete() {
     assert!(run_put(&dir, "test_id", cred_json), "put should succeed");
     let (output, success) = run_get(&dir, "test_id");
     assert!(success, "get should succeed");
-    assert!(output.contains("tok_test"), "output should contain access_token: {output}");
-    assert!(output.contains("ref_test"), "output should contain refresh_token: {output}");
+    assert!(
+        output.contains("tok_test"),
+        "output should contain access_token: {output}"
+    );
+    assert!(
+        output.contains("ref_test"),
+        "output should contain refresh_token: {output}"
+    );
 
     assert!(run_delete(&dir, "test_id"), "delete should succeed");
     let (_, success) = run_get(&dir, "test_id");

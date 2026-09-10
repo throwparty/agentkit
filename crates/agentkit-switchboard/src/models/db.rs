@@ -13,7 +13,11 @@ impl ModelDb {
         model_overrides: HashMap<String, ModelConfig>,
         providers: &HashMap<String, ProviderConfig>,
     ) -> Self {
-        Self::from_snapshot(model_overrides, providers, agentkit_models::bundled_snapshot_parsed())
+        Self::from_snapshot(
+            model_overrides,
+            providers,
+            agentkit_models::bundled_snapshot_parsed(),
+        )
     }
 
     pub fn from_snapshot_path(
@@ -63,12 +67,18 @@ impl ModelDb {
             }
 
             let override_entry = model_overrides.get(model_id);
-            let final_ctx = override_entry.and_then(|o| o.context_window).or(entry.context_window);
-            let final_mx = override_entry.and_then(|o| o.max_output).or(entry.max_output);
+            let final_ctx = override_entry
+                .and_then(|o| o.context_window)
+                .or(entry.context_window);
+            let final_mx = override_entry
+                .and_then(|o| o.max_output)
+                .or(entry.max_output);
             let final_caps = override_entry
                 .and_then(|o| o.capabilities.as_ref())
                 .map(|c| ModelCapabilities {
-                    tool_calling: c.tool_calling.or(caps.as_ref().and_then(|c| c.tool_calling)),
+                    tool_calling: c
+                        .tool_calling
+                        .or(caps.as_ref().and_then(|c| c.tool_calling)),
                     reasoning: c.reasoning.or(caps.as_ref().and_then(|c| c.reasoning)),
                     structured_output: c
                         .structured_output
@@ -97,10 +107,12 @@ impl ModelDb {
                         id: model_id.clone(),
                         context_window: override_cfg.context_window,
                         max_output: override_cfg.max_output,
-                        capabilities: override_cfg.capabilities.as_ref().map(|c| ModelCapabilities {
-                            tool_calling: c.tool_calling,
-                            reasoning: c.reasoning,
-                            structured_output: c.structured_output,
+                        capabilities: override_cfg.capabilities.as_ref().map(|c| {
+                            ModelCapabilities {
+                                tool_calling: c.tool_calling,
+                                reasoning: c.reasoning,
+                                structured_output: c.structured_output,
+                            }
                         }),
                         providers: Vec::new(),
                     },
@@ -128,11 +140,21 @@ impl ModelDb {
                         identity: prov_identity.clone(),
                         billing: prov_cfg.billing.to_string(),
                         pricing: Some(ModelPricing {
-                            input_per_mtok: per_model.and_then(|m| m.input_per_mtok).unwrap_or(pricing.input_per_mtok),
-                            output_per_mtok: per_model.and_then(|m| m.output_per_mtok).unwrap_or(pricing.output_per_mtok),
-                            cache_read_per_mtok: per_model.and_then(|m| m.cache_read_per_mtok).or(pricing.cache_read_per_mtok),
-                            cache_write_per_mtok: per_model.and_then(|m| m.cache_write_per_mtok).or(pricing.cache_write_per_mtok),
-                            reasoning_per_mtok: per_model.and_then(|m| m.reasoning_per_mtok).or(pricing.reasoning_per_mtok),
+                            input_per_mtok: per_model
+                                .and_then(|m| m.input_per_mtok)
+                                .unwrap_or(pricing.input_per_mtok),
+                            output_per_mtok: per_model
+                                .and_then(|m| m.output_per_mtok)
+                                .unwrap_or(pricing.output_per_mtok),
+                            cache_read_per_mtok: per_model
+                                .and_then(|m| m.cache_read_per_mtok)
+                                .or(pricing.cache_read_per_mtok),
+                            cache_write_per_mtok: per_model
+                                .and_then(|m| m.cache_write_per_mtok)
+                                .or(pricing.cache_write_per_mtok),
+                            reasoning_per_mtok: per_model
+                                .and_then(|m| m.reasoning_per_mtok)
+                                .or(pricing.reasoning_per_mtok),
                         }),
                     });
                 }

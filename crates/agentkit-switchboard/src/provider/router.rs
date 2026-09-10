@@ -1,7 +1,7 @@
-use std::collections::HashMap;
 use crate::config::{ApiSurface, BillingModel};
 use crate::provider::ProviderView;
 use crate::session::SessionAffinity;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProviderSelection {
@@ -53,12 +53,17 @@ pub fn select_provider(
     }
 
     let session_miss = session.is_some_and(|sa| {
-        !candidates.iter().any(|p| p.identity == sa.provider_identity)
+        !candidates
+            .iter()
+            .any(|p| p.identity == sa.provider_identity)
     });
 
     if let Some(sa) = session {
         if !session_miss {
-            if let Some(assigned) = candidates.iter().find(|p| p.identity == sa.provider_identity) {
+            if let Some(assigned) = candidates
+                .iter()
+                .find(|p| p.identity == sa.provider_identity)
+            {
                 return Ok(ProviderSelection {
                     identity: assigned.identity.clone(),
                     reason: SelectionReason::Affinity,
@@ -84,7 +89,11 @@ pub fn select_provider(
         a.identity.cmp(&b.identity)
     });
 
-    let reason = if session_miss { SelectionReason::Fallback } else { SelectionReason::Cost };
+    let reason = if session_miss {
+        SelectionReason::Fallback
+    } else {
+        SelectionReason::Cost
+    };
     let switch_count = if session_miss { 1 } else { 0 };
 
     Ok(ProviderSelection {

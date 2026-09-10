@@ -9,31 +9,36 @@ This directory contains test harnesses for evaluating MCP server SDK implementat
 A comprehensive test client that sends JSON-RPC messages to the MCP server over stdio.
 
 **Usage:**
+
 ```bash
 python3 test_mcp_server.py <poc-directory>
 ```
 
 **Example:**
+
 ```bash
 python3 test_mcp_server.py poc-rmcp
 ```
 
 **Tests performed:**
+
 1. Initialize MCP connection
-2. List available tools
-3. Call `write_file` with absolute path (should succeed)
-4. Call `write_file` with relative path (should fail)
+1. List available tools
+1. Call `write_file` with absolute path (should succeed)
+1. Call `write_file` with relative path (should fail)
 
 ### Bash Test Script (`test_mcp_server.sh`)
 
 A shell-based test harness for environments without Python.
 
 **Usage:**
+
 ```bash
 ./test_mcp_server.sh <poc-directory>
 ```
 
 **Example:**
+
 ```bash
 ./test_mcp_server.sh poc-rmcp
 ```
@@ -43,6 +48,7 @@ A shell-based test harness for environments without Python.
 The test harnesses send these JSON-RPC messages:
 
 ### 1. Initialize
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -64,6 +70,7 @@ The test harnesses send these JSON-RPC messages:
 ```
 
 ### 2. Initialized Notification
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -73,6 +80,7 @@ The test harnesses send these JSON-RPC messages:
 ```
 
 ### 3. List Tools
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -83,6 +91,7 @@ The test harnesses send these JSON-RPC messages:
 ```
 
 ### 4. Call write_file (Absolute Path)
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -99,6 +108,7 @@ The test harnesses send these JSON-RPC messages:
 ```
 
 ### 5. Call write_file (Relative Path - Should Fail)
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -117,6 +127,7 @@ The test harnesses send these JSON-RPC messages:
 ## Expected Responses
 
 ### Successful Initialize Response
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -135,6 +146,7 @@ The test harnesses send these JSON-RPC messages:
 ```
 
 ### Successful write_file Response
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -151,6 +163,7 @@ The test harnesses send these JSON-RPC messages:
 ```
 
 ### Failed write_file Response (Relative Path)
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -165,8 +178,9 @@ The test harnesses send these JSON-RPC messages:
 ## PoC Structure
 
 Each PoC implementation should:
+
 1. Be in a directory named `poc-<sdk-name>`
-2. Be a valid Rust cargo project
-3. Build a binary with the same name as the directory (e.g., `poc-rmcp` builds `target/debug/poc-rmcp`)
-4. Implement the `write_file` tool as specified in the ADR
-5. Accept JSON-RPC messages on stdin and respond on stdout
+1. Be a valid Rust cargo project
+1. Build a binary with the same name as the directory (e.g., `poc-rmcp` builds `target/debug/poc-rmcp`)
+1. Implement the `write_file` tool as specified in the ADR
+1. Accept JSON-RPC messages on stdin and respond on stdout

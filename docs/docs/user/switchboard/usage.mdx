@@ -1,7 +1,6 @@
 ---
 ---
 
-
 # 🚀 Using Switchboard
 
 Once Switchboard is running, point your agent tools at `http://127.0.0.1:3812/openai/v1/chat/completions` as if it were an OpenAI API endpoint.
@@ -102,19 +101,19 @@ switchboard auth logout openai_codex_sub
 
 ### Log signals
 
-| Level | Signal | What to do |
-|---|---|---|
-| `error` | All providers degraded for model X | Check credential validity and quota state. |
-| `error` | OAuth refresh failed for identity X | Run `switchboard auth login` to re-auth. |
-| `warn` | Provider X degraded (reason) | Expected when quota exhausts — will auto-recover. |
-| `warn` | Session X switched from A to B | Cache penalty incurred. Expected behaviour. |
-| `warn` | Credential helper not found | Set `credential_helper = "file"` if headless. |
+| Level   | Signal                              | What to do                                        |
+| ------- | ----------------------------------- | ------------------------------------------------- |
+| `error` | All providers degraded for model X  | Check credential validity and quota state.        |
+| `error` | OAuth refresh failed for identity X | Run `switchboard auth login` to re-auth.          |
+| `warn`  | Provider X degraded (reason)        | Expected when quota exhausts — will auto-recover. |
+| `warn`  | Session X switched from A to B      | Cache penalty incurred. Expected behaviour.       |
+| `warn`  | Credential helper not found         | Set `credential_helper = "file"` if headless.     |
 
 ### Undoing things
 
-| What to undo | How |
-|---|---|
-| Wrong config | Edit `switchboard.toml`, restart the binary. |
-| Stale OAuth tokens | Run `switchboard auth login <identity>`. |
-| Corrupt session DB | Delete `~/.switchboard/sessions.db` — it's recreated automatically. |
+| What to undo         | How                                                                    |
+| -------------------- | ---------------------------------------------------------------------- |
+| Wrong config         | Edit `switchboard.toml`, restart the binary.                           |
+| Stale OAuth tokens   | Run `switchboard auth login <identity>`.                               |
+| Corrupt session DB   | Delete `~/.switchboard/sessions.db` — it's recreated automatically.    |
 | Stop using the proxy | Kill the process. Point your client directly at the upstream provider. |

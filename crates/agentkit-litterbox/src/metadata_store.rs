@@ -19,15 +19,16 @@ fn base_path(project_slug: &str, metadata_dir: Option<&Path>) -> PathBuf {
 }
 
 fn load_metadata_dir() -> Option<PathBuf> {
-    std::env::var("LITTERBOX_METADATA_DIR").ok().map(PathBuf::from)
+    std::env::var("LITTERBOX_METADATA_DIR")
+        .ok()
+        .map(PathBuf::from)
 }
 
 fn store_in(dir: &Path, slug: &str, meta: &SandboxMetadata) -> Result<(), SandboxError> {
     fs::create_dir_all(dir).map_err(SandboxError::Io)?;
 
     let path = dir.join(format!("{}.toml", slug));
-    let content =
-        toml::to_string(meta).map_err(|e| SandboxError::Config(e.to_string()))?;
+    let content = toml::to_string(meta).map_err(|e| SandboxError::Config(e.to_string()))?;
 
     let file = fs::OpenOptions::new()
         .create(true)
@@ -82,19 +83,12 @@ fn remove_in(dir: &Path, slug: &str) -> Result<(), SandboxError> {
     Ok(())
 }
 
-pub fn store(
-    project_slug: &str,
-    slug: &str,
-    meta: &SandboxMetadata,
-) -> Result<(), SandboxError> {
+pub fn store(project_slug: &str, slug: &str, meta: &SandboxMetadata) -> Result<(), SandboxError> {
     let dir = base_path(project_slug, load_metadata_dir().as_deref());
     store_in(&dir, slug, meta)
 }
 
-pub fn load(
-    project_slug: &str,
-    slug: &str,
-) -> Result<Option<SandboxMetadata>, SandboxError> {
+pub fn load(project_slug: &str, slug: &str) -> Result<Option<SandboxMetadata>, SandboxError> {
     let dir = base_path(project_slug, load_metadata_dir().as_deref());
     load_in(&dir, slug)
 }
@@ -173,14 +167,10 @@ mod tests {
         let dir = TempDir::new().expect("tempdir");
         let meta = test_metadata();
         store_in(dir.path(), "test-sandbox", &meta).expect("store");
-        assert!(load_in(dir.path(), "test-sandbox")
-            .expect("load")
-            .is_some());
+        assert!(load_in(dir.path(), "test-sandbox").expect("load").is_some());
 
         remove_in(dir.path(), "test-sandbox").expect("remove");
-        assert!(load_in(dir.path(), "test-sandbox")
-            .expect("load")
-            .is_none());
+        assert!(load_in(dir.path(), "test-sandbox").expect("load").is_none());
     }
 
     #[test]
@@ -203,15 +193,11 @@ mod tests {
 
         let meta = test_metadata();
         store_in(&dir, "my-sandbox", &meta).expect("store");
-        let loaded = load_in(&dir, "my-sandbox")
-            .expect("load")
-            .expect("some");
+        let loaded = load_in(&dir, "my-sandbox").expect("load").expect("some");
         assert_eq!(loaded.name, meta.name);
         assert_eq!(loaded.mode, meta.mode);
 
         remove_in(&dir, "my-sandbox").expect("remove");
-        assert!(load_in(&dir, "my-sandbox")
-            .expect("load")
-            .is_none());
+        assert!(load_in(&dir, "my-sandbox").expect("load").is_none());
     }
 }

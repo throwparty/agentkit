@@ -1,4 +1,4 @@
 pub mod engine;
 pub mod types;
 
-pub use engine::{KagiSearchEngine, KagiOptions};
+pub use engine::{KagiOptions, KagiSearchEngine};

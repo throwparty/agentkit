@@ -72,7 +72,13 @@ pub fn generate_cli_docs(command: &clap::Command) -> String {
 fn format_positional_label(arg: &Arg) -> String {
     let name = arg
         .get_value_names()
-        .map(|names| names.iter().map(|name| name.as_str()).collect::<Vec<_>>().join(" "))
+        .map(|names| {
+            names
+                .iter()
+                .map(|name| name.as_str())
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
         .unwrap_or_else(|| arg.get_id().as_str().to_string());
 
     if arg.is_required_set() {
@@ -95,10 +101,13 @@ fn format_option_label(arg: &Arg) -> Option<String> {
     }
 
     let mut label = flags.join(", ");
-    if let Some(value_name) = arg
-        .get_value_names()
-        .map(|names| names.iter().map(|name| name.as_str()).collect::<Vec<_>>().join(" "))
-    {
+    if let Some(value_name) = arg.get_value_names().map(|names| {
+        names
+            .iter()
+            .map(|name| name.as_str())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }) {
         label.push_str(&format!(" <{value_name}>"));
     }
 
@@ -147,7 +156,11 @@ pub fn generate_mcp_docs(tools: &[ToolDoc]) -> String {
 
         output.push_str("Parameters:\n\n");
         for param in tool.params {
-            let requirement = if param.required { "required" } else { "optional" };
+            let requirement = if param.required {
+                "required"
+            } else {
+                "optional"
+            };
             output.push_str(&format!(
                 "- `{}` ({}, {}) {}\n",
                 param.name, param.type_name, requirement, param.description
@@ -169,29 +182,25 @@ mod tests {
 
     #[test]
     fn test_generate_cli_docs_basic() {
-        use clap::{Command, Arg};
+        use clap::{Arg, Command};
 
         let cmd = Command::new("test-cli")
             .subcommand(
-                Command::new("subcommand1")
-                    .about("First subcommand")
-                    .arg(
-                        Arg::new("input")
-                            .required(true)
-                            .value_name("INPUT")
-                            .help("Input file"),
-                    )
+                Command::new("subcommand1").about("First subcommand").arg(
+                    Arg::new("input")
+                        .required(true)
+                        .value_name("INPUT")
+                        .help("Input file"),
+                ),
             )
             .subcommand(
-                Command::new("subcommand2")
-                    .about("Second subcommand")
-                    .arg(
-                        Arg::new("output")
-                            .short('o')
-                            .long("output")
-                            .value_name("FILE")
-                            .help("Output file"),
-                    )
+                Command::new("subcommand2").about("Second subcommand").arg(
+                    Arg::new("output")
+                        .short('o')
+                        .long("output")
+                        .value_name("FILE")
+                        .help("Output file"),
+                ),
             );
 
         let docs = generate_cli_docs(&cmd);
@@ -232,15 +241,17 @@ mod tests {
             .short('o')
             .long("output")
             .value_name("FILE");
-        assert_eq!(format_option_label(&arg), Some("-o, --output <FILE>".to_string()));
+        assert_eq!(
+            format_option_label(&arg),
+            Some("-o, --output <FILE>".to_string())
+        );
     }
 
     #[test]
     fn test_format_option_label_long_only() {
         use clap::Arg;
 
-        let arg = Arg::new("verbose")
-            .long("verbose");
+        let arg = Arg::new("verbose").long("verbose");
         assert_eq!(format_option_label(&arg), Some("--verbose".to_string()));
     }
 
@@ -248,8 +259,7 @@ mod tests {
     fn test_format_option_label_short_only() {
         use clap::Arg;
 
-        let arg = Arg::new("help")
-            .short('h');
+        let arg = Arg::new("help").short('h');
         assert_eq!(format_option_label(&arg), Some("-h".to_string()));
     }
 
@@ -259,14 +269,12 @@ mod tests {
             ToolDoc {
                 name: "search",
                 description: "Search the web.",
-                params: &[
-                    ParamDoc {
-                        name: "query",
-                        type_name: "string",
-                        required: true,
-                        description: "Search query.",
-                    },
-                ],
+                params: &[ParamDoc {
+                    name: "query",
+                    type_name: "string",
+                    required: true,
+                    description: "Search query.",
+                }],
             },
             ToolDoc {
                 name: "fetch",

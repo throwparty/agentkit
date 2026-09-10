@@ -1,7 +1,7 @@
 # pmcp PoC Implementation
 
-**Status**: ✅ **SUCCESS** - All tests passing with git main branch  
-**Date**: 2026-02-04  
+**Status**: ✅ **SUCCESS** - All tests passing with git main branch\
+**Date**: 2026-02-04\
 **SDK**: pmcp v1.9.4+git (commit e1bcebaf from main branch)
 
 ## Summary
@@ -13,10 +13,12 @@ pmcp **successfully passed all 4 tests** after using the main branch from git. H
 ## Critical Discovery: Broken Release, Working Main
 
 **Problem**: pmcp v1.9.4 published on crates.io has non-functional stdio transport
+
 - Used HTTP-style `Content-Length:` framing instead of JSON-RPC newline protocol
 - Would hang indefinitely when receiving MCP initialize requests
 
 **Solution**: PR #157 fixed stdio transport in the main branch
+
 - Repository: https://github.com/paiml/rust-mcp-sdk
 - Fixed commit: e1bcebaf (merged Jan 18, 2026)
 - Use git dependency until next release is published
@@ -28,7 +30,7 @@ pmcp **successfully passed all 4 tests** after using the main branch from git. H
 ```
 ✓ Initialize successful: poc-pmcp-write-file v1.0.0
 ✓ Found write_file tool
-✓ File created successfully with correct content  
+✓ File created successfully with correct content
 ✓ Relative path correctly rejected: Validation error: path must be absolute
 ```
 
@@ -112,7 +114,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .tool_authorizer(authorizer)
         .tool("write_file", WriteFileTool)
         .build()?;
-    
+
     server.run_stdio().await?;
     Ok(())
 }
@@ -159,6 +161,7 @@ impl ToolHandler for WriteFileTool {
 ```
 
 **Comparison to rmcp**:
+
 - **pmcp**: Explicit trait implementation, manual JSON handling
 - **rmcp**: `#[tool]` macro auto-generates everything from function signature
 
@@ -197,6 +200,7 @@ nix develop ./nix --command bash -c 'cd poc_implementations && python3 test_mcp_
 pmcp is designed for **HTTP-first development with cloud deployment workflows**:
 
 ### Primary Workflow (HTTP)
+
 ```bash
 cargo pmcp new my-workspace     # Create workspace
 cargo pmcp add myserver --tools # Add server
@@ -206,6 +210,7 @@ cargo pmcp deploy               # Deploy to AWS/GCP/Cloudflare
 ```
 
 ### stdio Support (Secondary)
+
 - `run_stdio()` method exists for local development
 - **Now working** in main branch (fixed in PR #157)
 - Less documented than HTTP workflow
@@ -213,31 +218,32 @@ cargo pmcp deploy               # Deploy to AWS/GCP/Cloudflare
 
 ## Comparison: pmcp vs rmcp
 
-| Feature | rmcp | pmcp |
-|---------|------|------|
-| **STDIO support** | ✅ Primary, fully working | ✅ Working (main branch only) |
-| **HTTP support** | ❌ None | ✅ Primary with SSE |
-| **Macros** | ✅ `#[tool]`, `#[tool_router]` | ❌ Trait-based handlers |
-| **Cloud deployment** | ❌ Manual | ✅ `cargo pmcp deploy` |
-| **OAuth** | ❌ None | ✅ Cognito, OIDC, DCR |
-| **Hot reload** | ❌ None | ✅ `cargo pmcp dev` |
-| **Test generation** | ❌ Manual | ✅ `--generate-scenarios` |
-| **Boilerplate** | Low (macros) | Medium (traits + auth) |
-| **Use case** | Local tools, simple servers | Production cloud services |
-| **Crates.io release** | ✅ Latest works | ❌ Broken, use git main |
+| Feature               | rmcp                           | pmcp                          |
+| --------------------- | ------------------------------ | ----------------------------- |
+| **STDIO support**     | ✅ Primary, fully working      | ✅ Working (main branch only) |
+| **HTTP support**      | ❌ None                        | ✅ Primary with SSE           |
+| **Macros**            | ✅ `#[tool]`, `#[tool_router]` | ❌ Trait-based handlers       |
+| **Cloud deployment**  | ❌ Manual                      | ✅ `cargo pmcp deploy`        |
+| **OAuth**             | ❌ None                        | ✅ Cognito, OIDC, DCR         |
+| **Hot reload**        | ❌ None                        | ✅ `cargo pmcp dev`           |
+| **Test generation**   | ❌ Manual                      | ✅ `--generate-scenarios`     |
+| **Boilerplate**       | Low (macros)                   | Medium (traits + auth)        |
+| **Use case**          | Local tools, simple servers    | Production cloud services     |
+| **Crates.io release** | ✅ Latest works                | ❌ Broken, use git main       |
 
 ## pmcp Strengths
 
-✅ **Production-ready cloud deployments** - One command to AWS Lambda/GCP/Cloudflare  
-✅ **Comprehensive OAuth** - Cognito integration, tenant ID extraction, DCR  
-✅ **Developer tooling** - `cargo-pmcp` CLI with hot-reload and test generation  
-✅ **Infrastructure as code** - AWS CDK stacks included  
-✅ **Multi-tenancy** - Built-in tenant isolation  
-✅ **Extensive examples** - 60+ examples covering all features  
+✅ **Production-ready cloud deployments** - One command to AWS Lambda/GCP/Cloudflare\
+✅ **Comprehensive OAuth** - Cognito integration, tenant ID extraction, DCR\
+✅ **Developer tooling** - `cargo-pmcp` CLI with hot-reload and test generation\
+✅ **Infrastructure as code** - AWS CDK stacks included\
+✅ **Multi-tenancy** - Built-in tenant isolation\
+✅ **Extensive examples** - 60+ examples covering all features
 
 ## pmcp Weaknesses
 
 ⚠️ **BLOCKING ISSUE: Depends on unreleased code**
+
 - **Latest stable release (v1.9.4) has broken stdio** - unusable for our requirements
 - **Must use git main branch** - requires `git = "..."` dependency instead of semantic versioning
 - **No new release published** - Fix merged Jan 18, 2026; still unreleased 17 days later
@@ -245,21 +251,23 @@ cargo pmcp deploy               # Deploy to AWS/GCP/Cloudflare
 - **Dependency instability** - Pinned to commit e1bcebaf, could diverge from eventual release
 - **Production concerns** - Using unreleased code in production is risky
 
-⚠️ **Complex for simple servers** - Auth boilerplate required even for stdio  
-⚠️ **Less documentation for stdio** - Most docs focus on HTTP workflow  
-⚠️ **Heavier dependencies** - Pulls in HTTP stack even for stdio-only use  
+⚠️ **Complex for simple servers** - Auth boilerplate required even for stdio\
+⚠️ **Less documentation for stdio** - Most docs focus on HTTP workflow\
+⚠️ **Heavier dependencies** - Pulls in HTTP stack even for stdio-only use
 
 ## Recommendation
 
 ### ⚠️ pmcp Cannot Be Recommended for Production Use
 
 **Reason**: The latest stable release has broken stdio support. Using unreleased git dependencies creates:
+
 - **No semantic versioning** - Can't specify version constraints like `^1.9`
 - **Build reproducibility issues** - Commit hashes are fragile, branches can change
 - **Dependency audit failures** - Security scanners flag git dependencies
 - **Maintenance burden** - Must manually track when releases are published
 
 ### Use pmcp ONLY if:
+
 - You accept the risk of depending on unreleased code from git main
 - Deploying to AWS Lambda, Google Cloud Run, or Cloudflare Workers (and the cloud features justify the risk)
 - Need OAuth authentication (Cognito, OIDC)
@@ -268,12 +276,14 @@ cargo pmcp deploy               # Deploy to AWS/GCP/Cloudflare
 **Better alternative**: Wait for pmcp to publish a new stable release before adopting
 
 ### Use rmcp for production (stable, released):
+
 - Building local CLI tools or simple integrations
 - Want minimal boilerplate (macros over traits)
 - Prefer stdio as primary transport
 - Need **stable, versioned dependencies from crates.io**
 
 ### Git dependency workaround (until new release):
+
 ```toml
 # ⚠️ NOT RECOMMENDED FOR PRODUCTION
 pmcp = { git = "https://github.com/paiml/rust-mcp-sdk", branch = "main" }
