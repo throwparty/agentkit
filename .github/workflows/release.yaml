@@ -17,4 +17,4 @@ jobs:
       actions: write  # Called workflow uses it for build caches
       contents: write  # Called workflow publishes release artifacts
       id-token: write  # Called workflow uses keyless signing
-    uses: ./.github/workflows/agentkit.build-and-release.yaml
+    uses: $/.github/workflows/agentkit.build-and-release.yaml
