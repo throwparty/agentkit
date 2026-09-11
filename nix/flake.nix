@@ -27,6 +27,7 @@
           inherit system;
           overlays = [
             (import rust-overlay)
+            throwparty.overlays.default
           ];
         };
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
