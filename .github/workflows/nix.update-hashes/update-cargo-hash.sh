@@ -15,7 +15,7 @@ update_flake_nix() {
   sed -i 's|^\( *\)cargoHash = "sha256-[A-Za-z0-9+/=]*";|\1cargoHash = "'"$new_hash"'";|' "$flake_file"
   if [[ "$before" == "$(cat "$flake_file")" ]]; then
     echo "No cargoHash line found to update." >&2
-    return 0
+    return 1
   fi
 }
 
