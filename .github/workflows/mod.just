@@ -6,7 +6,7 @@ list:
     just --list --justfile {{source_directory()}}/mod.just
 
 actionlint:
-    actionlint -ignore 'unexpected key "queue" for "concurrency" section'
+    actionlint -ignore 'unexpected key "queue" for "concurrency" section' -ignore '\$/\.github/'
 
 zizmor *flags:
     zizmor --persona=auditor {{flags}} {{source_directory()}}/../dependabot.yaml {{source_directory()}}
