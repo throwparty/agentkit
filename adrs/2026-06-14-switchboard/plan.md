@@ -77,7 +77,6 @@ agentkit-switchboard/src/
 ├── domain/
 │   ├── mod.rs                  # Re-exports
 │   ├── quota.rs                # ProviderQuotaBehaviour trait + generic state machine
-│   ├── conversation.rs         # ConversationHandler trait (req/resp translation)
 │   ├── http.rs                 # HttpEndpoint trait (URL building, header injection)
 │   └── sse.rs                  # SseProcessor trait (SSE event handling)
 │
@@ -85,13 +84,10 @@ agentkit-switchboard/src/
 │   ├── mod.rs                  # ProviderMap, factory function
 │   ├── openai/
 │   │   ├── mod.rs              # OpenAiProvider struct, factory
-│   │   ├── quota.rs            # OpenAiQuota: header parsing, subscription model
-│   │   └── conversation.rs     # Chat Completions ↔ Responses API translation
+│   │   └── quota.rs            # OpenAiQuota: header parsing, subscription model
 │   └── anthropic/
 │       ├── mod.rs              # AnthropicProvider struct, factory
 │       └── quota.rs            # AnthropicQuota: header parsing, subscription model
-│
-├── provider/                   # Deprecated — moved to domain/ + providers/
 │
 ├── session/
 │   ├── mod.rs                  # SessionManager trait (get, set, update)
@@ -246,9 +242,8 @@ sequenceDiagram
 - The client's `Authorization` header is stripped before forwarding; the authenticator's resolved credential is injected instead.
 - URL rewriting: strip `/openai/v1` prefix, use `base_url` from provider config as the new origin.
   - API key providers: `/openai/v1/chat/completions` → `https://api.openai.com/v1/chat/completions`
-  - Codex subscription: `/openai/v1/chat/completions` → `https://chatgpt.com/backend-api/codex/responses`
-- **Request translation** (Codex subscription only): Convert Chat Completions `messages` array to Responses API `input` format. Map `system` role to `instructions`. Add `store: false`, `reasoning: {effort: "medium"}`, required headers (`OpenAI-Beta`, `originator`, `ChatGPT-Account-Id`).
-- **Response translation** (Codex subscription only): Convert Responses API `output` array back to Chat Completions `choices` format. Non-streaming only in MVP — streaming requests to Codex subscription return 400 with a message to use non-streaming.
+  - Codex subscription: `/openai/v1/responses` → `https://chatgpt.com/backend-api/codex/responses`
+- Bodies pass through unchanged — there is no cross-surface translation. Codex-specific headers (`OpenAI-Beta`, `originator`, `ChatGPT-Account-Id`) are added by the responses provider.
 - Token counts for non-streaming: parse response body JSON. For streaming: accumulate `usage` from final SSE chunk.
 
 **Acceptance criteria:**
@@ -414,14 +409,10 @@ sequenceDiagram
     SB->>CH: exec get openai_codex_sub
     CH-->>SB: stdout: { access_token, refresh_token, expires_at }
 
-    Note over SB: Rewrite URL based on provider type.<br/>API key: → https://api.openai.com/v1/...<br/>Codex sub: → https://chatgpt.com/backend-api/codex/responses<br/>Inject Authorization: Bearer tok_...
+    Note over SB: Rewrite URL based on provider surface.<br/>chat-completions: → https://api.openai.com/v1/chat/completions<br/>responses: → https://chatgpt.com/backend-api/codex/responses<br/>Inject Authorization: Bearer tok_...<br/>Bodies pass through unchanged — no translation.
 
-    Note over SB: If Codex subscription:<br/>Translate Chat Completions request → Responses API format.<br/>Add required headers (OpenAI-Beta, originator, ChatGPT-Account-Id).
-
-    SB->>UP: Forward request (non-streaming for Codex sub)
+    SB->>UP: Forward request
     UP-->>SB: 200 OK (JSON or SSE chunks)
-
-    Note over SB: If Codex subscription:<br/>Translate Responses API response → Chat Completions format.<br/>Parse rate-limit response headers.<br/>Forward response to client.
 
     SB-->>C: SSE chunks (byte-by-byte)
 

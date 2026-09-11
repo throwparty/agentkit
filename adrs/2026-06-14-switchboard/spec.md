@@ -60,7 +60,7 @@ Currently, choosing which provider to use for a given model request is manual an
 The switchboard solves this by acting as a **local HTTP proxy** that:
 
 1. Accepts requests in an OpenAI Chat Completions-compatible format at `/openai/v1/chat/completions`.
-1. Routes each request to the most cost-effective provider that serves the requested model. For providers that use a different API format (e.g., Codex subscription uses the Responses API), the switchboard translates the request and response transparently.
+1. Routes each request to the most cost-effective provider that serves the requested model, proxying it in its native wire format. Each API surface has its own inbound endpoint; there is no cross-surface translation.
 1. Maximises use of time-limited subscription quota by preferentially routing to subscription providers while quota remains, falling back to pay-as-you-go providers only when necessary.
 1. Tracks per-provider quota and rate-limit state from response headers, provider quota APIs, and per-request utilization data.
 1. Maintains session-aware provider affinity and **persists session-to-provider mappings** so affinity survives restarts and KV cache benefits are preserved.
@@ -72,7 +72,7 @@ The switchboard solves this by acting as a **local HTTP proxy** that:
 
 | Term                  | Definition                                                                                                                                                                                                                                                                                                                                                                     |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **API surface**       | The wire protocol format the proxy speaks and backends speak. Identified by URL path prefix (`/openai/v1/...`, future `/anthropic/v1/...`, `/ollama/...`). The proxy routes within the same surface where possible; for providers using a different wire format (e.g., Codex subscription uses Responses API), the proxy translates request and response bodies transparently. |
+| **API surface**       | The wire protocol format the proxy speaks and backends speak. Identified by URL path prefix (`/openai/v1/...`, `/anthropic/v1/...`, `/ollama/...`). Each surface has a dedicated inbound endpoint and bodies pass through unchanged — the proxy routes within a surface and never translates across surfaces. |
 | **Provider**          | A configurable combination of a base URL, API surface, authenticator implementation, billing model, pricing, and a set of models it can serve. Defined in TOML, stored in a map keyed by identity.                                                                                                                                                                             |
 | **Identity**          | The unique key for a provider within the TOML config. Used for lookup, credential reference, response header identification, and credential helper key.                                                                                                                                                                                                                        |
 | **Authenticator**     | A component that knows what credentials a provider expects, which env vars or credential helper keys to read, how to present the credential on the wire, and (for OAuth) how to refresh it.                                                                                                                                                                                    |
@@ -81,7 +81,8 @@ The switchboard solves this by acting as a **local HTTP proxy** that:
 | **Utilization float** | A 0.0–1.0 value representing how much of a quota window has been consumed. At 1.0, further requests return 429. Used by Claude Code's internal usage endpoint.                                                                                                                                                                                                                 |
 | **Session**           | A grouping of requests identified by an `X-Session-Id` HTTP header. Sessions have provider affinity: once assigned, all requests in a session go to the same provider unless that provider becomes unavailable. Session state is persisted to SQLite.                                                                                                                          |
 | **Cache penalty**     | The additional cost incurred when a session switches providers, because the new provider has no cached prefix for the conversation context. Preserving session affinity avoids this.                                                                                                                                                                                           |
-| **Model metadata**    | Provider-agnostic facts about a model: context window size, max output tokens, supported capabilities (tool calling, structured output, reasoning, modalities). Sourced from a bundled snapshot of models.dev data, with TOML overrides.                                                                                                                                       |
+| **Model metadata**    | Provider-agnostic facts about a model: context window size, max output tokens, supported capabilities (tool calling, structured output, reasoning, modalities). Sourced from a bundled snapshot of models.dev data, with TOML overrides.                                                                                                                                                                                                       |
+| **Model shape**       | A model as exposed by `GET /openai/v1/models`: its metadata (context window, max output, capabilities) plus the list of providers serving it and their per-model pricing. The unit returned by model shape discovery.                                                                                                                                                                   |
 | **Provider pricing**  | Per-provider, per-model cost per million tokens for input, output, cached input, and reasoning tokens. Defined per provider (not per model), because the same model served by different providers has different prices.                                                                                                                                                        |
 | **Credential source** | Where a credential value comes from: an environment variable (for API keys and pre-acquired tokens) or a credential helper (for switchboard-managed OAuth tokens with refresh).                                                                                                                                                                                                |
 
@@ -335,7 +336,7 @@ context_window = 128000
 
 # Provider 1: OpenAI Codex subscription (OAuth, quota-based)
 # Uses the Responses API at chatgpt.com, not api.openai.com.
-# The switchboard translates Chat Completions requests to Responses API format.
+# The switchboard proxies to the Responses API endpoint natively (no translation).
 [[providers]]
 identity = "openai_codex_sub"
 api_surface = "openai"
@@ -749,7 +750,7 @@ Future API surfaces would add their own path prefixes:
 
 The API surface is extracted from the path prefix and used to filter candidate providers (a provider with `api_surface = "openai"` only serves requests at `/openai/v1/...`).
 
-**Protocol translation note:** Providers using the Responses API (e.g., Codex subscription at `chatgpt.com/backend-api/codex`) receive translated requests. The switchboard converts Chat Completions request bodies to Responses API format and converts Responses API responses back to Chat Completions format. This translation is limited to basic message passing (non-streaming in MVP; streaming deferred).
+**Native proxying note:** Each API surface has its own inbound endpoint (`/openai/v1/chat/completions`, `/openai/v1/responses`, `/anthropic/v1/messages`). Requests are forwarded to the matched provider's endpoint in their native format — request and response bodies pass through unchanged. There is no cross-surface translation.
 
 ### 8.2 Candidate Selection
 
@@ -799,37 +800,19 @@ flowchart TD
     apply auth header
     remove client Authorization"]
 
-    Auth --> Surface{"Uses Responses API?"}
-
-    Surface -- "Yes (Codex)" --> Translate["Translate request body:
-    messages → input format
-    system → instructions
-    add required fields & headers
-    extract ChatGPT-Account-Id"]
-    Surface -- "No (Chat Completions)" --> Passthrough["Pass body through unchanged"]
-
-    Translate --> Rewrite["Rewrite URL:
+    Auth --> Rewrite["Rewrite URL:
     replace host/port with base_url
     strip API surface prefix"]
-    Passthrough --> Rewrite
 
     Rewrite --> Streaming{"Streaming?"}
 
-    Streaming -- "Yes" --> RespStream{"Responses API?"}
-    RespStream -- "Yes" --> Deferred["Return 400
-    (SSE translation deferred — use non-streaming)"]
-    RespStream -- "No" --> SSE["Forward SSE chunks byte-by-byte"]
+    Streaming -- "Yes" --> SSE["Forward SSE chunks byte-by-byte"]
 
     Streaming -- "No" --> Buffer["Buffer full response"]
-    Buffer --> RespBuffer{"Responses API?"}
-    RespBuffer -- "Yes" --> TranslateResp["Translate response:
-    output → choices
-    restructure body"]
-    RespBuffer -- "No" --> ForwardBody["Forward body unchanged"]
+    Buffer --> ForwardBody["Forward body unchanged"]
 
     SSE --> Update["Update session DB:
     token counts, last_used_at"]
-    TranslateResp --> Update
     ForwardBody --> Update
 
     Update --> Headers["Add response headers:
@@ -1489,7 +1472,7 @@ If the session database is corrupted:
 | Topic                                           | Rationale                                                                                                                                                                                                                       |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Anthropic / Ollama frontend API surfaces**    | MVP serves `/openai/v1/*` only. Additional surfaces are separate features.                                                                                                                                                      |
-| **Full protocol translation**                   | The proxy translates Chat Completions ↔ Responses API for Codex subscription providers only (basic message passing, non-streaming). Translation between arbitrary API surfaces (e.g., OpenAI ↔ Anthropic) remains out of scope. |
+| **Cross-surface translation**                   | The proxy routes within a single API surface and never translates between surfaces. An early Chat Completions ↔ Responses translation layer was removed. |
 | **Third-party OAuth flows beyond OpenAI Codex** | The `switchboard auth login` subcommand is designed for extensibility, but only OpenAI Codex OAuth is implemented in the MVP.                                                                                                   |
 | **Multi-tenant quota enforcement**              | Single-user workstation software.                                                                                                                                                                                               |
 | **Config hot reload**                           | Requires file watcher + graceful credential rotation. Deferred.                                                                                                                                                                 |
@@ -1586,22 +1569,16 @@ crates/agentkit-switchboard/
 │   ├── proxy/
 │   │   ├── router.rs                            # Provider selection algorithm
 │   │   └── forwarder.rs                         # Request rewriting, SSE passthrough
-│   ├── provider/
-│   │   ├── mod.rs                               # ProviderView, ProviderRuntime, ProviderStatus
-│   │   ├── registry.rs                          # Provider registry: config + runtime + provider map
-│   │   └── quota.rs                             # (moved to domain/quota.rs)
 │   ├── domain/
 │   │   ├── mod.rs                               # Re-exports
 │   │   ├── quota.rs                             # ProviderQuotaBehaviour trait + state machine
-│   │   ├── conversation.rs                      # ConversationHandler trait
 │   │   ├── http.rs                              # HttpEndpoint trait
 │   │   └── sse.rs                               # SseProcessor trait
 │   ├── providers/
 │   │   ├── mod.rs                               # ProviderMap, factory
 │   │   ├── openai/
 │   │   │   ├── mod.rs                           # OpenAiProvider
-│   │   │   ├── quota.rs                         # OpenAiQuota implementation
-│   │   │   └── conversation.rs                  # Translation logic
+│   │   │   └── quota.rs                         # OpenAiQuota implementation
 │   │   └── anthropic/
 │   │       ├── mod.rs                           # AnthropicProvider
 │   │       └── quota.rs                         # AnthropicQuota implementation
