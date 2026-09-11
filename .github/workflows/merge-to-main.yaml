@@ -57,7 +57,7 @@ jobs:
     permissions:
       actions: write  # Called workflow uses it for cargo caches
       contents: read
-    uses: ./.github/workflows/agentkit.build-and-test.yaml
+    uses: $/.github/workflows/agentkit.build-and-test.yaml
 
   build-docs:
     name: Build docs
@@ -67,7 +67,7 @@ jobs:
       contents: read
       pages: read  # To configure Pages and upload build artifact
       id-token: write  # Required by actions/configure-pages
-    uses: ./.github/workflows/docs.build.yaml
+    uses: $/.github/workflows/docs.build.yaml
 
   lint-workflows:
     name: Lint workflows
@@ -75,7 +75,7 @@ jobs:
     if: needs.changes.outputs.workflows == 'true'
     permissions:
       contents: read
-    uses: ./.github/workflows/workflows.lint.yaml
+    uses: $/.github/workflows/workflows.lint.yaml
 
   lint-nix:
     name: Lint Nix
@@ -86,7 +86,7 @@ jobs:
       needs.changes.outputs.nix == 'true'
     permissions:
       contents: read
-    uses: ./.github/workflows/nix.lint.yaml
+    uses: $/.github/workflows/nix.lint.yaml
 
   deploy-docs:
     name: Deploy docs
@@ -95,4 +95,4 @@ jobs:
       contents: read
       pages: write  # To deploy to GitHub Pages
       id-token: write  # Required by actions/deploy-pages
-    uses: ./.github/workflows/docs.deploy.yaml
+    uses: $/.github/workflows/docs.deploy.yaml

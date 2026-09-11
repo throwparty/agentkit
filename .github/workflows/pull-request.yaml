@@ -30,7 +30,7 @@ jobs:
           persist-credentials: false
       - name: Check PR body for snapshot tag
         id: pr-body-check
-        uses: ./.github/actions/check-pr-body
+        uses: $/.github/actions/check-pr-body
         with:
           tag: snapshot
           body: ${{ github.event.pull_request.body }}
@@ -62,7 +62,7 @@ jobs:
     permissions:
       actions: write  # Called workflow uses it for cargo caches
       contents: read
-    uses: ./.github/workflows/agentkit.build-and-test.yaml
+    uses: $/.github/workflows/agentkit.build-and-test.yaml
 
   docs:
     name: Build docs
@@ -72,7 +72,7 @@ jobs:
       contents: read
       pages: read  # To configure Pages and upload build artifact
       id-token: write  # Required by actions/configure-pages
-    uses: ./.github/workflows/docs.build.yaml
+    uses: $/.github/workflows/docs.build.yaml
 
   lint-workflows:
     name: Lint workflows
@@ -80,7 +80,7 @@ jobs:
     if: needs.changes.outputs.workflows == 'true'
     permissions:
       contents: read
-    uses: ./.github/workflows/workflows.lint.yaml
+    uses: $/.github/workflows/workflows.lint.yaml
 
   lint-nix:
     name: Lint Nix
@@ -91,7 +91,7 @@ jobs:
       needs.changes.outputs.nix == 'true'
     permissions:
       contents: read
-    uses: ./.github/workflows/nix.lint.yaml
+    uses: $/.github/workflows/nix.lint.yaml
 
   update-hashes:
     name: Update cargo hashes
@@ -100,7 +100,7 @@ jobs:
     permissions:
       actions: write  # Called workflow uses it for nix caches
       contents: write  # Called workflow pushes hash updates
-    uses: ./.github/workflows/nix.update-hashes.yaml
+    uses: $/.github/workflows/nix.update-hashes.yaml
     with:
       head-ref: ${{ github.head_ref }}
       head-sha: ${{ github.event.pull_request.head.sha }}
@@ -118,7 +118,7 @@ jobs:
       actions: write  # Called workflow uses it for build caches
       contents: write  # Called workflow publishes snapshot artifacts
       id-token: write  # Called workflow uses keyless signing
-    uses: ./.github/workflows/agentkit.build-and-release.yaml
+    uses: $/.github/workflows/agentkit.build-and-release.yaml
     with:
       build-is-snapshot: true
 

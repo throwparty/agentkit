@@ -25,7 +25,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Nix
-        uses: ./.github/actions/setup-nix
+        uses: $/.github/actions/setup-nix
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Cache dependencies
