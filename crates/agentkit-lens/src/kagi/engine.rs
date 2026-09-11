@@ -120,7 +120,7 @@ impl SearchEngine for KagiSearchEngine {
             .body(body)
             .send()
             .await
-            .map_err(|e| SearchError::Network(e))?;
+            .map_err(SearchError::Network)?;
 
         let status = response.status().as_u16();
 
