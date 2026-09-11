@@ -53,7 +53,6 @@ flowchart TB
 
     subgraph Domain["Domain traits"]
         quota["domain/quota.rs<br/>ProviderQuotaBehaviour"]
-        conv["domain/conversation.rs<br/>ConversationHandler"]
         http["domain/http.rs<br/>HttpEndpoint"]
         sse["domain/sse.rs<br/>SseProcessor"]
     end
@@ -65,7 +64,6 @@ flowchart TB
 
     subgraph Subopenai["OpenAI"]
         oai_quota["quota.rs"]
-        oai_conv["conversation.rs"]
     end
 
     subgraph Subanthropic["Anthropic"]
@@ -169,13 +167,11 @@ sequenceDiagram
         CH->>CH: Store new tokens
     end
 
-    Note over R: Translate request body<br/>if Responses API
-    Note over R: Rewrite URL,<br/>inject auth header
+    Note over R: Forward body unchanged<br/>Rewrite URL, inject auth header
 
     R->>UP: Forward request
     UP-->>R: Response (SSE or JSON)
 
-    Note over R: Translate response body<br/>if Responses API
     Note over R: Parse rate-limit headers,<br/>update quota state
 
     R->>SDB: Update token counts

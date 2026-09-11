@@ -1,0 +1,17 @@
+# Native proxying
+
+The switchboard does **not** translate between API wire formats. Each surface has its own inbound endpoint and request/response bodies pass through unchanged.
+
+## Endpoints
+
+| Path | API Surface |
+|------|-------------|
+| `POST /openai/v1/chat/completions` | `openai-chat-completions` |
+| `POST /openai/v1/responses` | `openai-responses` |
+| `POST /anthropic/v1/messages` | `anthropic-messages` |
+| `GET /openai/v1/models` | model list |
+| `GET /health` | health check |
+
+Routing filters candidate providers by surface: a request at `/openai/v1/responses` only considers providers with `api_surface = "openai-responses"`. The forwarder sends the request body to the matched provider's endpoint unchanged and returns the upstream response body unchanged — the client sees the upstream body byte-for-byte. Token usage is parsed from the response for the session database.
+
+An early design translated Chat Completions ↔ Responses; that translation layer was removed and cross-surface translation is out of scope.
