@@ -58,4 +58,3 @@ Switchboard exposes a single OpenAI-compatible endpoint at `http://127.0.0.1:381
 - **Credential pooling**: multiple API keys or OAuth tokens for the same provider are treated as separate providers with independent rate-limit tracking.
 - **OAuth token management**: built-in `auth login` subcommand handles the OAuth authorization code flow with PKCE, stores tokens via a [credential helper](../utilities/credentials) (system keychain or file-based).
 - **Model metadata aggregation**: bundled models.dev snapshot merged with user TOML overrides provides a single source of truth for model capabilities and pricing.
-- **Protocol translation**: transparently converts between Chat Completions and Responses API formats for providers like Codex subscription.
