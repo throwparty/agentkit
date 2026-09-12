@@ -181,11 +181,13 @@
           {
             agentkit-lens = mkAgentkitBin "lens";
             agentkit-litterbox = mkAgentkitBin "litterbox";
+            agentkit-switchboard = mkAgentkitBin "switchboard";
           };
         checks = {
           inherit (self.packages.${system})
             agentkit-lens
             agentkit-litterbox
+            agentkit-switchboard
             ;
         };
       }
@@ -195,6 +197,7 @@
         inherit (self.packages.${final.system})
           agentkit-lens
           agentkit-litterbox
+          agentkit-switchboard
           ;
       };
     };
