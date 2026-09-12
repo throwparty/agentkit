@@ -1,6 +1,7 @@
 [advisories]
 db-urls = ["https://github.com/rustsec/advisory-db"]
 unmaintained = "all"
+git-fetch-with-cli = true
 
 [bans]
 multiple-versions = "warn"

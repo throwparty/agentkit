@@ -33,9 +33,10 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # ratchet:actions/cache@v6.1.0
         with:
           path: |
-            ~/.cargo/registry
-            ~/.cargo/git
+            .cargo/registry
+            .cargo/git
             target
+            .cargo/advisory-dbs
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Lint
         if: "!cancelled()"
