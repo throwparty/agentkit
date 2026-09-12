@@ -4,7 +4,7 @@ on:
   workflow_call: {}
 
 concurrency:
-  group: nix-lint-${{ github.event.pull_request.number || github.ref }}
+  group: nix.lint-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 
 permissions: {}

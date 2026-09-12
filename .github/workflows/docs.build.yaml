@@ -6,7 +6,7 @@ on:
 permissions: {}
 
 concurrency:
-  group: "pages"
+  group: docs.build
   cancel-in-progress: false
 
 jobs:
