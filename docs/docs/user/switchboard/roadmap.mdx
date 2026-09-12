@@ -7,7 +7,7 @@ sidebar_position: 100
 ## Additional model providers
 
 - **OpenRouter** — third-party aggregator with broad model selection and per-model pricing. Already covered by the existing `bearer_token` auth type — just needs a `[[providers]]` entry in the TOML config.
-- **OpenAI Codex Go/Zen** — new OpenAI subscription tiers with their own API surfaces and auth flows.
+- **OpenCode Go/Zen** — OpenCode's subscription tiers with their own auth flows on top of underlying model API surfaces.
 - **Anthropic (Claude subscription OAuth + Platform API keys)** — full first-class support for both authentication paths, including Claude Code's internal usage endpoint for quota-aware routing.
 - **GitHub Copilot** — subscription-based model access via GitHub's OAuth flow and API surface.
 - **AWS Bedrock** — enterprise deployment path. Notably uses different caching infrastructure than the Anthropic API directly (cache isolation per-organization vs per-workspace).
