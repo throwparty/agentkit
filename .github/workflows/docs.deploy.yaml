@@ -6,7 +6,7 @@ on:
 permissions: {}
 
 concurrency:
-  group: "pages"
+  group: docs.deploy
   cancel-in-progress: false
 
 jobs:
