@@ -7,6 +7,10 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    naersk = {
+      url = "github:nix-community/naersk";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     throwparty = {
       url = "git+ssh://git@github.com/throwparty/nix";
       inputs.flake-utils.follows = "flake-utils";
@@ -18,6 +22,7 @@
       flake-utils,
       nixpkgs,
       rust-overlay,
+      naersk,
       throwparty,
       self,
     }:
@@ -39,6 +44,10 @@
             "aarch64-unknown-linux-gnu"
             "aarch64-apple-darwin"
           ];
+        };
+        naersk' = pkgs.callPackage naersk {
+          cargo = rustToolchain;
+          rustc = rustToolchain;
         };
         inherit (pkgs.lib) getExe getExe';
         mingwBinutils = pkgs.pkgsCross.mingwW64.buildPackages.binutils;
@@ -153,22 +162,19 @@
               bin:
               let
                 qualifiedBin = "agentkit-${bin}";
-                commonCargoFlags = [
+              in
+              naersk'.buildPackage {
+                pname = qualifiedBin;
+                version = "0.1.0";
+                src = ../.;
+                cargoBuildFlags = [
                   "--package"
                   qualifiedBin
                   "--bin"
                   qualifiedBin
                 ];
-              in
-              pkgs.rustPlatform.buildRustPackage {
-                pname = qualifiedBin;
-                version = "0.1.0";
-
-                src = ../.;
-                cargoBuildFlags = commonCargoFlags;
-                cargoTestFlags = commonCargoFlags;
-                cargoDepsName = "agentkit";
-                cargoHash = "sha256-v+brLhI9hbiSNwuPSEW1WZ6rbeJcyYysKyO/9D3ttG0=";
+                nativeBuildInputs = with pkgs; [ pkg-config dbus openssl ];
+                buildInputs = with pkgs; [ dbus openssl ];
 
                 meta = {
                   description = "Provides fetch and search tools backed by various search engines.";
