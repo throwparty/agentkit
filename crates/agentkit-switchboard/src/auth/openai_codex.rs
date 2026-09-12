@@ -126,24 +126,19 @@ pub async fn login(identity: &str, config: &SwitchboardConfig) -> Result<String,
         }),
     };
 
-    if helper::put(helper_name, identity, &cred) {
-        Ok(format!(
+    match helper::put(helper_name, identity, &cred) {
+        Ok(()) => Ok(format!(
             "✓ Authentication complete (helper: agentkit-credential-{helper_name}).",
-        ))
-    } else {
-        Err(format!(
-            "credential helper 'agentkit-credential-{helper_name}' not found.\n  PATH:\n  {}",
-            crate::credential::helper::format_path_for_display(),
-        ))
+        )),
+        Err(e) => Err(e),
     }
 }
 
 pub async fn logout(identity: &str, config: &SwitchboardConfig) -> Result<String, String> {
     let helper_name = config.credential_helper.as_deref().unwrap_or("keychain");
-    if helper::delete(helper_name, identity) {
-        Ok(format!("✓ Credentials removed for '{identity}'"))
-    } else {
-        Err(format!("failed to erase credential for '{identity}'"))
+    match helper::delete(helper_name, identity) {
+        Ok(()) => Ok(format!("✓ Credentials removed for '{identity}'")),
+        Err(e) => Err(e),
     }
 }
 
@@ -184,12 +179,11 @@ pub async fn refresh_if_needed(
         }),
     };
 
-    if helper::put(helper_name, identity, &refreshed) {
-        Ok(refreshed)
-    } else {
-        Err(format!(
-            "failed to store refreshed credential for '{identity}'"
-        ))
+    match helper::put(helper_name, identity, &refreshed) {
+        Ok(()) => Ok(refreshed),
+        Err(e) => Err(format!(
+            "failed to store refreshed credential for '{identity}': {e}"
+        )),
     }
 }
 

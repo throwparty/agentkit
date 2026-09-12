@@ -49,7 +49,10 @@ pub fn run_helper_raw(
     stdin_data: Option<&str>,
 ) -> Result<Output, String> {
     let path = resolve_helper_path(helper_name).ok_or_else(|| {
-        format!("credential helper 'agentkit-credential-{helper_name}' not found")
+        format!(
+            "credential helper 'agentkit-credential-{helper_name}' not found.\n  Searched PATH:\n  {}\n  (target: agentkit-credential-{helper_name})",
+            format_path_for_display(),
+        )
     })?;
 
     let mut cmd = Command::new(&path);
@@ -65,20 +68,23 @@ pub fn run_helper_raw(
 
     let mut child = cmd
         .spawn()
-        .map_err(|e| format!("cannot spawn helper: {e}"))?;
+        .map_err(|e| format!("cannot spawn helper '{}': {e}", path.display()))?;
 
     if let Some(data) = stdin_data {
         if let Some(mut stdin) = child.stdin.take() {
             use std::io::Write;
             stdin
                 .write_all(data.as_bytes())
-                .map_err(|e| format!("cannot write to helper: {e}"))?;
+                .map_err(|e| format!("cannot write to helper '{}': {e}", path.display()))?;
         }
     }
 
-    child
-        .wait_with_output()
-        .map_err(|e| format!("helper wait failed: {e}"))
+    child.wait_with_output().map_err(|e| {
+        format!(
+            "helper '{}' wait failed for '{identity}': {e}",
+            path.display()
+        )
+    })
 }
 
 const COMPONENT: &str = "switchboard";
@@ -156,7 +162,38 @@ pub fn get(helper_name: &str, identity: &str) -> Option<ResolvedCredential> {
     result
 }
 
-pub fn put(helper_name: &str, identity: &str, credential: &ResolvedCredential) -> bool {
+fn check_helper_output(
+    helper_name: &str,
+    operation: &str,
+    identity: &str,
+    output: &Output,
+) -> Result<(), String> {
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let detail = stderr.trim();
+    let code = output
+        .status
+        .code()
+        .map(|c| c.to_string())
+        .unwrap_or_else(|| output.status.to_string());
+    if detail.is_empty() {
+        Err(format!(
+            "credential helper 'agentkit-credential-{helper_name}' failed to {operation} credential for '{identity}' (exited with {code}, no stderr)"
+        ))
+    } else {
+        Err(format!(
+            "credential helper 'agentkit-credential-{helper_name}' failed to {operation} credential for '{identity}' (exited with {code}): {detail}"
+        ))
+    }
+}
+
+pub fn put(
+    helper_name: &str,
+    identity: &str,
+    credential: &ResolvedCredential,
+) -> Result<(), String> {
     let json = serde_json::json!({
         "access_token": credential.value,
         "refresh_token": credential.oauth.as_ref().and_then(|o| o.refresh_token.as_deref()),
@@ -166,13 +203,11 @@ pub fn put(helper_name: &str, identity: &str, credential: &ResolvedCredential) -
         "account_id": credential.oauth.as_ref().and_then(|o| o.account_id.as_deref()),
     });
     let body = serde_json::to_string(&json).unwrap_or_default();
-    run_helper(helper_name, "put", identity, Some(&body))
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    let output = run_helper(helper_name, "put", identity, Some(&body))?;
+    check_helper_output(helper_name, "store", identity, &output)
 }
 
-pub fn delete(helper_name: &str, identity: &str) -> bool {
-    run_helper(helper_name, "delete", identity, None)
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+pub fn delete(helper_name: &str, identity: &str) -> Result<(), String> {
+    let output = run_helper(helper_name, "delete", identity, None)?;
+    check_helper_output(helper_name, "erase", identity, &output)
 }

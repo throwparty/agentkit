@@ -61,13 +61,66 @@ fn credential_helper_store_missing_binary() {
         oauth: None,
     };
     let result = helper::put("nonexistent-helper-xyz", "test_identity", &cred);
-    assert!(!result);
+    let err = result.expect_err("put with missing helper should fail");
+    assert!(
+        err.contains("agentkit-credential-nonexistent-helper-xyz")
+            && err.contains("not found"),
+        "error should identify the missing helper binary: {err}"
+    );
 }
 
 #[test]
 fn credential_helper_erase_missing_binary() {
     let result = helper::delete("nonexistent-helper-xyz", "test_identity");
-    assert!(!result);
+    let err = result.expect_err("delete with missing helper should fail");
+    assert!(
+        err.contains("agentkit-credential-nonexistent-helper-xyz")
+            && err.contains("not found"),
+        "error should identify the missing helper binary: {err}"
+    );
+}
+
+#[test]
+fn credential_helper_put_surfaces_helper_failure() {
+    // Reproduces https:// libdbus-style failures: the helper binary exists
+    // but exits non-zero (e.g. missing shared library -> exit 127). This must
+    // NOT be reported as "not found".
+    let dir = std::env::temp_dir().join(format!("agentkit-helper-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let helper_path = dir.join("agentkit-credential-failing-helper-xyz");
+    std::fs::write(
+        &helper_path,
+        "#!/usr/bin/env bash\necho 'error while loading shared libraries: libdbus-1.so.3' >&2\nexit 127\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&helper_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let old_path = std::env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{}", dir.display(), old_path);
+    std::env::set_var("PATH", &new_path);
+
+    let cred = ResolvedCredential {
+        value: "tok_test".into(),
+        source: CredentialSource::None,
+        oauth: None,
+    };
+    let result = helper::put("failing-helper-xyz", "test_identity", &cred);
+
+    std::env::set_var("PATH", &old_path);
+    std::fs::remove_dir_all(&dir).ok();
+
+    let err = result.expect_err("put with failing helper should fail");
+    assert!(
+        err.contains("127") && err.contains("libdbus-1.so.3"),
+        "error should surface exit code and stderr: {err}"
+    );
+    assert!(
+        !err.contains("not found"),
+        "helper failure must not be misreported as not found: {err}"
+    );
 }
 
 #[test]

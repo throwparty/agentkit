@@ -104,15 +104,11 @@ fn add_credential(
         },
         oauth: None,
     };
-    if helper::put(helper_name, identity, &cred) {
-        Ok(format!(
+    match helper::put(helper_name, identity, &cred) {
+        Ok(()) => Ok(format!(
             "✓ Credential stored for '{identity}' (helper: agentkit-credential-{helper_name})."
-        ))
-    } else {
-        Err(format!(
-            "credential helper 'agentkit-credential-{helper_name}' not found.\n  Searched PATH:\n  {}\n  (target: agentkit-credential-{helper_name})",
-            crate::credential::helper::format_path_for_display(),
-        ))
+        )),
+        Err(e) => Err(e),
     }
 }
 
