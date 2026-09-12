@@ -93,20 +93,6 @@ jobs:
       contents: read
     uses: $/.github/workflows/nix.lint.yaml
 
-  update-hashes:
-    name: Update cargo hashes
-    needs: changes
-    if: needs.changes.outputs.agentkit-cargo == 'true'
-    permissions:
-      actions: write # Called workflow uses it for nix caches
-      contents: write # Called workflow pushes hash updates
-    uses: $/.github/workflows/nix.update-hashes.yaml
-    with:
-      head-ref: ${{ github.head_ref }}
-      head-sha: ${{ github.event.pull_request.head.sha }}
-      pr-body: ${{ github.event.pull_request.body }}
-      is-fork: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
-
   release-snapshot:
     name: Release snapshot
     needs: changes
@@ -125,7 +111,7 @@ jobs:
   ready:
     name: Ready
     needs:
-      [test, docs, lint-workflows, lint-nix, update-hashes, release-snapshot]
+      [test, docs, lint-workflows, lint-nix, release-snapshot]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     steps:
