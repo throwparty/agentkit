@@ -1,4 +1,4 @@
-name: "Litterbox: build and test"
+name: "AgentKit: build and test"
 
 on:
   workflow_call: {}
