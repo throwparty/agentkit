@@ -119,12 +119,10 @@
                 cargo-deny
                 cargo-zigbuild
                 cosign
-                dbus
                 goreleaser
                 mdformat
                 mingwBinutils
                 nixfmt
-                openssl
                 otel-desktop-viewer
                 pkg-config
                 prettier
@@ -137,10 +135,18 @@
                 yq-go
                 zig
               ];
+              buildInputs = [ dbus openssl ];
               shellHook = ''
                 cat ${rustToolVersions}
                 export RUSTUP_HOME="$PWD/.rustup"
                 export CARGO_HOME="$PWD/.cargo"
+                # cargo-built binaries aren't patchelf'd, so the dynamic
+                # linker needs help finding Nix-provided shared libs
+                # (e.g. libdbus-1.so.3 for agentkit-credential-keychain).
+                export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [
+                  dbus
+                  openssl
+                ]}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
                 mkdir -p "$RUSTUP_HOME" "$CARGO_HOME"
                 rustup toolchain link nix "$(dirname "$(readlink -f "$(type -P rustc)")")/.."
                 rustup default nix
