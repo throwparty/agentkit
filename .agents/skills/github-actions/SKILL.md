@@ -13,7 +13,7 @@
 
 ### Workflow files
 
-Naming: `<scope>.<action>.yaml` (e.g. `nix.lint.yaml`, `nix.update-hashes.yaml`, `agentkit.build-and-test.yaml`).
+Naming: `<scope>.<action>.yaml` (e.g. `nix.lint.yaml`, `agentkit.build-and-test.yaml`).
 
 Workflow structure:
 
