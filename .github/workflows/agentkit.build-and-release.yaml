@@ -33,6 +33,7 @@ jobs:
       - name: Setup Nix
         uses: $/.github/actions/setup-nix
         with:
+          cachix-cache: ${{ vars.CACHIX_CACHE }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Cache macOS SDK
         id: cache-macos-sdk

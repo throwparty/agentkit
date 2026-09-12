@@ -27,6 +27,7 @@ jobs:
       - name: Setup Nix
         uses: $/.github/actions/setup-nix
         with:
+          cachix-cache: ${{ vars.CACHIX_CACHE }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Cache dependencies
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # ratchet:actions/cache@v6.1.0
