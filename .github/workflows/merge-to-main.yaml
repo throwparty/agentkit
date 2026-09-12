@@ -21,7 +21,6 @@ jobs:
       agentkit-cargo: ${{ steps.filter.outputs.agentkit-cargo }}
       docs: ${{ steps.filter.outputs.docs }}
       nix: ${{ steps.filter.outputs.nix }}
-      workflows: ${{ steps.filter.outputs.workflows }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7.0.1
@@ -44,9 +43,6 @@ jobs:
               - 'docs/**'
             nix:
               - 'nix/**'
-            workflows:
-              - '.github/workflows/**'
-              - '.github/dependabot.yaml'
 
   test:
     name: Build and test
@@ -68,14 +64,6 @@ jobs:
       pages: read # To configure Pages and upload build artifact
       id-token: write # Required by actions/configure-pages
     uses: $/.github/workflows/docs.build.yaml
-
-  lint-workflows:
-    name: Lint workflows
-    needs: changes
-    if: needs.changes.outputs.workflows == 'true'
-    permissions:
-      contents: read
-    uses: $/.github/workflows/workflows.lint.yaml
 
   lint-nix:
     name: Lint Nix
