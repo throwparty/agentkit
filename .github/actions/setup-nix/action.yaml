@@ -2,6 +2,15 @@ name: Setup Nix
 description: Install Nix and configure Git for flakes
 
 inputs:
+  cachix-cache:
+    description: Cachix cache name
+    required: true
+  cachix-auth-token:
+    description: Cachix authentication token
+    required: false
+  cachix-signing-key:
+    description: Cachix signing key
+    required: false
   github-token:
     description: GitHub token for flake authentication
     required: true
@@ -14,6 +23,12 @@ runs:
       with:
         extra_nix_config: |
           access-tokens = github.com=${{ inputs.github-token }}
+    - name: Use binary cache
+      uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # ratchet:cachix/cachix-action@v17
+      with:
+        name: ${{ inputs.cachix-cache }}
+        authToken: ${{ inputs.cachix-auth-token }}
+        signingKey: ${{ inputs.cachix-signing-key }}
     - name: Rewrite GitHub SSH URLs to HTTPS
       shell: bash
       run: .github/actions/setup-nix/setup-nix-git-config.sh

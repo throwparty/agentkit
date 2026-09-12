@@ -26,6 +26,7 @@ jobs:
       - name: Setup Nix
         uses: $/.github/actions/setup-nix
         with:
+          cachix-cache: ${{ vars.CACHIX_CACHE }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Run actionlint
         run: just workflows actionlint
