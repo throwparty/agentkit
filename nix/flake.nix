@@ -65,6 +65,7 @@
               cargo-zigbuild
               cosign
               dbus
+              git
               goreleaser
               mdformat
               nixfmt
@@ -119,6 +120,7 @@
                 cargo-deny
                 cargo-zigbuild
                 cosign
+                git
                 goreleaser
                 mdformat
                 mingwBinutils
