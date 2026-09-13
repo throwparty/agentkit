@@ -138,22 +138,26 @@
                 zig
               ];
               buildInputs = [ dbus openssl ];
-              shellHook = ''
-                cat ${rustToolVersions}
-                export RUSTUP_HOME="$PWD/.rustup"
-                export CARGO_HOME="$PWD/.cargo"
-                # cargo-built binaries aren't patchelf'd, so the dynamic
-                # linker needs help finding Nix-provided shared libs
-                # (e.g. libdbus-1.so.3 for agentkit-credential-keychain).
-                export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [
-                  dbus
-                  openssl
-                ]}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-                mkdir -p "$RUSTUP_HOME" "$CARGO_HOME"
-                rustup toolchain link nix "$(dirname "$(readlink -f "$(type -P rustc)")")/.."
-                rustup default nix
-                export PATH="$CARGO_HOME/bin:$PATH"
-              '';
+              shellHook =
+                let
+                  # Embed Nix library paths in RPATH of cargo-built binaries so
+                  # they can find Nix-provided shared libs (e.g. libdbus-1.so.3
+                  # for agentkit-credential-keychain) at runtime without setting
+                  # LD_LIBRARY_PATH globally (which breaks system binaries like git).
+                  rpathFlags = pkgs.lib.concatMapStringsSep " " (p: "-C link-arg=-Wl,-rpath,${p}") (
+                    pkgs.lib.splitString ":" (pkgs.lib.makeLibraryPath [ dbus openssl ])
+                  );
+                in
+                ''
+                  cat ${rustToolVersions}
+                  export RUSTUP_HOME="$PWD/.rustup"
+                  export CARGO_HOME="$PWD/.cargo"
+                  export RUSTFLAGS="${rpathFlags}''${RUSTFLAGS:+ $RUSTFLAGS}"
+                  mkdir -p "$RUSTUP_HOME" "$CARGO_HOME"
+                  rustup toolchain link nix "$(dirname "$(readlink -f "$(type -P rustc)")")/.."
+                  rustup default nix
+                  export PATH="$CARGO_HOME/bin:$PATH"
+                '';
             };
           in
           (mergeShells [
