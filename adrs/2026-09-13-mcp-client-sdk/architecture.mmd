@@ -1,0 +1,24 @@
+flowchart LR
+    subgraph Host["agentic coding harness (ACP server)"]
+        acp["ACP server (acp-server)"]
+        subgraph McpClient["MCP client (rmcp client feature)"]
+            role["RoleClient / ClientHandler"]
+            stdioTransport["transport-child-process (stdio)"]
+            httpTransport["transport-streamable-http-client-reqwest"]
+            models["rmcp::model (shared protocol types)"]
+        end
+    end
+    zed["Client (e.g. Zed)"] -- "ACP stdio or HTTP" --> acp
+    acp -- "mcpServers from session/new" --> role
+    role --> stdioTransport
+    role --> httpTransport
+    stdioTransport -- "spawn child + JSON-RPC" --> litterbox["MCP server (rmcp server, agentkit-litterbox / agentkit-lens)"]
+    httpTransport -- "streamable HTTP + TLS" --> remote["Remote MCP server"]
+    models -. shared with server role .- acp
+    subgraph Pocs["PoC phase: one shared reference server"]
+        shared["mcp-server (rmcp 3.3.0 server role, echo tool, stdio)"]
+        rmcpClient["poc-rmcp"]
+        rustSdkClient["poc-rust-mcp-sdk"]
+        rmcpClient -- "same binary" --> shared
+        rustSdkClient -- "same binary" --> shared
+    end
