@@ -14,7 +14,7 @@ Create poc_implementations/mcp-server: a Rust crate on the already-adopted serve
 | Depends On       |                                                                                                                                                    |
 | References       | stdio-transport, initialization-handshake, tool-discovery, tool-invocation, stdio-poc, current-protocol-era                                        |
 
-### T-002: Build rmcp stdio PoC
+### T-002: [x] Build rmcp stdio PoC
 
 Create poc_implementations/poc-rmcp: a Rust crate using rmcp 3.3.0 with features client and transport-child-process. Spawn the shared mcp-server via TokioChildProcess (explicit argv, no shell), complete the handshake over the current protocol era (server/discover), call list_all_tools(), then call the echo tool with a JSON message. Print tool count, first five tool names, and the tool result in a fixed output shape.
 
