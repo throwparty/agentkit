@@ -26,7 +26,7 @@ Create poc_implementations/poc-rmcp: a Rust crate using rmcp 3.3.0 with features
 | Depends On       | T-001                                                                                                                                                       |
 | References       | stdio-transport, initialization-handshake, tool-discovery, tool-invocation, stdio-poc                                                                       |
 
-### T-003: Build rust-mcp-sdk stdio PoC
+### T-003: [x] Build rust-mcp-sdk stdio PoC
 
 Create poc_implementations/poc-rust-mcp-sdk: a Rust crate using rust-mcp-sdk 2.0.0 with default-features disabled and features client and stdio. Spawn the same shared mcp-server via StdioTransport create_with_server_launch with a command string and explicit argv array, create the client runtime with ClientDetails, start it, call request_tool_list(), then call the echo tool. Print the same output shape as T-002.
 
