@@ -1,57 +1,22 @@
-use rmcp::{
-    ErrorData as McpError, ServerHandler,
-    handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    model::{CallToolResult, ContentBlock, ServerCapabilities, ServerInfo},
-    service::serve_server,
-    tool, tool_handler, tool_router,
-    transport::stdio,
-};
-use schemars::JsonSchema;
-use serde::Deserialize;
-
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-pub struct EchoArgs {
-    pub message: String,
-}
-
-pub struct EchoServer {
-    #[allow(dead_code)]
-    tool_router: ToolRouter<Self>,
-}
-
-#[tool_router]
-impl EchoServer {
-    #[allow(clippy::new_without_default)]
-    pub fn new() -> Self {
-        Self {
-            tool_router: Self::tool_router(),
-        }
-    }
-
-    #[tool(name = "echo", description = "Echo the provided message")]
-    async fn echo(
-        &self,
-        Parameters(args): Parameters<EchoArgs>,
-    ) -> Result<CallToolResult, McpError> {
-        Ok(CallToolResult::success(vec![ContentBlock::text(format!(
-            "Echo: {}",
-            args.message
-        ))]))
-    }
-}
-
-#[tool_handler]
-impl ServerHandler for EchoServer {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
-            .with_instructions("Shared reference MCP server for the client-SDK PoCs")
-    }
-}
+use mcp_server::{serve_stdio, serve_stdio_empty};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let (stdin, stdout) = stdio();
-    let running = serve_server(EchoServer::new(), (stdin, stdout)).await?;
-    running.waiting().await?;
-    Ok(())
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--http") {
+        let addr = args
+            .iter()
+            .position(|a| a == "--http")
+            .and_then(|i| args.get(i + 1))
+            .ok_or("--http requires an address")?;
+        let listener = tokio::net::TcpListener::bind(addr).await?;
+        let (url, _ct) = mcp_server::serve_http(listener).await;
+        println!("{url}");
+        std::future::pending::<()>().await;
+        Ok(())
+    } else if args.iter().any(|a| a == "--no-tools") {
+        serve_stdio_empty().await
+    } else {
+        serve_stdio().await
+    }
 }

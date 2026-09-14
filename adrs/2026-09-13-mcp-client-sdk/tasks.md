@@ -62,7 +62,7 @@ Decide the winning library by comparing the PoC runs against the spec: NFR-001 c
 | Depends On       | T-004                                                                                                                                                             |
 | References       | client-sdk-selected, consistency-with-existing-choice, stable-release, maintenance, ecosystem-fit, same-crate-as-server, fallback-path                            |
 
-### T-006: Extend the winner to streamable HTTP
+### T-006: [x] Extend the winner to streamable HTTP
 
 Extend the winning PoC crate with a second mode that connects over streamable HTTP (rmcp transport-streamable-http-client-reqwest or rust-mcp-sdk streamable-http feature) to a remote MCP server - run mcp-server's HTTP transport or another reachable server - then lists tools and calls one tool.
 
