@@ -73,6 +73,19 @@ Two candidates are carried forward to proof of concept. The PoC crates are writt
 
 Protocol-era finding (recorded from the first PoC run): the TS reference server @modelcontextprotocol/server-everything depends on @modelcontextprotocol/sdk ^1.30.0, whose LATEST_PROTOCOL_VERSION is 2025-11-25 and which registers no server/discover handler. rust-mcp-sdk 2.x implements only the stateless 2026-07-28 protocol, so it cannot connect to that server (-32601 Method not found on server/discover); rmcp 3.3.0 negotiates the legacy initialize handshake and succeeds. The comparison therefore uses the shared rmcp-based mcp-server, which speaks both eras, so each client is tested against the same server over the same protocol era. The server-everything mismatch is documented here as the reason the reference server is a shared Rust implementation rather than the TS reference package. pmcp receives no PoC - its missing client-side child spawn disqualifies it, and compensating would mean owning custom protocol plumbing. smg-mcp is not a competing SDK.
 
+### PoC runs (2026-09-14)
+
+Both PoCs ran against the same shared mcp-server (poc_implementations/mcp-server) via the runner at poc_implementations/run-pocs.sh. Each spawned the shared binary over stdio, completed the handshake over the current protocol era, listed tools, and called the echo tool. Output was identical in shape (fixed output shape from the ADR tasks):
+
+```
+handshake=complete
+tool_count=1
+first_five_tools=echo
+echo_result=Echo: Hello, MCP!
+```
+
+Both completed with exit 0; no failures. pomcp's missing client-side child spawn was confirmed against the shared server (no child-spawn transport exists), and smg-mcp was not run (not a standalone SDK). The protocol-era finding is recorded above.
+
 ### Provisional ranking
 
 1. rmcp - official SDK, complete client surface, shell-free spawn, dual-era lifecycle modes, and the only candidate sharing its type system with the server SDK already adopted in this workspace. Expected winner.
