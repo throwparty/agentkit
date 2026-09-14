@@ -50,7 +50,7 @@ Add a PoC runner (script or Makefile) that executes T-002 and T-003 against the 
 | Depends On       | T-002, T-003                                                                                                                                                                |
 | References       | candidate-comparison, stdio-poc, current-protocol-era                                                                                                                       |
 
-### T-005: Select the library and record the decision
+### T-005: [x] Select the library and record the decision
 
 Decide the winning library by comparing the PoC runs against the spec: NFR-001 consistency with the adopted rmcp server SDK, NFR-002 crates.io stability, both transports, conformance, and shared protocol types. Record the winner and the rationale in spec.toon's Evaluation section. If the winner is not rmcp (NFR-001/AC-005 conflict), amend the spec's acceptance criteria and non-functional requirements to match reality (EC-005). Move the ADR status to accepted.
 
