@@ -1,8 +1,10 @@
 [dependencies]
 tokio = {version = "1", features = ["macros", "rt-multi-thread", "process"]}
-rmcp = {version = "3.3.0", features = ["macros", "schemars", "server", "transport-io"]}
+rmcp = {version = "3.3.0", features = ["macros", "schemars", "server", "transport-io", "transport-streamable-http-server"]}
 schemars = "1.2"
 serde = {version = "1.0", features = ["derive"]}
+axum = {version = "0.8", default-features = false, features = ["http1", "tokio"]}
+tokio-util = "0.7"
 
 [package]
 name = "mcp-server"
