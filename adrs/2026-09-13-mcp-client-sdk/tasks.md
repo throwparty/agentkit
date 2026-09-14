@@ -2,7 +2,7 @@
 
 ## Tasks
 
-### T-001: Build the shared reference MCP server
+### T-001: [x] Build the shared reference MCP server
 
 Create poc_implementations/mcp-server: a Rust crate on the already-adopted server SDK (rmcp 3.3.0, features macros, schemars, server, transport-io) exposing an echo tool over stdio and implementing the current protocol era (2026-07-28 via server/discover) alongside the legacy initialize handshake. Both client PoCs must spawn this one binary - the server implementation is shared, never duplicated per client. The crate also exposes a helper (lib) that locates/builds the binary so both PoC test suites spawn the same server.
 
