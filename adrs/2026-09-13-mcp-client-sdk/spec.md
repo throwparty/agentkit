@@ -1,6 +1,6 @@
 # Choose an MCP client SDK for Rust
 
-**Status:** draft **Created:** 2026-09-13 **Author:** adrian
+**Status:** accepted **Created:** 2026-09-13 **Author:** adrian
 
 The agentic coding harness implements an ACP (Agent Client Protocol) server (adrs/2026-04-28-acp-server) and must act as an agent: it receives MCP server configuration from the client at session/new and connects out to those servers so the agent can call tools. Today the harness advertises mcpCapabilities {http: false, sse: false} and ignores the mcpServers field.
 
@@ -85,6 +85,10 @@ echo_result=Echo: Hello, MCP!
 ```
 
 Both completed with exit 0; no failures. pomcp's missing client-side child spawn was confirmed against the shared server (no child-spawn transport exists), and smg-mcp was not run (not a standalone SDK). The protocol-era finding is recorded above.
+
+### Decision (2026-09-14)
+
+Winner: **rmcp 3.3.0**. Both PoCs completed the full flow against the shared mcp-server, so the decision rests on the non-functional requirements. rmcp satisfies NFR-001 (it is the client of the already-adopted server SDK), FR-006/AC-005 (one protocol implementation and type system shared across roles in the same binary), NFR-002 (stable crates.io release 3.3.0), NFR-003 (official modelcontextprotocol reference implementation), and NFR-004 (Tokio + rustls, no new runtime). The protocol-era finding reinforces the choice: rmcp negotiates the legacy 2025-11-25 initialize handshake and the current 2026-07-28 stateless protocol, so it connects to both legacy-era servers (e.g. the TS reference server-everything) and current-era servers; rust-mcp-sdk 2.x is current-era only and fails with -32601 against a legacy-era server. rust-mcp-sdk 2.0.0 is the runner-up - strong conformance claim and a clean spawn API, but separate protocol types (forking the implementation) and no dual-era negotiation. pmcp was disqualified on interfaces (no client-side child spawn) and smg-mcp is not a standalone SDK.
 
 ### Provisional ranking
 
