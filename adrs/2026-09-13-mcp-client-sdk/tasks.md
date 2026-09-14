@@ -38,7 +38,7 @@ Create poc_implementations/poc-rust-mcp-sdk: a Rust crate using rust-mcp-sdk 2.0
 | Depends On       | T-001                                                                                                                                                |
 | References       | stdio-transport, initialization-handshake, tool-discovery, tool-invocation, stdio-poc                                                                |
 
-### T-004: Run and compare both PoCs
+### T-004: [x] Run and compare both PoCs
 
 Add a PoC runner (script or Makefile) that executes T-002 and T-003 against the same shared mcp-server and captures their stdout side by side. Verify both complete the full flow (handshake, tool list, tool call). Record the runs and any failures in the ADR comparison notes in spec.toon's Evaluation section, including the protocol-era finding: the TS reference server-everything implements only the legacy 2025-11-25 initialize handshake, so a 2026-07-28-only client SDK cannot connect to it; the shared mcp-server implements both eras so the comparison is apples-to-apples.
 
