@@ -1,0 +1,81 @@
+# MCP Client SDK - PoC and harness integration
+
+## Approach
+
+Two phases. Phase 1 picks the library with implementation-time proofs of concept, mirroring how the server-SDK ADR (2026-02-03) ran its POC harnesses: build one shared reference MCP server (poc_implementations/mcp-server) on the already-adopted server SDK (rmcp 3.3.0, server role) and build two client PoCs against that same server - poc-rmcp and poc-rust-mcp-sdk - each spawning the shared server binary over stdio, completing the handshake, listing tools, and calling the echo tool. One server, one implementation, shared by both clients; no per-client server copies. Compare the runs against the spec non-functional requirements (NFR-001 consistency with the already-adopted rmcp server SDK, NFR-002 crates.io stability, the two transports, conformance, shared protocol types), record the winner, and move this ADR to accepted. Phase 2 integrates the chosen SDK into the harness directly, per FR-006: add the dependency, connect per configured server (stdio child via the SDK's explicit-argv transport, or streamable HTTP for remote servers), list and call tools, and tear down on session close. No internal client abstraction is introduced - the harness uses the SDK as-is, one protocol implementation in the binary. Surfacing tools in ACP session/prompt turns is owned by the ACP server ADR and is out of scope here.
+
+## Architecture
+
+The harness uses the chosen client SDK directly (FR-006): one client handle per MCP server configured in an ACP session. Stdio servers are spawned with explicit argv through the SDK's child-process transport - no shell interpretation, only per-server configured env (EC-006); remote servers use the SDK's streamable HTTP client with verified TLS by default (NFR-005). Lifecycle per server: complete the handshake (initialize or server/discover per the negotiated protocol era), list tools, call tools with JSON arguments, disconnect on session close. Server-to-client notifications fall back to the SDK default handler; sampling, elicitation, and roots are deferred per the spec non-goals. The diagram below shows the intended end-state; the MCP client box is provisional until the Phase 1 PoCs select the SDK.
+
+```mermaid
+flowchart LR
+    subgraph Host["agentic coding harness (ACP server)"]
+        acp["ACP server (acp-server)"]
+        subgraph McpClient["MCP client (rmcp client feature)"]
+            role["RoleClient / ClientHandler"]
+            stdioTransport["transport-child-process (stdio)"]
+            httpTransport["transport-streamable-http-client-reqwest"]
+            models["rmcp::model (shared protocol types)"]
+        end
+    end
+    zed["Client (e.g. Zed)"] -- "ACP stdio or HTTP" --> acp
+    acp -- "mcpServers from session/new" --> role
+    role --> stdioTransport
+    role --> httpTransport
+    stdioTransport -- "spawn child + JSON-RPC" --> litterbox["MCP server (rmcp server, agentkit-litterbox / agentkit-lens)"]
+    httpTransport -- "streamable HTTP + TLS" --> remote["Remote MCP server"]
+    models -. shared with server role .- acp
+    subgraph Pocs["PoC phase: one shared reference server"]
+        shared["mcp-server (rmcp 3.3.0 server role, echo tool, stdio)"]
+        rmcpClient["poc-rmcp"]
+        rustSdkClient["poc-rust-mcp-sdk"]
+        rmcpClient -- "same binary" --> shared
+        rustSdkClient -- "same binary" --> shared
+    end
+```
+
+## Technologies
+
+| Technology         | Role                                                                                                                  |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| rmcp 3.3.0         | client candidate A (official modelcontextprotocol SDK); also the shared PoC reference server (server role)            |
+| rust-mcp-sdk 2.0.0 | client candidate B                                                                                                    |
+| mcp-server         | shared reference MCP server for the PoCs: rmcp 3.3.0 server role, current protocol era (2026-07-28), echo tool, stdio |
+| tokio              | async runtime for the harness and PoCs                                                                                |
+| serde_json         | JSON tool arguments and results                                                                                       |
+| rustls             | verified-by-default TLS for the streamable HTTP client (NFR-005)                                                      |
+
+## Components
+
+### mcp-server
+
+Shared reference server for both PoCs
+
+Built during implementation at poc_implementations/mcp-server: an rmcp 3.3.0 server-role binary exposing an echo tool over stdio, implementing the current protocol era (2026-07-28 via server/discover) plus the legacy initialize handshake. Both client PoCs spawn this one binary; no per-client server copies
+
+### poc-rmcp
+
+PoC crate for candidate A (rmcp)
+
+Built during implementation at poc_implementations/poc-rmcp: spawns the shared mcp-server via TokioChildProcess (explicit argv), completes the handshake (server/discover), calls list_all_tools(), and calls the echo tool with a JSON message; prints tool count, first five tool names, and the tool result
+
+### poc-rust-mcp-sdk
+
+PoC crate for candidate B (rust-mcp-sdk)
+
+Built during implementation at poc_implementations/poc-rust-mcp-sdk: StdioTransport create_with_server_launch (command plus argv array) against the same shared mcp-server, create_client plus start(), request_tool_list(), calls the echo tool; prints the same output shape as poc-rmcp for direct comparison
+
+### PoC runner
+
+Development script to execute both PoCs
+
+Runs poc-rmcp and poc-rust-mcp-sdk against the same shared mcp-server and captures their stdout side by side; fails loudly if either crate does not complete the handshake, list tools, or return a tool result
+
+## Data Flow
+
+ACP session/new supplies mcpServers. The harness connects to each configured server with the chosen SDK: stdio entries are spawned as explicit-argv children (EC-006), remote entries use the streamable HTTP client with verified TLS (NFR-005). Each connection completes the handshake (initialize for legacy-era servers, server/discover for current-era) and exposes tools/list and tools/call with JSON arguments; results return to the harness. On session/close the harness disconnects the clients and tears down the stdio children. Server-initiated notifications route to the SDK default handler; sampling, elicitation, and roots remain out of scope per the spec non-goals. How tools are surfaced to the ACP client is the ACP server ADR's concern.
+
+## Deployment
+
+The PoCs need only a Rust toolchain and the cargo workspace - no Node.js, no npx. The reference server is built from source at poc_implementations/mcp-server. The harness itself gains no new runtime dependency beyond the chosen SDK; production stdio servers are configured binaries or locally installed commands, and remote servers are reached over streamable HTTP with default-verified TLS. No infrastructure or deployment change.

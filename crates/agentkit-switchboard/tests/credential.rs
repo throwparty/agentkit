@@ -63,8 +63,7 @@ fn credential_helper_store_missing_binary() {
     let result = helper::put("nonexistent-helper-xyz", "test_identity", &cred);
     let err = result.expect_err("put with missing helper should fail");
     assert!(
-        err.contains("agentkit-credential-nonexistent-helper-xyz")
-            && err.contains("not found"),
+        err.contains("agentkit-credential-nonexistent-helper-xyz") && err.contains("not found"),
         "error should identify the missing helper binary: {err}"
     );
 }
@@ -74,8 +73,7 @@ fn credential_helper_erase_missing_binary() {
     let result = helper::delete("nonexistent-helper-xyz", "test_identity");
     let err = result.expect_err("delete with missing helper should fail");
     assert!(
-        err.contains("agentkit-credential-nonexistent-helper-xyz")
-            && err.contains("not found"),
+        err.contains("agentkit-credential-nonexistent-helper-xyz") && err.contains("not found"),
         "error should identify the missing helper binary: {err}"
     );
 }

@@ -1,0 +1,13 @@
+[dependencies]
+tokio = {version = "1", features = ["macros", "rt-multi-thread"]}
+rust-mcp-sdk = {version = "2.0.0", default-features = false, features = ["client", "stdio"]}
+async-trait = "0.1"
+serde = {version = "1.0", features = ["derive"]}
+serde_json = "1.0"
+mcp-server = {path = "../mcp-server"}
+
+[package]
+name = "poc-rust-mcp-sdk"
+version = "0.1.0"
+edition = "2021"
+default-run = "poc-rust-mcp-sdk"

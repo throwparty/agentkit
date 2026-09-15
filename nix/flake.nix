@@ -135,7 +135,10 @@
                 yq-go
                 zig
               ];
-              buildInputs = [ dbus openssl ];
+              buildInputs = [
+                dbus
+                openssl
+              ];
               shellHook =
                 let
                   # Embed Nix library paths in RPATH of cargo-built binaries so
@@ -143,7 +146,12 @@
                   # for agentkit-credential-keychain) at runtime without setting
                   # LD_LIBRARY_PATH globally (which breaks system binaries like git).
                   rpathFlags = pkgs.lib.concatMapStringsSep " " (p: "-C link-arg=-Wl,-rpath,${p}") (
-                    pkgs.lib.splitString ":" (pkgs.lib.makeLibraryPath [ dbus openssl ])
+                    pkgs.lib.splitString ":" (
+                      pkgs.lib.makeLibraryPath [
+                        dbus
+                        openssl
+                      ]
+                    )
                   );
                 in
                 ''
@@ -183,8 +191,15 @@
                   "--bin"
                   qualifiedBin
                 ];
-                nativeBuildInputs = with pkgs; [ pkg-config dbus openssl ];
-                buildInputs = with pkgs; [ dbus openssl ];
+                nativeBuildInputs = with pkgs; [
+                  pkg-config
+                  dbus
+                  openssl
+                ];
+                buildInputs = with pkgs; [
+                  dbus
+                  openssl
+                ];
 
                 meta = {
                   description = "Provides fetch and search tools backed by various search engines.";

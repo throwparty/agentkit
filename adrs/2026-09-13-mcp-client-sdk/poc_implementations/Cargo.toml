@@ -1,0 +1,7 @@
+[workspace]
+resolver = "3"
+members = [
+  "mcp-server",
+  "poc-rmcp",
+  "poc-rust-mcp-sdk"
+]

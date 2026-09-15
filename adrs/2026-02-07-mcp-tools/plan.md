@@ -22,6 +22,7 @@ The key architectural principle is to keep the agent SCM-agnostic. The agent foc
 
 - **Sandbox Environment:**
   - **Technology:** Docker containers. Offers strong process and filesystem isolation, ensuring that agent actions do not affect the host system or other sandboxes. Provides a consistent and reproducible environment.
+
 - **SCM:**
   - **Technology:** Git. Widely adopted, robust, and provides the necessary primitives for efficient snapshotting and history management.
 
