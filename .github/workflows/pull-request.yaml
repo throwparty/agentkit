@@ -110,8 +110,7 @@ jobs:
 
   ready:
     name: Ready
-    needs:
-      [test, docs, lint-workflows, lint-nix, release-snapshot]
+    needs: [test, docs, lint-workflows, lint-nix, release-snapshot]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     steps:
