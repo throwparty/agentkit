@@ -5,7 +5,7 @@ clap = {version = "4", features = ["derive"]}
 serde = {version = "1", features = ["derive"]}
 serde_json = "1"
 rustls-webpki = "0.103.15"
-lru = "0.16.3"
+lru = "0.18.4"
 
 [lib]
 name = "llm_sample"
