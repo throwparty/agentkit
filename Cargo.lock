@@ -108,7 +108,7 @@ dependencies = [
  "agentkit-models",
  "agentkit-path",
  "axum",
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "clap",
  "http-body-util",
