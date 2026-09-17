@@ -1,0 +1,87 @@
+# tackle configuration
+# User layer:     ~/.config/agentkit/tackle/config.toml
+# Project layer:  ./.agentkit/tackle/config.toml
+# Project overrides user, EXCEPT the [endpoints] section, which is rejected
+# with a named error if present in project configuration.
+
+# --- Model endpoints — USER CONFIGURATION ONLY -------------------------------
+# Multiple named upstreams; models are addressed as <endpoint>/<model>.
+# Each entry is one (base_url, wire_format) pair — the same provider can
+# appear twice under different wire formats. Wire presentation (Bearer vs
+# x-api-key) is derived from the wire format, never configured.
+# Credentials always resolve through a credential helper command on PATH,
+# invoked with the endpoint name as its identity — the same model as
+# switchboard. No secret values or env var names live in this file.
+credential_helper = "agentkit-credential"
+
+[endpoints.switchboard]
+base_url = "http://localhost:3812/openai/v1"
+wire_format = "openai-chat-completions"
+auth = "none"                                 # none | helper
+
+[endpoints.anthropic]
+base_url = "https://api.anthropic.com/v1"
+wire_format = "anthropic-messages"
+auth = "helper"                               # helper resolves the secret for identity "anthropic"
+
+[endpoints.ollama]
+base_url = "http://localhost:11434/v1"
+wire_format = "openai-chat-completions"
+auth = "none"
+models = ["llama3:8b", "qwen2.5-coder:32b"]   # optional static list when /models discovery is unavailable
+
+# --- Defaults ----------------------------------------------------------------
+[defaults]
+actor = "adrian"                              # used when the client does not select one
+model = "switchboard/claude-sonnet-4-5"       # endpoint-qualified; actors and the session model selector may override
+
+# --- Turn and session options ---------------------------------------------------
+[turns]
+max_model_requests = 8                        # cap per turn; the agent announces when it trips
+
+[sessions]
+include_ephemeral = false                     # when true, retained ephemeral sessions (compaction/titling forks)
+                                              # appear in session/list marked via _meta — inspection mode
+
+# --- MCP servers (both layers; merged with client-provided mcpServers) -------
+# Client-declared servers take precedence on name collisions; shadowed config
+# servers are reported in the first-turn status.
+[mcp_servers.litterbox]
+transport = "stdio"                           # stdio | http — the rmcp transport
+command = "litterbox"                         # explicit argv; no shell interpretation
+args = ["mcp"]
+
+[mcp_servers.litterbox.env]                   # explicit named entries only; no blanket forwarding
+LITTERBOX_LOG = "debug"
+
+[mcp_servers.docs]
+transport = "http"
+url = "https://mcp.example.com/v1"
+
+# --- Scripts -------------------------------------------------------------------
+# Rhai scripts registered against harness events. The event determines the
+# script's kind: pre_tool_use registrations run in policy engines (decision
+# inputs only, verdict expected); all other events run in behaviour engines
+# (host API available). Mixing decision and workflow events in one entry is a
+# configuration error. Files resolve from ./.agentkit/tackle/scripts/ then
+# ~/.config/agentkit/tackle/scripts/; project scripts require TOFU trust
+# consent (trust.toml) before loading. Any script entry may set
+# enabled = false to disable it, built-ins included; a disabling entry needs
+# no file.
+#
+# Built-in defaults (compaction, titling) are ordinary registrations at the
+# lowest precedence: define a script with the same name here to override one
+# wholesale — the shipped scripts double as customization examples.
+[scripts.deny-secrets]
+events = ["pre_tool_use"]
+file = "deny-secrets.rhai"
+
+[scripts.provision-sandbox]
+events = ["session_forked"]
+file = "provision-sandbox.rhai"
+# Scripts never invoke tools directly: they drive the model via send_prompt,
+# whose tool calls pass through the normal permission pipeline.
+#
+# Script-driven model work is bounded by fixed internal safety limits (live
+# ephemeral forks, prompts per script and turn, cost cap, await timeouts,
+# depth-one nesting) — deliberately not configurable.
