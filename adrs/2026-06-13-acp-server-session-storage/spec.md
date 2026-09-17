@@ -14,7 +14,7 @@ The current ACP server stores sessions in an in-memory `HashMap`. All state is l
 
 ## Scope
 
-This ADR covers the data model, storage engine selection, schema, and migration strategy for a **standalone library crate** (`acp-storage`) that is tested independently. Merging it into the ACP server is a future ADR. It does **not** cover the `session/fork` method handler itself (that is a separate feature building on this storage layer).
+This ADR covers the data model, storage engine selection, schema, and migration strategy for session storage. Originally scoped as a **standalone library crate** (`acp-storage`) with merging into the ACP server deferred to a future ADR; as decided in [tackle](../2026-09-17-tackle/spec.md) (architecture decision 2), it is instead delivered as a module of the tackle harness — the schema, engine evaluation, and migration strategy here are adopted as written, the standalone-crate scope is dropped, prompt turns are renamed to turns per the workspace CONTEXT.md, and the `SessionStore` trait with an in-memory backend is retained for testability. It does **not** cover the `session/fork` method handler itself (that is a separate feature building on this storage layer).
 
 ## Data Model: Three-Level Hierarchy
 
