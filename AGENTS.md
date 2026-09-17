@@ -16,6 +16,7 @@ We're building Litterbox, a tool for sandboxing agents doing software engineerin
 
 # Core concepts
 
+- Terminology and conventions are defined in [CONTEXT.md](CONTEXT.md) — normative for all components.
 - Sandboxes are pairs of SCM branches and some form of compute. SCM branches are the authoritative source of information about running sandboxes, and containers may be spun up from existing SCM branches in case of accidental deletion.
 
 # Key Modules for Agents
