@@ -16,7 +16,7 @@ tracing-opentelemetry = "0.33"
 tracing-subscriber = {version = "0.3", features = ["json", "env-filter", "registry"]}
 uuid = {version = "1", features = ["v4"]}
 axum = {version = "0.8", features = ["macros"]}
-tower-http = {version = "0.6", features = ["cors", "trace"]}
+tower-http = {version = "0.7", features = ["cors", "trace"]}
 sqlx = {version = "0.9", features = ["runtime-tokio", "sqlite", "migrate"]}
 oauth2 = {version = "5", default-features = false, features = ["reqwest", "pkce-plain"]}
 url = "2"
