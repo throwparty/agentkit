@@ -5,9 +5,11 @@
 //! are user-configuration only: a project layer declaring them is rejected
 //! with a named error, so a cloned repository cannot redirect model traffic
 //! or credential resolution (Scout finding 2). Project `mcp_servers`
-//! entries are accepted but trust-gated (see T-005).
+//! entries are accepted but trust-gated (see [`trust`]).
 
-use serde::Deserialize;
+pub mod trust;
+
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -73,8 +75,15 @@ pub enum ConfigError {
 
 /// Loads the layered configuration: the user layer from `user_dir/config.toml`
 /// (if present), overlaid by the project layer from
-/// `project_dir/config.toml` (if present, and subject to endpoint rejection).
-pub fn load_layered(user_dir: &Path, project_dir: Option<&Path>) -> Result<Loaded, ConfigError> {
+/// `project_dir/config.toml` (if present, and subject to endpoint rejection
+/// plus trust gating of executable entries — `mcp_servers` and `scripts` —
+/// before the merge, so shadowed user entries resurface when a project
+/// entry is refused).
+pub fn load_layered(
+    user_dir: &Path,
+    project_dir: Option<&Path>,
+    gate: Option<&mut trust::Gate<'_>>,
+) -> Result<Loaded, ConfigError> {
     let user_path = user_dir.join("config.toml");
     let user = load_file(&user_path)?;
 
@@ -84,7 +93,11 @@ pub fn load_layered(user_dir: &Path, project_dir: Option<&Path>) -> Result<Loade
         Some(path) => {
             let project = load_file(path)?.unwrap_or_default();
             reject_project_security_fields(&project)?;
-            project
+            if let Some(gate) = gate {
+                gate_project_entries(gate, project)
+            } else {
+                project
+            }
         }
         None => Config::default(),
     };
@@ -94,6 +107,33 @@ pub fn load_layered(user_dir: &Path, project_dir: Option<&Path>) -> Result<Loade
         user_layer: user_path.is_file().then_some(user_path),
         project_layer,
     })
+}
+
+/// Trust-gates the executable entries of a project layer (`mcp_servers`
+/// and `scripts`); unapproved entries are dropped before the merge. The
+/// hash covers the serialised entry, so any field change re-prompts.
+fn gate_project_entries(gate: &mut trust::Gate<'_>, project: Config) -> Config {
+    let mut entries = BTreeMap::new();
+    for (name, server) in &project.mcp_servers {
+        let serialised = toml::to_string(server).unwrap_or_default();
+        entries.insert(format!("mcp_servers/{name}"), trust::hash(&serialised));
+    }
+    for (name, script) in &project.scripts {
+        let serialised = toml::to_string(script).unwrap_or_default();
+        entries.insert(format!("scripts/{name}"), trust::hash(&serialised));
+    }
+    if entries.is_empty() {
+        return project;
+    }
+    let approved = gate.gate(&entries);
+    let mut project = project;
+    project
+        .mcp_servers
+        .retain(|name, _| approved.contains(&format!("mcp_servers/{name}")));
+    project
+        .scripts
+        .retain(|name, _| approved.contains(&format!("scripts/{name}")));
+    project
 }
 
 fn load_file(path: &Path) -> Result<Option<Config>, ConfigError> {
@@ -153,7 +193,7 @@ pub enum Auth {
     Helper,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "transport", rename_all = "lowercase")]
 pub enum McpServerConfig {
     Stdio {
@@ -168,7 +208,7 @@ pub enum McpServerConfig {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScriptConfig {
     pub events: Vec<String>,
     pub file: String,
@@ -250,8 +290,12 @@ mod tests {
     #[test]
     fn missing_layers_yield_default_config() {
         let dir = tempfile::tempdir().unwrap();
-        let loaded =
-            load_layered(&dir.path().join("user"), Some(&dir.path().join("project"))).unwrap();
+        let loaded = load_layered(
+            &dir.path().join("user"),
+            Some(&dir.path().join("project")),
+            None,
+        )
+        .unwrap();
         assert!(loaded.config.endpoints.is_empty());
         assert_eq!(loaded.config.defaults.actor, None);
         assert_eq!(loaded.user_layer, None);
@@ -269,8 +313,12 @@ mod tests {
             &dir.path().join("project"),
             "[defaults]\nactor = \"project-actor\"\n",
         );
-        let loaded =
-            load_layered(&dir.path().join("user"), Some(&dir.path().join("project"))).unwrap();
+        let loaded = load_layered(
+            &dir.path().join("user"),
+            Some(&dir.path().join("project")),
+            None,
+        )
+        .unwrap();
         assert_eq!(
             loaded.config.defaults.actor,
             Some("project-actor".to_string())
@@ -290,8 +338,12 @@ mod tests {
             &dir.path().join("project"),
             "[mcp_servers.tools]\ntransport = \"http\"\nurl = \"https://project.example.com\"\n",
         );
-        let loaded =
-            load_layered(&dir.path().join("user"), Some(&dir.path().join("project"))).unwrap();
+        let loaded = load_layered(
+            &dir.path().join("user"),
+            Some(&dir.path().join("project")),
+            None,
+        )
+        .unwrap();
         match loaded.config.mcp_servers.get("tools") {
             Some(McpServerConfig::Http { url }) => {
                 assert_eq!(url, "https://project.example.com")
@@ -307,8 +359,12 @@ mod tests {
             &dir.path().join("project"),
             "[endpoints.rogue]\nbase_url = \"https://rogue.example.com\"\nwire_format = \"openai-chat-completions\"\nauth = \"none\"\n",
         );
-        let err =
-            load_layered(&dir.path().join("user"), Some(&dir.path().join("project"))).unwrap_err();
+        let err = load_layered(
+            &dir.path().join("user"),
+            Some(&dir.path().join("project")),
+            None,
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("endpoints"), "{err}");
     }
 
@@ -319,8 +375,12 @@ mod tests {
             &dir.path().join("project"),
             "credential_helper = \"rogue\"\n",
         );
-        let err =
-            load_layered(&dir.path().join("user"), Some(&dir.path().join("project"))).unwrap_err();
+        let err = load_layered(
+            &dir.path().join("user"),
+            Some(&dir.path().join("project")),
+            None,
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("credential_helper"), "{err}");
     }
 
@@ -331,8 +391,12 @@ mod tests {
             &dir.path().join("user"),
             "[endpoints.switchboard]\nbase_url = \"http://localhost:3812/openai/v1\"\nwire_format = \"openai-chat-completions\"\nauth = \"none\"\n\n[defaults]\nmodel = \"switchboard/claude-sonnet-4-5\"\n",
         );
-        let loaded =
-            load_layered(&dir.path().join("user"), Some(&dir.path().join("project"))).unwrap();
+        let loaded = load_layered(
+            &dir.path().join("user"),
+            Some(&dir.path().join("project")),
+            None,
+        )
+        .unwrap();
         assert_eq!(loaded.config.endpoints.len(), 1);
         assert_eq!(
             loaded.config.defaults.model,
@@ -347,8 +411,12 @@ mod tests {
             &dir.path().join("user"),
             "[mcp_servers.litterbox]\ntransport = \"stdio\"\ncommand = \"litterbox\"\nargs = [\"mcp\"]\n\n[mcp_servers.litterbox.env]\nLITTERBOX_LOG = \"debug\"\n",
         );
-        let loaded =
-            load_layered(&dir.path().join("user"), Some(&dir.path().join("project"))).unwrap();
+        let loaded = load_layered(
+            &dir.path().join("user"),
+            Some(&dir.path().join("project")),
+            None,
+        )
+        .unwrap();
         match loaded.config.mcp_servers.get("litterbox") {
             Some(McpServerConfig::Stdio { command, args, env }) => {
                 assert_eq!(command, "litterbox");
@@ -366,8 +434,12 @@ mod tests {
             &dir.path().join("user"),
             "[scripts.deny-secrets]\nevents = [\"pre_tool_use\"]\nfile = \"deny-secrets.rhai\"\n",
         );
-        let loaded =
-            load_layered(&dir.path().join("user"), Some(&dir.path().join("project"))).unwrap();
+        let loaded = load_layered(
+            &dir.path().join("user"),
+            Some(&dir.path().join("project")),
+            None,
+        )
+        .unwrap();
         let script = loaded.config.scripts.get("deny-secrets").unwrap();
         assert!(script.enabled);
         assert_eq!(script.events, &["pre_tool_use"]);
