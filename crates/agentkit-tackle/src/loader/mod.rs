@@ -10,7 +10,7 @@
 
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 /// Maximum definition file size, bounding parse work.
@@ -69,6 +69,51 @@ pub struct Definitions {
 }
 
 impl Definitions {
+    /// Trust entries for every project-layer definition: relative path and
+    /// SHA-256 of the raw content.
+    pub fn project_trust_entries(&self, project_dir: &Path) -> BTreeMap<String, String> {
+        let mut entries = BTreeMap::new();
+        Self::collect_trust_entries(&self.personas, project_dir, &mut entries);
+        Self::collect_trust_entries(&self.actors, project_dir, &mut entries);
+        Self::collect_trust_entries(&self.prompts, project_dir, &mut entries);
+        entries
+    }
+
+    fn collect_trust_entries<T>(
+        map: &BTreeMap<String, Definition<T>>,
+        project_dir: &Path,
+        entries: &mut BTreeMap<String, String>,
+    ) {
+        for def in map.values() {
+            if let Ok(rel) = def.path.strip_prefix(project_dir) {
+                entries.insert(
+                    rel.to_string_lossy().to_string(),
+                    crate::config::trust::hash(&def.raw),
+                );
+            }
+        }
+    }
+
+    /// Drops project-layer definitions whose trust entries were refused.
+    pub fn retain_project(&mut self, project_dir: &Path, approved: &BTreeSet<String>) {
+        Self::retain_map(&mut self.personas, project_dir, approved);
+        Self::retain_map(&mut self.actors, project_dir, approved);
+        Self::retain_map(&mut self.prompts, project_dir, approved);
+    }
+
+    fn retain_map<T>(
+        map: &mut BTreeMap<String, Definition<T>>,
+        project_dir: &Path,
+        approved: &BTreeSet<String>,
+    ) {
+        map.retain(|_, def| {
+            match def.path.strip_prefix(project_dir) {
+                Ok(rel) => approved.contains(&rel.to_string_lossy().to_string()),
+                Err(_) => true, // not a project-layer definition
+            }
+        });
+    }
+
     /// Registers the built-in defaults at the lowest precedence: any
     /// discovered definition with the same name replaces the built-in.
     pub fn with_builtins(mut self) -> Self {
