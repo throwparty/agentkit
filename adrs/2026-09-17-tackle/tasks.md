@@ -28,7 +28,7 @@ Add config_dir alongside the existing data_dir in agentkit-path: platform config
 | Depends On |  |
 | References | config-discovery |
 
-### T-003: Layered configuration
+### T-003: [x] Layered configuration
 
 Implement config loading: user layer then project ./.agentkit/tackle/config.toml with project precedence; reject endpoint and credential fields in project configuration with named errors; project mcp_servers entries are accepted but trust-gated (T-005); config.example.toml is the schema of record
 
