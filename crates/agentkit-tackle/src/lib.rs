@@ -12,3 +12,6 @@ pub mod permissions;
 pub mod scripts;
 pub mod store;
 pub mod telemetry;
+
+/// Re-exported for integration tests and downstream consumers.
+pub use agent_client_protocol;
