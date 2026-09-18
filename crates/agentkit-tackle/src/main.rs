@@ -1,18 +1,6 @@
-//! Tackle: ACP-native agentic coding harness.
+//! Tackle: ACP-native agentic coding harness. Binary entrypoint.
 
-mod acp;
-mod agent;
-mod builtins;
-mod cli;
-mod config;
-mod invokables;
-mod loader;
-mod mcp;
-mod permissions;
-mod scripts;
-mod store;
-mod telemetry;
-
+use agentkit_tackle::{cli, config, loader, telemetry};
 use clap::Parser;
 
 fn main() -> std::process::ExitCode {
