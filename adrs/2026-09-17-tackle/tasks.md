@@ -93,7 +93,7 @@ Implement the recursive CTE walk from the session head stopping at compaction tu
 | Depends On | T-006 |
 | References | session-storage,compaction,testability |
 
-### T-008: Ownership leases and soft delete
+### T-008: [x] Ownership leases and soft delete
 
 Implement per-session ownership lease with heartbeat and expiry; session/prompt against an actively-owned session fails with a precise error; soft delete sets active=0, preserves turns referenced by forks, refuses live sessions
 
