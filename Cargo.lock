@@ -142,9 +142,13 @@ dependencies = [
 name = "agentkit-tackle"
 version = "0.1.0"
 dependencies = [
+ "agentkit-path",
  "clap",
+ "serde",
  "tempfile",
+ "thiserror 2.0.20",
  "tokio",
+ "toml",
  "tracing",
  "tracing-subscriber",
 ]
