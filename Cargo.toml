@@ -8,6 +8,7 @@ members = [
   "crates/agentkit-models",
   "crates/agentkit-path",
   "crates/agentkit-script",
-  "crates/agentkit-switchboard"
+  "crates/agentkit-switchboard",
+  "crates/agentkit-tackle"
 ]
 exclude = ["adrs"]
