@@ -80,7 +80,7 @@ Implement the storage module adopting the schema.sql DDL: sessions, turns, messa
 | Depends On | T-001 |
 | References | session-storage,session-lifecycle |
 
-### T-007: Context assembly and daggy mirror
+### T-007: [x] Context assembly and daggy mirror
 
 Implement the recursive CTE walk from the session head stopping at compaction turns with first_retained_turn_id resume; the in-memory daggy::Dag mirror maintained DB-first and rebuilt on conflict; property tests asserting SQL walks match daggy traversals
 
