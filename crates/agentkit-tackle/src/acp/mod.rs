@@ -10,12 +10,14 @@ use crate::config::Loaded;
 use crate::loader::Definitions;
 use crate::store::SessionStore;
 use agent_client_protocol::schema::v1::{
-    AgentCapabilities, InitializeRequest, InitializeResponse, McpCapabilities, PromptCapabilities,
-    SessionCapabilities, SessionCloseCapabilities, SessionDeleteCapabilities,
-    SessionForkCapabilities, SessionListCapabilities, SessionResumeCapabilities,
+    AgentCapabilities, CloseSessionResponse, DeleteSessionResponse, InitializeRequest,
+    InitializeResponse, ListSessionsResponse, McpCapabilities, NewSessionRequest,
+    NewSessionResponse, PromptCapabilities, SessionCapabilities, SessionCloseCapabilities,
+    SessionDeleteCapabilities, SessionForkCapabilities, SessionId, SessionInfo,
+    SessionListCapabilities, SessionResumeCapabilities,
 };
 use agent_client_protocol::schema::ProtocolVersion;
-use agent_client_protocol::{Agent, Stdio};
+use agent_client_protocol::{Agent, Error, Stdio};
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
@@ -120,6 +122,14 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
     let negotiation_for_init = negotiation.clone();
     let state_for_init = state.clone();
 
+    // The connection's lease-owner id — consumed from T-015 onward, when
+    // turns acquire leases on the session.
+    let _owner = Arc::new(format!("stdio-{}", uuid::Uuid::new_v4()));
+    let state_for_new = state.clone();
+    let state_for_list = state.clone();
+    let state_for_close = state.clone();
+    let state_for_delete = state.clone();
+
     Agent
         .builder()
         .name("tackle")
@@ -136,8 +146,116 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
             },
             agent_client_protocol::on_receive_request!(),
         )
+        .on_receive_request(
+            async move |request: NewSessionRequest, responder, _cx| {
+                // Default actor selection: [defaults].actor, else the
+                // built-in "default" (T-031 adds the client selector).
+                let actor = state_for_new
+                    .config
+                    .config
+                    .defaults
+                    .actor
+                    .clone()
+                    .unwrap_or_else(|| "default".into());
+                let metadata = serde_json::json!({ "actor": actor }).to_string();
+                let session = state_for_new
+                    .db
+                    .create_session(
+                        crate::store::SessionKind::Interactive,
+                        &request.cwd.to_string_lossy(),
+                        None,
+                        None,
+                        &metadata,
+                    )
+                    .await
+                    .map_err(|err| Error::internal_error().data(err.to_string()))?;
+                // MCP connections kick off asynchronously (T-018); session
+                // creation never blocks on them.
+                responder.respond(NewSessionResponse::new(SessionId::new(session.id)))
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |request: crate::agent_client_protocol::schema::v1::ListSessionsRequest,
+                        responder,
+                        _cx| {
+                let cwd = request
+                    .cwd
+                    .as_ref()
+                    .map(|cwd| cwd.to_string_lossy().to_string());
+                let filter = crate::store::ListFilter {
+                    cwd: cwd.as_deref(),
+                    include_ephemeral: state_for_list
+                        .config
+                        .config
+                        .sessions
+                        .include_ephemeral
+                        .unwrap_or(false),
+                    include_deleted: false,
+                };
+                let sessions = state_for_list
+                    .db
+                    .list_sessions(&filter)
+                    .await
+                    .map_err(|err| Error::internal_error().data(err.to_string()))?;
+                let infos: Vec<SessionInfo> = sessions
+                    .into_iter()
+                    .map(|session| {
+                        let mut info = SessionInfo::new(
+                            SessionId::new(session.id.clone()),
+                            session.cwd.clone(),
+                        )
+                        .updated_at(timestamp(session.updated_at));
+                        if !session.title.is_empty() {
+                            info = info.title(session.title.clone());
+                        }
+                        if let Some(owner) = &session.owner {
+                            let mut meta = agent_client_protocol::schema::v1::Meta::new();
+                            meta.insert("owner".into(), owner.clone().into());
+                            info = info.meta(meta);
+                        }
+                        info
+                    })
+                    .collect();
+                responder.respond(ListSessionsResponse::new(infos))
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |request: agent_client_protocol::schema::v1::CloseSessionRequest,
+                        responder,
+                        _cx| {
+                state_for_close
+                    .db
+                    .close_session(&request.session_id.to_string())
+                    .await
+                    .map_err(|err| Error::internal_error().data(err.to_string()))?;
+                responder.respond(CloseSessionResponse::new())
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |request: agent_client_protocol::schema::v1::DeleteSessionRequest,
+                        responder,
+                        _cx| {
+                state_for_delete
+                    .db
+                    .delete_session(&request.session_id.to_string())
+                    .await
+                    .map_err(|err| Error::internal_error().data(err.to_string()))?;
+                responder.respond(DeleteSessionResponse::new())
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
         .connect_to(Stdio::new())
         .await
+}
+
+/// RFC 3339 rendering of a unix-seconds timestamp (ACP `updatedAt`).
+fn timestamp(unix_seconds: i64) -> String {
+    jiff::Timestamp::from_second(unix_seconds)
+        .map(|ts| ts.to_string())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
