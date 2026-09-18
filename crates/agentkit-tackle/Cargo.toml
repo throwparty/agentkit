@@ -1,5 +1,9 @@
 [dependencies]
-agent-client-protocol = "2.2.0"
+agent-client-protocol = { version = "2.2.0", features = [
+  "unstable_session_fork",
+  "unstable_session_compaction",
+  "unstable_session_notices",
+] }
 agentkit-path = { path = "../agentkit-path" }
 clap = { version = "4", features = ["derive"] }
 daggy = "0.9.0"
