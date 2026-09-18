@@ -54,7 +54,7 @@ Discover and parse personas, actors, prompts, and scripts from config subdirecto
 | Depends On | T-003 |
 | References | first-run,config-discovery,reusable-prompts |
 
-### T-005: TOFU trust records
+### T-005: [x] TOFU trust records
 
 Maintain trust.toml in the user config directory: normalized repository remote mapping relative paths to SHA-256 hashes for project scripts, personas, actors, prompts, and mcp_servers entries; first-use consent flow behind a stubbed prompt interface, replaced by request_permission wiring in T-022; re-consent on hash change; load once at start, never hot-reload
 

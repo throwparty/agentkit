@@ -31,7 +31,28 @@ fn main() -> std::process::ExitCode {
         let db_path = cli::db_path(&args);
         let project_config_dir = cli::project_config_dir_at(std::path::Path::new("."));
         tracing::info!(db_path = %db_path.display(), "resolved paths");
-        let loaded = match config::load_layered(&user_config_dir, Some(&project_config_dir)) {
+
+        let identity = config::trust::project_identity(std::path::Path::new("."));
+        let trust_path = user_config_dir.join("trust.toml");
+        let mut trust_store = match config::trust::TrustStore::load(trust_path) {
+            Ok(store) => store,
+            Err(err) => {
+                eprintln!("tackle: {err}");
+                return;
+            }
+        };
+        let prompt = config::trust::DenyPrompt;
+        let mut gate = config::trust::Gate {
+            store: &mut trust_store,
+            identity: &identity,
+            prompt: &prompt,
+        };
+
+        let loaded = match config::load_layered(
+            &user_config_dir,
+            Some(&project_config_dir),
+            Some(&mut gate),
+        ) {
             Ok(loaded) => loaded,
             Err(err) => {
                 eprintln!("tackle: {err}");
@@ -47,13 +68,16 @@ fn main() -> std::process::ExitCode {
             "configuration loaded"
         );
 
-        let definitions = match loader::discover(&user_config_dir, Some(&project_config_dir)) {
+        let mut definitions = match loader::discover(&user_config_dir, Some(&project_config_dir)) {
             Ok(definitions) => definitions,
             Err(err) => {
                 eprintln!("tackle: {err}");
                 return;
             }
         };
+        let project_entries = definitions.project_trust_entries(&project_config_dir);
+        let approved = gate.gate(&project_entries);
+        definitions.retain_project(&project_config_dir, &approved);
         tracing::info!(
             personas = definitions.personas.len(),
             actors = definitions.actors.len(),
