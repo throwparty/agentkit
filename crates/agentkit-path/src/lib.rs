@@ -33,6 +33,26 @@ pub fn data_dir(component: &str) -> PathBuf {
     base.join(component)
 }
 
+/// Returns the platform-specific configuration directory for an AgentKit
+/// component, per the CONTEXT.md convention:
+/// - Linux:   `$HOME/.config/agentkit/<component>/`
+/// - macOS:   `$HOME/Library/Application Support/AgentKit/<component>/`
+/// - Windows: `$USERPROFILE/AppData/Roaming/AgentKit/<component>/`
+pub fn config_dir(component: &str) -> PathBuf {
+    let base = match std::env::consts::OS {
+        "macos" => PathBuf::from(home_dir())
+            .join("Library")
+            .join("Application Support")
+            .join("AgentKit"),
+        "windows" => PathBuf::from(home_dir())
+            .join("AppData")
+            .join("Roaming")
+            .join("AgentKit"),
+        _ => PathBuf::from(home_dir()).join(".config").join("agentkit"),
+    };
+    base.join(component)
+}
+
 fn home_dir() -> String {
     #[cfg(target_os = "macos")]
     {
@@ -62,5 +82,24 @@ mod tests {
     fn test_data_dir_is_absolute() {
         let path = data_dir("test");
         assert!(path.is_absolute());
+    }
+
+    #[test]
+    fn test_config_dir_ends_with_component() {
+        let path = config_dir("tackle");
+        assert!(path.ends_with("tackle"));
+    }
+
+    #[test]
+    fn test_config_dir_is_absolute() {
+        let path = config_dir("test");
+        assert!(path.is_absolute());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_config_dir_is_xdg_config_on_linux() {
+        let path = config_dir("tackle");
+        assert!(path.starts_with(PathBuf::from(home_dir()).join(".config").join("agentkit")));
     }
 }
