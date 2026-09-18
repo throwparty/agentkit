@@ -2,7 +2,7 @@
 
 ## Tasks
 
-### T-001: Crate scaffolding and CLI
+### T-001: [x] Crate scaffolding and CLI
 
 Create crates/agentkit-tackle as a workspace member with the twelve-module tree; implement cli.rs with clap: --transport stdio|http (default stdio), --bind, --http-port (default 127.0.0.1:3811), --db-path, --config-dir, --version; graceful shutdown on SIGINT/SIGTERM; all diagnostics to stderr
 
