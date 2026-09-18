@@ -50,6 +50,21 @@ async fn initialize_negotiates_v1_and_advertises_capabilities() {
             // No authentication in v1.
             assert!(response.auth_methods.is_empty());
 
+            // Unstable features are advertised via _meta and the fork
+            // capability (gated on SENDING, not advertising — FR-002).
+            let meta = response
+                .agent_capabilities
+                .meta
+                .as_ref()
+                .expect("unstable _meta");
+            assert!(meta.contains_key("unstable_session_fork"));
+            assert!(meta.contains_key("unstable_session_compaction"));
+            assert!(meta.contains_key("unstable_session_notices"));
+            assert!(
+                session_capabilities.fork.is_some(),
+                "session/fork capability"
+            );
+
             Ok(())
         })
         .await
