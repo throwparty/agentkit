@@ -42,6 +42,28 @@ pub struct Cli {
     pub config_dir: Option<PathBuf>,
 }
 
+/// Resolves the effective user configuration directory, honouring the
+/// CLI override.
+pub fn config_dir(args: &Cli) -> PathBuf {
+    args.config_dir
+        .clone()
+        .unwrap_or_else(|| agentkit_path::config_dir("tackle"))
+}
+
+/// Resolves the effective session database path, honouring the CLI override.
+pub fn db_path(args: &Cli) -> PathBuf {
+    args.db_path
+        .clone()
+        .unwrap_or_else(|| agentkit_path::data_dir("tackle").join("sessions.db"))
+}
+
+/// Resolves the effective project configuration directory anchored at an
+/// explicit working directory (used when the process cwd differs from the
+/// session cwd).
+pub fn project_config_dir_at(cwd: &std::path::Path) -> PathBuf {
+    cwd.join(".agentkit").join("tackle")
+}
+
 /// Waits for a shutdown signal: Ctrl-C, or SIGTERM on Unix.
 pub async fn wait_for_shutdown() {
     #[cfg(unix)]
@@ -69,5 +91,39 @@ mod tests {
         assert_eq!(args.transport, Transport::Stdio);
         assert_eq!(args.http_port, 3811);
         assert_eq!(args.bind, "127.0.0.1");
+    }
+
+    #[test]
+    fn config_dir_defaults_to_platform_path() {
+        let args = Cli::parse_from(["tackle"]);
+        let path = config_dir(&args);
+        assert!(path.is_absolute());
+        assert!(path.ends_with("tackle"));
+    }
+
+    #[test]
+    fn config_dir_override_is_honoured() {
+        let args = Cli::parse_from(["tackle", "--config-dir", "/tmp/tackle-cfg"]);
+        assert_eq!(config_dir(&args), PathBuf::from("/tmp/tackle-cfg"));
+    }
+
+    #[test]
+    fn db_path_defaults_to_data_dir() {
+        let args = Cli::parse_from(["tackle"]);
+        let path = db_path(&args);
+        assert!(path.ends_with("sessions.db"));
+        assert!(path.is_absolute());
+    }
+
+    #[test]
+    fn db_path_override_is_honoured() {
+        let args = Cli::parse_from(["tackle", "--db-path", "/tmp/tackle.db"]);
+        assert_eq!(db_path(&args), PathBuf::from("/tmp/tackle.db"));
+    }
+
+    #[test]
+    fn project_config_dir_anchors_at_cwd() {
+        let dir = project_config_dir_at(std::path::Path::new("/work"));
+        assert_eq!(dir, PathBuf::from("/work/.agentkit/tackle"));
     }
 }
