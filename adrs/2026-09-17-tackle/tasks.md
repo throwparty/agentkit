@@ -67,7 +67,7 @@ Maintain trust.toml in the user config directory: normalized repository remote m
 | Depends On | T-003,T-004 |
 | References | config-discovery,security-posture |
 
-### T-006: Storage module core
+### T-006: [x] Storage module core
 
 Implement the storage module adopting the schema.sql DDL: sessions, turns, messages, definitions, turn_definitions tables; SessionStore trait with SQLite (sqlx, WAL, busy_timeout, 0600 file perms) and in-memory backends; sqlx migrations; per-turn usage deltas on turns; permission grants are in-memory only and deliberately absent from the schema
 
