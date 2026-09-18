@@ -184,6 +184,8 @@ pub struct Session {
     pub active: bool,
     pub created_at: i64,
     pub updated_at: i64,
+    /// JSON blob: session-creation metadata (the selected actor, …).
+    pub metadata: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -289,6 +291,7 @@ impl SessionStore {
         cwd: &str,
         forked_from: Option<&SessionId>,
         fork_point: Option<&TurnId>,
+        metadata: &str,
     ) -> Result<Session, StoreError> {
         let id = new_id();
         let now = unix_now();
@@ -305,18 +308,20 @@ impl SessionStore {
             active: true,
             created_at: now,
             updated_at: now,
+            metadata: metadata.to_owned(),
         };
         match &self.backend {
             Backend::Sqlite(pool) => {
                 sqlx::query(
-                    "INSERT INTO sessions (id, kind, forked_from_session_id, fork_point_turn_id, cwd, created_at, updated_at) \
-                     VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO sessions (id, kind, forked_from_session_id, fork_point_turn_id, cwd, metadata, created_at, updated_at) \
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 )
                 .bind(&session.id)
                 .bind(kind.as_str())
                 .bind(forked_from)
                 .bind(fork_point)
                 .bind(cwd)
+                .bind(metadata)
                 .bind(now)
                 .bind(now)
                 .execute(pool)
@@ -690,6 +695,7 @@ struct SqliteSession {
     active: i64,
     created_at: i64,
     updated_at: i64,
+    metadata: String,
 }
 
 impl SqliteSession {
@@ -707,6 +713,7 @@ impl SqliteSession {
             active: self.active != 0,
             created_at: self.created_at,
             updated_at: self.updated_at,
+            metadata: self.metadata,
         }
     }
 }
@@ -796,7 +803,7 @@ mod tests {
 
     async fn crud_round_trip(store: &SessionStore) -> Result<(), StoreError> {
         let session = store
-            .create_session(SessionKind::Interactive, "/work", None, None)
+            .create_session(SessionKind::Interactive, "/work", None, None, "{}")
             .await?;
         assert!(session.head_turn_id.is_none());
 
@@ -823,7 +830,7 @@ mod tests {
     async fn turns_messages_and_usage_round_trip() {
         let store = SessionStore::in_memory();
         let session = store
-            .create_session(SessionKind::Interactive, "/work", None, None)
+            .create_session(SessionKind::Interactive, "/work", None, None, "{}")
             .await
             .unwrap();
 
@@ -866,7 +873,7 @@ mod tests {
     async fn ephemeral_sessions_are_filtered_from_listings() {
         let store = SessionStore::in_memory();
         store
-            .create_session(SessionKind::Ephemeral, "/work", None, None)
+            .create_session(SessionKind::Ephemeral, "/work", None, None, "{}")
             .await
             .unwrap();
 
@@ -952,7 +959,7 @@ mod tests {
     async fn linear_chain_assembles_oldest_first() {
         for store in [SessionStore::in_memory(), sqlite_memory_store().await] {
             let session = store
-                .create_session(SessionKind::Interactive, "/work", None, None)
+                .create_session(SessionKind::Interactive, "/work", None, None, "{}")
                 .await
                 .unwrap();
             let mut parent = None;
@@ -977,7 +984,7 @@ mod tests {
     async fn full_compaction_elides_everything_below_the_summary() {
         for store in [SessionStore::in_memory(), sqlite_memory_store().await] {
             let session = store
-                .create_session(SessionKind::Interactive, "/work", None, None)
+                .create_session(SessionKind::Interactive, "/work", None, None, "{}")
                 .await
                 .unwrap();
             let t1 =
@@ -1015,7 +1022,7 @@ mod tests {
     async fn keep_recent_compaction_retains_range_and_summary_sorts_first() {
         for store in [SessionStore::in_memory(), sqlite_memory_store().await] {
             let session = store
-                .create_session(SessionKind::Interactive, "/work", None, None)
+                .create_session(SessionKind::Interactive, "/work", None, None, "{}")
                 .await
                 .unwrap();
             let t1 =
@@ -1072,7 +1079,7 @@ mod tests {
     async fn turns_after_compaction_come_after_the_retained_range() {
         for store in [SessionStore::in_memory(), sqlite_memory_store().await] {
             let session = store
-                .create_session(SessionKind::Interactive, "/work", None, None)
+                .create_session(SessionKind::Interactive, "/work", None, None, "{}")
                 .await
                 .unwrap();
             let t1 =
@@ -1129,11 +1136,11 @@ mod tests {
             let sqlite_store = sqlite_memory_store().await;
 
             let session = memory_store
-                .create_session(SessionKind::Interactive, "/work", None, None)
+                .create_session(SessionKind::Interactive, "/work", None, None, "{}")
                 .await
                 .unwrap();
             let sqlite_session = sqlite_store
-                .create_session(SessionKind::Interactive, "/work", None, None)
+                .create_session(SessionKind::Interactive, "/work", None, None, "{}")
                 .await
                 .unwrap();
 
@@ -1251,7 +1258,7 @@ mod tests {
 
     async fn lease_round_trip(store: &SessionStore) -> Result<(), StoreError> {
         let session = store
-            .create_session(SessionKind::Interactive, "/work", None, None)
+            .create_session(SessionKind::Interactive, "/work", None, None, "{}")
             .await?;
 
         // Contention: the first owner wins; the second is refused.
@@ -1298,7 +1305,7 @@ mod tests {
     async fn expired_leases_are_stealable() -> Result<(), StoreError> {
         for store in [SessionStore::in_memory(), sqlite_memory_store().await] {
             let session = store
-                .create_session(SessionKind::Interactive, "/work", None, None)
+                .create_session(SessionKind::Interactive, "/work", None, None, "{}")
                 .await?;
             // A lease already expired when acquired: a negative ttl puts
             // the expiry in the past.

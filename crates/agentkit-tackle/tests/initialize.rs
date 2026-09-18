@@ -3,7 +3,9 @@
 //! binary as a subprocess and drives it with the SDK's client — the same
 //! shape the golden transcripts replay.
 
-use agentkit_tackle::agent_client_protocol::schema::v1::{InitializeRequest, SessionCapabilities};
+use agentkit_tackle::agent_client_protocol::schema::v1::{
+    InitializeRequest, ListSessionsRequest, NewSessionRequest, SessionCapabilities,
+};
 use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
 
@@ -69,4 +71,72 @@ async fn initialize_negotiates_v1_and_advertises_capabilities() {
         })
         .await
         .expect("initialize handshake");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn session_lifecycle_round_trips() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = spawn_agent(dir.path());
+
+    Client
+        .builder()
+        .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
+            connection
+                .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+
+            // session/new: immediate return with a session id.
+            let created = connection
+                .send_request(NewSessionRequest::new(std::path::PathBuf::from("/work")))
+                .block_task()
+                .await?;
+            let session_id = created.session_id.clone();
+
+            // session/list: the new session appears, ordered, with cwd.
+            let listed = connection
+                .send_request(ListSessionsRequest::new())
+                .block_task()
+                .await?;
+            assert_eq!(listed.sessions.len(), 1);
+            assert_eq!(listed.sessions[0].session_id, session_id);
+            assert_eq!(listed.sessions[0].cwd, std::path::PathBuf::from("/work"));
+            assert!(listed.next_cursor.is_none());
+
+            // session/close: the session stays listable.
+            let closed = connection
+                .send_request(
+                    agentkit_tackle::agent_client_protocol::schema::v1::CloseSessionRequest::new(
+                        session_id.clone(),
+                    ),
+                )
+                .block_task()
+                .await?;
+            let _ = closed;
+            let listed = connection
+                .send_request(ListSessionsRequest::new())
+                .block_task()
+                .await?;
+            assert_eq!(listed.sessions.len(), 1, "close keeps the session listable");
+
+            // session/delete: hides it.
+            let deleted = connection
+                .send_request(
+                    agentkit_tackle::agent_client_protocol::schema::v1::DeleteSessionRequest::new(
+                        session_id.clone(),
+                    ),
+                )
+                .block_task()
+                .await?;
+            let _ = deleted;
+            let listed = connection
+                .send_request(ListSessionsRequest::new())
+                .block_task()
+                .await?;
+            assert!(listed.sessions.is_empty(), "delete hides the session");
+
+            Ok(())
+        })
+        .await
+        .expect("session lifecycle round-trip");
 }
