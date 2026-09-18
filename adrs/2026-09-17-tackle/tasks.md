@@ -41,7 +41,7 @@ Implement config loading: user layer then project ./.agentkit/tackle/config.toml
 | Depends On | T-002 |
 | References | config-discovery,model-endpoint-config |
 
-### T-004: Definition loading
+### T-004: [x] Definition loading
 
 Discover and parse personas, actors, prompts, and scripts from config subdirectories; frontmatter dispatch: --- as YAML via yaml_serde, +++ as TOML via toml; bounded parsing with size caps; validation errors name file and key; built-in default persona and actor compiled in via include_str as fallbacks
 

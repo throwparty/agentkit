@@ -47,6 +47,20 @@ fn main() -> std::process::ExitCode {
             "configuration loaded"
         );
 
+        let definitions = match loader::discover(&user_config_dir, Some(&project_config_dir)) {
+            Ok(definitions) => definitions,
+            Err(err) => {
+                eprintln!("tackle: {err}");
+                return;
+            }
+        };
+        tracing::info!(
+            personas = definitions.personas.len(),
+            actors = definitions.actors.len(),
+            prompts = definitions.prompts.len(),
+            "definitions loaded"
+        );
+
         // The ACP server (T-009) replaces this stub; until then the process
         // idles until shutdown is requested.
         cli::wait_for_shutdown().await;
