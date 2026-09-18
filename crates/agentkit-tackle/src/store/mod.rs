@@ -20,6 +20,8 @@ pub type MessageId = String;
 pub enum StoreError {
     #[error("store is misconfigured: {0}")]
     Config(String),
+    #[error("session {session} is actively owned by {owner}")]
+    LeaseHeld { session: SessionId, owner: String },
     #[error("database error: {0}")]
     Sqlx(#[from] sqlx::Error),
     #[error("migration failed: {0}")]
@@ -175,6 +177,10 @@ pub struct Session {
     pub fork_point_turn_id: Option<TurnId>,
     pub cwd: String,
     pub title: String,
+    /// The live ownership lease, if any: the owning connection id and the
+    /// absolute expiry (unix seconds).
+    pub owner: Option<String>,
+    pub lease_expires_at: Option<i64>,
     pub active: bool,
     pub created_at: i64,
     pub updated_at: i64,
@@ -294,6 +300,8 @@ impl SessionStore {
             fork_point_turn_id: fork_point.cloned(),
             cwd: cwd.to_owned(),
             title: String::new(),
+            owner: None,
+            lease_expires_at: None,
             active: true,
             created_at: now,
             updated_at: now,
@@ -370,18 +378,115 @@ impl SessionStore {
         Ok(())
     }
 
-    /// Soft-deletes a session: hidden from listings, turns preserved for
-    /// forks that reference them.
-    pub async fn delete_session(&self, id: &SessionId) -> Result<(), StoreError> {
+    /// Attempts to acquire the session's ownership lease for `owner` for
+    /// `ttl_secs`. Succeeds if the lease is free or expired. A session
+    /// actively owned by another connection must not accept turns.
+    pub async fn acquire_lease(
+        &self,
+        session_id: &SessionId,
+        owner: &str,
+        ttl_secs: i64,
+    ) -> Result<bool, StoreError> {
+        let now = unix_now();
         match &self.backend {
             Backend::Sqlite(pool) => {
-                sqlx::query("UPDATE sessions SET active = 0, updated_at = ? WHERE id = ?")
-                    .bind(unix_now())
-                    .bind(id)
-                    .execute(pool)
-                    .await?;
+                let result = sqlx::query(
+                    "UPDATE sessions SET owner_connection = ?, lease_expires_at = ? \
+                     WHERE id = ? AND (owner_connection IS NULL OR lease_expires_at < ?)",
+                )
+                .bind(owner)
+                .bind(now + ttl_secs)
+                .bind(session_id)
+                .bind(now)
+                .execute(pool)
+                .await?;
+                Ok(result.rows_affected() == 1)
             }
-            Backend::Memory(_) => self.lock_memory().delete_session(id),
+            Backend::Memory(_) => {
+                Ok(self
+                    .lock_memory()
+                    .acquire_lease(session_id, owner, now + ttl_secs, now))
+            }
+        }
+    }
+
+    /// Refreshes the lease; false if another connection holds it.
+    pub async fn heartbeat_lease(
+        &self,
+        session_id: &SessionId,
+        owner: &str,
+        ttl_secs: i64,
+    ) -> Result<bool, StoreError> {
+        let now = unix_now();
+        match &self.backend {
+            Backend::Sqlite(pool) => {
+                let result = sqlx::query(
+                    "UPDATE sessions SET lease_expires_at = ? \
+                     WHERE id = ? AND owner_connection = ?",
+                )
+                .bind(now + ttl_secs)
+                .bind(session_id)
+                .bind(owner)
+                .execute(pool)
+                .await?;
+                Ok(result.rows_affected() == 1)
+            }
+            Backend::Memory(_) => {
+                Ok(self
+                    .lock_memory()
+                    .heartbeat_lease(session_id, owner, now + ttl_secs))
+            }
+        }
+    }
+
+    /// The current lease holder, if the lease is live.
+    pub async fn lease_holder(&self, session_id: &SessionId) -> Result<Option<String>, StoreError> {
+        let now = unix_now();
+        match &self.backend {
+            Backend::Sqlite(pool) => {
+                let owner: Option<String> = sqlx::query_scalar(
+                    "SELECT owner_connection FROM sessions \
+                     WHERE id = ? AND lease_expires_at >= ?",
+                )
+                .bind(session_id)
+                .bind(now)
+                .fetch_optional(pool)
+                .await?
+                .flatten();
+                Ok(owner)
+            }
+            Backend::Memory(_) => Ok(self.lock_memory().lease_holder(session_id, now)),
+        }
+    }
+
+    /// Soft-deletes a session: hidden from listings, turns preserved for
+    /// forks that reference them. Refused while the session is actively
+    /// leased; close first.
+    pub async fn delete_session(&self, id: &SessionId) -> Result<(), StoreError> {
+        let now = unix_now();
+        match &self.backend {
+            Backend::Sqlite(pool) => {
+                let result = sqlx::query(
+                    "UPDATE sessions SET active = 0, updated_at = ? \
+                     WHERE id = ? AND (owner_connection IS NULL OR lease_expires_at < ?)",
+                )
+                .bind(now)
+                .bind(id)
+                .bind(now)
+                .execute(pool)
+                .await?;
+                if result.rows_affected() == 0 {
+                    if let Some(owner) = self.lease_holder(id).await? {
+                        return Err(StoreError::LeaseHeld {
+                            session: id.clone(),
+                            owner,
+                        });
+                    }
+                    // No rows and no live lease: unknown or already deleted —
+                    // idempotent success.
+                }
+            }
+            Backend::Memory(_) => self.lock_memory().delete_session(id, now)?,
         }
         Ok(())
     }
@@ -580,6 +685,8 @@ struct SqliteSession {
     fork_point_turn_id: Option<String>,
     cwd: String,
     title: String,
+    owner_connection: Option<String>,
+    lease_expires_at: Option<i64>,
     active: i64,
     created_at: i64,
     updated_at: i64,
@@ -595,6 +702,8 @@ impl SqliteSession {
             fork_point_turn_id: self.fork_point_turn_id,
             cwd: self.cwd,
             title: self.title,
+            owner: self.owner_connection,
+            lease_expires_at: self.lease_expires_at,
             active: self.active != 0,
             created_at: self.created_at,
             updated_at: self.updated_at,
@@ -1136,5 +1245,67 @@ mod tests {
                 "seed {seed}: SQL assembly must match the daggy oracle"
             );
         }
+    }
+
+    // --- Ownership leases (T-008) ---
+
+    async fn lease_round_trip(store: &SessionStore) -> Result<(), StoreError> {
+        let session = store
+            .create_session(SessionKind::Interactive, "/work", None, None)
+            .await?;
+
+        // Contention: the first owner wins; the second is refused.
+        assert!(store.acquire_lease(&session.id, "conn-a", 60).await?);
+        assert!(!store.acquire_lease(&session.id, "conn-b", 60).await?);
+        assert_eq!(
+            store.lease_holder(&session.id).await?,
+            Some("conn-a".into())
+        );
+
+        // Heartbeat by the owner refreshes; by another is refused.
+        assert!(store.heartbeat_lease(&session.id, "conn-a", 60).await?);
+        assert!(!store.heartbeat_lease(&session.id, "conn-b", 60).await?);
+
+        // Soft delete is refused while actively leased.
+        let err = store.delete_session(&session.id).await.unwrap_err();
+        assert!(
+            matches!(&err, StoreError::LeaseHeld { owner, .. } if owner == "conn-a"),
+            "{err}"
+        );
+
+        // Close releases the lease; delete then succeeds.
+        store.close_session(&session.id).await?;
+        assert_eq!(store.lease_holder(&session.id).await?, None);
+        store.delete_session(&session.id).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn lease_round_trips_on_memory() {
+        lease_round_trip(&SessionStore::in_memory()).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn lease_round_trips_on_sqlite() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SessionStore::connect_sqlite(&dir.path().join("sessions.db"))
+            .await
+            .unwrap();
+        lease_round_trip(&store).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn expired_leases_are_stealable() -> Result<(), StoreError> {
+        for store in [SessionStore::in_memory(), sqlite_memory_store().await] {
+            let session = store
+                .create_session(SessionKind::Interactive, "/work", None, None)
+                .await?;
+            // A lease already expired when acquired: a negative ttl puts
+            // the expiry in the past.
+            assert!(store.acquire_lease(&session.id, "stale", -1).await?);
+            assert!(store.acquire_lease(&session.id, "fresh", 60).await?);
+            assert_eq!(store.lease_holder(&session.id).await?, Some("fresh".into()));
+        }
+        Ok(())
     }
 }
