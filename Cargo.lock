@@ -197,6 +197,7 @@ dependencies = [
  "clap",
  "daggy",
  "git2",
+ "jiff",
  "petgraph",
  "serde",
  "serde_json",

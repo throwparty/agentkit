@@ -132,7 +132,7 @@ Advertise loadSession, sessionCapabilities for list close resume delete, promptC
 | Depends On | T-009 |
 | References | capability-advertisement,protocol-conformance |
 
-### T-011: Session lifecycle methods
+### T-011: [x] Session lifecycle methods
 
 Implement session/new (immediate return, default actor selection, MCP connect kicked off asynchronously), session/list (updatedAt descending, cwd filter, cursor pagination, include_ephemeral option with _meta marking, ownership lease surfaced per session), session/close (cancels work, releases the lease, session stays listable), session/delete (soft-hides from list)
 
