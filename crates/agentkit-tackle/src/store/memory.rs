@@ -2,7 +2,9 @@
 //! semantics — the readable reference the SQLite queries are tested
 //! against. Not durable; the test backend.
 
-use super::{ListFilter, Message, Session, SessionId, SessionKind, Turn, TurnId, TurnUsage};
+use super::{
+    ListFilter, Message, Session, SessionId, SessionKind, Turn, TurnId, TurnKind, TurnUsage,
+};
 use std::collections::BTreeMap;
 
 #[derive(Default)]
@@ -69,5 +71,57 @@ impl MemoryData {
             .filter(|turn| turn.session_id == *session_id)
             .map(|turn| turn.usage)
             .fold(TurnUsage::default(), TurnUsage::add)
+    }
+
+    /// The parent-chain walk from the head with the compaction truncation
+    /// state machine — the Rust mirror of the SQL CTE.
+    fn context_walk(&self, session_id: &SessionId) -> Vec<(TurnId, TurnKind)> {
+        let session = match self.sessions.get(session_id) {
+            Some(session) => session,
+            None => return Vec::new(),
+        };
+        let mut walk = Vec::new();
+        let mut stop_at: Option<TurnId> = None;
+        let mut current = session.head_turn_id.clone();
+
+        while let Some(id) = current {
+            let Some(turn) = self.turns.get(&id) else {
+                break; // dangling parent: defensive stop
+            };
+            walk.push((id.clone(), turn.kind));
+
+            if turn.kind == TurnKind::Compaction {
+                match &turn.first_retained_turn_id {
+                    None => break, // full compaction
+                    Some(retained) => {
+                        stop_at = Some(retained.clone());
+                        current = turn.parent_id.clone();
+                    }
+                }
+            } else if stop_at.as_ref() == Some(&id) {
+                break; // keep-recent boundary
+            } else {
+                current = turn.parent_id.clone();
+            }
+        }
+
+        walk
+    }
+
+    pub fn assemble_context(&self, session_id: &SessionId) -> Vec<super::AssembledMessage> {
+        let order = super::assembly_order(self.context_walk(session_id));
+        order
+            .iter()
+            .flat_map(|turn_id| {
+                self.messages
+                    .get(turn_id)
+                    .into_iter()
+                    .flatten()
+                    .map(|message| super::AssembledMessage {
+                        message: message.clone(),
+                        turn_kind: self.turns[turn_id].kind,
+                    })
+            })
+            .collect()
     }
 }
