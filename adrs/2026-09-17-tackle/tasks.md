@@ -119,7 +119,7 @@ Implement the Agent trait over AgentSideConnection with the stdio transport; ini
 | Depends On | T-001 |
 | References | acp-v1-server |
 
-### T-010: Capability advertisement
+### T-010: [x] Capability advertisement
 
 Advertise loadSession, sessionCapabilities for list close resume delete, promptCapabilities image, mcpCapabilities http; unstable features (compaction updates, notices, fork) behind SDK cargo features and _meta gates, sent only when the client advertises support
 
