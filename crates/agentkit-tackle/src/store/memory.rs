@@ -39,14 +39,87 @@ impl MemoryData {
 
     pub fn close_session(&mut self, id: &SessionId) {
         if let Some(session) = self.sessions.get_mut(id) {
+            session.owner = None;
+            session.lease_expires_at = None;
             session.updated_at = super::unix_now();
         }
     }
 
-    pub fn delete_session(&mut self, id: &SessionId) {
-        if let Some(session) = self.sessions.get_mut(id) {
-            session.active = false;
-            session.updated_at = super::unix_now();
+    /// Attempts to acquire the lease; `expires_at` is the absolute expiry
+    /// (unix seconds). Succeeds when free or expired.
+    pub fn acquire_lease(
+        &mut self,
+        session_id: &SessionId,
+        owner: &str,
+        expires_at: i64,
+        now: i64,
+    ) -> bool {
+        match self.sessions.get_mut(session_id) {
+            Some(session) => {
+                let free = session.owner.is_none()
+                    || session
+                        .lease_expires_at
+                        .is_some_and(|expires| expires < now);
+                if free {
+                    session.owner = Some(owner.to_owned());
+                    session.lease_expires_at = Some(expires_at);
+                    true
+                } else {
+                    false
+                }
+            }
+            None => false,
+        }
+    }
+
+    /// Refreshes the lease; false if another connection holds it.
+    pub fn heartbeat_lease(
+        &mut self,
+        session_id: &SessionId,
+        owner: &str,
+        expires_at: i64,
+    ) -> bool {
+        match self.sessions.get_mut(session_id) {
+            Some(session) if session.owner.as_deref() == Some(owner) => {
+                session.lease_expires_at = Some(expires_at);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The live lease holder, if any.
+    pub fn lease_holder(&self, session_id: &SessionId, now: i64) -> Option<String> {
+        self.sessions
+            .get(session_id)
+            .filter(|session| session.owner.is_some())
+            .filter(|session| {
+                session
+                    .lease_expires_at
+                    .is_some_and(|expires| expires >= now)
+            })
+            .map(|session| session.owner.clone().expect("owner checked above"))
+    }
+
+    /// Soft-deletes; refused while the session is actively leased.
+    pub fn delete_session(&mut self, id: &SessionId, now: i64) -> Result<(), super::StoreError> {
+        match self.sessions.get_mut(id) {
+            Some(session) => {
+                if session.owner.is_some()
+                    && session
+                        .lease_expires_at
+                        .is_some_and(|expires| expires >= now)
+                {
+                    return Err(super::StoreError::LeaseHeld {
+                        session: id.clone(),
+                        owner: session.owner.clone().expect("owner checked above"),
+                    });
+                }
+                session.active = false;
+                session.updated_at = now;
+                Ok(())
+            }
+            None => Ok(()),
         }
     }
 
