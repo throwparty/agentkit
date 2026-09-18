@@ -106,7 +106,7 @@ Implement per-session ownership lease with heartbeat and expiry; session/prompt 
 | Depends On | T-006 |
 | References | session-ownership,multi-instance |
 
-### T-009: ACP server core
+### T-009: [x] ACP server core
 
 Implement the Agent trait over AgentSideConnection with the stdio transport; initialize handling with protocol version negotiation responding with the latest supported version
 
