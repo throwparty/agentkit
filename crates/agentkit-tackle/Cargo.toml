@@ -1,6 +1,10 @@
 [dependencies]
+agentkit-path = { path = "../agentkit-path" }
 clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
+toml = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
