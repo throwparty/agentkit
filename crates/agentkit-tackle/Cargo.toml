@@ -1,4 +1,5 @@
 [dependencies]
+agent-client-protocol = "2.2.0"
 agentkit-path = { path = "../agentkit-path" }
 clap = { version = "4", features = ["derive"] }
 daggy = "0.9.0"
