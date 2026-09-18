@@ -1,7 +1,9 @@
 [dependencies]
 agentkit-path = { path = "../agentkit-path" }
 clap = { version = "4", features = ["derive"] }
+git2 = "0.21.0"
 serde = { version = "1", features = ["derive"] }
+sha2 = "0.11.0"
 thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
 toml = "1"
