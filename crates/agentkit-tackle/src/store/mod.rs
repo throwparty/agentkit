@@ -28,6 +28,39 @@ pub enum StoreError {
     Io(#[from] std::io::Error),
 }
 
+mod graph;
+mod memory;
+
+pub use graph::SessionGraph;
+
+/// One message in assembled context, tagged with its turn's kind (the
+/// agent loop needs the boundary information: summaries are untrusted,
+/// harness turns are not user-authored).
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssembledMessage {
+    pub message: Message,
+    pub turn_kind: TurnKind,
+}
+
+/// Orders a parent-chain walk (newest first) for assembly: compaction
+/// summaries first — they replace the elided prefix — then the retained
+/// turns oldest to newest.
+pub(crate) fn assembly_order(walk: Vec<(TurnId, TurnKind)>) -> Vec<TurnId> {
+    let mut summaries = Vec::new();
+    let mut retained = Vec::new();
+    for (id, kind) in walk {
+        if kind == TurnKind::Compaction {
+            summaries.push(id);
+        } else {
+            retained.push(id);
+        }
+    }
+    summaries.reverse();
+    retained.reverse();
+    summaries.extend(retained);
+    summaries
+}
+
 fn unix_now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -73,7 +106,6 @@ impl TurnKind {
         }
     }
 
-    #[expect(dead_code)] // read path lands with context assembly (T-007) and replay (T-012)
     fn from_str(raw: &str) -> Self {
         match raw {
             "seed" => TurnKind::Seed,
@@ -103,7 +135,6 @@ impl Role {
         }
     }
 
-    #[expect(dead_code)] // read path lands with context assembly (T-007) and replay (T-012)
     fn from_str(raw: &str) -> Self {
         match raw {
             "assistant" => Role::Assistant,
@@ -481,6 +512,50 @@ impl SessionStore {
             Backend::Memory(_) => Ok(self.lock_memory().session_usage(session_id)),
         }
     }
+
+    /// Assembles the conversation context for a session: the parent-chain
+    /// walk from the head with compaction truncation, summaries first,
+    /// then retained turns oldest to newest, messages expanded in
+    /// position order.
+    pub async fn assemble_context(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<AssembledMessage>, StoreError> {
+        match &self.backend {
+            Backend::Sqlite(pool) => {
+                let rows = sqlx::query_as::<_, SqliteAssembledRow>(
+                    "WITH RECURSIVE walk AS ( \
+                         SELECT t.*, 0 AS depth, CAST(NULL AS TEXT) AS stop_at \
+                         FROM turns t \
+                         JOIN sessions s ON s.head_turn_id = t.id \
+                         WHERE s.id = ?1 \
+                         UNION ALL \
+                         SELECT p.*, walk.depth + 1, \
+                                CASE WHEN walk.kind = 'compaction' \
+                                     THEN walk.first_retained_turn_id \
+                                     ELSE walk.stop_at \
+                                END \
+                         FROM walk \
+                         JOIN turns p ON p.id = walk.parent_id \
+                         WHERE NOT (walk.kind = 'compaction' AND walk.first_retained_turn_id IS NULL) \
+                           AND (walk.stop_at IS NULL OR walk.id <> walk.stop_at) \
+                     ) \
+                     SELECT m.id, m.turn_id, m.role, m.content, m.tool_name, m.tool_call_id, m.is_error, m.position, m.created_at, w.kind \
+                     FROM walk w \
+                     JOIN messages m ON m.turn_id = w.id \
+                     ORDER BY CASE WHEN w.kind = 'compaction' THEN 0 ELSE 1 END, w.depth DESC, m.position ASC",
+                )
+                .bind(session_id)
+                .fetch_all(pool)
+                .await?;
+                Ok(rows
+                    .into_iter()
+                    .map(SqliteAssembledRow::into_domain)
+                    .collect())
+            }
+            Backend::Memory(_) => Ok(self.lock_memory().assemble_context(session_id)),
+        }
+    }
 }
 
 /// Restricts a file's permissions to 0600 on Unix; no-op elsewhere.
@@ -527,11 +602,44 @@ impl SqliteSession {
     }
 }
 
-mod memory;
+/// Row mapping for the assembly CTE.
+#[derive(sqlx::FromRow)]
+struct SqliteAssembledRow {
+    id: String,
+    turn_id: String,
+    role: String,
+    content: String,
+    tool_name: Option<String>,
+    tool_call_id: Option<String>,
+    is_error: Option<i64>,
+    position: i64,
+    created_at: i64,
+    kind: String,
+}
+
+impl SqliteAssembledRow {
+    fn into_domain(self) -> AssembledMessage {
+        AssembledMessage {
+            message: Message {
+                id: self.id,
+                turn_id: self.turn_id,
+                role: Role::from_str(&self.role),
+                content: self.content,
+                tool_name: self.tool_name,
+                tool_call_id: self.tool_call_id,
+                is_error: self.is_error.map(|v| v != 0),
+                position: self.position,
+                created_at: self.created_at,
+            },
+            turn_kind: TurnKind::from_str(&self.kind),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
 
     #[tokio::test]
     async fn sqlite_connects_migrates_and_restricts_permissions() {
@@ -664,5 +772,369 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(listed.len(), 1);
+    }
+
+    // --- Context assembly (T-007) ---
+
+    /// Appends one interaction turn with a single user message whose
+    /// content identifies the turn.
+    async fn append_named_turn(
+        store: &SessionStore,
+        session_id: &SessionId,
+        parent: Option<&TurnId>,
+        kind: TurnKind,
+        first_retained: Option<&TurnId>,
+        content: &str,
+    ) -> Turn {
+        let turn = store
+            .append_turn(
+                session_id,
+                parent,
+                kind,
+                first_retained,
+                TurnUsage::default(),
+            )
+            .await
+            .unwrap();
+        store
+            .append_message(
+                &turn.id,
+                Role::User,
+                &format!("[{{\"type\":\"text\",\"text\":\"{content}\"}}]"),
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        turn
+    }
+
+    fn assembled_texts(messages: &[AssembledMessage]) -> Vec<String> {
+        messages
+            .iter()
+            .map(|assembled| {
+                let blocks: serde_json::Value =
+                    serde_json::from_str(&assembled.message.content).unwrap();
+                blocks[0]["text"].as_str().expect("text block").to_owned()
+            })
+            .collect()
+    }
+
+    /// An in-memory SQLite store: the fast backend for property tests.
+    /// The pool is pinned to one connection — each pooled connection would
+    /// otherwise get its own empty `:memory:` database.
+    async fn sqlite_memory_store() -> SessionStore {
+        let options = SqliteConnectOptions::new()
+            .in_memory(true)
+            .busy_timeout(std::time::Duration::from_secs(5));
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        SessionStore {
+            backend: Backend::Sqlite(pool),
+        }
+    }
+
+    #[tokio::test]
+    async fn linear_chain_assembles_oldest_first() {
+        for store in [SessionStore::in_memory(), sqlite_memory_store().await] {
+            let session = store
+                .create_session(SessionKind::Interactive, "/work", None, None)
+                .await
+                .unwrap();
+            let mut parent = None;
+            for name in ["t1", "t2", "t3"] {
+                let turn = append_named_turn(
+                    &store,
+                    &session.id,
+                    parent.as_ref(),
+                    TurnKind::Interaction,
+                    None,
+                    name,
+                )
+                .await;
+                parent = Some(turn.id);
+            }
+            let assembled = store.assemble_context(&session.id).await.unwrap();
+            assert_eq!(assembled_texts(&assembled), ["t1", "t2", "t3"]);
+        }
+    }
+
+    #[tokio::test]
+    async fn full_compaction_elides_everything_below_the_summary() {
+        for store in [SessionStore::in_memory(), sqlite_memory_store().await] {
+            let session = store
+                .create_session(SessionKind::Interactive, "/work", None, None)
+                .await
+                .unwrap();
+            let t1 =
+                append_named_turn(&store, &session.id, None, TurnKind::Interaction, None, "t1")
+                    .await;
+            let t2 = append_named_turn(
+                &store,
+                &session.id,
+                Some(&t1.id),
+                TurnKind::Interaction,
+                None,
+                "t2",
+            )
+            .await;
+            append_named_turn(
+                &store,
+                &session.id,
+                Some(&t2.id),
+                TurnKind::Compaction,
+                None,
+                "summary",
+            )
+            .await;
+
+            let assembled = store.assemble_context(&session.id).await.unwrap();
+            assert_eq!(
+                assembled_texts(&assembled),
+                ["summary"],
+                "full compaction keeps only the summary"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn keep_recent_compaction_retains_range_and_summary_sorts_first() {
+        for store in [SessionStore::in_memory(), sqlite_memory_store().await] {
+            let session = store
+                .create_session(SessionKind::Interactive, "/work", None, None)
+                .await
+                .unwrap();
+            let t1 =
+                append_named_turn(&store, &session.id, None, TurnKind::Interaction, None, "t1")
+                    .await;
+            let t2 = append_named_turn(
+                &store,
+                &session.id,
+                Some(&t1.id),
+                TurnKind::Interaction,
+                None,
+                "t2",
+            )
+            .await;
+            let t3 = append_named_turn(
+                &store,
+                &session.id,
+                Some(&t2.id),
+                TurnKind::Interaction,
+                None,
+                "t3",
+            )
+            .await;
+            let t4 = append_named_turn(
+                &store,
+                &session.id,
+                Some(&t3.id),
+                TurnKind::Interaction,
+                None,
+                "t4",
+            )
+            .await;
+            // Compaction at t5 keeps t3 onward verbatim; t1..t2 are elided.
+            append_named_turn(
+                &store,
+                &session.id,
+                Some(&t4.id),
+                TurnKind::Compaction,
+                Some(&t3.id),
+                "summary",
+            )
+            .await;
+
+            let assembled = store.assemble_context(&session.id).await.unwrap();
+            assert_eq!(
+                assembled_texts(&assembled),
+                ["summary", "t3", "t4"],
+                "summary first, then retained turns oldest to newest"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn turns_after_compaction_come_after_the_retained_range() {
+        for store in [SessionStore::in_memory(), sqlite_memory_store().await] {
+            let session = store
+                .create_session(SessionKind::Interactive, "/work", None, None)
+                .await
+                .unwrap();
+            let t1 =
+                append_named_turn(&store, &session.id, None, TurnKind::Interaction, None, "t1")
+                    .await;
+            let c = append_named_turn(
+                &store,
+                &session.id,
+                Some(&t1.id),
+                TurnKind::Compaction,
+                None,
+                "summary",
+            )
+            .await;
+            append_named_turn(
+                &store,
+                &session.id,
+                Some(&c.id),
+                TurnKind::Interaction,
+                None,
+                "t2",
+            )
+            .await;
+
+            let assembled = store.assemble_context(&session.id).await.unwrap();
+            assert_eq!(assembled_texts(&assembled), ["summary", "t2"]);
+        }
+    }
+
+    /// Seeded xorshift: deterministic property-test generation without a
+    /// random-number dependency.
+    struct Rng(u64);
+
+    impl Rng {
+        fn new(seed: u64) -> Self {
+            Self(seed | 1)
+        }
+
+        fn below(&mut self, n: u64) -> u64 {
+            let mut x = self.0;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            self.0 = x;
+            x % n
+        }
+    }
+
+    #[tokio::test]
+    async fn property_sql_matches_memory_and_daggy() {
+        for seed in 0..48u64 {
+            let mut rng = Rng::new(seed);
+            let memory_store = SessionStore::in_memory();
+            let sqlite_store = sqlite_memory_store().await;
+
+            let session = memory_store
+                .create_session(SessionKind::Interactive, "/work", None, None)
+                .await
+                .unwrap();
+            let sqlite_session = sqlite_store
+                .create_session(SessionKind::Interactive, "/work", None, None)
+                .await
+                .unwrap();
+
+            // All turns ever created (the SessionGraph oracle spans the DAG).
+            // Backends generate independent uuids; correspondence between
+            // memory and sqlite turns is positional, so parent/retained
+            // links are chosen as INDICES and mapped per backend.
+            let mut all_turns: Vec<Turn> = Vec::new();
+            let mut all_turns_sqlite: Vec<Turn> = Vec::new();
+            let mut content_by_turn: BTreeMap<TurnId, String> = BTreeMap::new();
+            let mut head_idx: Option<usize> = None;
+            let mut newest_compaction_idx: Option<usize> = None;
+
+            let count = 8 + rng.below(8);
+            for i in 0..count {
+                // Fork: occasionally continue from an older turn instead of
+                // the head.
+                let parent_idx: Option<usize> = if head_idx.is_some() && rng.below(4) == 0 {
+                    Some(rng.below(all_turns.len() as u64) as usize)
+                } else {
+                    head_idx
+                };
+
+                let is_compaction = rng.below(5) == 0;
+                let (kind, retained_idx) = if is_compaction {
+                    // Clamp rule: first_retained must be newer than the
+                    // newest existing compaction (or a full compaction).
+                    let retained = match newest_compaction_idx {
+                        None => {
+                            if all_turns.is_empty() {
+                                None
+                            } else {
+                                Some(rng.below(all_turns.len() as u64) as usize)
+                            }
+                        }
+                        Some(newest) => {
+                            let newer_span = all_turns.len() - newest - 1;
+                            if newer_span > 0 {
+                                Some(newest + 1 + rng.below(newer_span as u64) as usize)
+                            } else {
+                                None
+                            }
+                        }
+                    };
+                    (TurnKind::Compaction, retained)
+                } else {
+                    (TurnKind::Interaction, None)
+                };
+
+                let content = format!("s{seed}-t{i}");
+                let memory_parent = parent_idx.map(|idx| all_turns[idx].id.clone());
+                let sqlite_parent = parent_idx.map(|idx| all_turns_sqlite[idx].id.clone());
+                let memory_retained = retained_idx.map(|idx| all_turns[idx].id.clone());
+                let sqlite_retained = retained_idx.map(|idx| all_turns_sqlite[idx].id.clone());
+
+                let memory_turn = append_named_turn(
+                    &memory_store,
+                    &session.id,
+                    memory_parent.as_ref(),
+                    kind,
+                    memory_retained.as_ref(),
+                    &content,
+                )
+                .await;
+                // Each backend generates its own uuid; the correspondence
+                // is positional, verified via the shared content below.
+                let sqlite_turn = append_named_turn(
+                    &sqlite_store,
+                    &sqlite_session.id,
+                    sqlite_parent.as_ref(),
+                    kind,
+                    sqlite_retained.as_ref(),
+                    &content,
+                )
+                .await;
+
+                content_by_turn.insert(memory_turn.id.clone(), content);
+                if kind == TurnKind::Compaction {
+                    newest_compaction_idx = Some(all_turns.len());
+                }
+                head_idx = Some(all_turns.len());
+                all_turns.push(memory_turn);
+                all_turns_sqlite.push(sqlite_turn);
+            }
+
+            // Oracle: daggy graph over all turns, walked from the head.
+            let graph = SessionGraph::build(all_turns.iter().cloned());
+            let head_id = all_turns[head_idx.unwrap()].id.clone();
+            let expected_ids = graph.assembly_order(&head_id);
+            let expected_contents: Vec<String> = expected_ids
+                .iter()
+                .map(|id| content_by_turn[id].clone())
+                .collect();
+
+            let memory_assembled = memory_store.assemble_context(&session.id).await.unwrap();
+            let sqlite_assembled = sqlite_store
+                .assemble_context(&sqlite_session.id)
+                .await
+                .unwrap();
+
+            assert_eq!(
+                assembled_texts(&memory_assembled),
+                expected_contents,
+                "seed {seed}: memory assembly must match the daggy oracle"
+            );
+            assert_eq!(
+                assembled_texts(&sqlite_assembled),
+                expected_contents,
+                "seed {seed}: SQL assembly must match the daggy oracle"
+            );
+        }
     }
 }
