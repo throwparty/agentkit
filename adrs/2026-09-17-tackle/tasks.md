@@ -15,7 +15,7 @@ Create crates/agentkit-tackle as a workspace member with the twelve-module tree;
 | Depends On |  |
 | References | acp-v1-server |
 
-### T-002: agentkit-path config_dir
+### T-002: [x] agentkit-path config_dir
 
 Add config_dir alongside the existing data_dir in agentkit-path: platform config directory per the CONTEXT.md convention (~/.config/agentkit/<component> on Linux)
 
