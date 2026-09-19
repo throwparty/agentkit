@@ -11,10 +11,11 @@ use crate::loader::Definitions;
 use crate::store::SessionStore;
 use agent_client_protocol::schema::v1::{
     AgentCapabilities, CloseSessionResponse, DeleteSessionResponse, InitializeRequest,
-    InitializeResponse, ListSessionsResponse, McpCapabilities, NewSessionRequest,
-    NewSessionResponse, PromptCapabilities, SessionCapabilities, SessionCloseCapabilities,
+    InitializeResponse, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
+    McpCapabilities, NewSessionRequest, NewSessionResponse, PromptCapabilities,
+    ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities, SessionCloseCapabilities,
     SessionDeleteCapabilities, SessionForkCapabilities, SessionId, SessionInfo,
-    SessionListCapabilities, SessionResumeCapabilities,
+    SessionListCapabilities, SessionNotification, SessionResumeCapabilities, SessionUpdate,
 };
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{Agent, Error, Stdio};
@@ -129,6 +130,7 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
     let state_for_list = state.clone();
     let state_for_close = state.clone();
     let state_for_delete = state.clone();
+    let state_for_load = state.clone();
 
     Agent
         .builder()
@@ -247,8 +249,101 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
             },
             agent_client_protocol::on_receive_request!(),
         )
+        .on_receive_request(
+            async move |request: LoadSessionRequest, responder, cx| {
+                // Replay: full user-visible history in DAG order. Usage
+                // snapshot emission lands with T-016's model metadata.
+                let assembled = state_for_load
+                    .db
+                    .assemble_context(&request.session_id.to_string())
+                    .await
+                    .map_err(|err| Error::internal_error().data(err.to_string()))?;
+                for replay in replay_updates(&request.session_id, &assembled) {
+                    cx.send_notification(replay)
+                        .map_err(|err| Error::internal_error().data(err.to_string()))?;
+                }
+                responder.respond(LoadSessionResponse::new())
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |_request: ResumeSessionRequest, responder, _cx| {
+                // Resume reattaches WITHOUT replay (FR-003); config state
+                // in the response arrives with T-031.
+                responder.respond(ResumeSessionResponse::new())
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
         .connect_to(Stdio::new())
         .await
+}
+
+/// Maps stored messages to replay notifications: user/assistant messages
+/// become message chunks (all blocks, sharing the stored message id —
+/// stable identity per logical message); tool call/result pairs collapse
+/// into one completed tool-call update; seeds replay as agent chunks;
+/// compaction summaries are skipped in stable v1 replay.
+fn replay_updates(
+    session_id: &SessionId,
+    assembled: &[crate::store::AssembledMessage],
+) -> Vec<SessionNotification> {
+    use agent_client_protocol::schema::v1::{
+        ContentBlock, ContentChunk, MessageId, ToolCall, ToolCallStatus,
+    };
+
+    let mut updates = Vec::new();
+    for assembled in assembled {
+        let message = &assembled.message;
+        let blocks: Vec<ContentBlock> = match serde_json::from_str(&message.content) {
+            Ok(blocks) => blocks,
+            Err(_) => continue, // unparseable stored content: skip, never crash replay
+        };
+        let message_id = MessageId::new(message.id.clone());
+
+        match message.role {
+            crate::store::Role::User => {
+                for block in blocks {
+                    updates.push(notification(
+                        session_id,
+                        SessionUpdate::UserMessageChunk(
+                            ContentChunk::new(block).message_id(message_id.clone()),
+                        ),
+                    ));
+                }
+            }
+            crate::store::Role::Assistant | crate::store::Role::System => {
+                for block in blocks {
+                    updates.push(notification(
+                        session_id,
+                        SessionUpdate::AgentMessageChunk(
+                            ContentChunk::new(block).message_id(message_id.clone()),
+                        ),
+                    ));
+                }
+            }
+            crate::store::Role::ToolCall => {
+                // The pair collapses: one completed tool-call update.
+                updates.push(notification(
+                    session_id,
+                    SessionUpdate::ToolCall(
+                        ToolCall::new(
+                            message.id.clone(),
+                            message.tool_name.clone().unwrap_or_default(),
+                        )
+                        .status(ToolCallStatus::Completed),
+                    ),
+                ));
+            }
+            crate::store::Role::ToolResult => {
+                // Collapsed into the tool_call update above.
+            }
+        }
+    }
+    updates
+}
+
+fn notification(session_id: &SessionId, update: SessionUpdate) -> SessionNotification {
+    SessionNotification::new(session_id.clone(), update)
 }
 
 /// RFC 3339 rendering of a unix-seconds timestamp (ACP `updatedAt`).
