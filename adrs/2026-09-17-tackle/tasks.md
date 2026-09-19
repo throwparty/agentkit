@@ -158,7 +158,7 @@ Implement session/load replaying full user-visible history in DAG order with ori
 | Depends On | T-011,T-007 |
 | References | session-lifecycle,ephemeral-sessions |
 
-### T-013: Golden-transcript conformance harness
+### T-013: [x] Golden-transcript conformance harness
 
 Build the fixture infrastructure: recorded ACP sessions as golden transcripts, replayed against stable-only features, unstable-feature builds, and a strict deserializer; wired to run in CI
 

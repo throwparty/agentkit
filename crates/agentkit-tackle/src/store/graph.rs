@@ -91,11 +91,10 @@ impl SessionGraph {
     }
 
     fn parent_id(&self, index: NodeIndex) -> Option<TurnId> {
-        // daggy's Parents type doesn't implement Iterator in this version;
-        // walk the underlying petgraph graph's incoming edges instead.
+        // daggy re-exports the petgraph version it builds on.
         self.dag
             .graph()
-            .neighbors_directed(index, petgraph::Direction::Incoming)
+            .neighbors_directed(index, daggy::petgraph::Direction::Incoming)
             .next()
             .and_then(|parent| self.dag.node_weight(parent).cloned())
     }

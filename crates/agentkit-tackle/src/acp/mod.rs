@@ -9,13 +9,15 @@
 use crate::config::Loaded;
 use crate::loader::Definitions;
 use crate::store::SessionStore;
+#[cfg(feature = "unstable")]
+use agent_client_protocol::schema::v1::SessionForkCapabilities;
 use agent_client_protocol::schema::v1::{
     AgentCapabilities, CloseSessionResponse, DeleteSessionResponse, InitializeRequest,
     InitializeResponse, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
     McpCapabilities, NewSessionRequest, NewSessionResponse, PromptCapabilities,
     ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities, SessionCloseCapabilities,
-    SessionDeleteCapabilities, SessionForkCapabilities, SessionId, SessionInfo,
-    SessionListCapabilities, SessionNotification, SessionResumeCapabilities, SessionUpdate,
+    SessionDeleteCapabilities, SessionId, SessionInfo, SessionListCapabilities,
+    SessionNotification, SessionResumeCapabilities, SessionUpdate,
 };
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{Agent, Error, Stdio};
@@ -93,28 +95,46 @@ impl TackleState {
     /// features tackle implements (advertised unconditionally — the gate
     /// applies to *sending* RFD-shaped updates, per FR-002).
     fn capabilities(&self) -> AgentCapabilities {
-        let unstable: agent_client_protocol::schema::v1::Meta = [
+        let mut unstable: agent_client_protocol::schema::v1::Meta =
+            agent_client_protocol::schema::v1::Meta::new();
+        #[cfg(feature = "unstable")]
+        for feature in [
             UnstableFeature::Fork,
             UnstableFeature::SessionCompaction,
             UnstableFeature::SessionNotices,
-        ]
-        .into_iter()
-        .map(|feature| (feature.meta_key().to_owned(), serde_json::json!({})))
-        .collect();
+        ] {
+            unstable.insert(feature.meta_key().to_owned(), serde_json::json!({}));
+        }
         AgentCapabilities::new()
             .load_session(true)
             .prompt_capabilities(PromptCapabilities::new().image(true).audio(false))
             .mcp_capabilities(McpCapabilities::new().http(true).sse(false))
-            .session_capabilities(
-                SessionCapabilities::new()
+            .session_capabilities({
+                let capabilities = SessionCapabilities::new()
                     .list(Some(SessionListCapabilities::default()))
                     .close(Some(SessionCloseCapabilities::default()))
                     .resume(Some(SessionResumeCapabilities::default()))
-                    .delete(Some(SessionDeleteCapabilities::default()))
-                    .fork(Some(SessionForkCapabilities::default())),
-            )
+                    .delete(Some(SessionDeleteCapabilities::default()));
+                #[cfg(feature = "unstable")]
+                let capabilities = capabilities.fork(Some(SessionForkCapabilities::default()));
+                capabilities
+            })
             .meta(unstable)
     }
+}
+
+/// Prefixes a session id for the wire (the storage ADR's serialization
+/// boundary).
+fn wire_session_id(id: &crate::store::SessionId) -> SessionId {
+    SessionId::new(format!("sess_{id}"))
+}
+
+/// Strips the wire prefix back to the bare store id.
+fn store_session_id(id: &SessionId) -> String {
+    id.to_string()
+        .strip_prefix("sess_")
+        .unwrap_or(id.to_string().as_str())
+        .to_owned()
 }
 
 /// Runs the ACP agent over stdio until the transport closes.
@@ -173,7 +193,7 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
                     .map_err(|err| Error::internal_error().data(err.to_string()))?;
                 // MCP connections kick off asynchronously (T-018); session
                 // creation never blocks on them.
-                responder.respond(NewSessionResponse::new(SessionId::new(session.id)))
+                responder.respond(NewSessionResponse::new(wire_session_id(&session.id)))
             },
             agent_client_protocol::on_receive_request!(),
         )
@@ -229,7 +249,7 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
                         _cx| {
                 state_for_close
                     .db
-                    .close_session(&request.session_id.to_string())
+                    .close_session(&store_session_id(&request.session_id))
                     .await
                     .map_err(|err| Error::internal_error().data(err.to_string()))?;
                 responder.respond(CloseSessionResponse::new())
@@ -242,7 +262,7 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
                         _cx| {
                 state_for_delete
                     .db
-                    .delete_session(&request.session_id.to_string())
+                    .delete_session(&store_session_id(&request.session_id))
                     .await
                     .map_err(|err| Error::internal_error().data(err.to_string()))?;
                 responder.respond(DeleteSessionResponse::new())
@@ -255,7 +275,7 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
                 // snapshot emission lands with T-016's model metadata.
                 let assembled = state_for_load
                     .db
-                    .assemble_context(&request.session_id.to_string())
+                    .assemble_context(&store_session_id(&request.session_id))
                     .await
                     .map_err(|err| Error::internal_error().data(err.to_string()))?;
                 for replay in replay_updates(&request.session_id, &assembled) {
