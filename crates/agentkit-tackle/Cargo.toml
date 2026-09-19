@@ -7,48 +7,32 @@ license = "Apache-2.0"
 
 [dependencies]
 agentkit-path = { path = "../agentkit-path" }
+agent-client-protocol = "2.2.0"
 clap = { version = "4", features = ["derive"] }
+daggy = "0.8"
+futures = "0.3"
+git2 = "0.21"
+jiff = { version = "0.2", features = ["serde"] }
+petgraph = "0.8"
 rig-core = "0.42.0"
 secrecy = "0.10.3"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+sqlx = { version = "0.9.0", default-features = false, features = [
+  "runtime-tokio",
+  "sqlite",
+  "migrate",
+  "macros",
+] }
 thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
 toml = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
 wiremock = "0.6.5"
-
-[dependencies.agent-client-protocol]
-version = "2.2.0"
-features = []
-
-[dependencies.serde_json]
-version = "1"
-
-[dependencies.sqlx]
-version = "0.9.0"
-default-features = false
-features = ["runtime-tokio", "sqlite", "migrate", "macros"]
-
-[dependencies.sha2]
-version = "0.10"
-
-[dependencies.git2]
-version = "0.21"
-
-[dependencies.jiff]
-version = "0.2"
-features = ["serde"]
-
-[dependencies.uuid]
-version = "1"
-features = ["v4"]
-
-[dependencies.daggy]
-version = "0.8"
-
-[dependencies.yaml_serde]
-version = "0.10"
+yaml_serde = "0.10"
 
 [features]
 default = ["unstable"]
@@ -58,8 +42,6 @@ unstable = [
   "agent-client-protocol/unstable_session_compaction",
   "agent-client-protocol/unstable_session_notices",
 ]
-# The SDK is only optional when it is not used at all; keep it always on by
-# making `unstable` not affect optionality.
 
 [dev-dependencies]
 tempfile = "3"

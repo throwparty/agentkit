@@ -184,7 +184,7 @@ Implement the tackle-owned ModelProvider trait; rig-core implementation speaking
 | Depends On | T-003 |
 | References | model-endpoint-config |
 
-### T-015: Turn loop
+### T-015: [x] Turn loop
 
 Implement the turn loop: context assembly via the store, system prompt builder (persona body plus manifest sections), streaming with chunk accumulation and one messageId per logical message, stop-reason mapping onto ACP values, configurable model-request cap (default 8) with an explanatory agent message before max_turn_requests; buildable against stub registry and pipeline — integration with the real ones lands in T-021 and T-022
 
