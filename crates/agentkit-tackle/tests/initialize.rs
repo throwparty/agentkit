@@ -65,13 +65,23 @@ async fn initialize_negotiates_v1_and_advertises_capabilities() {
                 .meta
                 .as_ref()
                 .expect("unstable _meta");
-            assert!(meta.contains_key("unstable_session_fork"));
-            assert!(meta.contains_key("unstable_session_compaction"));
-            assert!(meta.contains_key("unstable_session_notices"));
-            assert!(
-                session_capabilities.fork.is_some(),
-                "session/fork capability"
-            );
+            #[cfg(feature = "unstable")]
+            {
+                assert!(meta.contains_key("unstable_session_fork"));
+                assert!(meta.contains_key("unstable_session_compaction"));
+                assert!(meta.contains_key("unstable_session_notices"));
+                assert!(
+                    session_capabilities.fork.is_some(),
+                    "session/fork capability"
+                );
+            }
+            #[cfg(not(feature = "unstable"))]
+            {
+                // The stable build advertises no unstable capabilities.
+                assert!(!meta.contains_key("unstable_session_fork"));
+                assert!(!meta.contains_key("unstable_session_compaction"));
+                assert!(!meta.contains_key("unstable_session_notices"));
+            }
 
             Ok(())
         })
