@@ -8,12 +8,15 @@ license = "Apache-2.0"
 [dependencies]
 agentkit-path = { path = "../agentkit-path" }
 clap = { version = "4", features = ["derive"] }
+rig-core = "0.42.0"
+secrecy = "0.10.3"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
 toml = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+wiremock = "0.6.5"
 
 [dependencies.agent-client-protocol]
 version = "2.2.0"
