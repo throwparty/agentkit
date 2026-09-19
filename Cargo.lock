@@ -198,10 +198,9 @@ dependencies = [
  "daggy",
  "git2",
  "jiff",
- "petgraph",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.10.9",
  "sqlx",
  "tempfile",
  "thiserror 2.0.20",
@@ -811,12 +810,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "const-oid"
-version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
-
-[[package]]
 name = "const-random"
 version = "0.1.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -964,9 +957,9 @@ dependencies = [
 
 [[package]]
 name = "daggy"
-version = "0.9.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "804169db156b21258a2545757336922d93dfa229892c75911a0ad141aa0ff241"
+checksum = "70def8d72740e44d9f676d8dab2c933a236663d86dd24319b57a2bed4d694774"
 dependencies = [
  "petgraph",
 ]
@@ -1153,7 +1146,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1dd6dbb5841937940781866fa1281a1ff7bd3bf827091440879f9994983d5c2"
 dependencies = [
  "block-buffer 0.12.1",
- "const-oid",
  "crypto-common 0.2.2",
  "ctutils",
 ]
@@ -2751,14 +2743,12 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "petgraph"
-version = "0.8.3"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8701b58ea97060d5e5b155d383a69952a60943f0e6dfe30b04c287beb0b27455"
+checksum = "3672b37090dbd86368a4145bc067582552b29c27377cad4e0a306c97f9bd7772"
 dependencies = [
  "fixedbitset",
- "hashbrown 0.15.5",
  "indexmap 2.14.0",
- "serde",
 ]
 
 [[package]]
