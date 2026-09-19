@@ -145,7 +145,7 @@ Implement session/new (immediate return, default actor selection, MCP connect ki
 | Depends On | T-009,T-006,T-008 |
 | References | session-lifecycle,session-ownership,first-run,ephemeral-sessions |
 
-### T-012: Session load and resume
+### T-012: [x] Session load and resume
 
 Implement session/load replaying full user-visible history in DAG order with original content, stable message and tool-call ids, turns of ephemeral sessions excluded, exactly one usage snapshot after replay; session/resume reattaching without replay
 

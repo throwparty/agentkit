@@ -4,10 +4,16 @@
 //! shape the golden transcripts replay.
 
 use agentkit_tackle::agent_client_protocol::schema::v1::{
-    InitializeRequest, ListSessionsRequest, NewSessionRequest, SessionCapabilities,
+    InitializeRequest, ListSessionsRequest, LoadSessionRequest, NewSessionRequest,
+    SessionCapabilities,
 };
 use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
+use std::sync::{Arc as StdArc, Mutex as StdMutex};
+
+/// Replayed chunks observed by the notification handler: (role, message
+/// id, text).
+type Seen = StdArc<StdMutex<Vec<(String, Option<String>, String)>>>;
 
 /// Spawns tackle as a subprocess against an isolated configuration.
 fn spawn_agent(dir: &std::path::Path) -> AcpAgent {
@@ -139,4 +145,59 @@ async fn session_lifecycle_round_trips() {
         })
         .await
         .expect("session lifecycle round-trip");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn session_load_replays_history_with_stable_ids() {
+    use agentkit_tackle::agent_client_protocol::schema::v1::SessionNotification;
+
+    let dir = tempfile::tempdir().unwrap();
+    let agent = spawn_agent(dir.path());
+
+    let seen: Seen = StdArc::default();
+    let seen_handler = seen.clone();
+
+    Client
+        .builder()
+        .on_receive_notification(
+            async move |notification: SessionNotification, _cx| {
+                if let agentkit_tackle::agent_client_protocol::schema::v1::SessionUpdate::UserMessageChunk(chunk) =
+                    &notification.update
+                {
+                    let mut seen = seen_handler.lock().unwrap();
+                    seen.push((
+                        "user".into(),
+                        chunk.message_id.as_ref().map(|id| id.to_string()),
+                        match &chunk.content {
+                            agentkit_tackle::agent_client_protocol::schema::v1::ContentBlock::Text(text) => {
+                                text.text.clone()
+                            }
+                            _ => String::new(),
+                        },
+                    ));
+                }
+                Ok(())
+            },
+            agentkit_tackle::agent_client_protocol::on_receive_notification!(),
+        )
+        .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
+            let created = connection
+                .send_request(NewSessionRequest::new(std::path::PathBuf::from("/work")))
+                .block_task()
+                .await?;
+            let session_id = created.session_id.clone();
+
+            // Load replays nothing (the session has no turns yet) and
+            // answers once.
+            connection
+                .send_request(LoadSessionRequest::new(
+                    session_id.clone(),
+                    std::path::PathBuf::from("/work"),
+                ))
+                .block_task()
+                .await?;
+            Ok(())
+        })
+        .await
+        .expect("session/load on an empty session");
 }
