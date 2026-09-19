@@ -146,6 +146,12 @@ impl MemoryData {
             .fold(TurnUsage::default(), TurnUsage::add)
     }
 
+    pub fn set_turn_usage(&mut self, turn_id: &TurnId, usage: TurnUsage) {
+        if let Some(turn) = self.turns.get_mut(turn_id) {
+            turn.usage = usage;
+        }
+    }
+
     /// The parent-chain walk from the head with the compaction truncation
     /// state machine — the Rust mirror of the SQL CTE.
     fn context_walk(&self, session_id: &SessionId) -> Vec<(TurnId, TurnKind)> {
