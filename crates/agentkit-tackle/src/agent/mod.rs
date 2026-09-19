@@ -3,7 +3,9 @@
 //! single-module change and tests can substitute doubles.
 
 pub mod provider;
+pub mod turn;
 
+use crate::store::TurnUsage;
 use std::future::Future;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,4 +69,28 @@ pub trait ModelProvider: Send + Sync {
         &self,
         request: ModelRequest,
     ) -> impl Future<Output = Result<ModelResponse, ModelError>> + Send;
+
+    /// Streaming completion: `on_text_delta` fires per text delta as it
+    /// arrives (the caller relays chunks to the client live); the
+    /// aggregated response (full text + usage) returns at the end.
+    fn stream_completion(
+        &self,
+        request: ModelRequest,
+        on_text_delta: &mut (dyn FnMut(&str) + Send),
+    ) -> impl Future<Output = Result<ModelResponse, ModelError>> + Send;
+}
+
+/// The terminal state of one executed turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurnStop {
+    /// The model finished without requesting tools.
+    EndTurn,
+    /// The model-request cap was hit mid-work; the user may continue.
+    MaxTurnRequests,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TurnOutcome {
+    pub stop: TurnStop,
+    pub usage: TurnUsage,
 }
