@@ -547,7 +547,10 @@ impl SessionStore {
         Ok(turn)
     }
 
-    /// Appends a message to a turn at the next position.
+    /// Appends a message to a turn at the next position. `id` supplies a
+    /// pre-generated identity (streaming chunks and the stored message
+    /// share one); `None` generates one.
+    #[allow(clippy::too_many_arguments)] // the tool-message fields are all optional and positional
     pub async fn append_message(
         &self,
         turn_id: &TurnId,
@@ -556,8 +559,9 @@ impl SessionStore {
         tool_name: Option<&str>,
         tool_call_id: Option<&MessageId>,
         is_error: Option<bool>,
+        id: Option<&str>,
     ) -> Result<Message, StoreError> {
-        let id = new_id();
+        let id = id.map(str::to_owned).unwrap_or_else(new_id);
         let now = unix_now();
         let message = Message {
             id,
@@ -621,6 +625,29 @@ impl SessionStore {
             }
             Backend::Memory(_) => Ok(self.lock_memory().session_usage(session_id)),
         }
+    }
+
+    /// Records the usage delta a turn's model requests incurred.
+    pub async fn set_turn_usage(
+        &self,
+        turn_id: &TurnId,
+        usage: TurnUsage,
+    ) -> Result<(), StoreError> {
+        match &self.backend {
+            Backend::Sqlite(pool) => {
+                sqlx::query(
+                    "UPDATE turns SET input_tokens = ?, output_tokens = ?, cost_usd = ? WHERE id = ?",
+                )
+                .bind(usage.input_tokens as i64)
+                .bind(usage.output_tokens as i64)
+                .bind(usage.cost_usd)
+                .bind(turn_id)
+                .execute(pool)
+                .await?;
+            }
+            Backend::Memory(_) => self.lock_memory().set_turn_usage(turn_id, usage),
+        }
+        Ok(())
     }
 
     /// Assembles the conversation context for a session: the parent-chain
@@ -856,11 +883,12 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .await
             .unwrap();
         store
-            .append_message(&turn.id, Role::Assistant, "[]", None, None, None)
+            .append_message(&turn.id, Role::Assistant, "[]", None, None, None, None)
             .await
             .unwrap();
 
@@ -917,6 +945,7 @@ mod tests {
                 &turn.id,
                 Role::User,
                 &format!("[{{\"type\":\"text\",\"text\":\"{content}\"}}]"),
+                None,
                 None,
                 None,
                 None,
