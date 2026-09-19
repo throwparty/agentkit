@@ -171,7 +171,7 @@ Build the fixture infrastructure: recorded ACP sessions as golden transcripts, r
 | Depends On | T-012 |
 | References | testability,protocol-conformance,capability-advertisement |
 
-### T-014: ModelProvider trait and rig-core implementation
+### T-014: [x] ModelProvider trait and rig-core implementation
 
 Implement the tackle-owned ModelProvider trait; rig-core implementation speaking per-endpoint wire format (openai-chat-completions and anthropic-messages); named endpoints with endpoint-qualified models; credential resolution through the credential helper command with the endpoint name as identity
 
