@@ -152,6 +152,55 @@ impl ModelProvider for RigProvider {
             },
         })
     }
+
+    async fn stream_completion(
+        &self,
+        request: ModelRequest,
+        on_text_delta: &mut (dyn FnMut(&str) + Send),
+    ) -> Result<ModelResponse, ModelError> {
+        use futures::StreamExt as _;
+        use rig_core::streaming::StreamedAssistantContent;
+
+        let completion = self.completion(request);
+        let mut stream = completion
+            .stream()
+            .await
+            .map_err(|err| ModelError::Completion(err.to_string()))?;
+        let mut text = String::new();
+        let mut usage = ModelUsage::default();
+
+        while let Some(part) = stream.next().await {
+            match part {
+                Ok(StreamedAssistantContent::Text(delta)) => {
+                    on_text_delta(&delta.text);
+                    text.push_str(&delta.text);
+                }
+                Ok(_) => {} // tool calls land with the registry (T-021)
+                Err(err) => return Err(ModelError::Completion(err.to_string())),
+            }
+        }
+
+        // The aggregated choice is authoritative for the final text.
+        let final_text = stream
+            .choice
+            .iter()
+            .filter_map(|content| match content {
+                AssistantContent::Text(text) => Some(text.text.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("");
+        if !final_text.is_empty() {
+            text = final_text;
+        }
+        if let Some(terminal) = &stream.response {
+            usage = ModelUsage {
+                input_tokens: terminal.usage.input_tokens,
+                output_tokens: terminal.usage.output_tokens,
+            };
+        }
+        Ok(ModelResponse { text, usage })
+    }
 }
 
 #[allow(unused)]
@@ -159,6 +208,7 @@ impl ModelProvider for RigProvider {
 mod tests {
     use super::*;
     use crate::config::{Auth, EndpointConfig, WireFormat};
+    use crate::store::SessionStore;
     use std::io::Write as _;
 
     fn endpoint_config(base_url: &str, auth: Auth) -> EndpointConfig {
@@ -334,5 +384,129 @@ mod tests {
             .unwrap_or_default();
         assert!(header.contains("secret"), "authorization header: {header}");
         std::env::set_var("PATH", path_var);
+    }
+
+    #[tokio::test]
+    async fn streaming_relays_deltas_and_aggregates() {
+        let server = wiremock::MockServer::start().await;
+        // The real OpenAI streaming shape: SSE data lines, delta fragments,
+        // a terminal chunk with usage, and the [DONE] sentinel.
+        let sse = [
+            "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"created\":0,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}",
+            "",
+            "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"created\":0,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hel\"}}]}",
+            "",
+            "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"created\":0,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"}}]}",
+            "",
+            "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"created\":0,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2,\"total_tokens\":7}}",
+            "",
+            "data: [DONE]",
+            "",
+        ]
+        .join("\n");
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .set_body_raw(sse.into_bytes(), "text/event-stream"),
+            )
+            .mount(&server)
+            .await;
+
+        let config = config_with_endpoint(&server.uri(), Auth::None);
+        let provider = provider_for("test/streaming-model", &config).unwrap();
+
+        let mut deltas = Vec::new();
+        let response = provider
+            .stream_completion(
+                ModelRequest {
+                    model: "streaming-model".into(),
+                    system: String::new(),
+                    messages: vec![ChatMessage {
+                        role: ChatRole::User,
+                        text: "say hi".into(),
+                    }],
+                },
+                &mut |delta: &str| deltas.push(delta.to_owned()),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(deltas.join(""), "Hello", "every delta was relayed live");
+        assert_eq!(response.text, "Hello", "the aggregated text matches");
+        assert_eq!(response.usage.input_tokens, 5);
+        assert_eq!(response.usage.output_tokens, 2);
+    }
+
+    #[tokio::test]
+    async fn turn_loop_persists_assistant_response_and_usage() {
+        let server = wiremock::MockServer::start().await;
+        // The turn loop streams: the mock must answer with SSE.
+        let sse = [
+            "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"created\":0,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}",
+            "",
+            "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"created\":0,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"the answer\"}}]}",
+            "",
+            "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"created\":0,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":3,\"total_tokens\":12}}",
+            "",
+            "data: [DONE]",
+            "",
+        ]
+        .join("\n");
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .set_body_raw(sse.into_bytes(), "text/event-stream"),
+            )
+            .mount(&server)
+            .await;
+
+        let store = SessionStore::in_memory();
+        let session = store
+            .create_session(
+                crate::store::SessionKind::Interactive,
+                "/work",
+                None,
+                None,
+                "{}",
+            )
+            .await
+            .unwrap();
+        let turn = store
+            .append_turn(
+                &session.id,
+                None,
+                crate::store::TurnKind::Interaction,
+                None,
+                crate::store::TurnUsage::default(),
+            )
+            .await
+            .unwrap();
+        let assistant_id = "msg-assistant-1";
+
+        let config = config_with_endpoint(&server.uri(), Auth::None);
+        let provider = provider_for("test/model", &config).unwrap();
+
+        let mut deltas = Vec::new();
+        let outcome = crate::agent::turn::run_turn(
+            &provider,
+            &store,
+            &session.id,
+            &turn.id,
+            assistant_id,
+            "test/model",
+            "system prompt",
+            "the question",
+            Vec::new(),
+            8,
+            |delta: &str| deltas.push(delta.to_owned()),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(outcome.stop, crate::agent::TurnStop::EndTurn);
+        assert_eq!(deltas, ["the answer"]);
+        let usage = store.session_usage(&session.id).await.unwrap();
+        assert_eq!(usage.input_tokens, 9, "the turn's usage delta is persisted");
+        assert_eq!(usage.output_tokens, 3);
     }
 }

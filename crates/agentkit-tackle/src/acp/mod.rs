@@ -223,11 +223,9 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
                 let infos: Vec<SessionInfo> = sessions
                     .into_iter()
                     .map(|session| {
-                        let mut info = SessionInfo::new(
-                            SessionId::new(session.id.clone()),
-                            session.cwd.clone(),
-                        )
-                        .updated_at(timestamp(session.updated_at));
+                        let mut info =
+                            SessionInfo::new(wire_session_id(&session.id), session.cwd.clone())
+                                .updated_at(timestamp(session.updated_at));
                         if !session.title.is_empty() {
                             info = info.title(session.title.clone());
                         }
