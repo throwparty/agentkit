@@ -127,6 +127,10 @@ fn titling_sources(
                 continue;
             }
         }
+        if let Some(source) = crate::builtins::script_source(&config.file) {
+            sources.push((name.clone(), source.to_owned()));
+            continue;
+        }
         let Some(user_dir) = user_dir else { continue };
         match std::fs::read_to_string(user_dir.join("scripts").join(&config.file)) {
             Ok(source) => sources.push((name.clone(), source)),
@@ -183,7 +187,15 @@ struct LoopPendingCompletions;
 impl CompletionSink for LoopPendingCompletions {
     fn publish(&self, _session: &SessionId, _completion: Completion) {}
     fn take(&self, _session: &SessionId) -> Option<Completion> {
-        None
+        // The agent loop integration drives these model turns; scripts
+        // awaiting a completion degrade silently on a non-end_turn
+        // answer instead of hanging on their timeout.
+        Some(Completion {
+            stop_reason: "model-loop-pending".to_owned(),
+            final_message: String::new(),
+            input_tokens: 0,
+            output_tokens: 0,
+        })
     }
 }
 
