@@ -55,10 +55,12 @@ async fn compaction_intercepts_announces_and_records() {
     let chunks: StdArc<StdMutex<Vec<String>>> = StdArc::default();
     let usage_updates: StdArc<StdMutex<Vec<u64>>> = StdArc::default();
     let compaction_updates: StdArc<StdMutex<Vec<String>>> = StdArc::default();
+    let info_updates: StdArc<StdMutex<Vec<Option<String>>>> = StdArc::default();
 
     let chunks_handler = chunks.clone();
     let usage_handler = usage_updates.clone();
     let compaction_handler = compaction_updates.clone();
+    let info_handler = info_updates.clone();
 
     // The client advertises the unstable compaction capability: the
     // RFD-shaped update flows.
@@ -86,6 +88,12 @@ async fn compaction_intercepts_announces_and_records() {
                     #[cfg(feature = "unstable")]
                     SessionUpdate::CompactionUpdate(update) => {
                         compaction_handler.lock().unwrap().push(format!("{:?}", update.status));
+                    }
+                    SessionUpdate::SessionInfoUpdate(info) => {
+                        info_handler
+                            .lock()
+                            .unwrap()
+                            .push(info.updated_at.value().map(|ts| ts.to_string()));
                     }
                     _ => {}
                 }
@@ -182,6 +190,12 @@ async fn compaction_intercepts_announces_and_records() {
             assert!(
                 !usage_updates.lock().unwrap().is_empty(),
                 "a usage_update followed the compaction"
+            );
+
+            // The updatedAt cadence: a session_info_update each turn.
+            assert!(
+                !info_updates.lock().unwrap().is_empty(),
+                "a session_info_update followed the turn"
             );
             Ok(())
         })

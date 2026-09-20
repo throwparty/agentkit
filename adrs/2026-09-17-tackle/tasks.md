@@ -366,7 +366,7 @@ Implement compaction turns with the in-band announcement (trigger and token coun
 | Depends On | T-007,T-023,T-026 |
 | References | compaction,error-handling |
 
-### T-029: Session titling
+### T-029: [x] Session titling
 
 Implement the default title_trigger script: ephemeral-fork summarisation into a six-word title, set via session_info_update; failures silent and never blocking; updatedAt sent each turn
 
