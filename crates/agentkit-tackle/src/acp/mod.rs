@@ -12,6 +12,7 @@ use crate::store::SessionStore;
 
 pub mod compaction;
 pub mod fork;
+pub mod titling;
 #[cfg(feature = "unstable")]
 use agent_client_protocol::schema::v1::SessionForkCapabilities;
 use agent_client_protocol::schema::v1::{
@@ -390,6 +391,23 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
                         request.session_id.clone(),
                         agent_client_protocol::schema::v1::SessionUpdate::AgentMessageChunk(chunk),
                     ));
+
+                    // updatedAt each turn — the fork's report turn too.
+                    let updated = agent_client_protocol::schema::v1::SessionInfoUpdate::new()
+                        .updated_at(
+                            state_for_prompt
+                                .db
+                                .get_session(&session_id)
+                                .await
+                                .ok()
+                                .flatten()
+                                .map(|session| timestamp(session.updated_at))
+                                .unwrap_or_default(),
+                        );
+                    let _ = cx.send_notification(SessionNotification::new(
+                        request.session_id.clone(),
+                        SessionUpdate::SessionInfoUpdate(updated),
+                    ));
                     state_for_prompt
                         .db
                         .release_lease(&session_id, &owner_for_prompt)
@@ -503,6 +521,23 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
                             SessionUpdate::CompactionUpdate(update),
                         ));
                     }
+
+                    // updatedAt each turn — intercepted turns included.
+                    let updated = agent_client_protocol::schema::v1::SessionInfoUpdate::new()
+                        .updated_at(
+                            state_for_prompt
+                                .db
+                                .get_session(&session_id)
+                                .await
+                                .ok()
+                                .flatten()
+                                .map(|session| timestamp(session.updated_at))
+                                .unwrap_or_default(),
+                        );
+                    let _ = cx.send_notification(SessionNotification::new(
+                        request.session_id.clone(),
+                        SessionUpdate::SessionInfoUpdate(updated),
+                    ));
 
                     state_for_prompt
                         .db
@@ -638,6 +673,31 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
                     },
                 )
                 .await;
+
+                // updatedAt each turn: the client-visible last-activity
+                // stamp, before the response.
+                let updated = agent_client_protocol::schema::v1::SessionInfoUpdate::new()
+                    .updated_at(
+                        state_for_prompt
+                            .db
+                            .get_session(&session_id)
+                            .await
+                            .ok()
+                            .flatten()
+                            .map(|session| timestamp(session.updated_at))
+                            .unwrap_or_default(),
+                    );
+                let _ = cx.send_notification(SessionNotification::new(
+                    request.session_id.clone(),
+                    SessionUpdate::SessionInfoUpdate(updated),
+                ));
+
+                // Titling: detached, silent, only for untitled sessions.
+                titling::fire_title_trigger_detached(
+                    state_for_prompt.clone(),
+                    session_id.clone(),
+                    size,
+                );
 
                 state_for_prompt
                     .db
