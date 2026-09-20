@@ -672,6 +672,109 @@ impl SessionStore {
         Ok(())
     }
 
+    /// Sets the session title (the `session_info_update` backing).
+    pub async fn set_title(&self, session_id: &SessionId, title: &str) -> Result<(), StoreError> {
+        let now = unix_now();
+        match &self.backend {
+            Backend::Sqlite(pool) => {
+                sqlx::query("UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?")
+                    .bind(title)
+                    .bind(now)
+                    .bind(session_id)
+                    .execute(pool)
+                    .await?;
+            }
+            Backend::Memory(_) => self.lock_memory().set_title(session_id, title),
+        }
+        Ok(())
+    }
+
+    /// The session's parent-chain turn identities and kinds, newest
+    /// first — compaction clamping reads the kinds.
+    pub async fn session_walk(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<(TurnId, TurnKind)>, StoreError> {
+        match &self.backend {
+            Backend::Sqlite(pool) => {
+                let rows: Vec<(String, String)> = sqlx::query_as(
+                    "WITH RECURSIVE walk AS ( \
+                         SELECT t.id, t.kind, 0 AS depth \
+                         FROM turns t \
+                         JOIN sessions s ON s.head_turn_id = t.id \
+                         WHERE s.id = ?1 \
+                         UNION ALL \
+                         SELECT p.id, p.kind, walk.depth + 1 \
+                         FROM walk \
+                         JOIN turns p ON p.id = walk.parent_id \
+                     ) \
+                     SELECT id, kind FROM walk ORDER BY depth ASC",
+                )
+                .bind(session_id)
+                .fetch_all(pool)
+                .await?;
+                Ok(rows
+                    .into_iter()
+                    .map(|(id, kind)| (id, TurnKind::from_str(&kind)))
+                    .collect())
+            }
+            Backend::Memory(_) => Ok(self.lock_memory().session_walk(session_id)),
+        }
+    }
+
+    /// One turn by id.
+    pub async fn get_turn(&self, turn_id: &TurnId) -> Result<Option<Turn>, StoreError> {
+        match &self.backend {
+            Backend::Sqlite(pool) => {
+                let row = sqlx::query_as::<
+                    _,
+                    (
+                        String,
+                        String,
+                        String,
+                        Option<String>,
+                        Option<String>,
+                        i64,
+                        i64,
+                        i64,
+                        f64,
+                    ),
+                >(
+                    "SELECT id, session_id, kind, parent_id, first_retained_turn_id, created_at, input_tokens, output_tokens, cost_usd FROM turns WHERE id = ?",
+                )
+                .bind(turn_id)
+                .fetch_optional(pool)
+                .await?;
+                Ok(row.map(
+                    |(
+                        id,
+                        session_id,
+                        kind,
+                        parent_id,
+                        first_retained,
+                        created_at,
+                        input,
+                        output,
+                        cost,
+                    )| Turn {
+                        id,
+                        session_id,
+                        kind: TurnKind::from_str(&kind),
+                        parent_id,
+                        first_retained_turn_id: first_retained,
+                        created_at,
+                        usage: TurnUsage {
+                            input_tokens: input.max(0) as u64,
+                            output_tokens: output.max(0) as u64,
+                            cost_usd: cost,
+                        },
+                    },
+                ))
+            }
+            Backend::Memory(_) => Ok(self.lock_memory().get_turn(turn_id)),
+        }
+    }
+
     /// Assembles the conversation context for a session: the parent-chain
     /// walk from the head with compaction truncation, summaries first,
     /// then retained turns oldest to newest, messages expanded in
