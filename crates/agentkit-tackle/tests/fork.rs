@@ -1,9 +1,11 @@
 //! Fork integration tests (T-027): the RFD path, the v1 /fork fallback,
 //! seed insertion, fork titles, and script-failure grace.
 
+#[cfg(feature = "unstable")]
+use agentkit_tackle::agent_client_protocol::schema::v1::ForkSessionRequest;
 use agentkit_tackle::agent_client_protocol::schema::v1::{
-    ContentBlock, ForkSessionRequest, InitializeRequest, NewSessionRequest, PromptRequest,
-    SessionNotification, SessionUpdate, TextContent,
+    ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, SessionNotification,
+    SessionUpdate, TextContent,
 };
 use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
@@ -44,6 +46,7 @@ fn spawn_agent_with_config(dir: &std::path::Path) -> AcpAgent {
     .expect("agent arguments")
 }
 
+#[cfg(feature = "unstable")]
 #[tokio::test(flavor = "multi_thread")]
 async fn rfd_fork_creates_a_titled_fork_with_lineage() {
     let dir = tempfile::tempdir().unwrap();
@@ -226,6 +229,7 @@ async fn fallback_fork_reports_the_id_and_seeds() {
         .expect("fallback fork round-trip");
 }
 
+#[cfg(feature = "unstable")]
 #[tokio::test(flavor = "multi_thread")]
 async fn script_failure_never_fails_the_fork() {
     let dir = tempfile::tempdir().unwrap();

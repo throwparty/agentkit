@@ -213,12 +213,14 @@
             agentkit-lens = mkAgentkitBin "lens";
             agentkit-litterbox = mkAgentkitBin "litterbox";
             agentkit-switchboard = mkAgentkitBin "switchboard";
+            agentkit-tackle = mkAgentkitBin "tackle";
           };
         checks = {
           inherit (self.packages.${system})
             agentkit-lens
             agentkit-litterbox
             agentkit-switchboard
+            agentkit-tackle
             ;
         };
       }
@@ -229,6 +231,7 @@
           agentkit-lens
           agentkit-litterbox
           agentkit-switchboard
+          agentkit-tackle
           ;
       };
     };

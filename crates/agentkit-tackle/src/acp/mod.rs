@@ -278,8 +278,8 @@ where
                 // The selectors ride the response; degraded discovery
                 // surfaces as notices.
                 let selectors = config_options::build(&state_for_new, &session).await;
+                #[cfg(feature = "unstable")]
                 for notice in &selectors.notices {
-                    #[cfg(feature = "unstable")]
                     if negotiation_for_new.supports(UnstableFeature::SessionNotices) {
                         let _ = cx.send_notification(SessionNotification::new(
                             wire_session_id(&session.id),
@@ -897,15 +897,22 @@ where
                                         std::sync::Arc::new(compaction::LoopPendingCompletions),
                                         0,
                                     ));
+                                #[cfg(feature = "unstable")]
                                 let mut updates: Vec<agent_client_protocol::schema::v1::Notice> =
                                     Vec::new();
-                                let mut notify = |update: config_options::SessionUpdateForOptions| {
-                                    match update {
-                                        config_options::SessionUpdateForOptions::Notice(notice) => {
-                                            updates.push(notice)
+                                let mut notify =
+                                    |update: config_options::SessionUpdateForOptions| {
+                                        #[cfg(feature = "unstable")]
+                                        match update {
+                                            config_options::SessionUpdateForOptions::Notice(
+                                                notice,
+                                            ) => {
+                                                updates.push(notice);
+                                            }
                                         }
-                                    }
-                                };
+                                        #[cfg(not(feature = "unstable"))]
+                                        drop(update);
+                                    };
                                 let result = config_options::apply_model_switch(
                                     &state_for_config,
                                     access.as_ref(),
@@ -914,8 +921,8 @@ where
                                     &mut notify,
                                 )
                                 .await;
+                                #[cfg(feature = "unstable")]
                                 for notice in updates {
-                                    #[cfg(feature = "unstable")]
                                     if negotiation_for_config.supports(UnstableFeature::SessionNotices) {
                                         let _ = cx.send_notification(SessionNotification::new(
                                             request.session_id.clone(),
