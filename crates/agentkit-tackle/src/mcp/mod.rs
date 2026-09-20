@@ -194,12 +194,14 @@ pub struct NamespacedTool {
 }
 
 /// A tool result: the content blocks (serialised), the error flag, and
-/// the truncation marker.
+/// the truncation marker with the original size.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolResult {
     pub content_json: String,
     pub is_error: bool,
     pub truncated: bool,
+    /// The serialised size before truncation; the size marker's source.
+    pub original_size: usize,
 }
 
 /// An MCP server's elicitation, forwarded for surfacing to the user —
@@ -439,7 +441,11 @@ impl<S: ElicitationSink> McpPool<S> {
         let arguments = match arguments {
             serde_json::Value::Null => None,
             serde_json::Value::Object(map) => Some(map),
-            other => Some(serde_json::from_value(other).expect("object map")),
+            _ => {
+                return Err(crate::mcp::McpPoolError::Call(
+                    "tool arguments must be a JSON object".to_owned(),
+                ))
+            }
         };
         let mut params = CallToolRequestParams::new(tool.to_owned());
         params.arguments = arguments;
@@ -449,17 +455,26 @@ impl<S: ElicitationSink> McpPool<S> {
             .await
             .map_err(|err| crate::mcp::McpPoolError::Call(err.to_string()))?;
 
-        let mut content_json =
+        let content_json =
             serde_json::to_string(&result.content).unwrap_or_else(|_| "[]".to_owned());
+        let original_size = content_json.len();
+        let mut content_json = content_json;
         let mut truncated = false;
         if content_json.len() > TOOL_RESULT_LIMIT {
-            content_json.truncate(TOOL_RESULT_LIMIT);
+            // Truncate at a character boundary: multi-byte content
+            // must not panic the harness.
+            let mut end = TOOL_RESULT_LIMIT;
+            while !content_json.is_char_boundary(end) {
+                end -= 1;
+            }
+            content_json.truncate(end);
             truncated = true;
         }
         Ok(ToolResult {
             content_json,
             is_error: result.is_error.unwrap_or(false),
             truncated,
+            original_size,
         })
     }
 }

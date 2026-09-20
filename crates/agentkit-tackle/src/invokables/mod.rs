@@ -11,7 +11,7 @@
 //! silent shadow.
 
 use crate::loader::Definitions;
-use crate::mcp::NamespacedTool;
+use crate::mcp::{ElicitationSink, McpPool, NamespacedTool};
 use agent_client_protocol::schema::v1::{
     AvailableCommand, AvailableCommandInput, UnstructuredCommandInput,
 };
@@ -370,40 +370,121 @@ impl Registry {
             .filter(|invokable| invokable.model_invokable())
     }
 
-    /// The ACP command advertisement: user-invokable prompts as
-    /// commands, with the unstructured input hint mapped from the
-    /// prompt's declared parameters.
+    /// The ACP command advertisement: the `!` prefix command (clients
+    /// autocomplete `/!`) followed by the user-invokable prompts, with
+    /// the unstructured input hint mapped from the prompt's declared
+    /// parameters.
     pub fn available_commands(&self) -> Vec<AvailableCommand> {
-        self.entries
-            .values()
-            .filter(|invokable| invokable.user_invokable())
-            .filter_map(|invokable| match invokable {
-                Invokable::Prompt {
-                    name,
-                    description,
-                    parameters,
-                    ..
-                } => {
-                    // The user types /<name>; the hint previews the
-                    // positional parameters the expansion will fill.
-                    let name = name.strip_prefix("prompt.").unwrap_or(name).to_owned();
-                    let mut command = AvailableCommand::new(name, description.clone());
-                    if !parameters.is_empty() {
-                        let hint = parameters
-                            .iter()
-                            .map(|parameter| format!("<{parameter}>"))
-                            .collect::<Vec<_>>()
-                            .join(" ");
-                        command = command.input(AvailableCommandInput::Unstructured(
-                            UnstructuredCommandInput::new(hint),
-                        ));
-                    }
-                    Some(command)
+        let mut commands =
+            vec![
+                AvailableCommand::new("!", "Execute an MCP tool directly with no model request")
+                    .input(AvailableCommandInput::Unstructured(
+                        UnstructuredCommandInput::new("mcp.<server>.<tool> {json arguments}"),
+                    )),
+            ];
+
+        for invokable in self.entries.values() {
+            if !invokable.user_invokable() {
+                continue;
+            }
+            if let Invokable::Prompt {
+                name,
+                description,
+                parameters,
+                ..
+            } = invokable
+            {
+                // The user types /<name>; the hint previews the
+                // positional parameters the expansion will fill.
+                let name = name.strip_prefix("prompt.").unwrap_or(name).to_owned();
+                let mut command = AvailableCommand::new(name, description.clone());
+                if !parameters.is_empty() {
+                    let hint = parameters
+                        .iter()
+                        .map(|parameter| format!("<{parameter}>"))
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    command = command.input(AvailableCommandInput::Unstructured(
+                        UnstructuredCommandInput::new(hint),
+                    ));
                 }
-                _ => None,
-            })
-            .collect()
+                commands.push(command);
+            }
+        }
+        commands
     }
+
+    /// `/!name execution of MCP tools with no model request`, bypassing
+    /// the permission pipeline — the user is the authority. Oversized
+    /// outputs arrive truncated at the fixed internal limit with the
+    /// original size recorded; storage keeps the full content.
+    pub async fn execute_direct<S: ElicitationSink>(
+        &self,
+        pool: &McpPool<S>,
+        input: &DirectInvocation,
+    ) -> Result<crate::mcp::ToolResult, DirectError> {
+        let invokable = self
+            .resolve(&input.invokable)
+            .ok_or_else(|| DirectError::Unknown(input.invokable.clone()))?;
+        let invokable_name = invokable.name().to_owned();
+        let Invokable::Mcp { server, tool, .. } = invokable else {
+            // /! on a non-MCP invokable is a precise error — direct
+            // invocation supports MCP tools only.
+            return Err(DirectError::NotMcp(invokable_name));
+        };
+
+        let arguments = if input.arguments.trim().is_empty() {
+            serde_json::Value::Null
+        } else {
+            let parsed: serde_json::Value = serde_json::from_str(&input.arguments)
+                .map_err(|_| DirectError::Arguments(input.invokable.clone()))?;
+            if !parsed.is_object() {
+                return Err(DirectError::Arguments(input.invokable.clone()));
+            }
+            parsed
+        };
+
+        pool.call_tool(server, tool, arguments)
+            .await
+            .map_err(DirectError::Pool)
+    }
+}
+
+/// User-typed `/!name arguments` input, exact first-token match. Only
+/// the ACP user-input path constructs these: never model output, seed
+/// messages, script payloads, or script-sent prompts.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DirectInvocation {
+    /// The namespaced MCP tool: `mcp.<server>.<tool>`.
+    pub invokable: String,
+    /// The remainder of the line: the tool's JSON object arguments.
+    pub arguments: String,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DirectError {
+    #[error("unknown invokable `{0}`")]
+    Unknown(String),
+    #[error("`{0}` is not an MCP tool — direct invocation supports MCP tools only")]
+    NotMcp(String),
+    #[error("direct invocation arguments must be a JSON object: /!{0} {{...}}")]
+    Arguments(String),
+    #[error(transparent)]
+    Pool(#[from] crate::mcp::McpPoolError),
+}
+
+/// Intercepts the `/!` prefix on user-typed input: exact first-token
+/// match, the first token naming the invokable, the remainder its
+/// arguments. Anything not starting with `/!` — pasted text, model
+/// output mentioning the syntax — yields `None`.
+pub fn parse_direct(input: &str) -> Option<DirectInvocation> {
+    let rest = input.strip_prefix("/!")?;
+    let invokable = rest.split_whitespace().next()?;
+    let arguments = rest[invokable.len()..].trim().to_owned();
+    Some(DirectInvocation {
+        invokable: invokable.to_owned(),
+        arguments,
+    })
 }
 
 #[cfg(test)]
@@ -649,7 +730,9 @@ mod tests {
         let registry = Registry::build(&definitions, &[]).unwrap();
 
         let commands = registry.available_commands();
-        assert_eq!(commands.len(), 2);
+        // The `!` prefix command leads, then the user-invokable prompts.
+        assert_eq!(commands.len(), 3);
+        assert_eq!(commands[0].name, "!");
 
         let explain = commands
             .iter()
@@ -823,6 +906,49 @@ mod tests {
                 .expand_model("prompt.user_only", &serde_json::json!({}))
                 .unwrap_err();
             assert!(err.to_string().contains("not model-invokable"), "{err}");
+        }
+    }
+
+    mod direct_invocation {
+        use super::*;
+
+        fn registry_with_mcp() -> Registry {
+            let definitions =
+                definitions_with(vec![prompt_def("deploy", default_prompt_meta(), "Body.")]);
+            Registry::build(&definitions, &[mcp_tool("echo", "echo")]).unwrap()
+        }
+
+        #[test]
+        fn the_prefix_command_is_advertised_for_autocomplete() {
+            let registry = registry_with_mcp();
+
+            let commands = registry.available_commands();
+            let bang = commands.first().unwrap();
+            assert_eq!(bang.name, "!");
+            let AvailableCommandInput::Unstructured(unstructured) = bang.input.as_ref().unwrap()
+            else {
+                panic!("expected an unstructured input hint");
+            };
+            assert_eq!(unstructured.hint, "mcp.<server>.<tool> {json arguments}");
+        }
+
+        #[test]
+        fn interception_is_exact_first_token_on_user_typed_input() {
+            let parsed = parse_direct("/!mcp.echo.echo {\"text\": \"hi\"}").unwrap();
+            assert_eq!(parsed.invokable, "mcp.echo.echo");
+            assert_eq!(parsed.arguments, "{\"text\": \"hi\"}");
+
+            // No arguments: empty remainder.
+            let parsed = parse_direct("/!mcp.echo.echo").unwrap();
+            assert_eq!(parsed.invokable, "mcp.echo.echo");
+            assert_eq!(parsed.arguments, "");
+
+            // Not the /! prefix — pasted text, or model output that
+            // merely mentions the syntax: never intercepted.
+            assert!(parse_direct("look at /!mcp.echo.echo").is_none());
+            assert!(parse_direct("I'd run /!mcp.echo.echo for that").is_none());
+            assert!(parse_direct("/mcp.echo.echo").is_none());
+            assert!(parse_direct("/!").is_none());
         }
     }
 }
