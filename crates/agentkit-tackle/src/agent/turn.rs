@@ -37,6 +37,9 @@ pub async fn run_turn<P: ModelProvider>(
     prompt_text: &str,
     prior: Vec<ChatMessage>,
     max_requests: u32,
+    #[allow(unused_variables)] // the usage callback owns the size decision (T-016 sends it)
+    size: u64,
+    mut on_usage: impl FnMut(u64, u64, f64) + Send,
     mut on_delta: impl FnMut(&str) + Send,
 ) -> Result<TurnOutcome, TurnError> {
     let mut request_count = 0u32;
@@ -96,10 +99,15 @@ pub async fn run_turn<P: ModelProvider>(
             crate::store::TurnUsage {
                 input_tokens: response.usage.input_tokens,
                 output_tokens: response.usage.output_tokens,
-                cost_usd: 0.0, // cost estimation lands with the pricing source (T-016)
+                cost_usd: 0.0,
             },
         )
         .await?;
+        on_usage(
+            response.usage.input_tokens,
+            response.usage.output_tokens,
+            0.0,
+        );
 
         // v1: the model made no tool requests (the tool-call loop lands in
         // T-021) — the response is the final answer.

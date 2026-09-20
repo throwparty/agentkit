@@ -45,6 +45,15 @@ impl MemoryData {
         }
     }
 
+    pub fn release_lease(&mut self, id: &SessionId, owner: &str) {
+        if let Some(session) = self.sessions.get_mut(id) {
+            if session.owner.as_deref() == Some(owner) {
+                session.owner = None;
+                session.lease_expires_at = None;
+            }
+        }
+    }
+
     /// Attempts to acquire the lease; `expires_at` is the absolute expiry
     /// (unix seconds). Succeeds when free or expired.
     pub fn acquire_lease(

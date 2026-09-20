@@ -487,6 +487,7 @@ mod tests {
         let provider = provider_for("test/model", &config).unwrap();
 
         let mut deltas = Vec::new();
+        let mut usage_updates = Vec::new();
         let outcome = crate::agent::turn::run_turn(
             &provider,
             &store,
@@ -498,12 +499,15 @@ mod tests {
             "the question",
             Vec::new(),
             8,
+            200_000,
+            |input: u64, _output: u64, _cost: f64| usage_updates.push(input),
             |delta: &str| deltas.push(delta.to_owned()),
         )
         .await
         .unwrap();
 
         assert_eq!(outcome.stop, crate::agent::TurnStop::EndTurn);
+        assert_eq!(usage_updates, [9], "one usage callback per model request");
         assert_eq!(deltas, ["the answer"]);
         let usage = store.session_usage(&session.id).await.unwrap();
         assert_eq!(usage.input_tokens, 9, "the turn's usage delta is persisted");
