@@ -206,6 +206,7 @@ dependencies = [
  "agent-client-protocol",
  "agentkit-models",
  "agentkit-path",
+ "agentkit-script",
  "clap",
  "daggy",
  "futures",

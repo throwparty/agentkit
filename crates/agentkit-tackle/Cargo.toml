@@ -8,6 +8,7 @@ license = "Apache-2.0"
 [dependencies]
 agentkit-models = { path = "../agentkit-models" }
 agentkit-path = { path = "../agentkit-path" }
+agentkit-script = { path = "../agentkit-script" }
 agent-client-protocol = "2.2.0"
 clap = { version = "4", features = ["derive"] }
 daggy = "0.8"
