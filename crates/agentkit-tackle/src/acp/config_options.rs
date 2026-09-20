@@ -108,7 +108,11 @@ pub async fn build(state: &TackleState, session: &Session) -> Selectors {
                 .config
                 .credential_helper
                 .as_deref()
-                .and_then(|helper| crate::agent::provider::resolve_credential(helper, name)),
+                .and_then(|helper| crate::agent::provider::resolve_credential(helper, name))
+                .map(|secret| {
+                    use secrecy::ExposeSecret as _;
+                    secret.expose_secret().to_owned()
+                }),
         };
         let qualified = |model: &str| format!("{name}/{model}");
         let discovered =

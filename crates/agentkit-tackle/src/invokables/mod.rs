@@ -498,6 +498,8 @@ impl Registry {
             parsed
         };
 
+        // The tool-call span: arguments redacted to their size.
+        let _call_guard = crate::telemetry::tool_call_span(&input.invokable, input.arguments.len());
         pool.call_tool(server, tool, arguments)
             .await
             .map_err(DirectError::Pool)
