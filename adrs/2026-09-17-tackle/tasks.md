@@ -249,7 +249,7 @@ Spawn stdio servers with explicit argv, no shell interpretation, named env entri
 | Depends On | T-018 |
 | References | mcp-integration,observability |
 
-### T-020: Elicitation forwarding
+### T-020: [x] Elicitation forwarding
 
 Forward MCP elicitations to session/request_permission with explicit origin attribution semantically distinct from tool permission prompts; elicitation responses never write the grant store
 
