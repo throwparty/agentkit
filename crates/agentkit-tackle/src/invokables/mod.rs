@@ -491,6 +491,7 @@ pub fn parse_direct(input: &str) -> Option<DirectInvocation> {
 mod tests {
     use super::*;
     use crate::loader::{ActorMeta, Definition, PersonaMeta, PromptMeta};
+    use std::collections::BTreeSet;
     use std::path::PathBuf;
 
     fn prompt_def(name: &str, meta: PromptMeta, body: &str) -> (String, Definition<PromptMeta>) {
@@ -522,6 +523,7 @@ mod tests {
             personas: BTreeMap::new(),
             actors: BTreeMap::new(),
             prompts: prompts.into_iter().collect(),
+            builtin_overrides: BTreeSet::new(),
         }
     }
 

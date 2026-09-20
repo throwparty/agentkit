@@ -11,6 +11,7 @@ use crate::loader::Definitions;
 use crate::store::SessionStore;
 
 pub mod compaction;
+pub mod first_run;
 pub mod fork;
 pub mod titling;
 #[cfg(feature = "unstable")]
@@ -148,6 +149,7 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
     let state_for_init = state.clone();
 
     let state_for_new = state.clone();
+    let state_for_auth = state.clone();
     let state_for_list = state.clone();
     let state_for_close = state.clone();
     let state_for_delete = state.clone();
@@ -169,10 +171,34 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
                 // responds with v1 regardless of the client's latest; a
                 // v1-only client proceeds, a v2-only client disconnects.
                 negotiation_for_init.capture(&request.client_capabilities.meta);
-                responder.respond(
-                    InitializeResponse::new(ProtocolVersion::V1)
-                        .agent_capabilities(state_for_init.capabilities()),
-                )
+                // Missing provider credentials surface as authMethods:
+                // the client drives the ACP authenticate method.
+                let mut response = InitializeResponse::new(ProtocolVersion::V1)
+                    .agent_capabilities(state_for_init.capabilities());
+                if first_run::missing_credentials(&state_for_init) {
+                    response.auth_methods =
+                        vec![agent_client_protocol::schema::v1::AuthMethod::Agent(
+                            agent_client_protocol::schema::v1::AuthMethodAgent::new(
+                                "credentials",
+                                "Set up model credentials",
+                            )
+                            .description(Some(
+                                "Resolve the configured model endpoints' credentials.".to_owned(),
+                            )),
+                        )];
+                }
+                responder.respond(response)
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |_request: agent_client_protocol::schema::v1::AuthenticateRequest,
+                        responder,
+                        _cx| {
+                // Re-attempt the credential resolution; the next prompt
+                // uses whatever resolved.
+                let _ = first_run::missing_credentials(&state_for_auth);
+                responder.respond(agent_client_protocol::schema::v1::AuthenticateResponse::new())
             },
             agent_client_protocol::on_receive_request!(),
         )
@@ -201,6 +227,34 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
                     .map_err(|err| Error::internal_error().data(err.to_string()))?;
                 // MCP connections kick off asynchronously (T-018); session
                 // creation never blocks on them.
+                // The first-session seed: harness-authored static content
+                // documenting the loaded configuration and the command
+                // syntaxes, on its own seed turn.
+                let seed = first_run::first_run_seed(&state_for_new);
+                let seed_turn = state_for_new
+                    .db
+                    .append_turn(
+                        &session.id,
+                        None,
+                        crate::store::TurnKind::Seed,
+                        None,
+                        crate::store::TurnUsage::default(),
+                    )
+                    .await
+                    .map_err(|err| Error::internal_error().data(err.to_string()))?;
+                state_for_new
+                    .db
+                    .append_message(
+                        &seed_turn.id,
+                        crate::store::Role::User,
+                        &serde_json::json!([{ "type": "text", "text": seed }]).to_string(),
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
+                    .await
+                    .map_err(|err| Error::internal_error().data(err.to_string()))?;
                 responder.respond(NewSessionResponse::new(wire_session_id(&session.id)))
             },
             agent_client_protocol::on_receive_request!(),
@@ -810,7 +864,15 @@ fn fork_access(state: &TackleState) -> std::sync::Arc<dyn fork::SessionAccess> {
     impl fork::CompletionSink for LoopPendingCompletions {
         fn publish(&self, _session: &crate::store::SessionId, _completion: fork::Completion) {}
         fn take(&self, _session: &crate::store::SessionId) -> Option<fork::Completion> {
-            None
+            // The agent loop integration drives these model turns;
+            // scripts awaiting a completion degrade gracefully on a
+            // non-end_turn answer instead of hanging on their timeout.
+            Some(fork::Completion {
+                stop_reason: "model-loop-pending".to_owned(),
+                final_message: String::new(),
+                input_tokens: 0,
+                output_tokens: 0,
+            })
         }
     }
     std::sync::Arc::new(fork::StoreAccess::new(
@@ -909,7 +971,7 @@ fn context_window(model_ref: &str) -> Option<u64> {
 }
 
 /// The text of a stored message: its text blocks joined.
-pub(crate) fn prompt_text_of(content: &str) -> String {
+pub fn prompt_text_of(content: &str) -> String {
     serde_json::from_str::<Vec<serde_json::Value>>(content)
         .map(|blocks| crate::agent::turn::prompt_text(&blocks))
         .unwrap_or_default()

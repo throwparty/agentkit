@@ -59,8 +59,8 @@ pub struct Loaded {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
-    #[error("project configuration must not set `{0}` (user configuration only)")]
-    ProjectForbidden(String),
+    #[error("{path}: project configuration must not set `{key}` (user configuration only)")]
+    ProjectForbidden { path: PathBuf, key: &'static str },
     #[error("failed to parse {path}: {source}")]
     Parse {
         path: PathBuf,
@@ -92,7 +92,7 @@ pub fn load_layered(
     let project = match &project_layer {
         Some(path) => {
             let project = load_file(path)?.unwrap_or_default();
-            reject_project_security_fields(&project)?;
+            reject_project_security_fields(&project, path)?;
             if let Some(gate) = gate {
                 gate_project_entries(gate, project)
             } else {
@@ -103,10 +103,40 @@ pub fn load_layered(
     };
 
     Ok(Loaded {
-        config: user.unwrap_or_default().merge(project),
+        // The built-in registrations seed at the lowest precedence: a
+        // user or project entry with the same name replaces one
+        // wholesale (a disabling entry needs no file).
+        config: builtin_registrations()
+            .merge(user.unwrap_or_default())
+            .merge(project),
         user_layer: user_path.is_file().then_some(user_path),
         project_layer,
     })
+}
+
+/// The shipped script registrations: compaction (automatic past the
+/// utilisation threshold and the manual /compact summary) and titling.
+/// Sources are built-in (`builtin:` references); user configuration
+/// overrides any entry wholesale.
+fn builtin_registrations() -> Config {
+    let mut config = Config::default();
+    config.scripts.insert(
+        "compaction".to_owned(),
+        ScriptConfig {
+            events: vec!["post_turn".to_owned(), "compaction_requested".to_owned()],
+            file: "builtin:compaction.rhai".to_owned(),
+            enabled: true,
+        },
+    );
+    config.scripts.insert(
+        "titling".to_owned(),
+        ScriptConfig {
+            events: vec!["title_trigger".to_owned()],
+            file: "builtin:titling.rhai".to_owned(),
+            enabled: true,
+        },
+    );
+    config
 }
 
 /// Trust-gates the executable entries of a project layer (`mcp_servers`
@@ -155,12 +185,18 @@ fn load_file(path: &Path) -> Result<Option<Config>, ConfigError> {
         })
 }
 
-fn reject_project_security_fields(project: &Config) -> Result<(), ConfigError> {
+fn reject_project_security_fields(project: &Config, path: &Path) -> Result<(), ConfigError> {
     if !project.endpoints.is_empty() {
-        return Err(ConfigError::ProjectForbidden("endpoints".into()));
+        return Err(ConfigError::ProjectForbidden {
+            path: path.to_path_buf(),
+            key: "endpoints",
+        });
     }
     if project.credential_helper.is_some() {
-        return Err(ConfigError::ProjectForbidden("credential_helper".into()));
+        return Err(ConfigError::ProjectForbidden {
+            path: path.to_path_buf(),
+            key: "credential_helper",
+        });
     }
     Ok(())
 }
