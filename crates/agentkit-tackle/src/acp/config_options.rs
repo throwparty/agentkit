@@ -14,10 +14,11 @@
 use crate::acp::TackleState;
 use crate::config::{Auth, WireFormat};
 use crate::store::{Session, SessionId};
+#[cfg(feature = "unstable")]
+use agent_client_protocol::schema::v1::{Notice, NoticeSeverity};
 use agent_client_protocol::schema::v1::{
-    Notice, NoticeSeverity, SessionConfigId, SessionConfigKind, SessionConfigOption,
-    SessionConfigOptionCategory, SessionConfigSelect, SessionConfigSelectOption,
-    SessionConfigValueId,
+    SessionConfigId, SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
+    SessionConfigSelect, SessionConfigSelectOption, SessionConfigValueId,
 };
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -88,6 +89,7 @@ async fn discover_models(
 /// Notices discovered while building the selectors (degraded discovery).
 pub struct Selectors {
     pub options: Vec<SessionConfigOption>,
+    #[cfg(feature = "unstable")]
     pub notices: Vec<Notice>,
 }
 
@@ -95,6 +97,7 @@ pub struct Selectors {
 /// (discovery primary, static fallback) and the actor selector.
 pub async fn build(state: &TackleState, session: &Session) -> Selectors {
     let mut options = Vec::new();
+    #[cfg(feature = "unstable")]
     let mut notices = Vec::new();
 
     // The model selector: the endpoint-qualified models across the
@@ -120,6 +123,7 @@ pub async fn build(state: &TackleState, session: &Session) -> Selectors {
         let models = match discovered {
             Some(models) => models,
             None => {
+                #[cfg(feature = "unstable")]
                 if !endpoint.models.is_empty() {
                     notices.push(
                         Notice::new(
@@ -188,7 +192,11 @@ pub async fn build(state: &TackleState, session: &Session) -> Selectors {
         );
     }
 
-    Selectors { options, notices }
+    Selectors {
+        options,
+        #[cfg(feature = "unstable")]
+        notices,
+    }
 }
 
 /// Applies a model switch: validated against the new model's context
@@ -213,6 +221,7 @@ pub async fn apply_model_switch(
             // Auto-compaction: the compaction scripts run, announced,
             // with a context note. The switch still applies, effective
             // the following turn.
+            #[cfg(feature = "unstable")]
             notify(SessionUpdateForOptions::Notice(
                 Notice::new(
                     NoticeSeverity::Warning,
@@ -222,6 +231,7 @@ pub async fn apply_model_switch(
                     "The session uses about {used_tokens} tokens; the new window is {window}."
                 ))),
             ));
+            let _ = (&used_tokens, &window);
             let turn = state
                 .db
                 .append_turn(
@@ -248,6 +258,7 @@ pub async fn apply_model_switch(
 /// The update kinds the switch path sends (kept opaque so the handler
 /// maps onto the SDK types).
 pub enum SessionUpdateForOptions {
+    #[cfg(feature = "unstable")]
     Notice(Notice),
 }
 
