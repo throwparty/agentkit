@@ -682,6 +682,11 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
                         .map(|(name, _)| name.as_str()),
                 );
                 let assistant_id = uuid::Uuid::new_v4().to_string();
+                // The turn span: parent of the tool-call and usage
+                // spans the loop's paths create.
+                let turn_span =
+                    crate::telemetry::turn_span(&session_id, &actor_name, &model_ref);
+                let _turn_guard = turn_span.enter();
                 let session_for_chunks = request.session_id.clone();
                 let cx_for_chunks = cx.clone();
                 let cx_for_retry = cx.clone();
@@ -759,6 +764,14 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
                     },
                 )
                 .await;
+
+                if let Ok(result) = &outcome {
+                    let _usage = crate::telemetry::usage_span(
+                        &session_id,
+                        result.usage.input_tokens,
+                        result.usage.output_tokens,
+                    );
+                }
 
                 // updatedAt each turn: the client-visible last-activity
                 // stamp, before the response.
