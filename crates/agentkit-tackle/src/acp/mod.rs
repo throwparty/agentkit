@@ -11,6 +11,7 @@ use crate::loader::Definitions;
 use crate::store::SessionStore;
 
 pub mod compaction;
+pub mod config_options;
 pub mod first_run;
 pub mod fork;
 pub mod titling;
@@ -151,6 +152,9 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
     let state_for_new = state.clone();
     let state_for_auth = state.clone();
     let state_for_list = state.clone();
+    let negotiation_for_new = negotiation.clone();
+    let negotiation_for_config = negotiation.clone();
+    let state_for_config = state.clone();
     let state_for_close = state.clone();
     let state_for_delete = state.clone();
     let state_for_load = state.clone();
@@ -203,7 +207,7 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
-            async move |request: NewSessionRequest, responder, _cx| {
+            async move |request: NewSessionRequest, responder, cx| {
                 // Default actor selection: [defaults].actor, else the
                 // built-in "default" (T-031 adds the client selector).
                 let actor = state_for_new
@@ -247,7 +251,8 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
                     .append_message(
                         &seed_turn.id,
                         crate::store::Role::User,
-                        &serde_json::json!([{ "type": "text", "text": seed }]).to_string(),
+                        &serde_json::json!([{ "type": "text", "text": seed }])
+                            .to_string(),
                         None,
                         None,
                         None,
@@ -255,7 +260,22 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
                     )
                     .await
                     .map_err(|err| Error::internal_error().data(err.to_string()))?;
-                responder.respond(NewSessionResponse::new(wire_session_id(&session.id)))
+                // The selectors ride the response; degraded discovery
+                // surfaces as notices.
+                let selectors = config_options::build(&state_for_new, &session).await;
+                for notice in &selectors.notices {
+                    #[cfg(feature = "unstable")]
+                    if negotiation_for_new.supports(UnstableFeature::SessionNotices) {
+                        let _ = cx.send_notification(SessionNotification::new(
+                            wire_session_id(&session.id),
+                            SessionUpdate::Notice(notice.clone()),
+                        ));
+                    }
+                }
+                responder.respond(
+                    NewSessionResponse::new(wire_session_id(&session.id))
+                        .config_options(selectors.options),
+                )
             },
             agent_client_protocol::on_receive_request!(),
         )
@@ -495,15 +515,23 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
                     let size = {
                         let model_ref = session_row
                             .as_ref()
-                            .and_then(|row| {
-                                state_for_prompt
-                                    .definitions
-                                    .actors
-                                    .get(&session_actor(
-                                        row,
-                                        state_for_prompt.config.config.defaults.actor.as_deref(),
-                                    ))
-                                    .and_then(|a| a.frontmatter.model.clone())
+                            .and_then(crate::store::session_model_free)
+                            .or_else(|| {
+                                session_row.as_ref().and_then(|row| {
+                                    state_for_prompt
+                                        .definitions
+                                        .actors
+                                        .get(&session_actor(
+                                            row,
+                                            state_for_prompt
+                                                .config
+                                                .config
+                                                .defaults
+                                                .actor
+                                                .as_deref(),
+                                        ))
+                                        .and_then(|a| a.frontmatter.model.clone())
+                                })
                             })
                             .or_else(|| state_for_prompt.config.config.defaults.model.clone())
                             .unwrap_or_else(|| "default/model".into());
@@ -609,8 +637,12 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
                         .get(&a.frontmatter.persona)
                 });
                 let system = persona.map(|p| p.body.clone()).unwrap_or_default();
-                let model_ref = actor
-                    .and_then(|a| a.frontmatter.model.clone())
+                // The model: the config-option switch (metadata) wins,
+                // then the actor's override, then [defaults].model.
+                let model_ref = session_row
+                    .as_ref()
+                    .and_then(crate::store::session_model_free)
+                    .or_else(|| actor.and_then(|a| a.frontmatter.model.clone()))
                     .or_else(|| state_for_prompt.config.config.defaults.model.clone())
                     .unwrap_or_else(|| "default/model".into());
                 let size = context_window(&model_ref).unwrap_or(0);
@@ -809,6 +841,104 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
                 responder.respond(ResumeSessionResponse::new())
             },
             agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |request: agent_client_protocol::schema::v1::SetSessionConfigOptionRequest,
+                        responder,
+                        cx| {
+                use agent_client_protocol::schema::v1::SessionConfigOptionValue;
+                let session_id = store_session_id(&request.session_id);
+                let session = state_for_config
+                    .db
+                    .get_session(&session_id)
+                    .await
+                    .map_err(|err| Error::internal_error().data(err.to_string()))?
+                    .ok_or_else(|| {
+                        Error::internal_error().data("no such session".to_owned())
+                    })?;
+
+                let applied = match &request.value {
+                    SessionConfigOptionValue::ValueId { value } => {
+                        let value = value.to_string();
+                        match request.config_id.0.as_ref() {
+                            config_options::MODEL_SELECTOR_ID => {
+                                let access: std::sync::Arc<dyn fork::SessionAccess> =
+                                    std::sync::Arc::new(compaction::StoreAccess::new(
+                                        std::sync::Arc::clone(&state_for_config.db),
+                                        std::sync::Arc::new(compaction::LoopPendingDispatcher),
+                                        std::sync::Arc::new(compaction::LoopPendingCompletions),
+                                        0,
+                                    ));
+                                let mut updates: Vec<agent_client_protocol::schema::v1::Notice> =
+                                    Vec::new();
+                                let mut notify = |update: config_options::SessionUpdateForOptions| {
+                                    match update {
+                                        config_options::SessionUpdateForOptions::Notice(notice) => {
+                                            updates.push(notice)
+                                        }
+                                    }
+                                };
+                                let result = config_options::apply_model_switch(
+                                    &state_for_config,
+                                    access.as_ref(),
+                                    &session_id,
+                                    &value,
+                                    &mut notify,
+                                )
+                                .await;
+                                for notice in updates {
+                                    #[cfg(feature = "unstable")]
+                                    if negotiation_for_config.supports(UnstableFeature::SessionNotices) {
+                                        let _ = cx.send_notification(SessionNotification::new(
+                                            request.session_id.clone(),
+                                            SessionUpdate::Notice(notice),
+                                        ));
+                                    }
+                                }
+                                result
+                            }
+                            config_options::ACTOR_SELECTOR_ID => {
+                                config_options::apply_actor_switch(
+                                    &state_for_config,
+                                    &session_id,
+                                    &value,
+                                )
+                                .await
+                            }
+                            other => Err(format!("unknown config option `{other}`")),
+                        }
+                    }
+                    SessionConfigOptionValue::Boolean { .. } => {
+                        Err("boolean options are not configured".to_owned())
+                    }
+                    other => Err(format!("unsupported config value: {other:?}")),
+                };
+
+                // The refreshed selectors; the switch is effective the
+                // following turn.
+                let refreshed = config_options::build(&state_for_config, &session).await;
+                match applied {
+                    Ok(()) => {
+                        let _ = cx.send_notification(SessionNotification::new(
+                            request.session_id.clone(),
+                            SessionUpdate::ConfigOptionUpdate(
+                                agent_client_protocol::schema::v1::ConfigOptionUpdate::new(
+                                    refreshed.options.clone(),
+                                ),
+                            ),
+                        ));
+                        responder.respond(
+                            agent_client_protocol::schema::v1::SetSessionConfigOptionResponse::new(
+                                refreshed.options,
+                            ),
+                        )
+                    }
+                    Err(message) => responder.respond_with_error(
+                        Error::internal_error().data(serde_json::json!({ "error": message })),
+                    ),
+                }
+            },
+            agent_client_protocol::on_receive_request!(),
         );
 
     // The RFD path for forking: session/fork, served to clients that
@@ -964,7 +1094,7 @@ fn session_actor(session: &crate::store::Session, fallback: Option<&str>) -> Str
 /// The model's context window from the bundled models.dev snapshot;
 /// None when the model is unknown (no usage_update is sent then — the
 /// RFD's guidance for unknowable window sizes).
-fn context_window(model_ref: &str) -> Option<u64> {
+pub(crate) fn context_window(model_ref: &str) -> Option<u64> {
     let bare = model_ref.split_once('/')?.1;
     let snapshot = agentkit_models::bundled_snapshot_parsed();
     snapshot.models.get(bare)?.context_window.map(u64::from)
