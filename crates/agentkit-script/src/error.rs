@@ -18,6 +18,9 @@ pub enum ScriptError {
     /// The script source could not be compiled.
     #[error("failed to compile script '{origin}': {message}")]
     Compile { origin: String, message: String },
+    /// The script source exceeded the configured size cap.
+    #[error("script '{origin}' exceeds the {limit}-byte size cap")]
+    TooLarge { origin: String, limit: usize },
     /// The script does not define the requested function.
     #[error("script '{origin}' does not define fn {function}/{arity}")]
     MissingFunction {
@@ -40,4 +43,7 @@ pub enum ScriptError {
     /// The script returned a value that could not be represented as JSON.
     #[error("script '{origin}' returned an unusable value: {message}")]
     InvalidReturn { origin: String, message: String },
+    /// A host function (or the script itself) panicked during evaluation.
+    #[error("script '{origin}' panicked: {message}")]
+    Panicked { origin: String, message: String },
 }
