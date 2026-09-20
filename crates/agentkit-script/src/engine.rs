@@ -1,9 +1,10 @@
 use std::cell::Cell;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Instant;
 
-use rhai::{Dynamic, EvalAltResult, Scope, AST};
 use rhai::packages::Package;
+use rhai::{AST, Dynamic, EvalAltResult, Position, Scope};
 use serde_json::Value;
 
 use crate::error::ScriptError;
@@ -19,14 +20,15 @@ thread_local! {
     static DEADLINE: Cell<Option<Instant>> = const { Cell::new(None) };
 }
 
-/// A sandboxed Rhai engine with no host capabilities.
+/// A sandboxed Rhai engine with no ambient host capabilities.
 ///
 /// The engine is built from [`rhai::Engine::new_raw`] plus the standard package,
 /// so scripts get arrays, maps, strings and operators but no file module
 /// resolver, no filesystem access and no network access. No host functions are
-/// registered, so the only API a script sees is what its compiled JSON
-/// arguments and return value provide. `eval`, `import` and `export` are
-/// disabled, and every limit in [`Limits`] is enforced.
+/// registered unless the host calls [`ScriptEngine::register_host_fn`], so by
+/// default the only API a script sees is what its compiled JSON arguments and
+/// return value provide. `eval`, `import` and `export` are disabled, and every
+/// limit in [`Limits`] is enforced.
 ///
 /// `ScriptEngine` is `Send + Sync` and intended to be shared as an
 /// `Arc<ScriptEngine>`.
@@ -67,15 +69,25 @@ impl ScriptEngine {
         engine.set_max_operations(limits.max_operations);
         engine.set_max_call_levels(limits.max_call_levels);
         engine.set_max_expr_depths(limits.max_expr_depth, limits.max_function_expr_depth);
+        engine.set_max_variables(limits.max_variables);
+        engine.set_max_functions(limits.max_functions);
         engine.set_max_string_size(limits.max_string_size);
         engine.set_max_array_size(limits.max_array_size);
         engine.set_max_map_size(limits.max_map_size);
         engine.set_max_strings_interned(limits.max_strings_interned);
         engine.on_progress(|_| {
-            let expired = DEADLINE
-                .with(|deadline| deadline.get().is_some_and(|deadline| Instant::now() > deadline));
+            let expired = DEADLINE.with(|deadline| {
+                deadline
+                    .get()
+                    .is_some_and(|deadline| Instant::now() > deadline)
+            });
             expired.then(|| Dynamic::from(TIMEOUT_TOKEN))
         });
+
+        // Stdout hygiene: print and debug never touch stdout, so a script can
+        // never corrupt a host's standard output stream.
+        engine.on_print(|text| eprintln!("{text}"));
+        engine.on_debug(|text, _source, _position| eprintln!("{text}"));
 
         Self { engine, limits }
     }
@@ -84,6 +96,70 @@ impl ScriptEngine {
     #[must_use]
     pub fn limits(&self) -> &Limits {
         &self.limits
+    }
+
+    /// Redirect `print` and `debug` output.
+    ///
+    /// By default both channels are written to stderr; this replaces that sink,
+    /// primarily so a host (or a test) can capture script output.
+    pub fn set_output_handler<F>(&mut self, handler: F)
+    where
+        F: Fn(&str) + Send + Sync + 'static,
+    {
+        let handler = Arc::new(handler);
+        let debug = Arc::clone(&handler);
+        self.engine.on_print(move |text| (*handler)(text));
+        self.engine
+            .on_debug(move |text, _source, _position| (*debug)(text));
+    }
+
+    /// Register a host function callable from scripts.
+    ///
+    /// `function` receives its arguments as JSON and returns a JSON value, or an
+    /// error message that becomes a Rhai runtime error. Only arities 0 to 3 are
+    /// supported. Host functions are how a script reaches host capabilities; a
+    /// [`ScriptEngine`] built without any registrations physically exposes none,
+    /// which is what makes policy and behaviour engines separable by
+    /// construction.
+    pub fn register_host_fn<F>(
+        &mut self,
+        name: &str,
+        arity: usize,
+        function: F,
+    ) -> Result<(), ScriptError>
+    where
+        F: Fn(&[Value]) -> Result<Value, String> + Send + Sync + 'static,
+    {
+        let function = Arc::new(function);
+        match arity {
+            0 => {
+                self.engine
+                    .register_fn(name, move || host_call(&*function, Vec::new()));
+            }
+            1 => {
+                self.engine
+                    .register_fn(name, move |a: Dynamic| host_call(&*function, vec![a]));
+            }
+            2 => {
+                self.engine
+                    .register_fn(name, move |a: Dynamic, b: Dynamic| {
+                        host_call(&*function, vec![a, b])
+                    });
+            }
+            3 => {
+                self.engine
+                    .register_fn(name, move |a: Dynamic, b: Dynamic, c: Dynamic| {
+                        host_call(&*function, vec![a, b, c])
+                    });
+            }
+            other => {
+                return Err(ScriptError::Compile {
+                    origin: crate::INLINE_ORIGIN.to_string(),
+                    message: format!("host functions with arity {other} are not supported"),
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Compile `source` under `origin`.
@@ -96,6 +172,12 @@ impl ScriptEngine {
         source: &str,
     ) -> Result<CompiledScript, ScriptError> {
         let origin = origin.into();
+        if source.len() > self.limits.max_script_size {
+            return Err(ScriptError::TooLarge {
+                origin,
+                limit: self.limits.max_script_size,
+            });
+        }
         self.engine
             .compile(source)
             .map(|ast| CompiledScript::new(std::sync::Arc::from(origin.as_str()), ast))
@@ -114,13 +196,40 @@ impl ScriptEngine {
         self.compile(path.display().to_string(), &source)
     }
 
-    /// Call `function` on `script` with a JSON input, returning a JSON value.
+    /// Call `function` on `script` with a JSON input, returning a JSON object.
     ///
     /// `function` must be a global function taking a single argument. JSON is
     /// converted to Rhai values on the way in and back again on the way out, so
     /// scripts have no access to host types. A script that returns anything
-    /// other than a JSON object fails with [`ScriptError::InvalidReturn`].
+    /// other than a JSON object fails with [`ScriptError::InvalidReturn`]; use
+    /// [`ScriptEngine::call_value`] when any JSON return is acceptable.
+    ///
+    /// Evaluation is panic-contained: a panicking script or host function is a
+    /// [`ScriptError::Panicked`], never a crash. A panic unwinds through Rhai
+    /// and may leave the engine inconsistent, so a shared engine must treat a
+    /// panic as terminal.
     pub fn call(
+        &self,
+        script: &CompiledScript,
+        function: &str,
+        input: &Value,
+    ) -> Result<Value, ScriptError> {
+        let origin = script.origin_owned();
+        let value = self.call_value(script, function, input)?;
+        if !value.is_object() {
+            return Err(ScriptError::InvalidReturn {
+                origin,
+                message: "returned a non-map value".to_string(),
+            });
+        }
+        Ok(value)
+    }
+
+    /// Call `function` on `script` with a JSON input, accepting any JSON return.
+    ///
+    /// Like [`ScriptEngine::call`] but does not require the return value to be a
+    /// JSON object, so scripts may return `()`, a scalar or an array.
+    pub fn call_value(
         &self,
         script: &CompiledScript,
         function: &str,
@@ -145,26 +254,25 @@ impl ScriptEngine {
             deadline.set(Some(Instant::now() + self.limits.timeout));
             previous
         });
-        let outcome = self.call_dynamic(script, function, argument);
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.call_dynamic(script, function, argument)
+        }));
         DEADLINE.with(|deadline| deadline.set(previous));
 
         match outcome {
-            Ok(value) => {
-                let value: Value = rhai::serde::from_dynamic(&value.flatten()).map_err(|error| {
+            Ok(Ok(value)) => {
+                rhai::serde::from_dynamic::<Value>(&value.flatten()).map_err(|error| {
                     ScriptError::InvalidReturn {
                         origin: origin.clone(),
                         message: error.to_string(),
                     }
-                })?;
-                if !value.is_object() {
-                    return Err(ScriptError::InvalidReturn {
-                        origin,
-                        message: "returned a non-map value".to_string(),
-                    });
-                }
-                Ok(value)
+                })
             }
-            Err(error) => Err(map_error(&origin, *error, self.limits.timeout)),
+            Ok(Err(error)) => Err(map_error(&origin, *error, self.limits.timeout)),
+            Err(panic) => Err(ScriptError::Panicked {
+                origin,
+                message: panic_message(panic.as_ref()),
+            }),
         }
     }
 
@@ -223,11 +331,38 @@ fn data_limit(kind: &str) -> &'static str {
     }
 }
 
+/// Bridge a native host function: convert Rhai arguments to JSON, invoke the
+/// function and convert its JSON result back.
+fn host_call<F>(function: &F, arguments: Vec<Dynamic>) -> Result<Dynamic, Box<EvalAltResult>>
+where
+    F: Fn(&[Value]) -> Result<Value, String>,
+{
+    let arguments = arguments
+        .iter()
+        .map(rhai::serde::from_dynamic::<Value>)
+        .collect::<Result<Vec<Value>, _>>()?;
+    let value = function(&arguments)
+        .map_err(|message| Box::new(EvalAltResult::ErrorRuntime(message.into(), Position::NONE)))?;
+    rhai::serde::to_dynamic(value)
+}
+
+/// Recover a human-readable message from a caught panic payload.
+fn panic_message(panic: &dyn std::any::Any) -> String {
+    if let Some(message) = panic.downcast_ref::<&str>() {
+        (*message).to_owned()
+    } else if let Some(message) = panic.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "unknown panic".to_owned()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::INLINE_ORIGIN;
     use serde_json::json;
+    use std::sync::Mutex;
 
     fn engine() -> ScriptEngine {
         ScriptEngine::new()
@@ -393,7 +528,10 @@ mod tests {
         let engine = engine();
 
         let error = engine
-            .compile(INLINE_ORIGIN, "import \"some/module\" as m; fn mutate(request) { 1 }")
+            .compile(
+                INLINE_ORIGIN,
+                "import \"some/module\" as m; fn mutate(request) { 1 }",
+            )
             .unwrap_err();
 
         assert!(matches!(error, ScriptError::Compile { .. }), "{error:?}");
@@ -422,14 +560,19 @@ mod tests {
 
         let error = engine.call(&script, "mutate", &json!({})).unwrap_err();
 
-        assert!(matches!(error, ScriptError::InvalidReturn { .. }), "{error:?}");
+        assert!(
+            matches!(error, ScriptError::InvalidReturn { .. }),
+            "{error:?}"
+        );
     }
 
     #[test]
     fn syntax_errors_are_compile_errors() {
         let engine = engine();
 
-        let error = engine.compile(INLINE_ORIGIN, "fn mutate(request) {").unwrap_err();
+        let error = engine
+            .compile(INLINE_ORIGIN, "fn mutate(request) {")
+            .unwrap_err();
 
         assert!(matches!(error, ScriptError::Compile { .. }), "{error:?}");
     }
@@ -461,5 +604,105 @@ mod tests {
         assert_eq!(script.origin(), path.display().to_string());
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_oversized_script_is_rejected_before_compiling() {
+        let engine = ScriptEngine::with_limits(Limits {
+            max_script_size: 16,
+            ..Limits::default()
+        });
+
+        let error = engine
+            .compile(INLINE_ORIGIN, "fn mutate(request) { request }")
+            .unwrap_err();
+
+        assert!(
+            matches!(error, ScriptError::TooLarge { limit: 16, .. }),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn call_value_accepts_non_map_returns() {
+        let engine = engine();
+        let script = compile(&engine, "fn mutate(request) { 42 }");
+
+        let value = engine.call_value(&script, "mutate", &json!({})).unwrap();
+        assert_eq!(value, json!(42));
+
+        assert!(matches!(
+            engine.call(&script, "mutate", &json!({})).unwrap_err(),
+            ScriptError::InvalidReturn { .. }
+        ));
+    }
+
+    #[test]
+    fn host_functions_are_callable_with_json_arguments() {
+        let mut engine = engine();
+        engine
+            .register_host_fn("add", 2, |args| {
+                let a = args[0].as_i64().unwrap();
+                let b = args[1].as_i64().unwrap();
+                Ok(json!(a + b))
+            })
+            .unwrap();
+        let script = compile(&engine, "fn run(request) { #{ total: add(2, 3) } }");
+
+        let value = engine.call(&script, "run", &json!({})).unwrap();
+
+        assert_eq!(value["total"], json!(5));
+    }
+
+    #[test]
+    fn host_function_errors_become_runtime_errors() {
+        let mut engine = engine();
+        engine
+            .register_host_fn("explode", 0, |_| Err("nope".to_string()))
+            .unwrap();
+        let script = compile(&engine, "fn run(request) { explode() }");
+
+        let error = engine.call(&script, "run", &json!({})).unwrap_err();
+
+        assert!(
+            matches!(error, ScriptError::Runtime { ref message, .. } if message.contains("nope")),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn panicking_host_functions_are_contained() {
+        let mut engine = engine();
+        engine
+            .register_host_fn("boom", 0, |_| panic!("kaboom"))
+            .unwrap();
+        let script = compile(&engine, "fn run(request) { boom() }");
+
+        let error = engine.call(&script, "run", &json!({})).unwrap_err();
+
+        assert!(
+            matches!(error, ScriptError::Panicked { ref message, .. } if message.contains("kaboom")),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn print_and_debug_are_routed_to_the_output_handler() {
+        let mut engine = engine();
+        let lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&lines);
+        engine.set_output_handler(move |text| sink.lock().unwrap().push(text.to_owned()));
+        let script = compile(
+            &engine,
+            r#"fn run(request) { print("printed"); debug("debugged"); #{} }"#,
+        );
+
+        engine.call(&script, "run", &json!({})).unwrap();
+
+        // Rhai's debug channel presents strings quoted.
+        assert_eq!(
+            &*lines.lock().unwrap(),
+            &["printed".to_owned(), "\"debugged\"".to_owned()]
+        );
     }
 }
