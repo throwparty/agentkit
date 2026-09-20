@@ -606,9 +606,10 @@ pub fn register_host_api(engine: &mut ScriptEngine, host: Arc<BehaviourHost>) {
     let title_host = Arc::clone(&host);
     host_fn(engine, "set_session_title", 1, move |args: &[Value]| {
         let title = string_arg(args, 0)?;
+        // Trimming here: titles arrive from model output.
         title_host
             .access
-            .set_session_title(&title_host.origin, &title)
+            .set_session_title(&title_host.origin, title.trim())
             .map(|()| Value::Null)
             .map_err(|err| err.to_string())
     });
