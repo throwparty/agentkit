@@ -444,7 +444,7 @@ Complete the golden-transcript suite coverage across all flows (prompt turns, pe
 | Depends On | T-013,T-032,T-033 |
 | References | testability,protocol-conformance,performance |
 
-### T-035: Agent invocation
+### T-035: [x] Agent invocation
 
 Implement FR-026: agent.<actor> invokables spawn a new agent instance of that actor running a nested turn loop within the current turn; the nested loop shares the parent turn's model-request cap; one-level nesting limit (a sub-agent cannot spawn further agents); usage attributed to the parent session; model-invokable only
 
