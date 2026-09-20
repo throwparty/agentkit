@@ -314,7 +314,7 @@ Implement /!name execution of MCP tools with no model request: a command named !
 | Depends On | T-021 |
 | References | direct-invocation |
 
-### T-025: Rhai engine builders
+### T-025: [x] Rhai engine builders
 
 Implement the two structurally separated engine builders: policy engines with decision inputs only (request, actor info, interactive indicator, history_search) physically lacking the acting functions; behaviour engines with the full host API; limits: operations, call levels, expression depths, collection sizes, 256 KiB script size, ~1s policy and ~10s behaviour time via on_progress, on_parse_token parse protection, no modules, fresh engine per invocation, argument payload caps; fail-closed on error or timeout; on_print/on_debug to stderr; catch_unwind on host functions
 
