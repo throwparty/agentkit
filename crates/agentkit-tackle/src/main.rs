@@ -74,7 +74,7 @@ async fn run(args: cli::Cli) -> ExitCode {
     };
 
     let state = Arc::new(TackleState {
-        db,
+        db: Arc::new(db),
         config: loaded,
         definitions,
     });
