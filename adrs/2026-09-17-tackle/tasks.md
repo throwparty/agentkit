@@ -457,7 +457,7 @@ Implement FR-026: agent.<actor> invokables spawn a new agent instance of that ac
 | Depends On | T-015,T-021,T-022 |
 | References | agent-invocation |
 
-### T-036: ACP HTTP transport
+### T-036: [x] ACP HTTP transport
 
 Implement the HTTP transport via agent-client-protocol-http over axum: --bind and --http-port wiring, multiple client connections in one process, integration test driving a session over HTTP
 

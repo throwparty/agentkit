@@ -88,8 +88,13 @@ async fn run(args: cli::Cli) -> ExitCode {
             Err(err) => fail(err),
         },
         cli::Transport::Http => {
-            eprintln!("tackle: HTTP transport is not implemented yet (T-036)");
-            ExitCode::FAILURE
+            match acp::http::run_http(state.clone(), &args.bind, args.http_port).await {
+                Ok(()) => {
+                    tracing::info!("shutdown complete");
+                    ExitCode::SUCCESS
+                }
+                Err(err) => fail(err),
+            }
         }
     }
 }

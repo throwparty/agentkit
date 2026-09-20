@@ -207,6 +207,7 @@ dependencies = [
  "agentkit-models",
  "agentkit-path",
  "agentkit-script",
+ "axum",
  "clap",
  "daggy",
  "futures",
@@ -228,6 +229,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "tokio-stream",
  "toml",
  "tracing",
  "tracing-opentelemetry 0.33.0",
@@ -4847,6 +4849,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
