@@ -405,7 +405,7 @@ Implement FR-027: configOptions with a model selector (per-endpoint discovery vi
 | Depends On | T-011,T-014,T-016 |
 | References | session-config-options |
 
-### T-032: Observability
+### T-032: [x] Observability
 
 Emit OTel spans per the switchboard-otel pattern for turns, tool calls, and token usage; credentials redacted at the type level via secrecy; tool arguments redacted in logs; all diagnostics to stderr
 
