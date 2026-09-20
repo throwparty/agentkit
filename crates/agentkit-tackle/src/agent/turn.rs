@@ -38,6 +38,9 @@ pub async fn run_turn<P: ModelProvider>(
     prior: Vec<ChatMessage>,
     tools: Vec<crate::agent::ToolDefinition>,
     max_requests: u32,
+    #[allow(unused_variables)] // the usage callback owns the size decision (T-016 sends it)
+    size: u64,
+    mut on_usage: impl FnMut(u64, u64, f64) + Send,
     mut on_delta: impl FnMut(&str) + Send,
     mut on_tool_call: impl FnMut(
         crate::agent::ModelToolCall,
@@ -101,10 +104,15 @@ pub async fn run_turn<P: ModelProvider>(
             crate::store::TurnUsage {
                 input_tokens: response.usage.input_tokens,
                 output_tokens: response.usage.output_tokens,
-                cost_usd: 0.0, // cost estimation lands with the pricing source (T-016)
+                cost_usd: 0.0,
             },
         )
         .await?;
+        on_usage(
+            response.usage.input_tokens,
+            response.usage.output_tokens,
+            0.0,
+        );
 
         // A final answer (no tool calls) ends the turn.
         if response.tool_calls.is_empty() {

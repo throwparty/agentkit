@@ -1,4 +1,5 @@
 [dependencies]
+agentkit-models = {path = "../agentkit-models"}
 agentkit-path = {path = "../agentkit-path"}
 agent-client-protocol = "2.2.0"
 clap = {version = "4", features = ["derive"]}

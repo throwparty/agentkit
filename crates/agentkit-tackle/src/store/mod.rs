@@ -496,6 +496,28 @@ impl SessionStore {
         Ok(())
     }
 
+    /// Releases the lease if still held by `owner`.
+    pub async fn release_lease(
+        &self,
+        session_id: &SessionId,
+        owner: &str,
+    ) -> Result<(), StoreError> {
+        match &self.backend {
+            Backend::Sqlite(pool) => {
+                sqlx::query(
+                    "UPDATE sessions SET owner_connection = NULL, lease_expires_at = NULL \
+                     WHERE id = ? AND owner_connection = ?",
+                )
+                .bind(session_id)
+                .bind(owner)
+                .execute(pool)
+                .await?;
+            }
+            Backend::Memory(_) => self.lock_memory().release_lease(session_id, owner),
+        }
+        Ok(())
+    }
+
     /// Appends a turn to a session, updating the session's head.
     pub async fn append_turn(
         &self,
