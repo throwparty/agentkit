@@ -159,3 +159,109 @@ async fn elicitation_cancellation_and_the_fail_closed_default() {
     let text: serde_json::Value = serde_json::from_str(&result.content_json).unwrap();
     assert_eq!(text[0]["text"], "elicit:declined");
 }
+
+mod direct_invocation {
+    use super::*;
+    use agentkit_tackle::invokables::{parse_direct, Registry};
+
+    #[tokio::test]
+    async fn execution_bypasses_the_pipeline_and_reports_the_shape() {
+        let definitions = agentkit_tackle::loader::Definitions::default();
+        let registry = Registry::build(
+            &definitions,
+            &[agentkit_tackle::mcp::NamespacedTool {
+                name: "mcp.echo.echo".into(),
+                description: "Echoes the provided text".into(),
+                schema: serde_json::json!({"type": "object"}),
+            }],
+        )
+        .unwrap();
+        // The grant store in scope for the whole exchange: direct
+        // invocation bypasses the pipeline and writes no records.
+        let grants = agentkit_tackle::permissions::GrantStore::default();
+
+        let mut pool = McpPool::new();
+        pool.connect("echo", &echo_server_config()).await;
+
+        let input = parse_direct("/!mcp.echo.echo {\"text\": \"hi\"}").unwrap();
+        let result = registry.execute_direct(&pool, &input).await.unwrap();
+
+        assert!(!result.is_error);
+        assert!(!result.truncated);
+        let text: serde_json::Value = serde_json::from_str(&result.content_json).unwrap();
+        assert_eq!(text[0]["text"], "hi");
+        assert!(grants.is_empty());
+    }
+
+    #[tokio::test]
+    async fn non_mcp_invokables_are_a_precise_error() {
+        // A registered user-invokable prompt: /! on it is the NotMcp
+        // error, not the unknown-invokable one.
+        let definitions = agentkit_tackle::loader::Definitions {
+            prompts: BTreeMap::from([(
+                "deploy".to_owned(),
+                agentkit_tackle::loader::Definition {
+                    name: "deploy".to_owned(),
+                    path: std::path::PathBuf::from("/prompts/deploy.md"),
+                    raw: String::new(),
+                    frontmatter: agentkit_tackle::loader::PromptMeta::default(),
+                    body: "Body.".to_owned(),
+                },
+            )]),
+            ..Default::default()
+        };
+        let registry = Registry::build(&definitions, &[]).unwrap();
+        let mut pool = McpPool::new();
+        pool.connect("echo", &echo_server_config()).await;
+
+        // A prompt is not an MCP tool — /! supports MCP tools only.
+        let input = agentkit_tackle::invokables::DirectInvocation {
+            invokable: "prompt.deploy".into(),
+            arguments: String::new(),
+        };
+        let err = registry.execute_direct(&pool, &input).await.unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("not an MCP tool — direct invocation supports MCP tools only"),
+            "{err}"
+        );
+
+        // Unnamespaced or unknown names never execute.
+        let input = parse_direct("/!echo").unwrap();
+        let err = registry.execute_direct(&pool, &input).await.unwrap_err();
+        assert!(err.to_string().contains("unknown invokable"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn oversized_outputs_truncate_with_the_original_size() {
+        let definitions = agentkit_tackle::loader::Definitions::default();
+        let registry = Registry::build(
+            &definitions,
+            &[agentkit_tackle::mcp::NamespacedTool {
+                name: "mcp.echo.echo".into(),
+                description: "Echoes the provided text".into(),
+                schema: serde_json::json!({"type": "object"}),
+            }],
+        )
+        .unwrap();
+        let mut pool = McpPool::new();
+        pool.connect("echo", &echo_server_config()).await;
+
+        let huge = "x".repeat(agentkit_tackle::mcp::TOOL_RESULT_LIMIT + 1024);
+        let input = parse_direct(&format!(
+            "/!mcp.echo.echo {}",
+            serde_json::json!({ "text": huge })
+        ))
+        .unwrap();
+        let result = registry.execute_direct(&pool, &input).await.unwrap();
+
+        assert!(result.truncated);
+        assert_eq!(
+            result.content_json.len(),
+            agentkit_tackle::mcp::TOOL_RESULT_LIMIT
+        );
+        // The size marker records the original size — larger than the
+        // limit; full content is what storage keeps.
+        assert!(result.original_size > agentkit_tackle::mcp::TOOL_RESULT_LIMIT);
+    }
+}

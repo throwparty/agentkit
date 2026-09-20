@@ -301,7 +301,7 @@ Implement /name expansion with parameter substitution into the conversation for 
 | Depends On | T-021 |
 | References | reusable-prompts,invokable-registry,manifest-injection |
 
-### T-024: Direct invocation
+### T-024: [x] Direct invocation
 
 Implement /!name execution of MCP tools with no model request: a command named ! is advertised via available_commands_update so clients autocomplete the prefix; execution reports tool_call and tool_call_update, responds end_turn, stores the result in the turn, and bypasses the pipeline; exact first-token match on user-typed input only; oversized outputs truncated at 16 KiB with an explicit size marker, full content retained in storage
 
