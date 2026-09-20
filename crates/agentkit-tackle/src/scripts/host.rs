@@ -605,9 +605,11 @@ pub fn register_host_api(engine: &mut Engine, host: Arc<BehaviourHost>) {
     engine.register_fn(
         "set_session_title",
         move |title: &str| -> Result<(), Box<rhai::EvalAltResult>> {
+            // Trimming here (rhai's string trim is in-place): titles
+            // arrive from model output.
             title_host
                 .access
-                .set_session_title(&title_host.origin, title)
+                .set_session_title(&title_host.origin, title.trim())
                 .map_err(eval_error)
         },
     );

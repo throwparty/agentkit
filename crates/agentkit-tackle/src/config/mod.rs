@@ -48,7 +48,7 @@ impl Config {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Loaded {
     pub config: Config,
     /// The user layer file, if one existed.
