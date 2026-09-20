@@ -6,7 +6,8 @@
 //! tool-call iterations (T-021: execute via the registry + pipeline,
 //! append tool results, request again) slot in without reshaping.
 
-use super::{ChatMessage, ModelProvider, ModelRequest, TurnOutcome, TurnStop};
+use super::{ModelProvider, ModelRequest, TurnOutcome, TurnStop};
+use crate::agent::{ChatMessage, ModelError};
 use crate::store::{Message, Role, SessionStore, StoreError, TurnId};
 
 #[derive(Debug, thiserror::Error)]
@@ -41,6 +42,7 @@ pub async fn run_turn<P: ModelProvider>(
     size: u64,
     mut on_usage: impl FnMut(u64, u64, f64) + Send,
     mut on_delta: impl FnMut(&str) + Send,
+    mut on_retry: impl FnMut(u32, &str) + Send,
 ) -> Result<TurnOutcome, TurnError> {
     let mut request_count = 0u32;
     let history = prior;
@@ -73,14 +75,108 @@ pub async fn run_turn<P: ModelProvider>(
         };
 
         // The messageId: every streamed chunk carries the same identity —
-        // chunks are fragments of ONE logical message.
+        // chunks are fragments of ONE logical message (the stored assistant
+        // message is appended below with exactly this id).
         let message_id = assistant_message_id.to_owned();
         let mut text = String::new();
+        let mut deltas_flowed = false;
         let mut on_delta = |delta: &str| {
+            deltas_flowed = true;
             text.push_str(delta);
             on_delta(delta);
         };
-        let response = provider.stream_completion(request, &mut on_delta).await?;
+        let response = provider.stream_completion(request, &mut on_delta).await;
+        let response = match response {
+            Ok(response) => response,
+            // A stream error with NO text: the failure happened before any
+            // delta reached the client — retry like a plain transient.
+            Err(ModelError::StreamFailed {
+                error,
+                text: partial,
+                ..
+            }) if partial.is_empty()
+                && super::retry::classify(&error) == super::retry::FailureClass::Retryable
+                && request_count < max_requests.min(super::retry::MAX_ATTEMPTS) =>
+            {
+                on_retry(request_count, &error);
+                let delay = super::retry::retry_after_secs(&error)
+                    .unwrap_or_else(|| super::retry::backoff(request_count));
+                tokio::time::sleep(delay).await;
+                continue;
+            }
+            // Mid-stream failure: the client already saw the deltas —
+            // persist the partial text and answer with an in-band failure
+            // notice (retrying would duplicate the streamed prefix).
+            Err(ModelError::StreamFailed {
+                text: partial,
+                error,
+                ..
+            }) => {
+                let note = format!(
+                    "The model connection failed mid-response; the text above is partial. ({error})"
+                );
+                db.append_message(
+                    turn_id,
+                    Role::Assistant,
+                    &serde_json::json!([
+                        { "type": "text", "text": partial },
+                        { "type": "text", "text": note }
+                    ])
+                    .to_string(),
+                    None,
+                    None,
+                    None,
+                    Some(&message_id),
+                )
+                .await?;
+                return Ok(TurnOutcome {
+                    stop: TurnStop::EndTurn,
+                    usage: db.session_usage(session_id).await?,
+                });
+            }
+            // Context-length: actionable, never retried (EC-003).
+            Err(ModelError::Completion(text))
+                if super::retry::classify(&text) == super::retry::FailureClass::ContextLength =>
+            {
+                let note = "This model's context is full. Enable or replace the \
+                     default compaction script (scripts/compaction), run /compact, \
+                     or start a fresh session.";
+                db.append_message(
+                    turn_id,
+                    Role::Assistant,
+                    &serde_json::json!([{ "type": "text", "text": note }]).to_string(),
+                    None,
+                    None,
+                    None,
+                    Some(&message_id),
+                )
+                .await?;
+                return Ok(TurnOutcome {
+                    stop: TurnStop::EndTurn,
+                    usage: db.session_usage(session_id).await?,
+                });
+            }
+            // Retryable without streamed deltas: back off and retry,
+            // reporting the attempt as a status card. A retryable failure
+            // WITH deltas is impossible (those arrive as StreamFailed).
+            Err(ModelError::Completion(text))
+                if super::retry::classify(&text) == super::retry::FailureClass::Retryable
+                    && !deltas_flowed
+                    && request_count < max_requests.min(super::retry::MAX_ATTEMPTS) =>
+            {
+                on_retry(request_count, &text);
+                let delay = super::retry::retry_after_secs(&text)
+                    .unwrap_or_else(|| super::retry::backoff(request_count));
+                tokio::time::sleep(delay).await;
+                continue;
+            }
+            Err(ModelError::Completion(text)) => {
+                // Retries exhausted (or fatal): hard failure — the caller
+                // surfaces a JSON-RPC error.
+                return Err(TurnError::Model(ModelError::Completion(text)));
+            }
+            Err(err) => return Err(TurnError::Model(err)),
+        };
 
         // Persist the assistant response with the SAME id the chunks used,
         // and the usage delta the request incurred.

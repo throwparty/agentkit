@@ -3,6 +3,7 @@
 //! single-module change and tests can substitute doubles.
 
 pub mod provider;
+pub mod retry;
 pub mod turn;
 
 use crate::store::TurnUsage;
@@ -59,6 +60,15 @@ pub enum ModelError {
     Credential { identity: String },
     #[error("completion failed: {0}")]
     Completion(String),
+    /// The stream failed AFTER text was already emitted to the client:
+    /// the partial text rides the error so the caller can persist it
+    /// (retrying would duplicate the deltas the client already saw).
+    #[error("stream failed after {text_len} characters: {error}")]
+    StreamFailed {
+        text: String,
+        text_len: usize,
+        error: String,
+    },
     #[error("malformed assembled context: {0}")]
     Context(String),
 }

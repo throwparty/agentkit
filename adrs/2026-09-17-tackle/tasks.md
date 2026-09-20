@@ -210,7 +210,7 @@ Emit usage_update after each model request and once at session setup; used from 
 | Depends On | T-015 |
 | References | usage-reporting |
 
-### T-017: Error handling
+### T-017: [x] Error handling
 
 Implement retries with exponential backoff honouring retry-after, reported as status cards; hard failures as JSON-RPC errors; mid-stream failures as agent message plus terminal stop reason; partial output preserved in the DAG; provider context-length errors translated into actionable messages without retry loops
 

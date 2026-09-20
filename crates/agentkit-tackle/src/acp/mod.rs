@@ -384,6 +384,8 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
                 let assistant_id = uuid::Uuid::new_v4().to_string();
                 let session_for_chunks = request.session_id.clone();
                 let cx_for_chunks = cx.clone();
+                let cx_for_retry = cx.clone();
+                let session_for_retry = request.session_id.clone();
 
                 let outcome = crate::agent::turn::run_turn(
                     &provider,
@@ -434,6 +436,25 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
                                 chunk,
                             ),
                         ));
+                    },
+                    // retry attempts surface as tool-call status cards
+                    // (the stable ACP surface's only card mechanism).
+                    {
+                        let cx = cx_for_retry;
+                        move |attempt: u32, message: &str| {
+                            let card = agent_client_protocol::schema::v1::ToolCall::new(
+                                agent_client_protocol::schema::v1::ToolCallId::new(format!(
+                                    "retry-{attempt}-{}",
+                                    uuid::Uuid::new_v4()
+                                )),
+                                format!("Retrying model request (attempt {attempt}): {message}"),
+                            )
+                            .status(agent_client_protocol::schema::v1::ToolCallStatus::InProgress);
+                            let _ = cx.send_notification(SessionNotification::new(
+                                session_for_retry.clone(),
+                                agent_client_protocol::schema::v1::SessionUpdate::ToolCall(card),
+                            ));
+                        }
                     },
                 )
                 .await;
