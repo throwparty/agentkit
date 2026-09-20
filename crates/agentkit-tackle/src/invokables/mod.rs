@@ -98,6 +98,187 @@ pub enum RegistryError {
     },
 }
 
+/// A prompt expansion failure: precise, carrying the usage string for
+/// the JSON-RPC error. No state is ever stored.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum ExpansionError {
+    #[error("unknown command `{0}`")]
+    Unknown(String),
+    #[error("`{invokable}` is not user-invokable")]
+    NotUserInvokable { invokable: String },
+    #[error("{invokable} is not model-invokable")]
+    NotModelInvokable { invokable: String },
+    #[error("{usage}")]
+    Arity { usage: String },
+}
+
+/// The usage string for a prompt: the slash command (the bare prompt
+/// name) and its declared parameters.
+fn usage_for(name: &str, parameters: &[String]) -> String {
+    let bare = name.strip_prefix("prompt.").unwrap_or(name);
+    if parameters.is_empty() {
+        format!("usage: /{bare}")
+    } else {
+        format!(
+            "usage: /{bare} {}",
+            parameters
+                .iter()
+                .map(|parameter| format!("<{parameter}>"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        )
+    }
+}
+
+/// Substitutes `{{ name }}` placeholders (inner whitespace tolerated)
+/// with the filled parameters' values; unknown placeholders are left
+/// as written.
+fn substitute(body: &str, filled: &BTreeMap<String, String>) -> String {
+    let mut out = String::with_capacity(body.len());
+    let mut rest = body;
+    while let Some(start) = rest.find("{{") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        match after.find("}}") {
+            Some(end) => {
+                let key = after[..end].trim();
+                match filled.get(key) {
+                    Some(value) => out.push_str(value),
+                    None => out.push_str(&rest[start..start + 2 + end + 2]),
+                }
+                rest = &after[end + 2..];
+            }
+            None => {
+                out.push_str(&rest[start..]);
+                rest = "";
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Fills the declared parameters positionally: each parameter takes the
+/// next whitespace token, except the last, which takes the remainder of
+/// the arguments.
+fn fill_positional(
+    name: &str,
+    parameters: &[String],
+    arguments: &str,
+) -> Result<BTreeMap<String, String>, ExpansionError> {
+    let usage = usage_for(name, parameters);
+    if parameters.is_empty() {
+        if arguments.trim().is_empty() {
+            return Ok(BTreeMap::new());
+        }
+        // A no-parameter prompt takes no input: an arity mismatch.
+        return Err(ExpansionError::Arity { usage });
+    }
+
+    let arguments = arguments.trim();
+
+    // Each of the first n-1 parameters takes the next whitespace
+    // token; the last takes the remainder of the arguments.
+    let head_count = parameters.len() - 1;
+    let mut filled = BTreeMap::new();
+    let mut consumed = 0usize;
+    for (parameter, token) in parameters[..head_count]
+        .iter()
+        .zip(arguments.split_whitespace())
+    {
+        filled.insert(parameter.clone(), token.to_owned());
+        consumed += token.len() + 1; // one separator
+    }
+    if filled.len() < head_count {
+        return Err(ExpansionError::Arity { usage });
+    }
+    let last = parameters.last().unwrap();
+    let remainder = arguments.get(consumed..).unwrap_or("").trim().to_owned();
+    // Declared parameters are required: an empty remainder means the
+    // arguments stopped short — an arity mismatch, not an empty fill.
+    if remainder.is_empty() {
+        return Err(ExpansionError::Arity { usage });
+    }
+    filled.insert(last.clone(), remainder);
+    Ok(filled)
+}
+
+impl Registry {
+    /// `/name arguments` expansion: positional filling of the declared
+    /// parameters, `{{ name }}` substitution, body for the model. Pure —
+    /// unknown commands and arity mismatches fail with the usage string
+    /// and store nothing.
+    pub fn expand_user(&self, name: &str, arguments: &str) -> Result<String, ExpansionError> {
+        let invokable = self
+            .resolve(&prompt_name(name))
+            .ok_or_else(|| ExpansionError::Unknown(name.to_owned()))?;
+        let Invokable::Prompt {
+            name,
+            parameters,
+            body,
+            user_invokable,
+            ..
+        } = invokable
+        else {
+            return Err(ExpansionError::Unknown(name.to_owned()));
+        };
+        if !user_invokable {
+            return Err(ExpansionError::NotUserInvokable {
+                invokable: name.clone(),
+            });
+        }
+        let filled = fill_positional(name, parameters, arguments)?;
+        Ok(substitute(body, &filled))
+    }
+
+    /// A model-invokable prompt invoked as a tool: the arguments object
+    /// names the parameters, the expanded body loads into context. Pure
+    /// — errors carry the usage string and store nothing.
+    pub fn expand_model(
+        &self,
+        invokable_name: &str,
+        arguments: &serde_json::Value,
+    ) -> Result<String, ExpansionError> {
+        let invokable = self
+            .resolve(invokable_name)
+            .ok_or_else(|| ExpansionError::Unknown(invokable_name.to_owned()))?;
+        let Invokable::Prompt {
+            name,
+            parameters,
+            body,
+            model_invokable,
+            ..
+        } = invokable
+        else {
+            return Err(ExpansionError::Unknown(invokable_name.to_owned()));
+        };
+        if !model_invokable {
+            return Err(ExpansionError::NotModelInvokable {
+                invokable: name.clone(),
+            });
+        }
+        let usage = usage_for(name, parameters);
+        let object = arguments.as_object().ok_or_else(|| ExpansionError::Arity {
+            usage: usage.clone(),
+        })?;
+        let mut filled = BTreeMap::new();
+        for parameter in parameters {
+            match object.get(parameter).and_then(|value| value.as_str()) {
+                Some(value) => {
+                    filled.insert(parameter.clone(), value.to_owned());
+                }
+                None => return Err(ExpansionError::Arity { usage }),
+            }
+        }
+        for key in object.keys() {
+            if !parameters.contains(key) {
+                return Err(ExpansionError::Arity { usage });
+            }
+        }
+        Ok(substitute(body, &filled))
+    }
+}
+
 /// The single dispatch point: namespaced invokables with visibility.
 #[derive(Debug, Default, Clone)]
 pub struct Registry {
@@ -489,5 +670,159 @@ mod tests {
 
         // Non-user-invokable prompts are not advertised.
         assert!(!commands.iter().any(|command| command.name == "model_only"));
+    }
+
+    mod expansion {
+        use super::*;
+
+        fn registry_with(body: &str, parameters: &[&str]) -> Registry {
+            let definitions = definitions_with(vec![prompt_def(
+                "deploy",
+                PromptMeta {
+                    parameters: parameters.iter().map(|p| p.to_string()).collect(),
+                    ..default_prompt_meta()
+                },
+                body,
+            )]);
+            Registry::build(&definitions, &[]).unwrap()
+        }
+
+        #[test]
+        fn positional_expansion_fills_the_last_parameter_with_the_remainder() {
+            let registry = registry_with(
+                "Ship {{ target }} to {{ where }}, noting: {{ notes }}",
+                &["target", "where", "notes"],
+            );
+
+            let expanded = registry
+                .expand_user("deploy", "api staging tonight after the release cut")
+                .unwrap();
+
+            // First parameters take single tokens; the last takes the
+            // remainder of the arguments, spacing preserved.
+            assert_eq!(
+                expanded,
+                "Ship api to staging, noting: tonight after the release cut"
+            );
+        }
+
+        #[test]
+        fn single_parameter_takes_the_whole_input() {
+            let registry = registry_with("Hello {{ who }}!", &["who"]);
+            assert_eq!(
+                registry.expand_user("deploy", "  world  ").unwrap(),
+                "Hello world!"
+            );
+        }
+
+        #[test]
+        fn arity_mismatches_fail_with_the_usage_string() {
+            let registry = registry_with("Ship {{ a }} then {{ b }}", &["a", "b"]);
+
+            // Too few arguments.
+            let err = registry.expand_user("deploy", "only-one").unwrap_err();
+            assert_eq!(err.to_string(), "usage: /deploy <a> <b>");
+
+            // A no-parameter prompt given input.
+            let registry = registry_with("Just deploy.", &[]);
+            let err = registry.expand_user("deploy", "extra input").unwrap_err();
+            assert_eq!(err.to_string(), "usage: /deploy");
+        }
+
+        #[test]
+        fn unknown_commands_fail_and_store_nothing() {
+            let registry = registry_with("Body.", &[]);
+            let err = registry.expand_user("missing", "").unwrap_err();
+            assert_eq!(err.to_string(), "unknown command `missing`");
+
+            // The registry is pure: expansion wrote nothing anywhere.
+            assert!(registry.resolve("prompt.deploy").is_some());
+        }
+
+        #[test]
+        fn model_tool_invocation_loads_the_expanded_body() {
+            let definitions = definitions_with(vec![prompt_def(
+                "deploy",
+                PromptMeta {
+                    user_invokable: false,
+                    model_invokable: true,
+                    parameters: vec!["service".to_owned(), "env".to_owned()],
+                    ..PromptMeta::default()
+                },
+                "Deploy {{ service }} to {{ env }}.",
+            )]);
+            let registry = Registry::build(&definitions, &[]).unwrap();
+
+            let expanded = registry
+                .expand_model(
+                    "prompt.deploy",
+                    &serde_json::json!({ "service": "api", "env": "staging" }),
+                )
+                .unwrap();
+            assert_eq!(expanded, "Deploy api to staging.");
+        }
+
+        #[test]
+        fn model_invocation_rejects_missing_and_unknown_arguments_with_usage() {
+            let definitions = definitions_with(vec![prompt_def(
+                "deploy",
+                PromptMeta {
+                    user_invokable: false,
+                    model_invokable: true,
+                    parameters: vec!["service".to_owned(), "env".to_owned()],
+                    ..PromptMeta::default()
+                },
+                "Deploy {{ service }} to {{ env }}.",
+            )]);
+            let registry = Registry::build(&definitions, &[]).unwrap();
+
+            let err = registry
+                .expand_model("prompt.deploy", &serde_json::json!({ "service": "api" }))
+                .unwrap_err();
+            assert_eq!(err.to_string(), "usage: /deploy <service> <env>");
+
+            let err = registry
+                .expand_model(
+                    "prompt.deploy",
+                    &serde_json::json!({ "service": "api", "env": "s", "rogue": "x" }),
+                )
+                .unwrap_err();
+            assert_eq!(err.to_string(), "usage: /deploy <service> <env>");
+
+            // Non-object arguments are an arity mismatch.
+            let err = registry
+                .expand_model("prompt.deploy", &serde_json::json!("api"))
+                .unwrap_err();
+            assert_eq!(err.to_string(), "usage: /deploy <service> <env>");
+        }
+
+        #[test]
+        fn visibility_gates_expansion_paths() {
+            // model-only prompt: /name expansion refuses.
+            let definitions = definitions_with(vec![prompt_def(
+                "model_only",
+                PromptMeta {
+                    user_invokable: false,
+                    model_invokable: true,
+                    ..PromptMeta::default()
+                },
+                "Body.",
+            )]);
+            let registry = Registry::build(&definitions, &[]).unwrap();
+            let err = registry.expand_user("model_only", "").unwrap_err();
+            assert!(err.to_string().contains("not user-invokable"), "{err}");
+
+            // user-only prompt: model-tool invocation refuses.
+            let definitions = definitions_with(vec![prompt_def(
+                "user_only",
+                default_prompt_meta(),
+                "Body.",
+            )]);
+            let registry = Registry::build(&definitions, &[]).unwrap();
+            let err = registry
+                .expand_model("prompt.user_only", &serde_json::json!({}))
+                .unwrap_err();
+            assert!(err.to_string().contains("not model-invokable"), "{err}");
+        }
     }
 }
