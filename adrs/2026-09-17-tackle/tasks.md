@@ -236,7 +236,7 @@ Implement the rmcp client pool: connections from client-provided mcpServers, con
 | Depends On | T-003,T-005,T-011 |
 | References | mcp-integration |
 
-### T-019: Spawn hygiene and stderr relay
+### T-019: [x] Spawn hygiene and stderr relay
 
 Spawn stdio servers with explicit argv, no shell interpretation, named env entries only, no blanket environment forwarding; relay child stderr to tackle's stderr line-prefixed with the server name and rate-capped, never touching stdout
 

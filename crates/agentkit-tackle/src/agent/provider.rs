@@ -249,10 +249,15 @@ mod tests {
         }
     }
 
+    /// Tests that mutate the process-global PATH must serialize: two
+    /// concurrent read-modify-write races drop one test's entry.
+    static PATH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn credential_resolution_reads_the_helper_stdout() {
         let dir = tempfile::tempdir().unwrap();
         write_fake_helper(dir.path(), "{\"access_token\": \"secret\"}");
+        let _guard = PATH_LOCK.lock().unwrap();
         let path_var = std::env::var("PATH").unwrap();
         std::env::set_var("PATH", format!("{}:{}", dir.path().display(), path_var));
         let credential = resolve_credential("test", "my-endpoint");
@@ -352,8 +357,6 @@ mod tests {
     async fn helper_auth_resolves_the_credential() {
         let dir = tempfile::tempdir().unwrap();
         write_fake_helper(dir.path(), "{\"access_token\": \"secret\"}");
-        let path_var = std::env::var("PATH").unwrap();
-        std::env::set_var("PATH", format!("{}:{}", dir.path().display(), path_var));
 
         let server = wiremock::MockServer::start().await;
         wiremock::Mock::given(wiremock::matchers::method("POST")).respond_with(
@@ -371,7 +374,16 @@ mod tests {
 
         let mut config = config_with_endpoint(&server.uri(), Auth::Helper);
         config.credential_helper = Some("test".into());
-        let provider = provider_for("test/model", &config).unwrap();
+        // The credential resolves during provider_for, so the lock (and
+        // the PATH mutation) need not be held across any await.
+        let provider = {
+            let _guard = PATH_LOCK.lock().unwrap();
+            let path_var = std::env::var("PATH").unwrap();
+            std::env::set_var("PATH", format!("{}:{}", dir.path().display(), path_var));
+            let provider = provider_for("test/model", &config);
+            std::env::set_var("PATH", path_var);
+            provider.unwrap()
+        };
         let response = provider
             .complete(ModelRequest {
                 model: "model".into(),
@@ -392,7 +404,6 @@ mod tests {
             .and_then(|value| value.to_str().ok())
             .unwrap_or_default();
         assert!(header.contains("secret"), "authorization header: {header}");
-        std::env::set_var("PATH", path_var);
     }
 
     #[tokio::test]
