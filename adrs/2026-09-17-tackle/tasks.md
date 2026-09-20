@@ -223,7 +223,7 @@ Implement retries with exponential backoff honouring retry-after, reported as st
 | Depends On | T-015 |
 | References | error-handling |
 
-### T-018: MCP client pool
+### T-018: [x] MCP client pool
 
 Implement the rmcp client pool: connections from client-provided mcpServers, config mcp_servers (transport stdio|http), and trust-gated project entries; asynchronous connect with per-server timeouts so session/new never blocks; per-server status surfaced at the first turn; duplicate name precedence with client winning and shadowed servers reported; tool results truncated at 16 KiB with a size marker
 
