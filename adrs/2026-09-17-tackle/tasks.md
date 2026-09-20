@@ -275,7 +275,7 @@ Implement the unified registry: mcp., prompt., and agent. namespaces with user_i
 | Depends On | T-004,T-018 |
 | References | invokable-registry,reusable-prompts,thin-core |
 
-### T-022: Permission pipeline
+### T-022: [x] Permission pipeline
 
 Implement the fixed-order pipeline: grant deny records authoritative, then the pre_tool_use policy script (allow and deny final, ask falls through, previously_granted flag), then allow_always honouring, then the fixed ask fallback regardless of the interactive indicator; the grant store is in-memory only — keyed by actor and invokable, written by tool-invocation allow_always and reject_always, gone on close, process exit, and resume after restart; request_permission integration with honest session-scope labels, cancelled and timed-out requests as reject-once, ask reasons in the prompt content; wires the TOFU consent flow from T-005 to request_permission
 
