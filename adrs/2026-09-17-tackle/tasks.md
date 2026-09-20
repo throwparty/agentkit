@@ -327,7 +327,7 @@ Implement the two structurally separated engine builders: policy engines with de
 | Depends On | T-001 |
 | References | policy-scripts,security-posture |
 
-### T-026: Behaviour host API
+### T-026: [x] Behaviour host API
 
 Implement SessionAccess and the behaviour host functions: fork_session (ephemeral option, usage attribution to parent), send_prompt, await_completion (timeout), insert_seed, record_compaction, set_session_title, history_search, context_usage, log; fixed internal budgets: live ephemeral forks, prompts per script and turn and session, cost cap at the parent, depth-one nesting rule; script-driven model calls surfaced in the client
 

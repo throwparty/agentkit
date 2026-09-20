@@ -23,6 +23,8 @@ use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+pub mod host;
+
 /// The script source size cap, bounding compile work.
 pub const SCRIPT_MAX_SIZE: usize = 256 * 1024;
 
