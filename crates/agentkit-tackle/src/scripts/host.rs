@@ -143,7 +143,7 @@ pub fn block_on<F: std::future::Future>(future: F) -> F::Output {
 
 /// The store-backed [`SessionAccess`].
 pub struct StoreAccess {
-    store: SessionStore,
+    store: Arc<SessionStore>,
     dispatcher: Arc<dyn PromptDispatcher>,
     completions: Arc<dyn CompletionSink>,
     /// The model context window size, from agentkit-models metadata.
@@ -154,7 +154,7 @@ pub struct StoreAccess {
 
 impl StoreAccess {
     pub fn new(
-        store: SessionStore,
+        store: Arc<SessionStore>,
         dispatcher: Arc<dyn PromptDispatcher>,
         completions: Arc<dyn CompletionSink>,
         window_size: u64,
@@ -704,7 +704,7 @@ mod tests {
     }
 
     fn fixture() -> Fixture {
-        let store = SessionStore::in_memory();
+        let store = Arc::new(SessionStore::in_memory());
         let origin = block_on(store.create_session(
             SessionKind::Interactive,
             "/workspace",
