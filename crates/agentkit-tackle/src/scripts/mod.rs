@@ -23,6 +23,8 @@ use serde_json::Value;
 
 pub use agentkit_script::{PAYLOAD_CAP, cap_payload};
 
+pub mod host;
+
 /// The script source size cap, bounding compile work.
 pub const SCRIPT_MAX_SIZE: usize = 256 * 1024;
 
