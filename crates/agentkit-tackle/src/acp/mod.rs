@@ -143,14 +143,16 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
     let negotiation_for_init = negotiation.clone();
     let state_for_init = state.clone();
 
-    // The connection's lease-owner id — consumed from T-015 onward, when
-    // turns acquire leases on the session.
-    let _owner = Arc::new(format!("stdio-{}", uuid::Uuid::new_v4()));
     let state_for_new = state.clone();
     let state_for_list = state.clone();
     let state_for_close = state.clone();
     let state_for_delete = state.clone();
     let state_for_load = state.clone();
+    // The connection's lease-owner id: turns acquire it for their
+    // lifetime; released when the turn responds.
+    let owner = Arc::new(format!("stdio-{}", uuid::Uuid::new_v4()));
+    let owner_for_prompt = owner.clone();
+    let state_for_prompt = state.clone();
 
     Agent
         .builder()
@@ -251,6 +253,207 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
                     .await
                     .map_err(|err| Error::internal_error().data(err.to_string()))?;
                 responder.respond(CloseSessionResponse::new())
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |request: agent_client_protocol::schema::v1::PromptRequest,
+                        responder,
+                        cx| {
+                use agent_client_protocol::schema::v1::{
+                    ContentBlock, PromptResponse, StopReason, UsageUpdate,
+                };
+
+                let session_id = store_session_id(&request.session_id);
+
+                // The lease is the one-turn-at-a-time invariant: prompt
+                // against an actively-owned session fails precisely.
+                if !state_for_prompt
+                    .db
+                    .acquire_lease(&session_id, &owner_for_prompt, 60)
+                    .await
+                    .map_err(|err| Error::internal_error().data(err.to_string()))?
+                {
+                    let holder = state_for_prompt
+                        .db
+                        .lease_holder(&session_id)
+                        .await
+                        .ok()
+                        .flatten()
+                        .unwrap_or_else(|| "another connection".into());
+                    return responder.respond_with_error(Error::internal_error().data(
+                        serde_json::json!({
+                            "error": "session-actively-owned",
+                            "owner": holder,
+                        }),
+                    ));
+                }
+
+                // Persist the prompt turn + the user message (original
+                // content blocks, stored as the JSON block array).
+                let blocks_json =
+                    serde_json::to_string(&request.prompt).unwrap_or_else(|_| "[]".to_owned());
+                let turn = state_for_prompt
+                    .db
+                    .append_turn(
+                        &session_id,
+                        None, // head-following turns chain via the store's head
+                        crate::store::TurnKind::Interaction,
+                        None,
+                        crate::store::TurnUsage::default(),
+                    )
+                    .await
+                    .map_err(|err| Error::internal_error().data(err.to_string()))?;
+                state_for_prompt
+                    .db
+                    .append_message(
+                        &turn.id,
+                        crate::store::Role::User,
+                        &blocks_json,
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
+                    .await
+                    .map_err(|err| Error::internal_error().data(err.to_string()))?;
+
+                // Resolve the actor + model for this session.
+                let session_row = state_for_prompt
+                    .db
+                    .get_session(&session_id)
+                    .await
+                    .ok()
+                    .flatten();
+                let actor_name = session_row
+                    .as_ref()
+                    .map(|row| {
+                        session_actor(
+                            row,
+                            state_for_prompt.config.config.defaults.actor.as_deref(),
+                        )
+                    })
+                    .unwrap_or_else(|| "default".into());
+                let actor = state_for_prompt.definitions.actors.get(&actor_name);
+                let persona = actor.and_then(|a| {
+                    state_for_prompt
+                        .definitions
+                        .personas
+                        .get(&a.frontmatter.persona)
+                });
+                let system = persona.map(|p| p.body.clone()).unwrap_or_default();
+                let model_ref = actor
+                    .and_then(|a| a.frontmatter.model.clone())
+                    .or_else(|| state_for_prompt.config.config.defaults.model.clone())
+                    .unwrap_or_else(|| "default/model".into());
+                let size = context_window(&model_ref).unwrap_or(0);
+
+                // Assemble the prior context (the prompt turn included —
+                // its user message is the prompt; the loop re-sends it as
+                // the final message).
+                let assembled = state_for_prompt
+                    .db
+                    .assemble_context(&session_id)
+                    .await
+                    .map_err(|err| Error::internal_error().data(err.to_string()))?;
+                let prior: Vec<crate::agent::ChatMessage> = assembled
+                    .iter()
+                    .filter(|a| a.message.turn_id != turn.id)
+                    .filter_map(|a| {
+                        let text = prompt_text_of(&a.message.content);
+                        if text.is_empty() {
+                            return None;
+                        }
+                        let role = match a.message.role {
+                            crate::store::Role::User => crate::agent::ChatRole::User,
+                            crate::store::Role::Assistant | crate::store::Role::System => {
+                                crate::agent::ChatRole::Assistant
+                            }
+                            _ => return None,
+                        };
+                        Some(crate::agent::ChatMessage { role, text })
+                    })
+                    .collect();
+                let prompt_text = prompt_text_of(&blocks_json);
+
+                let provider = crate::agent::provider::provider_for(
+                    &model_ref,
+                    &state_for_prompt.config.config,
+                )
+                .map_err(|err| Error::internal_error().data(err.to_string()))?;
+                let assistant_id = uuid::Uuid::new_v4().to_string();
+                let session_for_chunks = request.session_id.clone();
+                let cx_for_chunks = cx.clone();
+
+                let outcome = crate::agent::turn::run_turn(
+                    &provider,
+                    &state_for_prompt.db,
+                    &session_id,
+                    &turn.id,
+                    &assistant_id.to_string(),
+                    &model_ref,
+                    &system,
+                    &prompt_text,
+                    prior,
+                    state_for_prompt
+                        .config
+                        .config
+                        .turns
+                        .max_model_requests
+                        .unwrap_or(8),
+                    size,
+                    // usage cadence: a usage_update per model request,
+                    // skipped when the window is unknown (RFD guidance).
+                    {
+                        let cx = cx_for_chunks.clone();
+                        let session_for_usage = session_for_chunks.clone();
+                        move |input: u64, _output: u64, _cost: f64| {
+                            if size == 0 {
+                                return;
+                            }
+                            let _ = cx.send_notification(SessionNotification::new(
+                                session_for_usage.clone(),
+                                SessionUpdate::UsageUpdate(UsageUpdate::new(input, size)),
+                            ));
+                        }
+                    },
+                    move |delta: &str| {
+                        let chunk = agent_client_protocol::schema::v1::ContentChunk::new(
+                            ContentBlock::Text(
+                                agent_client_protocol::schema::v1::TextContent::new(
+                                    delta.to_owned(),
+                                ),
+                            ),
+                        )
+                        .message_id(
+                            agent_client_protocol::schema::v1::MessageId::new(assistant_id.clone()),
+                        );
+                        let _ = cx_for_chunks.send_notification(SessionNotification::new(
+                            session_for_chunks.clone(),
+                            agent_client_protocol::schema::v1::SessionUpdate::AgentMessageChunk(
+                                chunk,
+                            ),
+                        ));
+                    },
+                )
+                .await;
+
+                state_for_prompt
+                    .db
+                    .release_lease(&session_id, &owner_for_prompt)
+                    .await
+                    .ok();
+
+                match outcome {
+                    Ok(result) => responder.respond(PromptResponse::new(match result.stop {
+                        crate::agent::TurnStop::EndTurn => StopReason::EndTurn,
+                        crate::agent::TurnStop::MaxTurnRequests => StopReason::MaxTurnRequests,
+                    })),
+                    Err(err) => responder.respond_with_error(
+                        Error::internal_error()
+                            .data(serde_json::json!({ "error": err.to_string() })),
+                    ),
+                }
             },
             agent_client_protocol::on_receive_request!(),
         )
@@ -362,6 +565,32 @@ fn replay_updates(
 
 fn notification(session_id: &SessionId, update: SessionUpdate) -> SessionNotification {
     SessionNotification::new(session_id.clone(), update)
+}
+
+/// The session's selected actor: created in session metadata, falling
+/// back to `[defaults].actor`, then the built-in "default".
+fn session_actor(session: &crate::store::Session, fallback: Option<&str>) -> String {
+    serde_json::from_str::<serde_json::Value>(&session.metadata)
+        .ok()
+        .and_then(|meta| meta.get("actor")?.as_str().map(str::to_owned))
+        .or_else(|| fallback.map(str::to_owned))
+        .unwrap_or_else(|| "default".into())
+}
+
+/// The model's context window from the bundled models.dev snapshot;
+/// None when the model is unknown (no usage_update is sent then — the
+/// RFD's guidance for unknowable window sizes).
+fn context_window(model_ref: &str) -> Option<u64> {
+    let bare = model_ref.split_once('/')?.1;
+    let snapshot = agentkit_models::bundled_snapshot_parsed();
+    snapshot.models.get(bare)?.context_window.map(u64::from)
+}
+
+/// The text of a stored message: its text blocks joined.
+fn prompt_text_of(content: &str) -> String {
+    serde_json::from_str::<Vec<serde_json::Value>>(content)
+        .map(|blocks| crate::agent::turn::prompt_text(&blocks))
+        .unwrap_or_default()
 }
 
 /// RFC 3339 rendering of a unix-seconds timestamp (ACP `updatedAt`).
