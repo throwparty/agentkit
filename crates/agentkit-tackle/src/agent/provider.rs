@@ -70,7 +70,7 @@ fn to_rig_message(message: &ChatMessage) -> Message {
 /// Resolves a credential through the helper command: `agentkit-credential-
 /// {helper} get {identity}` — the switchboard protocol. The helper's
 /// stdout is JSON carrying `access_token`.
-pub fn resolve_credential(helper: &str, identity: &str) -> Option<String> {
+pub fn resolve_credential(helper: &str, identity: &str) -> Option<secrecy::SecretString> {
     let output = std::process::Command::new(format!("agentkit-credential-{helper}"))
         .arg("get")
         .arg(identity)
@@ -84,7 +84,10 @@ pub fn resolve_credential(helper: &str, identity: &str) -> Option<String> {
         return None;
     }
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
-    value.get("access_token")?.as_str().map(str::to_owned)
+    value
+        .get("access_token")?
+        .as_str()
+        .map(|token| secrecy::SecretString::new(token.to_owned().into()))
 }
 
 /// Constructs the concrete provider for an endpoint-qualified model from
@@ -104,8 +107,10 @@ pub fn provider_for(model_ref: &str, config: &Config) -> Result<RigProvider, Mod
 
     match endpoint.wire_format {
         crate::config::WireFormat::OpenaiChatCompletions => {
+            // The credential lives in a secrecy type; it is exposed only
+            // at the client construction.
             let credential = match endpoint.auth {
-                crate::config::Auth::None => String::new(),
+                crate::config::Auth::None => secrecy::SecretString::new(String::new().into()),
                 crate::config::Auth::Helper => {
                     let helper = config
                         .credential_helper
@@ -118,7 +123,6 @@ pub fn provider_for(model_ref: &str, config: &Config) -> Result<RigProvider, Mod
                     })?
                 }
             };
-            let credential = secrecy::SecretString::new(credential.into());
             RigProvider::openai_completions(&endpoint.base_url, credential.expose_secret(), model)
         }
         format => Err(ModelError::UnsupportedWireFormat {
@@ -262,7 +266,10 @@ mod tests {
         std::env::set_var("PATH", format!("{}:{}", dir.path().display(), path_var));
         let credential = resolve_credential("test", "my-endpoint");
         std::env::set_var("PATH", path_var);
-        assert_eq!(credential.as_deref(), Some("secret"));
+        assert_eq!(
+            credential.as_ref().map(|secret| secret.expose_secret()),
+            Some("secret"),
+        );
     }
 
     #[test]

@@ -18,6 +18,10 @@ petgraph = "0.8"
 rig-core = "0.42.0"
 rhai = { version = "1.26", features = ["internals"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+opentelemetry = { version = "0.32", features = ["trace"] }
+opentelemetry-otlp = { version = "0.32", features = ["http-proto", "reqwest-blocking-client", "trace"] }
+opentelemetry_sdk = { version = "0.32", features = ["trace", "testing", "rt-tokio"] }
+tracing-opentelemetry = "0.33"
 rmcp = { version = "3.2.0", features = [
   "client",
   "server",
