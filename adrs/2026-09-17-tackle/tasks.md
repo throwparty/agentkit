@@ -340,7 +340,7 @@ Implement SessionAccess and the behaviour host functions: fork_session (ephemera
 | Depends On | T-025,T-007 |
 | References | behaviour-scripts,ephemeral-sessions,thin-core |
 
-### T-027: Forking
+### T-027: [x] Forking
 
 Implement session/fork for clients advertising support with updates flowing only after attach; the /fork fallback prompt for v1 clients reporting the new session id in the parent turn; session_forked script event; seed messages as harness-authored static user-facing content with their own messageId; forks titled from their parent at creation
 

@@ -9,6 +9,8 @@
 use crate::config::Loaded;
 use crate::loader::Definitions;
 use crate::store::SessionStore;
+
+pub mod fork;
 #[cfg(feature = "unstable")]
 use agent_client_protocol::schema::v1::SessionForkCapabilities;
 use agent_client_protocol::schema::v1::{
@@ -85,7 +87,7 @@ impl ConnectionNegotiation {
 
 /// State shared across one connection's handlers.
 pub struct TackleState {
-    pub db: SessionStore,
+    pub db: std::sync::Arc<SessionStore>,
     pub config: Loaded,
     pub definitions: Definitions,
 }
@@ -148,13 +150,14 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
     let state_for_close = state.clone();
     let state_for_delete = state.clone();
     let state_for_load = state.clone();
+    let state_for_fork = state.clone();
     // The connection's lease-owner id: turns acquire it for their
     // lifetime; released when the turn responds.
     let owner = Arc::new(format!("stdio-{}", uuid::Uuid::new_v4()));
     let owner_for_prompt = owner.clone();
     let state_for_prompt = state.clone();
 
-    Agent
+    let builder = Agent
         .builder()
         .name("tackle")
         .on_receive_request(
@@ -317,6 +320,81 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
                     )
                     .await
                     .map_err(|err| Error::internal_error().data(err.to_string()))?;
+
+                // The /fork fallback for v1 clients: exact first-token
+                // match on user-typed input. Creates the fork, seeds it,
+                // fires the session_forked scripts, and reports the new
+                // session id in the parent turn — no model request.
+                let first_text = request
+                    .prompt
+                    .first()
+                    .and_then(|block| match block {
+                        ContentBlock::Text(text) => Some(text.text.trim().to_owned()),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                if first_text.split_whitespace().next() == Some("/fork") {
+                    let access = fork_access(&state_for_prompt);
+                    let fork_result = fork::run_fork(
+                        &state_for_prompt,
+                        std::sync::Arc::clone(&access),
+                        &session_id,
+                    )
+                    .await;
+                    let fork = match fork_result {
+                        Ok(fork) => fork,
+                        Err(err) => {
+                            state_for_prompt
+                                .db
+                                .release_lease(&session_id, &owner_for_prompt)
+                                .await
+                                .ok();
+                            return responder
+                                .respond_with_error(Error::internal_error().data(err.to_string()));
+                        }
+                    };
+                    // Seeds are harness-authored static user-facing
+                    // content with their own messageId.
+                    let _ =
+                        fork::insert_fork_seed(&state_for_prompt.db, &fork.id, &session_id).await;
+
+                    // The parent-turn report: an agent message carrying
+                    // the new session id (wire form for the client).
+                    let wire_fork_id = wire_session_id(&fork.id).to_string();
+                    let report =
+                        fork::fork_report_message(&wire_fork_id, fork.fork_point_turn_id.as_ref());
+                    let message = state_for_prompt
+                        .db
+                        .append_message(
+                            &turn.id,
+                            crate::store::Role::Assistant,
+                            &serde_json::json!([{ "type": "text", "text": report.clone() }])
+                                .to_string(),
+                            None,
+                            None,
+                            None,
+                            None,
+                        )
+                        .await
+                        .map_err(|err| Error::internal_error().data(err.to_string()))?;
+                    let chunk =
+                        agent_client_protocol::schema::v1::ContentChunk::new(ContentBlock::Text(
+                            agent_client_protocol::schema::v1::TextContent::new(report.clone()),
+                        ))
+                        .message_id(
+                            agent_client_protocol::schema::v1::MessageId::new(message.id.clone()),
+                        );
+                    let _ = cx.send_notification(SessionNotification::new(
+                        request.session_id.clone(),
+                        agent_client_protocol::schema::v1::SessionUpdate::AgentMessageChunk(chunk),
+                    ));
+                    state_for_prompt
+                        .db
+                        .release_lease(&session_id, &owner_for_prompt)
+                        .await
+                        .ok();
+                    return responder.respond(PromptResponse::new(StopReason::EndTurn));
+                }
 
                 // Resolve the actor + model for this session.
                 let session_row = state_for_prompt
@@ -515,9 +593,70 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
                 responder.respond(ResumeSessionResponse::new())
             },
             agent_client_protocol::on_receive_request!(),
+        );
+
+    // The RFD path for forking: session/fork, served to clients that
+    // call it; the fork capability advertisement is itself gated.
+    #[cfg(feature = "unstable")]
+    let builder = {
+        builder.on_receive_request(
+            async move |request: agent_client_protocol::schema::v1::ForkSessionRequest,
+                        responder,
+                        _cx| {
+                // No session updates flow here — the client attaches
+                // (session/load) and updates follow.
+                let source = store_session_id(&request.session_id);
+                let access = fork_access(&state_for_fork);
+                let fork = fork::create_fork(&state_for_fork.db, &source)
+                    .await
+                    .map_err(|err| Error::internal_error().data(err.to_string()))?;
+                fork::fire_session_forked(
+                    &state_for_fork,
+                    access,
+                    &fork.id,
+                    &source,
+                    fork.fork_point_turn_id.as_ref(),
+                );
+                responder.respond(agent_client_protocol::schema::v1::ForkSessionResponse::new(
+                    wire_session_id(&fork.id),
+                ))
+            },
+            agent_client_protocol::on_receive_request!(),
         )
-        .connect_to(Stdio::new())
-        .await
+    };
+
+    builder.connect_to(Stdio::new()).await
+}
+
+/// The session access the fork scripts act through: the shared store
+/// backend with the loop dispatcher pending (T-015 integration); model
+/// turns driven by scripts queue as user messages meanwhile.
+fn fork_access(state: &TackleState) -> std::sync::Arc<dyn fork::SessionAccess> {
+    struct LoopPendingDispatcher;
+    impl fork::PromptDispatcher for LoopPendingDispatcher {
+        fn dispatch(
+            &self,
+            _session: &crate::store::SessionId,
+            _text: &str,
+        ) -> Result<(), fork::HostError> {
+            // The agent loop integration drives these model turns; the
+            // user message is already stored, so nothing is lost.
+            Ok(())
+        }
+    }
+    struct LoopPendingCompletions;
+    impl fork::CompletionSink for LoopPendingCompletions {
+        fn publish(&self, _session: &crate::store::SessionId, _completion: fork::Completion) {}
+        fn take(&self, _session: &crate::store::SessionId) -> Option<fork::Completion> {
+            None
+        }
+    }
+    std::sync::Arc::new(fork::StoreAccess::new(
+        std::sync::Arc::clone(&state.db),
+        std::sync::Arc::new(LoopPendingDispatcher),
+        std::sync::Arc::new(LoopPendingCompletions),
+        0,
+    ))
 }
 
 /// Maps stored messages to replay notifications: user/assistant messages

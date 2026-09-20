@@ -18,6 +18,8 @@ pub type MessageId = String;
 
 #[derive(Debug, Error)]
 pub enum StoreError {
+    #[error("no such session: {0}")]
+    NotFound(SessionId),
     #[error("store is misconfigured: {0}")]
     Config(String),
     #[error("session {session} is actively owned by {owner}")]
