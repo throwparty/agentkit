@@ -197,7 +197,7 @@ Implement the turn loop: context assembly via the store, system prompt builder (
 | Depends On | T-014,T-007,T-004 |
 | References | turn-loop,manifest-injection,content-types |
 
-### T-016: Usage reporting
+### T-016: [x] Usage reporting
 
 Emit usage_update after each model request and once at session setup; used from the last request input tokens, size from agentkit-models context-window metadata, cost from agentkit-models pricing or endpoint-reported values when present; per-turn usage deltas persisted on turns, session cumulative cost summed over own turns so forks never double-count
 
