@@ -1,0 +1,88 @@
+---
+sidebar_position: 2
+---
+
+# 🔧 Setting up your providers
+
+Tackle talks to any model endpoint exposing a compatible interface — an OpenAI-compatible server, the Anthropic Messages API, or a proxy standing in front of either. Each endpoint is a named block in your configuration; models are addressed as `endpoint-name/model`.
+
+## Where configuration lives
+
+Tackle reads two layers, merged with project values winning over user values:
+
+1. **User layer** — `config.toml` in your user config directory (`~/.config/agentkit/tackle` on Linux, `~/Library/Application Support/AgentKit/tackle` on macOS). Override with `--config-dir`.
+2. **Project layer** — `.agentkit/tackle/config.toml` in your project. Endpoints and the credential helper are user-layer only — a project layer that sets them is rejected. Executable entries (`mcp_servers`, `scripts`) require trust consent on first use.
+
+## Endpoints
+
+Each endpoint declares where to send model traffic, which wire format to speak, and how to authenticate:
+
+```toml
+[endpoints.local]
+base_url = "http://localhost:11434/v1"
+wire_format = "openai-chat-completions"
+auth = "none"
+
+[defaults]
+model = "local/llama-3.2"
+```
+
+- `wire_format` — one of `openai-chat-completions`, `openai-responses`, or `anthropic-messages`.
+- `auth` — `none` (no credentials sent) or `helper` (resolve a bearer token through the credential helper at request time).
+- `models` — an optional static list used as a fallback when `/models` discovery fails or returns nothing.
+
+Model discovery fetches the endpoint's `/models` list at session start; discovered models are offered alongside your static fallbacks in the model selector.
+
+## Credentials
+
+For endpoints that need their own bearer token, set `auth = "helper"` and name a credential helper:
+
+```toml
+credential_helper = "keychain"
+
+[endpoints.rogue]
+base_url = "https://rogue.example.com"
+wire_format = "openai-chat-completions"
+auth = "helper"
+```
+
+At request time Tackle runs `agentkit-credential-keychain get rogue` and reads the `access_token` from its JSON output. If the credential can't be resolved, the endpoint isn't removed — it's advertised through ACP's `authMethods` and the `authenticate` method, so your harness can prompt for login instead of failing at first prompt.
+
+## Examples
+
+An OpenAI-compatible local runtime:
+
+```toml
+[endpoints.local]
+base_url = "http://localhost:11434/v1"
+wire_format = "openai-chat-completions"
+auth = "none"
+```
+
+The Anthropic Messages API:
+
+```toml
+[endpoints.anthropic]
+base_url = "https://api.anthropic.com"
+wire_format = "anthropic-messages"
+auth = "helper"
+```
+
+Or a proxy you already run — for example, [Switchboard](../switchboard/setting-up-your-providers.mdx), which fronts your OpenAI, Anthropic, and local subscriptions and handles their credentials itself, leaving Tackle nothing to authenticate:
+
+```toml
+[endpoints.switchboard]
+base_url = "http://localhost:3812/openai/v1"
+wire_format = "openai-chat-completions"
+auth = "none"
+models = []
+
+[defaults]
+model = "switchboard/claude-sonnet-4-5"
+```
+
+With Switchboard running (`switchboard --config switchboard.toml`), this is all the configuration Tackle needs — models are discovered from the proxy's `/models` list, and the switchboard-qualified names flow through unchanged.
+
+## Checking it works
+
+Start Tackle and begin a session; the model selector lists each configured endpoint's models, qualified by endpoint name. Pick one and send a prompt — if the endpoint is unreachable you'll see the failure classified in the turn's result rather than a hang.
