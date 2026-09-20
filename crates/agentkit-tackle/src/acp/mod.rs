@@ -14,6 +14,7 @@ pub mod compaction;
 pub mod config_options;
 pub mod first_run;
 pub mod fork;
+pub mod http;
 pub mod titling;
 #[cfg(feature = "unstable")]
 use agent_client_protocol::schema::v1::SessionForkCapabilities;
@@ -146,6 +147,20 @@ fn store_session_id(id: &SessionId) -> String {
 /// Runs the ACP agent over stdio until the transport closes.
 pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result<()> {
     let negotiation = Arc::new(ConnectionNegotiation::default());
+    run_agent_over(state, negotiation, Stdio::new()).await
+}
+
+/// Runs one agent connection over `transport`: the handler chain is
+/// built per connection (shared state rides `Arc<TackleState>`), so
+/// HTTP serves multiple connections in one process (T-036).
+pub(crate) async fn run_agent_over<T>(
+    state: Arc<TackleState>,
+    negotiation: Arc<ConnectionNegotiation>,
+    transport: T,
+) -> agent_client_protocol::Result<()>
+where
+    T: agent_client_protocol::ConnectTo<agent_client_protocol::role::acp::Agent>,
+{
     let negotiation_for_init = negotiation.clone();
     let state_for_init = state.clone();
 
@@ -984,7 +999,7 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
         )
     };
 
-    builder.connect_to(Stdio::new()).await
+    builder.connect_to(transport).await
 }
 
 /// The session access the fork scripts act through: the shared store

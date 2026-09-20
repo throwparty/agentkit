@@ -17,7 +17,9 @@ jiff = { version = "0.2", features = ["serde"] }
 petgraph = "0.8"
 rig-core = "0.42.0"
 rhai = { version = "1.26", features = ["internals"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+axum = "0.8"
+tokio-stream = { version = "0.1", features = ["sync"] }
 opentelemetry = { version = "0.32", features = ["trace"] }
 opentelemetry-otlp = { version = "0.32", features = ["http-proto", "reqwest-blocking-client", "trace"] }
 opentelemetry_sdk = { version = "0.32", features = ["trace", "testing", "rt-tokio"] }
