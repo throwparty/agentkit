@@ -142,6 +142,12 @@ impl GrantStore {
         self.grants.get(&(actor.to_owned(), invokable.to_owned()))
     }
 
+    /// Whether no grant records exist — elicitation responses and other
+    /// non-pipeline paths must never create any.
+    pub fn is_empty(&self) -> bool {
+        self.grants.is_empty()
+    }
+
     /// The session's active life is over: close, process exit, and
     /// resume after restart all start from an empty store.
     pub fn clear(&mut self) {

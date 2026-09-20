@@ -14,9 +14,14 @@
 //! touched by the relay.
 
 use crate::config::McpServerConfig;
-use rmcp::model::CallToolRequestParams;
-use rmcp::service::{RoleClient, RunningService};
+use rmcp::model::{
+    CallToolRequestParams, ClientCapabilities, ClientInfo, ElicitRequestParams, ElicitResult,
+    ElicitationAction, Implementation,
+};
+use rmcp::service::{RequestContext, RoleClient, RunningService};
+use rmcp::ClientHandler;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::process::Command;
@@ -197,27 +202,135 @@ pub struct ToolResult {
     pub truncated: bool,
 }
 
-pub struct McpPool {
-    connections: BTreeMap<String, Connection>,
+/// An MCP server's elicitation, forwarded for surfacing to the user —
+/// in production via `session/request_permission`, origin-attributed to
+/// the server and semantically distinct from tool permission prompts.
+/// Elicitation responses never write the grant store.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Elicitation {
+    /// The originating server: the explicit origin attribution.
+    pub server: String,
+    pub message: String,
+    /// The form schema, verbatim; `None` for URL elicitations.
+    pub requested_schema: Option<serde_json::Value>,
+    /// The URL for URL elicitations; `None` for form elicitations.
+    pub url: Option<String>,
+}
+
+/// What the user (via the ACP permission surface) answered. A
+/// permission prompt cannot collect form data, so an acceptance
+/// carries no content — servers design around that.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ElicitationResponse {
+    Accept,
+    Decline,
+    Cancel,
+}
+
+/// Receives forwarded elicitations. The ACP layer implements this over
+/// the client connection; permission prompts and elicitations are
+/// distinct surfaces — a grant record is never written from here.
+pub trait ElicitationSink: Send + Sync + 'static {
+    fn elicit(
+        &self,
+        elicitation: Elicitation,
+    ) -> impl std::future::Future<Output = ElicitationResponse> + Send;
+}
+
+/// The fail-closed default: every elicitation is declined when no
+/// forwarding surface is wired.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct AutoDecline;
+
+impl ElicitationSink for AutoDecline {
+    async fn elicit(&self, _elicitation: Elicitation) -> ElicitationResponse {
+        ElicitationResponse::Decline
+    }
+}
+
+/// The pool's client handler: advertises elicitation support and
+/// forwards every elicitation to the sink, attributed to its server.
+#[derive(Clone)]
+pub(crate) struct ForwardingHandler<S: ElicitationSink> {
+    sink: Arc<S>,
+    server: String,
+}
+
+impl<S: ElicitationSink> ClientHandler for ForwardingHandler<S> {
+    fn get_info(&self) -> ClientInfo {
+        let capabilities = ClientCapabilities::builder().enable_elicitation().build();
+        ClientInfo::new(
+            capabilities,
+            Implementation::new("agentkit-tackle", env!("CARGO_PKG_VERSION")),
+        )
+    }
+
+    async fn create_elicitation(
+        &self,
+        request: ElicitRequestParams,
+        _context: RequestContext<RoleClient>,
+    ) -> Result<ElicitResult, rmcp::ErrorData> {
+        let elicitation = match request {
+            ElicitRequestParams::FormElicitationParams {
+                message,
+                requested_schema,
+                ..
+            } => Elicitation {
+                server: self.server.clone(),
+                message,
+                requested_schema: serde_json::to_value(requested_schema).ok(),
+                url: None,
+            },
+            ElicitRequestParams::UrlElicitationParams { message, url, .. } => Elicitation {
+                server: self.server.clone(),
+                message,
+                requested_schema: None,
+                url: Some(url),
+            },
+            // Non-exhaustive enum: unknown future elicitation modes
+            // decline — fail-closed.
+            _ => {
+                return Ok(ElicitResult::new(ElicitationAction::Decline));
+            }
+        };
+        let response = self.sink.elicit(elicitation).await;
+        Ok(match response {
+            ElicitationResponse::Accept => ElicitResult::new(ElicitationAction::Accept),
+            ElicitationResponse::Decline => ElicitResult::new(ElicitationAction::Decline),
+            ElicitationResponse::Cancel => ElicitResult::new(ElicitationAction::Cancel),
+        })
+    }
+}
+pub struct McpPool<S: ElicitationSink = AutoDecline> {
+    connections: BTreeMap<String, Connection<S>>,
     statuses: BTreeMap<String, ServerStatus>,
+    sink: Arc<S>,
 }
 
-struct Connection {
-    peer: RunningService<RoleClient, ()>,
+struct Connection<S: ElicitationSink> {
+    peer: RunningService<RoleClient, ForwardingHandler<S>>,
 }
 
-impl Default for McpPool {
+impl Default for McpPool<AutoDecline> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl McpPool {
-    /// An empty pool.
+impl McpPool<AutoDecline> {
+    /// An empty pool with the fail-closed auto-decline sink.
     pub fn new() -> Self {
+        Self::with_sink(AutoDecline)
+    }
+}
+
+impl<S: ElicitationSink> McpPool<S> {
+    /// An empty pool forwarding elicitations to `sink`.
+    pub fn with_sink(sink: S) -> Self {
         Self {
             connections: BTreeMap::new(),
             statuses: BTreeMap::new(),
+            sink: Arc::new(sink),
         }
     }
 
@@ -230,7 +343,11 @@ impl McpPool {
     /// Connects one configured server (stdio argv or HTTP URL), recording
     /// the outcome as status. Never panics; failures are statuses.
     pub async fn connect(&mut self, name: &str, config: &McpServerConfig) {
-        let result: Result<RunningService<RoleClient, ()>, String> = async {
+        let handler = ForwardingHandler {
+            sink: Arc::clone(&self.sink),
+            server: name.to_owned(),
+        };
+        let result: Result<RunningService<RoleClient, ForwardingHandler<S>>, String> = async {
             match config {
                 McpServerConfig::Stdio { command, args, env } => {
                     let mut cmd = Command::new(command);
@@ -248,7 +365,7 @@ impl McpPool {
                             let _ = relay_stderr(&name, stderr, &mut out, &mut cap).await;
                         });
                     }
-                    match connect_timeout(rmcp::service::serve_client((), transport)).await {
+                    match connect_timeout(rmcp::service::serve_client(handler, transport)).await {
                         Ok(initialised) => initialised.map_err(|err| err.to_string()),
                         Err(reason) => Err(reason),
                     }
@@ -256,7 +373,7 @@ impl McpPool {
                 McpServerConfig::Http { url } => {
                     let transport =
                         rmcp::transport::StreamableHttpClientTransport::from_uri(url.clone());
-                    match connect_timeout(rmcp::service::serve_client((), transport)).await {
+                    match connect_timeout(rmcp::service::serve_client(handler, transport)).await {
                         Ok(initialised) => initialised.map_err(|err| err.to_string()),
                         Err(reason) => Err(reason),
                     }
