@@ -16,6 +16,7 @@ git2 = "0.21"
 jiff = { version = "0.2", features = ["serde"] }
 petgraph = "0.8"
 rig-core = "0.42.0"
+rhai = { version = "1.26", features = ["internals"] }
 rmcp = { version = "3.2.0", features = [
   "client",
   "server",
