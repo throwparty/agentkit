@@ -701,12 +701,12 @@ impl SessionStore {
             Backend::Sqlite(pool) => {
                 let rows: Vec<(String, String)> = sqlx::query_as(
                     "WITH RECURSIVE walk AS ( \
-                         SELECT t.id, t.kind, 0 AS depth \
+                         SELECT t.*, 0 AS depth \
                          FROM turns t \
                          JOIN sessions s ON s.head_turn_id = t.id \
                          WHERE s.id = ?1 \
                          UNION ALL \
-                         SELECT p.id, p.kind, walk.depth + 1 \
+                         SELECT p.*, walk.depth + 1 \
                          FROM walk \
                          JOIN turns p ON p.id = walk.parent_id \
                      ) \
@@ -775,6 +775,46 @@ impl SessionStore {
             }
             Backend::Memory(_) => Ok(self.lock_memory().get_turn(turn_id)),
         }
+    }
+
+    /// Deletes one turn, restoring full context for compaction turns
+    /// (reversibility by deletion). Messages go with it; the head moves
+    /// to the deleted turn's parent.
+    pub async fn delete_turn(&self, turn_id: &TurnId) -> Result<(), StoreError> {
+        match &self.backend {
+            Backend::Sqlite(pool) => {
+                let mut tx = pool.begin().await?;
+                let (session_id, parent): (String, Option<String>) =
+                    sqlx::query_as("SELECT session_id, parent_id FROM turns WHERE id = ?")
+                        .bind(turn_id)
+                        .fetch_one(&mut *tx)
+                        .await
+                        .map_err(|err| match err {
+                            sqlx::Error::RowNotFound => StoreError::NotFound(turn_id.clone()),
+                            other => StoreError::Sqlx(other),
+                        })?;
+                sqlx::query("DELETE FROM messages WHERE turn_id = ?")
+                    .bind(turn_id)
+                    .execute(&mut *tx)
+                    .await?;
+                sqlx::query("DELETE FROM turns WHERE id = ?")
+                    .bind(turn_id)
+                    .execute(&mut *tx)
+                    .await?;
+                sqlx::query(
+                    "UPDATE sessions SET head_turn_id = ?, updated_at = ? WHERE id = ? AND head_turn_id = ?",
+                )
+                .bind(parent)
+                .bind(unix_now())
+                .bind(session_id)
+                .bind(turn_id)
+                .execute(&mut *tx)
+                .await?;
+                tx.commit().await?;
+            }
+            Backend::Memory(_) => self.lock_memory().delete_turn(turn_id),
+        }
+        Ok(())
     }
 
     /// Assembles the conversation context for a session: the parent-chain

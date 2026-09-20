@@ -353,7 +353,7 @@ Implement session/fork for clients advertising support with updates flowing only
 | Depends On | T-011,T-023,T-026 |
 | References | forking,ephemeral-sessions |
 
-### T-028: Compaction
+### T-028: [x] Compaction
 
 Implement compaction turns with the in-band announcement (trigger and token counts plus a visible usage_update drop); the /compact turn definition: compaction-tagged prompts are intercepted, the compaction_requested event fires instead of a model turn, and the harness announces with before and after counts; immutable pinned prefix that compaction can never elide; records attributed to the producing script; compaction-disabled context-length errors translated into actionable messages naming the script
 

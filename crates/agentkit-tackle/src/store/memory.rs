@@ -172,6 +172,21 @@ impl MemoryData {
         self.turns.get(id).cloned()
     }
 
+    /// Deletes one turn (compaction reversibility): messages go with
+    /// it; the head retreats to the deleted turn's parent.
+    pub fn delete_turn(&mut self, id: &TurnId) {
+        let Some(turn) = self.turns.remove(id) else {
+            return;
+        };
+        self.messages.remove(id);
+        if let Some(session) = self.sessions.get_mut(&turn.session_id) {
+            if session.head_turn_id.as_deref() == Some(id.as_str()) {
+                session.head_turn_id = turn.parent_id.clone();
+                session.updated_at = super::unix_now();
+            }
+        }
+    }
+
     /// The parent-chain walk from the head: `(turn id, kind)`, newest
     /// first — compaction clamping reads the kinds.
     pub fn session_walk(&self, session_id: &SessionId) -> Vec<(TurnId, TurnKind)> {
