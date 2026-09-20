@@ -1,0 +1,70 @@
+# Architecture
+
+Tackle is built around three cooperating layers: the ACP protocol layer, the model loop, and persistent session storage.
+
+## Crate dependency graph
+
+```mermaid
+flowchart LR
+    subgraph tackle["agentkit-tackle"]
+        ACP["acp"]
+        INV["invokables"]
+        PERM["permissions"]
+        SCR["scripts"]
+        MCP["mcp"]
+        PROV["provider"]
+        STORE["store"]
+    end
+
+    ACP --> INV
+    ACP --> PERM
+    ACP --> SCR
+    INV --> MCP
+    INV --> PROV
+    PERM --> MCP
+    SCR --> STORE
+    PROV --> STORE
+```
+
+## Session lifecycle
+
+```mermaid
+sequenceDiagram
+    participant H as Harness (ACP client)
+    participant T as Tackle
+    participant P as Model endpoint
+    participant M as MCP servers
+
+    H->>T: session/new
+    T->>T: load or create session record
+    T-->>H: session response
+    H->>T: session/prompt
+    T->>T: expand prompts (/cmd, /!)
+    T->>T: check permission pipeline
+    T->>P: stream model request
+    P-->>T: streamed tokens + tool calls
+    T->>M: dispatch tool calls
+    M-->>T: tool results
+    T->>P: continue loop until end_turn
+    T-->>H: prompt response
+```
+
+Every prompt is persisted before the model request and again after it completes, so a crash mid-stream leaves a resumable partial turn.
+
+## Storage
+
+The store is an abstraction with two backends:
+
+- **SQLite** — the default, creating leading directories as needed.
+- **In-memory** — used by tests.
+
+Sessions form a tree: forking down a new path reuses the parent history. Turn, tool-call, and usage records are scoped to the session's lease.
+
+## Behaviour scripting
+
+Rhai scripts receive a host API over `SessionAccess` and run on the `policy` or `behaviour` engines. Built-ins (the default persona and actor, the summariser actor, and the compaction and titling scripts) are embedded in the binary and registered at the lowest precedence, so project configuration always wins.
+
+## Transports
+
+- **stdio** — `agent_client_protocol` over stdin/stdout, one connection per process.
+- **HTTP** (unstable) — axum-based transport sharing the same `run_agent_over` handler chain as stdio.
