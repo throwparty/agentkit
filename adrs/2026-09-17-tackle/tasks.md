@@ -392,7 +392,7 @@ Implement session/new succeeding with empty configuration via built-in defaults;
 | Depends On | T-011,T-004,T-022 |
 | References | first-run,config-discovery |
 
-### T-031: Session config options
+### T-031: [x] Session config options
 
 Implement FR-027: configOptions with a model selector (per-endpoint discovery via rig's model-listing support, static fallbacks, degraded-discovery notice) and an actor selector; mid-session model switch validated against the new model's context window with auto-compaction announcement and a context note, effective the following turn
 

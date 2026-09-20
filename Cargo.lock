@@ -201,6 +201,7 @@ dependencies = [
  "git2",
  "jiff",
  "petgraph 0.8.3",
+ "reqwest 0.12.28",
  "rhai",
  "rig-core",
  "rmcp",
