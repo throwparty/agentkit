@@ -71,6 +71,10 @@ pub fn resolve_session_forked_scripts(
                 continue;
             }
         }
+        if let Some(source) = crate::builtins::script_source(&config.file) {
+            sources.push((name.clone(), source.to_owned()));
+            continue;
+        }
         let Some(user_dir) = user_dir else {
             continue;
         };

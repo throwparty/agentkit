@@ -66,6 +66,9 @@ pub struct Definitions {
     pub personas: BTreeMap<String, Definition<PersonaMeta>>,
     pub actors: BTreeMap<String, Definition<ActorMeta>>,
     pub prompts: BTreeMap<String, Definition<PromptMeta>>,
+    /// Built-in definitions a discovered definition replaced (as
+    /// `kind:name`) — surfaced at first run.
+    pub builtin_overrides: BTreeSet<String>,
 }
 
 impl Definitions {
@@ -115,29 +118,63 @@ impl Definitions {
     }
 
     /// Registers the built-in defaults at the lowest precedence: any
-    /// discovered definition with the same name replaces the built-in.
+    /// discovered definition with the same name replaces the built-in,
+    /// and the replacement is surfaced in `builtin_overrides`.
     pub fn with_builtins(mut self) -> Self {
         for (kind, name, raw) in crate::builtins::defaults() {
             let path = PathBuf::from(format!("<builtin>/{kind}-{name}.md"));
             match kind {
                 "persona" => {
-                    if let Ok(definition) = parse_definition::<PersonaMeta>(name, &path, raw) {
-                        self.personas
-                            .entry(definition.name.clone())
-                            .or_insert(definition);
-                    }
+                    Self::register_builtin(
+                        &mut self.personas,
+                        &mut self.builtin_overrides,
+                        kind,
+                        name,
+                        &path,
+                        raw,
+                    );
                 }
                 "actor" => {
-                    if let Ok(definition) = parse_definition::<ActorMeta>(name, &path, raw) {
-                        self.actors
-                            .entry(definition.name.clone())
-                            .or_insert(definition);
-                    }
+                    Self::register_builtin(
+                        &mut self.actors,
+                        &mut self.builtin_overrides,
+                        kind,
+                        name,
+                        &path,
+                        raw,
+                    );
+                }
+                "prompt" => {
+                    Self::register_builtin(
+                        &mut self.prompts,
+                        &mut self.builtin_overrides,
+                        kind,
+                        name,
+                        &path,
+                        raw,
+                    );
                 }
                 _ => {}
             }
         }
         self
+    }
+
+    fn register_builtin<T: DeserializeOwned>(
+        map: &mut BTreeMap<String, Definition<T>>,
+        overrides: &mut BTreeSet<String>,
+        kind: &str,
+        name: &str,
+        path: &Path,
+        raw: &str,
+    ) {
+        if map.contains_key(name) {
+            overrides.insert(format!("{kind}:{name}"));
+            return;
+        }
+        if let Ok(definition) = parse_definition::<T>(name, path, raw) {
+            map.insert(definition.name.clone(), definition);
+        }
     }
 }
 

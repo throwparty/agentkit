@@ -379,7 +379,7 @@ Implement the default title_trigger script: ephemeral-fork summarisation into a 
 | Depends On | T-026 |
 | References | session-titling |
 
-### T-030: First-run experience
+### T-030: [x] First-run experience
 
 Implement session/new succeeding with empty configuration via built-in defaults; ship the built-in asset inventory: default persona, default actor, summariser actor, compaction and titling scripts, /fork and /compact prompts; first-session seed message listing loaded configuration layers with counts and documenting the / and /! syntaxes; configuration errors naming file and key; built-in override surfacing; missing provider credentials surface via authMethods advertisement and the ACP authenticate method
 

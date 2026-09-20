@@ -21,12 +21,37 @@ pub const SUMMARISER_ACTOR: &str = include_str!("summariser-actor.md");
 /// six-word title; failures silent.
 pub const TITLING_SCRIPT: &str = include_str!("titling.rhai");
 
+/// The shipped compaction script: automatic compaction past the
+/// utilisation threshold (post_turn) and the manual /compact summary
+/// (compaction_requested).
+pub const COMPACTION_SCRIPT: &str = include_str!("compaction.rhai");
+
+/// The shipped /fork prompt: the fallback path for v1 clients — the
+/// harness intercepts the command before this would expand.
+pub const FORK_PROMPT: &str = include_str!("fork-prompt.md");
+
+/// The shipped /compact prompt: compaction-tagged, intercepted by the
+/// harness into a compaction_requested turn.
+pub const COMPACT_PROMPT: &str = include_str!("compact-prompt.md");
+
+/// Resolves a built-in script file reference (`builtin:<name>.rhai`) to
+/// the shipped source.
+pub fn script_source(file: &str) -> Option<&'static str> {
+    match file.strip_prefix("builtin:")? {
+        "compaction.rhai" => Some(COMPACTION_SCRIPT),
+        "titling.rhai" => Some(TITLING_SCRIPT),
+        _ => None,
+    }
+}
+
 /// (`kind`, `name`, raw contents) for every built-in definition.
 pub fn defaults() -> impl Iterator<Item = (&'static str, &'static str, &'static str)> {
     [
         ("persona", "default", DEFAULT_PERSONA),
         ("actor", "default", DEFAULT_ACTOR),
         ("actor", "summariser", SUMMARISER_ACTOR),
+        ("prompt", "fork", FORK_PROMPT),
+        ("prompt", "compact", COMPACT_PROMPT),
     ]
     .into_iter()
 }
