@@ -262,7 +262,7 @@ Forward MCP elicitations to session/request_permission with explicit origin attr
 | Depends On | T-018,T-022 |
 | References | mcp-integration,permission-pipeline |
 
-### T-021: Invokable registry
+### T-021: [x] Invokable registry
 
 Implement the unified registry: mcp., prompt., and agent. namespaces with user_invokable and model_invokable flags; collisions are configuration errors at load; available_commands_update with parameter hints mapped from prompt frontmatter; the registry is the only dispatch point — the harness ships no built-in tools beyond it
 
