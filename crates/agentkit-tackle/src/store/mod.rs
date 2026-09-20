@@ -65,6 +65,23 @@ pub(crate) fn assembly_order(walk: Vec<(TurnId, TurnKind)>) -> Vec<TurnId> {
     summaries
 }
 
+/// The session metadata's `model` override, if set — the config-option
+/// switch, effective the following turn.
+pub fn session_model_free(session: &Session) -> Option<String> {
+    metadata_value(session, "model")
+}
+
+/// The session metadata's `actor`, if set.
+pub fn session_actor_value_free(session: &Session) -> Option<String> {
+    metadata_value(session, "actor")
+}
+
+fn metadata_value(session: &Session, key: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(&session.metadata)
+        .ok()
+        .and_then(|metadata| metadata.get(key)?.as_str().map(str::to_owned))
+}
+
 fn unix_now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -670,6 +687,51 @@ impl SessionStore {
                 .await?;
             }
             Backend::Memory(_) => self.lock_memory().set_turn_usage(turn_id, usage),
+        }
+        Ok(())
+    }
+
+    /// Sets the session's model override (the config-option switch).
+    pub async fn set_model(&self, session_id: &SessionId, model: &str) -> Result<(), StoreError> {
+        self.update_metadata(session_id, |metadata| {
+            metadata["model"] = serde_json::json!(model)
+        })
+        .await
+    }
+
+    /// Sets the session's actor override (the config-option switch).
+    pub async fn set_actor(&self, session_id: &SessionId, actor: &str) -> Result<(), StoreError> {
+        self.update_metadata(session_id, |metadata| {
+            metadata["actor"] = serde_json::json!(actor)
+        })
+        .await
+    }
+
+    async fn update_metadata(
+        &self,
+        session_id: &SessionId,
+        mutate: impl FnOnce(&mut serde_json::Value),
+    ) -> Result<(), StoreError> {
+        let session = self
+            .get_session(session_id)
+            .await?
+            .ok_or_else(|| StoreError::NotFound(session_id.clone()))?;
+        let mut metadata: serde_json::Value =
+            serde_json::from_str(&session.metadata).unwrap_or(serde_json::json!({}));
+        mutate(&mut metadata);
+        let now = unix_now();
+        match &self.backend {
+            Backend::Sqlite(pool) => {
+                sqlx::query("UPDATE sessions SET metadata = ?, updated_at = ? WHERE id = ?")
+                    .bind(metadata.to_string())
+                    .bind(now)
+                    .bind(session_id)
+                    .execute(pool)
+                    .await?;
+            }
+            Backend::Memory(_) => self
+                .lock_memory()
+                .set_metadata(session_id, &metadata.to_string()),
         }
         Ok(())
     }

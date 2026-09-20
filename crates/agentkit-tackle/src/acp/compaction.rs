@@ -13,7 +13,8 @@
 //! elide them.
 
 use crate::acp::TackleState;
-use crate::scripts::host::{BehaviourHost, SessionAccess, StoreAccess};
+pub use crate::scripts::host::StoreAccess;
+use crate::scripts::host::{BehaviourHost, SessionAccess};
 use crate::scripts::{behaviour_engine, host::register_host_api};
 use crate::store::{SessionId, TurnId, TurnKind};
 use rhai::Dynamic;
@@ -241,7 +242,7 @@ pub async fn run_compaction(
     (estimate_tokens(before), estimate_tokens(after))
 }
 
-struct LoopPendingDispatcher;
+pub struct LoopPendingDispatcher;
 impl crate::scripts::host::PromptDispatcher for LoopPendingDispatcher {
     fn dispatch(
         &self,
@@ -254,7 +255,7 @@ impl crate::scripts::host::PromptDispatcher for LoopPendingDispatcher {
     }
 }
 
-struct LoopPendingCompletions;
+pub struct LoopPendingCompletions;
 impl crate::scripts::host::CompletionSink for LoopPendingCompletions {
     fn publish(&self, _session: &SessionId, _completion: crate::scripts::host::Completion) {}
     fn take(&self, _session: &SessionId) -> Option<crate::scripts::host::Completion> {
