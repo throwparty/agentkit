@@ -288,7 +288,7 @@ Implement the fixed-order pipeline: grant deny records authoritative, then the p
 | Depends On | T-006,T-009,T-005 |
 | References | permission-pipeline,security-posture |
 
-### T-023: Prompt expansion
+### T-023: [x] Prompt expansion
 
 Implement /name expansion with parameter substitution into the conversation for the model; model_invokable prompts exposed as tools whose invocation loads the expanded body; unknown commands and arity mismatches fail with a precise JSON-RPC error carrying the usage string, storing nothing
 
