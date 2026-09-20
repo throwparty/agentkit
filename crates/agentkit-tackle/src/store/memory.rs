@@ -161,6 +161,23 @@ impl MemoryData {
         }
     }
 
+    pub fn set_title(&mut self, id: &SessionId, title: &str) {
+        if let Some(session) = self.sessions.get_mut(id) {
+            session.title = title.to_owned();
+            session.updated_at = super::unix_now();
+        }
+    }
+
+    pub fn get_turn(&self, id: &TurnId) -> Option<Turn> {
+        self.turns.get(id).cloned()
+    }
+
+    /// The parent-chain walk from the head: `(turn id, kind)`, newest
+    /// first — compaction clamping reads the kinds.
+    pub fn session_walk(&self, session_id: &SessionId) -> Vec<(TurnId, TurnKind)> {
+        self.context_walk(session_id)
+    }
+
     /// The parent-chain walk from the head with the compaction truncation
     /// state machine — the Rust mirror of the SQL CTE.
     fn context_walk(&self, session_id: &SessionId) -> Vec<(TurnId, TurnKind)> {
