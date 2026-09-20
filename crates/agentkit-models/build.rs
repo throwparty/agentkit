@@ -1,4 +1,4 @@
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::{
     convert::TryFrom,
     env,
@@ -76,6 +76,22 @@ fn read_checked_in_snapshot(manifest_dir: &Path) -> Result<Value, Box<dyn Error>
 
 fn normalize_snapshot(raw: &str) -> Result<Value, Box<dyn Error>> {
     let value: Value = serde_json::from_str(raw)?;
+
+    // Already-normalized snapshots pass through untouched: the checked-in
+    // snapshot is the ModelSnapshot shape (direct context_window /
+    // max_output per model entry), and re-transforming it as a raw
+    // catalog would wipe the window metadata.
+    let already_normalized = value
+        .get("models")
+        .and_then(|v| v.as_object())
+        .and_then(|models| models.values().next())
+        .and_then(|entry| entry.as_object())
+        .is_some_and(|entry| {
+            entry.contains_key("context_window") || entry.contains_key("max_output")
+        });
+    if already_normalized {
+        return Ok(value);
+    }
 
     // models.dev catalog.json: provider-agnostic model facts plus per-provider
     // serving details and pricing. Transformed into the ModelSnapshot shape.
