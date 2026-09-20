@@ -16,6 +16,7 @@ AgentKit provides a suite of tools for hosting, integrating, sandboxing and oper
 - `lens`: provides `fetch` and `search` tools backed by various search engines.
 - `litterbox`: review _outputs_, not _actions_: give your AI agents litter trays to poop into.
 - `switchboard`: a model provider proxy which forwards requests to upstream providers based on quota and pricing information and model configurations.
+- `tackle`: an agent harness exporting an ACP interface, and only MCP for access to the outside world.
 
 ## Installation
 

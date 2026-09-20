@@ -1,0 +1,79 @@
+---
+sidebar_position: 2
+---
+
+# 🎛️ Configuration
+
+Tackle configuration is sourced from two layers, merged in order:
+
+1. **Built-in registrations** — the built-in scripts (compaction, titling) at the lowest precedence.
+2. **User layer** — `config.toml` in the user config directory (`~/.config/agentkit/tackle` on Linux, `~/Library/Application Support/AgentKit/tackle` on macOS). Overridable with `--config-dir`.
+3. **Project layer** — `.agentkit/tackle/config.toml` in the session's working directory.
+
+The project layer may not set `endpoints` or `credential_helper` — a project trying to change where model traffic goes is rejected outright. Project `mcp_servers` and `scripts` are trust-gated: the first session in a project prompts for consent, keyed on a hash of each entry, so any change re-prompts.
+
+Maps merge per key: a project entry with the same name replaces one wholesale, so a disabling entry needs no file. Scalars merge per field.
+
+## `endpoints`
+
+Named model endpoints; models are addressed as `<endpoint>/<model>` (user layer only):
+
+```toml
+[endpoints.switchboard]
+base_url = "http://localhost:3812/openai/v1"
+wire_format = "openai-chat-completions"
+auth = "none"
+models = []  # optional static fallback when /models discovery fails
+```
+
+- `wire_format` — `openai-chat-completions`, `openai-responses`, or `anthropic-messages`.
+- `auth` — `none` or `helper` (resolve a bearer token via the credential helper).
+
+## `credential_helper` (user layer only)
+
+Name of the credential helper binary. `auth = "helper"` endpoints run `agentkit-credential-<helper> get <endpoint-name>` and read `access_token` from its JSON output.
+
+## `defaults`
+
+```toml
+[defaults]
+model = "switchboard/claude-sonnet-4-5"  # endpoint-qualified
+actor = "builtins/actuator"              # persona/actor override
+```
+
+## `mcp_servers`
+
+Tool providers, namespaced by server name:
+
+```toml
+[mcp_servers.litterbox]
+transport = "stdio"
+command = "litterbox"
+args = ["serve"]
+env = { RUST_LOG = "info" }
+
+[mcp_servers.remote]
+transport = "http"
+url = "https://example.com/mcp"
+```
+
+## `scripts`
+
+Behaviour scripts, registered per event:
+
+```toml
+[scripts.compaction]
+events = ["post_turn", "compaction_requested"]
+file = "builtin:compaction.rhai"  # or a path
+enabled = true                    # set false to disable a built-in
+```
+
+The built-ins are `compaction` (on `post_turn` and `compaction_requested`) and `titling` (on `title_trigger`).
+
+## `turns`
+
+- `max_model_requests` — cap on model requests per turn (safety bound on agent loops).
+
+## `sessions`
+
+- `include_ephemeral` — whether ephemeral sessions appear in listings.

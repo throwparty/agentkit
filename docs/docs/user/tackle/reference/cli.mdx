@@ -1,0 +1,43 @@
+---
+sidebar_position: 1
+---
+
+# 👩‍💻 Command line interface
+
+Tackle is a server launched by ACP clients — all session interaction, including resume, is client-driven over ACP. The CLI only selects the transport and overrides paths.
+
+{/* Generated with `tackle docgen cli`; keep the sections below in sync with the output. */}
+
+## `http`
+
+Serve the streamable HTTP transport
+
+Multiple client connections in one process.
+
+Options:
+
+- `--bind <BIND>` Network interface to bind
+- `--http-port <HTTP_PORT>` Port to listen on
+- `--db-path <DB_PATH>` Override the session database location (defaults to the platform data directory)
+- `--config-dir <CONFIG_DIR>` Override the user configuration directory (defaults to the platform config directory)
+
+## `stdio`
+
+Serve ACP over JSON-RPC on stdin/stdout
+
+One process per client connection.
+
+Options:
+
+- `--db-path <DB_PATH>` Override the session database location (defaults to the platform data directory)
+- `--config-dir <CONFIG_DIR>` Override the user configuration directory (defaults to the platform config directory)
+
+## Paths
+
+- **Session database** — `<data>/tackle/sessions.db` in the platform data directory (`~/.local/share/agentkit/tackle` on Linux, `~/Library/Application Support/AgentKit/tackle` on macOS), created with its leading directories if missing. Override with `--db-path`.
+- **User configuration** — `<config>/tackle/config.toml` in the platform config directory (`~/.config/agentkit/tackle` on Linux), overridable with `--config-dir`.
+- **Project configuration** — `.agentkit/tackle/config.toml` in the session's working directory; not configurable via the CLI.
+
+## Shutdown
+
+The process shuts down on Ctrl-C, or SIGTERM on Unix.
