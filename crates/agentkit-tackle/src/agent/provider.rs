@@ -176,7 +176,16 @@ impl ModelProvider for RigProvider {
                     text.push_str(&delta.text);
                 }
                 Ok(_) => {} // tool calls land with the registry (T-021)
-                Err(err) => return Err(ModelError::Completion(err.to_string())),
+                Err(err) => {
+                    // A failure after deltas flowed: the partial text rides
+                    // the error (retrying would duplicate what the client
+                    // already saw).
+                    return Err(ModelError::StreamFailed {
+                        text_len: text.len(),
+                        text,
+                        error: err.to_string(),
+                    });
+                }
             }
         }
 
@@ -502,6 +511,7 @@ mod tests {
             200_000,
             |input: u64, _output: u64, _cost: f64| usage_updates.push(input),
             |delta: &str| deltas.push(delta.to_owned()),
+            |_attempt: u32, _message: &str| {}, // no retry assertions here
         )
         .await
         .unwrap();
@@ -512,5 +522,211 @@ mod tests {
         let usage = store.session_usage(&session.id).await.unwrap();
         assert_eq!(usage.input_tokens, 9, "the turn's usage delta is persisted");
         assert_eq!(usage.output_tokens, 3);
+    }
+
+    #[tokio::test]
+    async fn retryable_failures_retry_then_succeed() {
+        let server = wiremock::MockServer::start().await;
+        // Attempt 1: a 429 with a retry-after hint; attempt 2: success.
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/chat/completions"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(429)
+                    .set_body_string("429 too many requests; retry-after: 1"),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({
+                    "id": "chatcmpl-r",
+                    "object": "chat.completion",
+                    "created": 0,
+                    "model": "m",
+                    "choices": [{"message": {"role": "assistant", "content": "recovered"}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3}
+                }),
+            ))
+            .mount(&server)
+            .await;
+
+        let config = config_with_endpoint(&server.uri(), Auth::None);
+        let provider = provider_for("test/model", &config).unwrap();
+        let mut retries = Vec::new();
+        let outcome = retry_completion(&provider, "test/model", &mut retries)
+            .await
+            .unwrap();
+        eprintln!(
+            "DEBUG retry: outcome={outcome:?} retries={retries:?} requests={}",
+            server.received_requests().await.unwrap().len()
+        );
+        assert_eq!(outcome.stop, crate::agent::TurnStop::EndTurn);
+        assert_eq!(retries, [1], "one retry card for the failed attempt");
+        assert_eq!(server.received_requests().await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn context_length_failures_translate_without_retrying() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(400)
+                    .set_body_string("prompt is too long: 300000 tokens > 200000 maximum"),
+            )
+            .mount(&server)
+            .await;
+
+        let store = SessionStore::in_memory();
+        let session = store
+            .create_session(
+                crate::store::SessionKind::Interactive,
+                "/work",
+                None,
+                None,
+                "{}",
+            )
+            .await
+            .unwrap();
+        let turn = store
+            .append_turn(
+                &session.id,
+                None,
+                crate::store::TurnKind::Interaction,
+                None,
+                crate::store::TurnUsage::default(),
+            )
+            .await
+            .unwrap();
+
+        let config = config_with_endpoint(&server.uri(), Auth::None);
+        let provider = provider_for("test/model", &config).unwrap();
+        let outcome = crate::agent::turn::run_turn(
+            &provider,
+            &store,
+            &session.id,
+            &turn.id,
+            "msg-x",
+            "test/model",
+            "sys",
+            "the question",
+            Vec::new(),
+            8,
+            200_000,
+            |_: u64, _: u64, _: f64| {},
+            |_: &str| {},
+            |_: u32, _: &str| {},
+        )
+        .await
+        .unwrap();
+
+        // The turn ENDS with an in-band actionable message; one request only.
+        assert_eq!(outcome.stop, crate::agent::TurnStop::EndTurn);
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+        let usage = store.session_usage(&session.id).await.unwrap();
+        let _ = usage;
+    }
+
+    #[tokio::test]
+    async fn mid_stream_failures_persist_partial_output_without_retrying() {
+        let server = wiremock::MockServer::start().await;
+        // One good delta, then a malformed line kills the SSE decode.
+        let sse = r#"data: {"id":"c1","object":"chat.completion.chunk","created":0,"model":"m","choices":[{"index":0,"delta":{"content":"partial tex"}}]}
+
+data: {not json}
+
+"#;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .set_body_raw(sse.bytes().collect::<Vec<u8>>(), "text/event-stream"),
+            )
+            .mount(&server)
+            .await;
+
+        let store = SessionStore::in_memory();
+        let session = store
+            .create_session(
+                crate::store::SessionKind::Interactive,
+                "/work",
+                None,
+                None,
+                "{}",
+            )
+            .await
+            .unwrap();
+        let turn = store
+            .append_turn(
+                &session.id,
+                None,
+                crate::store::TurnKind::Interaction,
+                None,
+                crate::store::TurnUsage::default(),
+            )
+            .await
+            .unwrap();
+
+        let config = config_with_endpoint(&server.uri(), Auth::None);
+        let provider = provider_for("test/model", &config).unwrap();
+        let outcome = crate::agent::turn::run_turn(
+            &provider,
+            &store,
+            &session.id,
+            &turn.id,
+            "msg-partial",
+            "test/model",
+            "sys",
+            "go",
+            Vec::new(),
+            8,
+            200_000,
+            |_: u64, _: u64, _: f64| {},
+            |_: &str| {},
+            |_: u32, _: &str| {},
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(outcome.stop, crate::agent::TurnStop::EndTurn);
+        assert_eq!(
+            server.received_requests().await.unwrap().len(),
+            1,
+            "mid-stream failures never retry"
+        );
+        let assembled = store.assemble_context(&session.id).await.unwrap();
+        let texts: Vec<String> = assembled
+            .iter()
+            .filter(|a| a.message.role == crate::store::Role::Assistant)
+            .map(|a| {
+                let blocks: serde_json::Value = serde_json::from_str(&a.message.content).unwrap();
+                blocks[0]["text"].as_str().unwrap().to_owned()
+            })
+            .collect();
+        assert_eq!(texts, ["partial tex"], "the partial text is persisted");
+    }
+
+    /// Runs one turn, collecting retry cards (the retry seam's shape).
+    async fn retry_completion(
+        provider: &RigProvider,
+        model: &str,
+        retries: &mut Vec<u32>,
+    ) -> Result<crate::agent::TurnOutcome, crate::agent::turn::TurnError> {
+        crate::agent::turn::run_turn(
+            provider,
+            &SessionStore::in_memory(),
+            &"sess-test".to_owned(),
+            &"turn-test".to_owned(),
+            "msg-r",
+            model,
+            "sys",
+            "go",
+            Vec::new(),
+            8,
+            200_000,
+            |_: u64, _: u64, _: f64| {},
+            |_: &str| {},
+            |attempt: u32, _: &str| retries.push(attempt),
+        )
+        .await
     }
 }
