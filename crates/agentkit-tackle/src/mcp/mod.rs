@@ -5,16 +5,31 @@
 //! creation never blocks; the status of every server (connected/failed)
 //! is reported at the first turn. Nothing about which servers exist is
 //! hardcoded.
+//!
+//! Spawn hygiene: stdio servers start with explicit argv (no shell
+//! interpretation) and only the named environment entries — tackle's
+//! own environment is never forwarded. Child stderr is relayed to
+//! tackle's stderr line-prefixed with the server name under a rate
+//! cap; the child's stdout is the MCP protocol channel and is never
+//! touched by the relay.
 
 use crate::config::McpServerConfig;
 use rmcp::model::CallToolRequestParams;
 use rmcp::service::{RoleClient, RunningService};
 use std::collections::BTreeMap;
 use std::time::Duration;
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::process::Command;
 
 /// Tool results are truncated at this size; full content is what the
 /// server sent (the truncation is a context/cost guard).
 pub const TOOL_RESULT_LIMIT: usize = 16 * 1024;
+
+/// Stderr relay rate cap: at most this many lines per relay window.
+pub const STDERR_RELAY_MAX_LINES: usize = 10;
+
+/// The relay window the stderr rate cap applies to.
+pub const STDERR_RELAY_WINDOW: Duration = Duration::from_secs(1);
 
 /// Connection timeout per server: session creation must never block.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -23,6 +38,139 @@ async fn connect_timeout<T>(future: impl std::future::Future<Output = T>) -> Res
     tokio::time::timeout(CONNECT_TIMEOUT, future)
         .await
         .map_err(|_| "connection exceeded the 10s per-server timeout".to_owned())
+}
+
+/// The spawn-hygiene operations, abstracted so construction is
+/// unit-testable against a recording fake.
+pub trait ConfigureCommand {
+    fn set_program(&mut self, program: &str);
+    fn set_args(&mut self, args: &[String]);
+    fn clear_env(&mut self);
+    fn set_env(&mut self, key: &str, value: &str);
+}
+
+impl ConfigureCommand for Command {
+    /// Only `Command::new` can set the program, so this replaces the
+    /// command; `configure_stdio_spawn` calls it before anything else.
+    fn set_program(&mut self, program: &str) {
+        *self = Command::new(program);
+    }
+
+    fn set_args(&mut self, args: &[String]) {
+        self.args(args);
+    }
+
+    fn clear_env(&mut self) {
+        self.env_clear();
+    }
+
+    fn set_env(&mut self, key: &str, value: &str) {
+        self.env(key, value);
+    }
+}
+
+/// Applies spawn hygiene to a stdio server spawn: explicit argv (no
+/// shell interpretation) and only the named environment entries —
+/// no blanket forwarding of tackle's own environment.
+pub fn configure_stdio_spawn(
+    cmd: &mut impl ConfigureCommand,
+    command: &str,
+    args: &[String],
+    env: &BTreeMap<String, String>,
+) {
+    cmd.set_program(command);
+    cmd.set_args(args);
+    cmd.clear_env();
+    for (key, value) in env {
+        cmd.set_env(key, value);
+    }
+}
+
+/// A rate-cap admission decision for one stderr line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Admission {
+    Relay,
+    Drop,
+    /// The relay window rolled over after drops; report the count once.
+    WindowReset {
+        dropped: usize,
+    },
+}
+
+/// The stderr relay rate cap: at most `max_per_window` lines per
+/// `window`, dropping the rest. Time is injected so tests are
+/// deterministic.
+pub struct StderrRateCap {
+    max_per_window: usize,
+    window: Duration,
+    window_start: std::time::Instant,
+    relayed: usize,
+    dropped: usize,
+}
+
+impl StderrRateCap {
+    pub fn new(max_per_window: usize, window: Duration) -> Self {
+        Self {
+            max_per_window,
+            window,
+            window_start: std::time::Instant::now(),
+            relayed: 0,
+            dropped: 0,
+        }
+    }
+
+    pub fn admit(&mut self, now: std::time::Instant) -> Admission {
+        if now.duration_since(self.window_start) >= self.window {
+            let dropped = std::mem::take(&mut self.dropped);
+            self.window_start = now;
+            self.relayed = 0;
+            if dropped > 0 {
+                return Admission::WindowReset { dropped };
+            }
+        }
+        if self.relayed < self.max_per_window {
+            self.relayed += 1;
+            Admission::Relay
+        } else {
+            self.dropped += 1;
+            Admission::Drop
+        }
+    }
+}
+
+/// Relays child stderr to `out` (tackle's stderr in production) with
+/// each line prefixed by the server name under the rate cap. The
+/// child's stdout is never seen here: it is the MCP protocol channel.
+pub async fn relay_stderr<S, W>(
+    server: &str,
+    stderr: S,
+    out: &mut W,
+    cap: &mut StderrRateCap,
+) -> std::io::Result<()>
+where
+    S: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    let mut lines = BufReader::new(stderr).lines();
+    while let Some(line) = lines.next_line().await? {
+        match cap.admit(std::time::Instant::now()) {
+            Admission::Relay => {
+                out.write_all(format!("mcp[{server}] {line}\n").as_bytes())
+                    .await?;
+            }
+            Admission::WindowReset { dropped } => {
+                out.write_all(
+                    format!("mcp[{server}] [rate cap: dropped {dropped} stderr lines]\n")
+                        .as_bytes(),
+                )
+                .await?;
+                out.write_all(format!("mcp[{server}] {line}\n").as_bytes())
+                    .await?;
+            }
+            Admission::Drop => {}
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -85,10 +233,21 @@ impl McpPool {
         let result: Result<RunningService<RoleClient, ()>, String> = async {
             match config {
                 McpServerConfig::Stdio { command, args, env } => {
-                    let mut command = tokio::process::Command::new(command);
-                    command.args(args).envs(env);
-                    let transport = rmcp::transport::TokioChildProcess::new(command)
+                    let mut cmd = Command::new(command);
+                    configure_stdio_spawn(&mut cmd, command, args, env);
+                    let (transport, stderr) = rmcp::transport::TokioChildProcess::builder(cmd)
+                        .stderr(std::process::Stdio::piped())
+                        .spawn()
                         .map_err(|err| err.to_string())?;
+                    if let Some(stderr) = stderr {
+                        let name = name.to_owned();
+                        tokio::spawn(async move {
+                            let mut cap =
+                                StderrRateCap::new(STDERR_RELAY_MAX_LINES, STDERR_RELAY_WINDOW);
+                            let mut out = tokio::io::stderr();
+                            let _ = relay_stderr(&name, stderr, &mut out, &mut cap).await;
+                        });
+                    }
                     match connect_timeout(rmcp::service::serve_client((), transport)).await {
                         Ok(initialised) => initialised.map_err(|err| err.to_string()),
                         Err(reason) => Err(reason),
@@ -194,4 +353,129 @@ pub enum McpPoolError {
     ServerNotConnected(String),
     #[error("tool call failed: {0}")]
     Call(String),
+}
+
+#[cfg(test)]
+mod spawn_hygiene_tests {
+    use super::*;
+
+    /// Records the spawn-hygiene calls in order, including the env
+    /// clear, so argv construction and env filtering are assertable.
+    #[derive(Default)]
+    struct RecordingCommand {
+        program: Option<String>,
+        args: Vec<String>,
+        cleared: bool,
+        env: BTreeMap<String, String>,
+        env_set_after_clear: Vec<(String, String)>,
+    }
+
+    impl ConfigureCommand for RecordingCommand {
+        fn set_program(&mut self, program: &str) {
+            self.program = Some(program.to_owned());
+        }
+
+        fn set_args(&mut self, args: &[String]) {
+            self.args = args.to_vec();
+        }
+
+        fn clear_env(&mut self) {
+            self.cleared = true;
+        }
+
+        fn set_env(&mut self, key: &str, value: &str) {
+            self.env.insert(key.to_owned(), value.to_owned());
+            self.env_set_after_clear
+                .push((key.to_owned(), value.to_owned()));
+        }
+    }
+
+    #[test]
+    fn argv_construction_is_explicit_without_a_shell() {
+        let mut cmd = RecordingCommand::default();
+        configure_stdio_spawn(
+            &mut cmd,
+            "mcp-server-everything",
+            &["--verbose".into()],
+            &BTreeMap::new(),
+        );
+        assert_eq!(cmd.program.as_deref(), Some("mcp-server-everything"));
+        assert_eq!(cmd.args, vec!["--verbose".to_owned()]);
+        // No shell: the program name is the argv[0] verbatim, never a
+        // shell command line.
+        assert!(!cmd.program.as_deref().unwrap_or_default().contains(' '));
+    }
+
+    #[test]
+    fn env_is_cleared_then_only_named_entries_set() {
+        let mut env = BTreeMap::new();
+        env.insert("MCP_TOKEN".to_owned(), "secret".to_owned());
+        env.insert("PATH".to_owned(), "/custom/bin".to_owned());
+
+        let mut cmd = RecordingCommand::default();
+        configure_stdio_spawn(&mut cmd, "server", &[], &env);
+
+        assert!(cmd.cleared, "no blanket environment forwarding");
+        assert_eq!(cmd.env, env);
+        // Entries are set only after the clear, so the parent's env is
+        // never forwarded.
+        assert_eq!(cmd.env_set_after_clear.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn stderr_relay_prefixes_lines_with_the_server_name() {
+        let (mut client, server) = tokio::io::duplex(64);
+        client.write_all(b"hello\nworld\n").await.unwrap();
+        drop(client);
+
+        let mut out = Vec::new();
+        let mut cap = StderrRateCap::new(STDERR_RELAY_MAX_LINES, STDERR_RELAY_WINDOW);
+        relay_stderr("echo", server, &mut out, &mut cap)
+            .await
+            .unwrap();
+
+        let text = String::from_utf8(out).unwrap();
+        assert_eq!(text, "mcp[echo] hello\nmcp[echo] world\n");
+    }
+
+    #[tokio::test]
+    async fn stderr_relay_is_rate_capped_within_a_window() {
+        let (mut client, server) = tokio::io::duplex(512);
+        for i in 0..20 {
+            client
+                .write_all(format!("line {i}\n").as_bytes())
+                .await
+                .unwrap();
+        }
+        drop(client);
+
+        let mut out = Vec::new();
+        // A fresh cap in a young window: at most 5 lines survive.
+        let mut cap = StderrRateCap::new(5, STDERR_RELAY_WINDOW);
+        relay_stderr("echo", server, &mut out, &mut cap)
+            .await
+            .unwrap();
+
+        let text = String::from_utf8(out).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 5, "only the capped number of lines relayed");
+        assert!(lines.iter().all(|line| line.starts_with("mcp[echo] ")));
+    }
+
+    #[test]
+    fn rate_cap_reports_dropped_lines_on_window_reset() {
+        let start = std::time::Instant::now();
+        let mut cap = StderrRateCap::new(2, Duration::from_secs(10));
+
+        assert_eq!(cap.admit(start), Admission::Relay);
+        assert_eq!(cap.admit(start), Admission::Relay);
+        assert_eq!(cap.admit(start), Admission::Drop);
+        assert_eq!(cap.admit(start), Admission::Drop);
+
+        // After the window rolls over the cap lifts and the dropped
+        // count is reported once.
+        let later = start + Duration::from_secs(11);
+        assert_eq!(cap.admit(later), Admission::WindowReset { dropped: 2 });
+        assert_eq!(cap.admit(later), Admission::Relay);
+    }
 }
