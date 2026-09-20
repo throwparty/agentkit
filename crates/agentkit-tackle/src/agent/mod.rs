@@ -2,6 +2,7 @@
 //! the rig-core implementation behind it, so pre-1.0 churn is a
 //! single-module change and tests can substitute doubles.
 
+pub mod nested;
 pub mod provider;
 pub mod retry;
 pub mod turn;
