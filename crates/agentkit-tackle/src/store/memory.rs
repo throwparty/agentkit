@@ -172,6 +172,13 @@ impl MemoryData {
         self.turns.get(id).cloned()
     }
 
+    pub fn set_metadata(&mut self, id: &SessionId, metadata: &str) {
+        if let Some(session) = self.sessions.get_mut(id) {
+            session.metadata = metadata.to_owned();
+            session.updated_at = super::unix_now();
+        }
+    }
+
     /// Deletes one turn (compaction reversibility): messages go with
     /// it; the head retreats to the deleted turn's parent.
     pub fn delete_turn(&mut self, id: &TurnId) {
