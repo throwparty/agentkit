@@ -10,6 +10,7 @@ use crate::config::Loaded;
 use crate::loader::Definitions;
 use crate::store::SessionStore;
 
+pub mod compaction;
 pub mod fork;
 #[cfg(feature = "unstable")]
 use agent_client_protocol::schema::v1::SessionForkCapabilities;
@@ -151,6 +152,7 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
     let state_for_delete = state.clone();
     let state_for_load = state.clone();
     let state_for_fork = state.clone();
+    let negotiation_for_compaction = negotiation.clone();
     // The connection's lease-owner id: turns acquire it for their
     // lifetime; released when the turn responds.
     let owner = Arc::new(format!("stdio-{}", uuid::Uuid::new_v4()));
@@ -396,7 +398,8 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
                     return responder.respond(PromptResponse::new(StopReason::EndTurn));
                 }
 
-                // Resolve the actor + model for this session.
+                // Resolve the actor for this session (compaction's
+                // event payload and the model turn both need it).
                 let session_row = state_for_prompt
                     .db
                     .get_session(&session_id)
@@ -412,6 +415,103 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
                         )
                     })
                     .unwrap_or_else(|| "default".into());
+
+                // Compaction-tagged prompts: intercepted — the
+                // compaction_requested script event fires instead of a
+                // model turn in the main session.
+                if compaction::is_compaction_command(&state_for_prompt.definitions, &first_text) {
+                    let size = {
+                        let model_ref = session_row
+                            .as_ref()
+                            .and_then(|row| {
+                                state_for_prompt
+                                    .definitions
+                                    .actors
+                                    .get(&session_actor(
+                                        row,
+                                        state_for_prompt.config.config.defaults.actor.as_deref(),
+                                    ))
+                                    .and_then(|a| a.frontmatter.model.clone())
+                            })
+                            .or_else(|| state_for_prompt.config.config.defaults.model.clone())
+                            .unwrap_or_else(|| "default/model".into());
+                        context_window(&model_ref).unwrap_or(0)
+                    };
+                    let (before, after) = compaction::run_compaction(
+                        &state_for_prompt,
+                        &session_id,
+                        &turn.id,
+                        &actor_name,
+                        size,
+                    )
+                    .await;
+
+                    // The in-band announcement: trigger and counts.
+                    let note =
+                        compaction::announcement(first_text.trim_start_matches('/'), before, after);
+                    let message = state_for_prompt
+                        .db
+                        .append_message(
+                            &turn.id,
+                            crate::store::Role::Assistant,
+                            &serde_json::json!([{ "type": "text", "text": note.clone() }])
+                                .to_string(),
+                            None,
+                            None,
+                            None,
+                            None,
+                        )
+                        .await
+                        .map_err(|err| Error::internal_error().data(err.to_string()))?;
+                    let chunk =
+                        agent_client_protocol::schema::v1::ContentChunk::new(ContentBlock::Text(
+                            agent_client_protocol::schema::v1::TextContent::new(note.clone()),
+                        ))
+                        .message_id(
+                            agent_client_protocol::schema::v1::MessageId::new(message.id.clone()),
+                        );
+                    let _ = cx.send_notification(SessionNotification::new(
+                        request.session_id.clone(),
+                        agent_client_protocol::schema::v1::SessionUpdate::AgentMessageChunk(chunk),
+                    ));
+
+                    // The visible usage_update drop.
+                    if size > 0 {
+                        let _ = cx.send_notification(SessionNotification::new(
+                            request.session_id.clone(),
+                            SessionUpdate::UsageUpdate(UsageUpdate::new(after, size)),
+                        ));
+                    }
+
+                    // RFD-shaped compaction updates flow only to
+                    // clients advertising the capability.
+                    #[cfg(feature = "unstable")]
+                    if negotiation_for_compaction.supports(UnstableFeature::SessionCompaction) {
+                        let update = agent_client_protocol::schema::v1::CompactionUpdate::new(
+                            agent_client_protocol::schema::v1::CompactionId::new(
+                                uuid::Uuid::new_v4().to_string(),
+                            ),
+                            agent_client_protocol::schema::v1::CompactionStatus::Completed,
+                        )
+                        .summary(vec![
+                            agent_client_protocol::schema::v1::ContentBlock::Text(
+                                agent_client_protocol::schema::v1::TextContent::new(note.clone()),
+                            ),
+                        ]);
+                        let _ = cx.send_notification(SessionNotification::new(
+                            request.session_id.clone(),
+                            SessionUpdate::CompactionUpdate(update),
+                        ));
+                    }
+
+                    state_for_prompt
+                        .db
+                        .release_lease(&session_id, &owner_for_prompt)
+                        .await
+                        .ok();
+                    return responder.respond(PromptResponse::new(StopReason::EndTurn));
+                }
+
                 let actor = state_for_prompt.definitions.actors.get(&actor_name);
                 let persona = actor.and_then(|a| {
                     state_for_prompt
@@ -434,24 +534,8 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
                     .assemble_context(&session_id)
                     .await
                     .map_err(|err| Error::internal_error().data(err.to_string()))?;
-                let prior: Vec<crate::agent::ChatMessage> = assembled
-                    .iter()
-                    .filter(|a| a.message.turn_id != turn.id)
-                    .filter_map(|a| {
-                        let text = prompt_text_of(&a.message.content);
-                        if text.is_empty() {
-                            return None;
-                        }
-                        let role = match a.message.role {
-                            crate::store::Role::User => crate::agent::ChatRole::User,
-                            crate::store::Role::Assistant | crate::store::Role::System => {
-                                crate::agent::ChatRole::Assistant
-                            }
-                            _ => return None,
-                        };
-                        Some(crate::agent::ChatMessage { role, text })
-                    })
-                    .collect();
+                let prior: Vec<crate::agent::ChatMessage> =
+                    compaction::prior_messages(&assembled, &turn.id);
                 let prompt_text = prompt_text_of(&blocks_json);
 
                 let provider = crate::agent::provider::provider_for(
@@ -459,6 +543,23 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
                     &state_for_prompt.config.config,
                 )
                 .map_err(|err| Error::internal_error().data(err.to_string()))?;
+                // The context-length failure note: actionable, naming
+                // the configured compaction script (or its absence).
+                let context_length_note = compaction::compaction_disabled_note(
+                    state_for_prompt
+                        .config
+                        .config
+                        .scripts
+                        .iter()
+                        .find(|(_, script)| {
+                            script.enabled
+                                && script
+                                    .events
+                                    .iter()
+                                    .any(|event| event == "compaction_requested")
+                        })
+                        .map(|(name, _)| name.as_str()),
+                );
                 let assistant_id = uuid::Uuid::new_v4().to_string();
                 let session_for_chunks = request.session_id.clone();
                 let cx_for_chunks = cx.clone();
@@ -482,6 +583,7 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
                         .max_model_requests
                         .unwrap_or(8),
                     size,
+                    &context_length_note,
                     // usage cadence: a usage_update per model request,
                     // skipped when the window is unknown (RFD guidance).
                     {
@@ -747,7 +849,7 @@ fn context_window(model_ref: &str) -> Option<u64> {
 }
 
 /// The text of a stored message: its text blocks joined.
-fn prompt_text_of(content: &str) -> String {
+pub(crate) fn prompt_text_of(content: &str) -> String {
     serde_json::from_str::<Vec<serde_json::Value>>(content)
         .map(|blocks| crate::agent::turn::prompt_text(&blocks))
         .unwrap_or_default()
