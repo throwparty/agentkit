@@ -213,6 +213,7 @@ dependencies = [
  "git2",
  "jiff",
  "petgraph 0.8.3",
+ "reqwest 0.12.28",
  "rig-core",
  "rmcp",
  "schemars 1.2.2",
