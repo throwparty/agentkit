@@ -418,7 +418,7 @@ Emit OTel spans per the switchboard-otel pattern for turns, tool calls, and toke
 | Depends On | T-015,T-018 |
 | References | observability,security-posture |
 
-### T-033: Two-process integration test
+### T-033: [x] Two-process integration test
 
 Integration test with two tackle processes sharing one session database: session/list visibility across processes, lease contention producing precise errors, fork lineage across processes
 
