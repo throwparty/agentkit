@@ -26,7 +26,6 @@ fn spawn_http_agent(dir: &std::path::Path, name: &str) -> HttpAgent {
 
     let child = Command::new(env!("CARGO_BIN_EXE_agentkit-tackle"))
         .args([
-            "--transport",
             "http",
             "--bind",
             "127.0.0.1",

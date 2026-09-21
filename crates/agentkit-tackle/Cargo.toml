@@ -3,6 +3,7 @@ name = "tackle-mcp-echo"
 path = "src/bin/tackle-mcp-echo.rs"
 
 [dependencies]
+agentkit-docgen = {path = "../agentkit-docgen"}
 agentkit-models = {path = "../agentkit-models"}
 agentkit-path = {path = "../agentkit-path"}
 agentkit-script = {path = "../agentkit-script"}
