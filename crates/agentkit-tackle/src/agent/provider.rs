@@ -16,6 +16,10 @@ pub struct RigProvider {
     /// The chat-completions model: the completions client (not the
     /// responses-API default) provides this model type.
     model: openai::completion::GenericCompletionModel,
+    /// The bare wire model name: the authority for the request body. A
+    /// ModelRequest may carry the endpoint-qualified address, which
+    /// never rides the wire.
+    model_name: String,
 }
 
 impl RigProvider {
@@ -33,6 +37,7 @@ impl RigProvider {
             .map_err(|err| ModelError::Completion(err.to_string()))?;
         Ok(Self {
             model: client.completion_model(model),
+            model_name: model.to_owned(),
         })
     }
 
@@ -56,7 +61,7 @@ impl RigProvider {
                     .collect::<Vec<_>>(),
             )
             .preamble(request.system)
-            .model(request.model)
+            .model(self.model_name.clone())
     }
 }
 
@@ -307,7 +312,9 @@ mod tests {
         let provider = provider_for("test/test-model", &config).unwrap();
         let response = provider
             .complete(ModelRequest {
-                model: "test-model".into(),
+                // The endpoint-qualified address, as the loop passes it:
+                // the provider owns the bare wire name.
+                model: "test/test-model".into(),
                 system: "You are testing.".into(),
                 messages: vec![
                     ChatMessage {
@@ -333,7 +340,10 @@ mod tests {
 
         let received = &server.received_requests().await.unwrap()[0];
         let body: serde_json::Value = serde_json::from_slice(&received.body).unwrap();
-        assert_eq!(body["model"], "test-model");
+        assert_eq!(
+            body["model"], "test-model",
+            "the endpoint-qualified address never rides the wire"
+        );
         // The system preamble rides the request (rig owns the wire shape —
         // content blocks for the system role in this version).
         assert!(
@@ -541,6 +551,12 @@ mod tests {
         let usage = store.session_usage(&session.id).await.unwrap();
         assert_eq!(usage.input_tokens, 9, "the turn's usage delta is persisted");
         assert_eq!(usage.output_tokens, 3);
+
+        // The wire model is the provider's bare name; the loop passes the
+        // endpoint-qualified address ("test/model").
+        let received = &server.received_requests().await.unwrap()[0];
+        let body: serde_json::Value = serde_json::from_slice(&received.body).unwrap();
+        assert_eq!(body["model"], "model");
     }
 
     #[tokio::test]
