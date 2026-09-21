@@ -193,6 +193,7 @@ name = "agentkit-tackle"
 version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
+ "agentkit-docgen",
  "agentkit-models",
  "agentkit-path",
  "axum",

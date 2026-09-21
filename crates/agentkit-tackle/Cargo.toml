@@ -6,6 +6,7 @@ publish = false
 license = "Apache-2.0"
 
 [dependencies]
+agentkit-docgen = { path = "../agentkit-docgen" }
 agentkit-models = { path = "../agentkit-models" }
 agentkit-path = { path = "../agentkit-path" }
 agent-client-protocol = "2.2.0"

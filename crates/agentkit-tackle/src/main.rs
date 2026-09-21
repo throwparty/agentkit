@@ -9,21 +9,43 @@ use std::sync::Arc;
 
 fn main() -> ExitCode {
     let args = cli::Cli::parse();
-    let _telemetry = telemetry::init();
 
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .expect("build tokio runtime");
+    match &args.command {
+        cli::Commands::Docgen { kind } => handle_docgen(kind),
+        _ => {
+            let _telemetry = telemetry::init();
 
-    runtime.block_on(run(args))
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("build tokio runtime");
+
+            runtime.block_on(run(args))
+        }
+    }
 }
 
 async fn run(args: cli::Cli) -> ExitCode {
-    tracing::info!(transport = ?args.transport, "tackle starting");
+    let (bind, http_port, db_override, config_override) = match &args.command {
+        cli::Commands::Stdio { db_path, config_dir } => (None, None, db_path.as_ref(), config_dir.as_ref()),
+        cli::Commands::Http {
+            bind,
+            http_port,
+            db_path,
+            config_dir,
+        } => (
+            Some(bind.as_str()),
+            Some(*http_port),
+            db_path.as_ref(),
+            config_dir.as_ref(),
+        ),
+        cli::Commands::Docgen { .. } => unreachable!("handled before the runtime"),
+    };
 
-    let user_config_dir = cli::config_dir(&args);
-    let db_path = cli::db_path(&args);
+    tracing::info!("tackle starting");
+
+    let user_config_dir = cli::config_dir(config_override);
+    let db_path = cli::db_path(db_override);
     let project_config_dir = cli::project_config_dir_at(std::path::Path::new("."));
     tracing::info!(db_path = %db_path.display(), "resolved paths");
 
@@ -79,24 +101,33 @@ async fn run(args: cli::Cli) -> ExitCode {
         definitions,
     });
 
-    match args.transport {
-        cli::Transport::Stdio => match acp::run_stdio(state).await {
+    match bind {
+        None => match acp::run_stdio(state).await {
             Ok(()) => {
                 tracing::info!("shutdown complete");
                 ExitCode::SUCCESS
             }
             Err(err) => fail(err),
         },
-        cli::Transport::Http => {
-            match acp::http::run_http(state.clone(), &args.bind, args.http_port).await {
-                Ok(()) => {
-                    tracing::info!("shutdown complete");
-                    ExitCode::SUCCESS
-                }
-                Err(err) => fail(err),
+        Some(bind) => match acp::http::run_http(state.clone(), bind, http_port.unwrap_or(3811)).await
+        {
+            Ok(()) => {
+                tracing::info!("shutdown complete");
+                ExitCode::SUCCESS
             }
+            Err(err) => fail(err),
+        },
+    }
+}
+
+fn handle_docgen(kind: &cli::DocgenCommand) -> ExitCode {
+    use clap::CommandFactory as _;
+    match kind {
+        cli::DocgenCommand::Cli => {
+            print!("{}", agentkit_docgen::generate_cli_docs(&cli::Cli::command()))
         }
     }
+    ExitCode::SUCCESS
 }
 
 fn fail(err: impl std::fmt::Display) -> ExitCode {
