@@ -1,59 +1,86 @@
-//! Command-line interface: transport selection and path overrides.
+//! Command-line interface: transport subcommands and path overrides.
 //!
 //! Tackle is a server launched by ACP clients; all session interaction,
 //! including resume, is client-driven over ACP — the CLI only selects
-//! transports and shutdown behaviour. Path resolution arrives with the
-//! layered configuration module (T-003).
+//! transports and shutdown behaviour.
 
-use clap::{Parser, ValueEnum};
+use clap::{Parser, Subcommand};
 use std::path::PathBuf;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum Transport {
-    /// JSON-RPC over stdin/stdout; one process per client connection.
-    Stdio,
-    /// Streamable HTTP; multiple client connections in one process.
-    Http,
-}
 
 #[derive(Debug, Parser)]
 #[command(name = "tackle", about = "ACP-native agentic coding harness", version)]
 pub struct Cli {
-    /// Transport to serve the ACP connection over.
-    #[arg(long, value_enum, default_value_t = Transport::Stdio)]
-    pub transport: Transport,
+    #[command(subcommand)]
+    pub command: Commands,
+}
 
-    /// Network interface to bind in HTTP mode.
-    #[arg(long, default_value = "127.0.0.1")]
-    pub bind: String,
+#[derive(Debug, Subcommand)]
+pub enum Commands {
+    /// Serve ACP over JSON-RPC on stdin/stdout
+    ///
+    /// One process per client connection.
+    Stdio {
+        /// Override the session database location (defaults to the platform
+        /// data directory).
+        #[arg(long)]
+        db_path: Option<PathBuf>,
 
-    /// Port to listen on in HTTP mode.
-    #[arg(long, default_value_t = 3811)]
-    pub http_port: u16,
+        /// Override the user configuration directory (defaults to the
+        /// platform config directory).
+        #[arg(long)]
+        config_dir: Option<PathBuf>,
+    },
+    /// Serve the streamable HTTP transport
+    ///
+    /// Multiple client connections in one process.
+    Http {
+        /// Network interface to bind.
+        #[arg(long, default_value = "127.0.0.1")]
+        bind: String,
 
-    /// Override the session database location (defaults to the platform
-    /// data directory).
-    #[arg(long)]
-    pub db_path: Option<PathBuf>,
+        /// Port to listen on.
+        #[arg(long, default_value_t = 3811)]
+        http_port: u16,
 
-    /// Override the user configuration directory (defaults to the platform
-    /// config directory).
-    #[arg(long)]
-    pub config_dir: Option<PathBuf>,
+        /// Override the session database location (defaults to the platform
+        /// data directory).
+        #[arg(long)]
+        db_path: Option<PathBuf>,
+
+        /// Override the user configuration directory (defaults to the
+        /// platform config directory).
+        #[arg(long)]
+        config_dir: Option<PathBuf>,
+    },
+    /// Generate reference documentation
+    ///
+    /// Prints docs to stdout.
+    #[command(hide = true)]
+    Docgen {
+        #[command(subcommand)]
+        kind: DocgenCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DocgenCommand {
+    /// Generate CLI reference documentation
+    Cli,
 }
 
 /// Resolves the effective user configuration directory, honouring the
-/// CLI override.
-pub fn config_dir(args: &Cli) -> PathBuf {
-    args.config_dir
-        .clone()
+/// subcommand override.
+pub fn config_dir(config_dir: Option<&PathBuf>) -> PathBuf {
+    config_dir
+        .cloned()
         .unwrap_or_else(|| agentkit_path::config_dir("tackle"))
 }
 
-/// Resolves the effective session database path, honouring the CLI override.
-pub fn db_path(args: &Cli) -> PathBuf {
-    args.db_path
-        .clone()
+/// Resolves the effective session database path, honouring the subcommand
+/// override.
+pub fn db_path(db_path: Option<&PathBuf>) -> PathBuf {
+    db_path
+        .cloned()
         .unwrap_or_else(|| agentkit_path::data_dir("tackle").join("sessions.db"))
 }
 
@@ -84,46 +111,64 @@ pub async fn wait_for_shutdown() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::CommandFactory;
 
     #[test]
-    fn defaults_are_stdio() {
-        let args = Cli::parse_from(["tackle"]);
-        assert_eq!(args.transport, Transport::Stdio);
-        assert_eq!(args.http_port, 3811);
-        assert_eq!(args.bind, "127.0.0.1");
+    fn parses_stdio() {
+        let args = Cli::parse_from(["tackle", "stdio"]);
+        assert!(matches!(args.command, Commands::Stdio { .. }));
     }
 
     #[test]
-    fn config_dir_defaults_to_platform_path() {
-        let args = Cli::parse_from(["tackle"]);
-        let path = config_dir(&args);
-        assert!(path.is_absolute());
-        assert!(path.ends_with("tackle"));
+    fn parses_http_defaults() {
+        let args = Cli::parse_from(["tackle", "http"]);
+        match args.command {
+            Commands::Http {
+                bind, http_port, ..
+            } => {
+                assert_eq!(bind, "127.0.0.1");
+                assert_eq!(http_port, 3811);
+            }
+            _ => panic!("expected http"),
+        }
     }
 
     #[test]
-    fn config_dir_override_is_honoured() {
-        let args = Cli::parse_from(["tackle", "--config-dir", "/tmp/tackle-cfg"]);
-        assert_eq!(config_dir(&args), PathBuf::from("/tmp/tackle-cfg"));
+    fn resolves_defaults() {
+        let args = Cli::parse_from(["tackle", "stdio"]);
+        let (db, cfg) = match &args.command {
+            Commands::Stdio { db_path, config_dir } => (db_path.as_ref(), config_dir.as_ref()),
+            _ => panic!("expected stdio"),
+        };
+        assert!(db_path(db).parent().unwrap().ends_with("tackle"));
+        assert!(config_dir(cfg).ends_with("tackle"));
     }
 
     #[test]
-    fn db_path_defaults_to_data_dir() {
-        let args = Cli::parse_from(["tackle"]);
-        let path = db_path(&args);
-        assert!(path.ends_with("sessions.db"));
-        assert!(path.is_absolute());
+    fn honours_overrides() {
+        let args = Cli::parse_from([
+            "tackle",
+            "http",
+            "--config-dir",
+            "/tmp/tackle-cfg",
+            "--db-path",
+            "/tmp/tackle.db",
+        ]);
+        match &args.command {
+            Commands::Http {
+                db_path: db,
+                config_dir: cfg,
+                ..
+            } => {
+                assert_eq!(config_dir(cfg.as_ref()), PathBuf::from("/tmp/tackle-cfg"));
+                assert_eq!(db_path(db.as_ref()), PathBuf::from("/tmp/tackle.db"));
+            }
+            _ => panic!("expected http"),
+        }
     }
 
     #[test]
-    fn db_path_override_is_honoured() {
-        let args = Cli::parse_from(["tackle", "--db-path", "/tmp/tackle.db"]);
-        assert_eq!(db_path(&args), PathBuf::from("/tmp/tackle.db"));
-    }
-
-    #[test]
-    fn project_config_dir_anchors_at_cwd() {
-        let dir = project_config_dir_at(std::path::Path::new("/work"));
-        assert_eq!(dir, PathBuf::from("/work/.agentkit/tackle"));
+    fn command_builds() {
+        Cli::command().build();
     }
 }

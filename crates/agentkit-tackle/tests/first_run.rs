@@ -15,6 +15,7 @@ use agentkit_tackle::store::{SessionStore, TurnKind};
 fn spawn_agent(dir: &std::path::Path) -> AcpAgent {
     AcpAgent::from_args([
         env!("CARGO_BIN_EXE_agentkit-tackle"),
+        "stdio",
         "--config-dir",
         dir.join("cfg").to_str().unwrap(),
         "--db-path",
@@ -175,6 +176,7 @@ fn configuration_errors_name_the_file_and_key() {
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_agentkit-tackle"))
         .current_dir(dir.path())
         .args([
+            "stdio",
             "--config-dir",
             dir.path().join("cfg").to_str().unwrap(),
             "--db-path",

@@ -15,6 +15,7 @@ use std::sync::{Arc as StdArc, Mutex as StdMutex};
 fn spawn_agent(dir: &std::path::Path) -> AcpAgent {
     AcpAgent::from_args([
         env!("CARGO_BIN_EXE_agentkit-tackle"),
+        "stdio",
         "--config-dir",
         dir.join("cfg").to_str().unwrap(),
         "--db-path",
@@ -38,6 +39,7 @@ fn spawn_agent_with_config(dir: &std::path::Path) -> AcpAgent {
     .unwrap();
     AcpAgent::from_args([
         env!("CARGO_BIN_EXE_agentkit-tackle"),
+        "stdio",
         "--config-dir",
         cfg.to_str().unwrap(),
         "--db-path",

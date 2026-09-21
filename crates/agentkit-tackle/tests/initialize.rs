@@ -19,6 +19,7 @@ type Seen = StdArc<StdMutex<Vec<(String, Option<String>, String)>>>;
 fn spawn_agent(dir: &std::path::Path) -> AcpAgent {
     AcpAgent::from_args([
         env!("CARGO_BIN_EXE_agentkit-tackle"),
+        "stdio",
         "--config-dir",
         dir.join("cfg").to_str().unwrap(),
         "--db-path",
