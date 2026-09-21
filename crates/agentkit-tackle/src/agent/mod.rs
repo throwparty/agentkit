@@ -105,8 +105,9 @@ pub(crate) fn ignore_tool_call(
     })
 }
 
-/// A completion request against a configured endpoint: the model name is
-/// bare (endpoint-qualified names resolve at construction).
+/// A completion request against a configured endpoint: `model` is the
+/// endpoint-qualified address; the provider owns the bare wire name,
+/// resolved at its construction — the request never overrides it.
 #[derive(Debug, Clone)]
 pub struct ModelRequest {
     pub model: String,
