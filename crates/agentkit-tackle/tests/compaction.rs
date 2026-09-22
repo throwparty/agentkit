@@ -85,7 +85,6 @@ async fn compaction_intercepts_announces_and_records() {
                     SessionUpdate::UsageUpdate(usage) => {
                         usage_handler.lock().unwrap().push(usage.used);
                     }
-                    #[cfg(feature = "unstable")]
                     SessionUpdate::CompactionUpdate(update) => {
                         compaction_handler.lock().unwrap().push(format!("{:?}", update.status));
                     }

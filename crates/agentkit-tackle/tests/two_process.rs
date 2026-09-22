@@ -2,7 +2,6 @@
 //! one session database — cross-process session/list visibility, lease
 //! contention with precise errors, and fork lineage across processes.
 
-#[cfg(feature = "unstable")]
 use agentkit_tackle::agent_client_protocol::schema::v1::ForkSessionRequest;
 use agentkit_tackle::agent_client_protocol::schema::v1::{
     InitializeRequest, ListSessionsRequest, NewSessionRequest, PromptRequest, TextContent,
@@ -189,7 +188,6 @@ async fn lease_contention_fails_precisely() {
     assert!(data.contains("session-actively-owned"), "{data}");
 }
 
-#[cfg(feature = "unstable")]
 #[tokio::test(flavor = "multi_thread")]
 async fn fork_lineage_spans_processes() {
     let dir = tempfile::tempdir().unwrap();
