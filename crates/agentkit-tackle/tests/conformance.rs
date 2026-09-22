@@ -1,7 +1,6 @@
 //! Golden-transcript conformance harness: replay recorded client→agent
 //! JSON-RPC transcripts against the tackle binary and subset-match the
-//! responses. Runs under every build configuration (CI: default features
-//! = unstable; `--no-default-features` = stable-only).
+//! responses.
 
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
