@@ -1,5 +1,5 @@
 use agentkit_switchboard::auth;
-use agentkit_switchboard::cli::{AuthCommands, Cli, Commands, DocgenCommand};
+use agentkit_switchboard::cli::{config_path, AuthCommands, Cli, Commands, DocgenCommand};
 use agentkit_switchboard::config;
 use clap::{CommandFactory, Parser};
 
@@ -9,7 +9,7 @@ async fn main() -> std::process::ExitCode {
 
     let _telemetry = agentkit_switchboard::otel::init_telemetry(&cli.log_level);
 
-    match config::loader::load_config(&cli.config) {
+    match config::loader::load_config(&config_path(cli.config.as_ref())) {
         Ok(mut cfg) => {
             if let Some(path) = cli.session_db.clone() {
                 cfg.session_db_path = Some(path);

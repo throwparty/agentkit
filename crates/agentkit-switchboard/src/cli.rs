@@ -8,8 +8,10 @@ use std::path::PathBuf;
     about = "Cost-aware model provider proxy"
 )]
 pub struct Cli {
-    #[arg(long, required = true)]
-    pub config: PathBuf,
+    /// Path to the TOML configuration file (defaults to the platform config
+    /// directory)
+    #[arg(long)]
+    pub config: Option<PathBuf>,
 
     #[arg(long, default_value = "127.0.0.1")]
     pub bind: String,
@@ -31,6 +33,14 @@ pub struct Cli {
 
     #[command(subcommand)]
     pub command: Option<Commands>,
+}
+
+/// Resolves the effective configuration file path, honouring the CLI
+/// override.
+pub fn config_path(config: Option<&PathBuf>) -> PathBuf {
+    config
+        .cloned()
+        .unwrap_or_else(|| agentkit_path::config_dir("switchboard").join("config.toml"))
 }
 
 #[derive(Subcommand)]
