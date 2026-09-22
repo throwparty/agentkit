@@ -35,15 +35,9 @@ flowchart LR
 - `telemetry` — OpenTelemetry spans with type-level redaction.
 - `config_loader` / `config` — project configuration parsing and merging.
 
-## Feature flags
-
-- `unstable` (default) — enables features not yet covered by the ACP conformance suite, such as session notices and the HTTP transport.
-
 ## Development
 
 ```bash
 cargo test -p agentkit-tackle
 cargo clippy -p agentkit-tackle --all-targets -- -D warnings
 ```
-
-The stable-only build (no default features) is also part of the test gate.
