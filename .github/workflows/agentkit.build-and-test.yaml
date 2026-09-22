@@ -47,9 +47,6 @@ jobs:
       - name: Test
         if: "!cancelled()"
         run: cargo test --locked
-      - name: Test tackle stable-only conformance
-        if: "!cancelled()"
-        run: cargo test --locked -p agentkit-tackle --no-default-features
       - name: Run audit
         if: "!cancelled()"
         run: cargo deny check

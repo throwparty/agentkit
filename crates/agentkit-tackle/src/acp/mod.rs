@@ -16,15 +16,13 @@ pub mod first_run;
 pub mod fork;
 pub mod http;
 pub mod titling;
-#[cfg(feature = "unstable")]
-use agent_client_protocol::schema::v1::SessionForkCapabilities;
 use agent_client_protocol::schema::v1::{
     AgentCapabilities, CloseSessionResponse, DeleteSessionResponse, InitializeRequest,
     InitializeResponse, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
     McpCapabilities, NewSessionRequest, NewSessionResponse, PromptCapabilities,
     ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities, SessionCloseCapabilities,
-    SessionDeleteCapabilities, SessionId, SessionInfo, SessionListCapabilities,
-    SessionNotification, SessionResumeCapabilities, SessionUpdate,
+    SessionDeleteCapabilities, SessionForkCapabilities, SessionId, SessionInfo,
+    SessionListCapabilities, SessionNotification, SessionResumeCapabilities, SessionUpdate,
 };
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{Agent, Error, Stdio};
@@ -104,7 +102,6 @@ impl TackleState {
     fn capabilities(&self) -> AgentCapabilities {
         let mut unstable: agent_client_protocol::schema::v1::Meta =
             agent_client_protocol::schema::v1::Meta::new();
-        #[cfg(feature = "unstable")]
         for feature in [
             UnstableFeature::Fork,
             UnstableFeature::SessionCompaction,
@@ -116,16 +113,14 @@ impl TackleState {
             .load_session(true)
             .prompt_capabilities(PromptCapabilities::new().image(true).audio(false))
             .mcp_capabilities(McpCapabilities::new().http(true).sse(false))
-            .session_capabilities({
-                let capabilities = SessionCapabilities::new()
+            .session_capabilities(
+                SessionCapabilities::new()
                     .list(Some(SessionListCapabilities::default()))
                     .close(Some(SessionCloseCapabilities::default()))
                     .resume(Some(SessionResumeCapabilities::default()))
-                    .delete(Some(SessionDeleteCapabilities::default()));
-                #[cfg(feature = "unstable")]
-                let capabilities = capabilities.fork(Some(SessionForkCapabilities::default()));
-                capabilities
-            })
+                    .delete(Some(SessionDeleteCapabilities::default()))
+                    .fork(Some(SessionForkCapabilities::default())),
+            )
             .meta(unstable)
     }
 }
@@ -278,7 +273,6 @@ where
                 // The selectors ride the response; degraded discovery
                 // surfaces as notices.
                 let selectors = config_options::build(&state_for_new, &session).await;
-                #[cfg(feature = "unstable")]
                 for notice in &selectors.notices {
                     if negotiation_for_new.supports(UnstableFeature::SessionNotices) {
                         let _ = cx.send_notification(SessionNotification::new(
@@ -600,7 +594,6 @@ where
 
                     // RFD-shaped compaction updates flow only to
                     // clients advertising the capability.
-                    #[cfg(feature = "unstable")]
                     if negotiation_for_compaction.supports(UnstableFeature::SessionCompaction) {
                         let update = agent_client_protocol::schema::v1::CompactionUpdate::new(
                             agent_client_protocol::schema::v1::CompactionId::new(
@@ -897,12 +890,10 @@ where
                                         std::sync::Arc::new(compaction::LoopPendingCompletions),
                                         0,
                                     ));
-                                #[cfg(feature = "unstable")]
                                 let mut updates: Vec<agent_client_protocol::schema::v1::Notice> =
                                     Vec::new();
                                 let mut notify =
                                     |update: config_options::SessionUpdateForOptions| {
-                                        #[cfg(feature = "unstable")]
                                         match update {
                                             config_options::SessionUpdateForOptions::Notice(
                                                 notice,
@@ -910,8 +901,6 @@ where
                                                 updates.push(notice);
                                             }
                                         }
-                                        #[cfg(not(feature = "unstable"))]
-                                        drop(update);
                                     };
                                 let result = config_options::apply_model_switch(
                                     &state_for_config,
@@ -921,7 +910,6 @@ where
                                     &mut notify,
                                 )
                                 .await;
-                                #[cfg(feature = "unstable")]
                                 for notice in updates {
                                     if negotiation_for_config.supports(UnstableFeature::SessionNotices) {
                                         let _ = cx.send_notification(SessionNotification::new(
@@ -978,7 +966,6 @@ where
 
     // The RFD path for forking: session/fork, served to clients that
     // call it; the fork capability advertisement is itself gated.
-    #[cfg(feature = "unstable")]
     let builder = {
         builder.on_receive_request(
             async move |request: agent_client_protocol::schema::v1::ForkSessionRequest,
