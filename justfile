@@ -1,5 +1,6 @@
 mod docs "docs"
 mod nix "nix"
+mod switchboard "crates/agentkit-switchboard"
 mod workflows ".github/workflows"
 
 set shell := ["bash", "-eux", "-o", "pipefail", "-c"]
