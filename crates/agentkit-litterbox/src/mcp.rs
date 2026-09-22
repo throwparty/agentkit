@@ -3,7 +3,7 @@ use rmcp::{
     ErrorData as McpError, ServerHandler, ServiceExt,
     handler::server::tool::ToolRouter,
     handler::server::wrapper::Parameters,
-    model::{CallToolResult, ContentBlock, ServerCapabilities, ServerInfo},
+    model::{CallToolResult, ContentBlock, ServerCapabilities, ServerConfig},
     tool, tool_handler, tool_router,
     transport::stdio,
 };
@@ -325,8 +325,8 @@ impl SandboxServer {
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for SandboxServer {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_instructions("Litterbox sandbox management")
     }
 }
