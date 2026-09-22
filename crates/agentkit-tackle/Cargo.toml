@@ -9,7 +9,11 @@ license = "Apache-2.0"
 agentkit-docgen = { path = "../agentkit-docgen" }
 agentkit-models = { path = "../agentkit-models" }
 agentkit-path = { path = "../agentkit-path" }
-agent-client-protocol = "2.2.0"
+agent-client-protocol = { version = "2.2.0", features = [
+  "unstable_session_fork",
+  "unstable_session_compaction",
+  "unstable_session_notices",
+] }
 clap = { version = "4", features = ["derive"] }
 daggy = "0.8"
 futures = "0.3"
@@ -53,15 +57,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4"] }
 wiremock = "0.6.5"
 yaml_serde = "0.10"
-
-[features]
-default = ["unstable"]
-# Unstable ACP features: compiled out for the stable-only conformance build.
-unstable = [
-  "agent-client-protocol/unstable_session_fork",
-  "agent-client-protocol/unstable_session_compaction",
-  "agent-client-protocol/unstable_session_notices",
-]
 
 [dev-dependencies]
 tempfile = "3"
