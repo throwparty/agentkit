@@ -548,31 +548,13 @@ where
                 // compaction_requested script event fires instead of a
                 // model turn in the main session.
                 if compaction::is_compaction_command(&state_for_prompt.definitions, &first_text) {
-                    let size = {
-                        let model_ref = session_row
-                            .as_ref()
-                            .and_then(crate::store::session_model_free)
-                            .or_else(|| {
-                                session_row.as_ref().and_then(|row| {
-                                    state_for_prompt
-                                        .definitions
-                                        .actors
-                                        .get(&session_actor(
-                                            row,
-                                            state_for_prompt
-                                                .config
-                                                .config
-                                                .defaults
-                                                .actor
-                                                .as_deref(),
-                                        ))
-                                        .and_then(|a| a.frontmatter.model.clone())
-                                })
-                            })
-                            .or_else(|| state_for_prompt.config.config.defaults.model.clone())
-                            .unwrap_or_else(|| "default/model".into());
-                        context_window(&model_ref).unwrap_or(0)
-                    };
+                    let size = session_row
+                        .as_ref()
+                        .and_then(|row| {
+                            config_options::resolve_model_for(&state_for_prompt, row, None)
+                        })
+                        .and_then(|model_ref| context_window(&model_ref))
+                        .unwrap_or(0);
                     let (before, after) = compaction::run_compaction(
                         &state_for_prompt,
                         &session_id,
@@ -672,14 +654,29 @@ where
                         .get(&a.frontmatter.persona)
                 });
                 let system = persona.map(|p| p.body.clone()).unwrap_or_default();
-                // The model: the config-option switch (metadata) wins,
-                // then the actor's override, then [defaults].model.
-                let model_ref = session_row
-                    .as_ref()
-                    .and_then(crate::store::session_model_free)
-                    .or_else(|| actor.and_then(|a| a.frontmatter.model.clone()))
-                    .or_else(|| state_for_prompt.config.config.defaults.model.clone())
-                    .unwrap_or_else(|| "default/model".into());
+                // The model: the shared resolution chain — metadata,
+                // actor frontmatter, [defaults].model, then the first
+                // listed selector option. Nothing left is a clear
+                // configuration error, never a `default/model` sentinel.
+                let session_for_model = session_row.as_ref().ok_or_else(|| {
+                    Error::internal_error().data("no such session".to_owned())
+                })?;
+                let model_ref = {
+                    if let Some(model_ref) =
+                        config_options::resolve_model_for(&state_for_prompt, session_for_model, None)
+                    {
+                        model_ref
+                    } else {
+                        let listed =
+                            config_options::build(&state_for_prompt, session_for_model).await;
+                        listed.first_model.ok_or_else(|| {
+                            Error::internal_error().data(
+                                "no model configured; set [defaults].model or select a model"
+                                    .to_owned(),
+                            )
+                        })?
+                    }
+                };
                 let size = context_window(&model_ref).unwrap_or(0);
 
                 // Assemble the prior context (the prompt turn included —
@@ -1141,7 +1138,7 @@ fn notification(session_id: &SessionId, update: SessionUpdate) -> SessionNotific
 
 /// The session's selected actor: created in session metadata, falling
 /// back to `[defaults].actor`, then the built-in "default".
-fn session_actor(session: &crate::store::Session, fallback: Option<&str>) -> String {
+pub(crate) fn session_actor(session: &crate::store::Session, fallback: Option<&str>) -> String {
     serde_json::from_str::<serde_json::Value>(&session.metadata)
         .ok()
         .and_then(|meta| meta.get("actor")?.as_str().map(str::to_owned))
