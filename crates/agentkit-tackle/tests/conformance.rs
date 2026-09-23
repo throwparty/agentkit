@@ -17,6 +17,7 @@ struct Agent {
 impl Agent {
     fn spawn(dir: &std::path::Path) -> Self {
         let mut child = Command::new(env!("CARGO_BIN_EXE_agentkit-tackle"))
+            .arg("stdio")
             .arg("--config-dir")
             .arg(dir.join("cfg"))
             .arg("--db-path")

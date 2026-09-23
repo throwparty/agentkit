@@ -38,6 +38,7 @@ fn spawn_agent_with_compaction_script(dir: &std::path::Path) -> AcpAgent {
     .unwrap();
     AcpAgent::from_args([
         env!("CARGO_BIN_EXE_agentkit-tackle"),
+        "stdio",
         "--config-dir",
         cfg.to_str().unwrap(),
         "--db-path",
