@@ -43,6 +43,7 @@ async fn selectors_populate_with_discovery_and_fallback() {
     .unwrap();
     let agent = AcpAgent::from_args([
         env!("CARGO_BIN_EXE_agentkit-tackle"),
+        "stdio",
         "--config-dir",
         cfg.to_str().unwrap(),
         "--db-path",
@@ -106,6 +107,7 @@ async fn model_switch_is_effective_the_following_turn() {
     .unwrap();
     let agent = AcpAgent::from_args([
         env!("CARGO_BIN_EXE_agentkit-tackle"),
+        "stdio",
         "--config-dir",
         cfg.to_str().unwrap(),
         "--db-path",

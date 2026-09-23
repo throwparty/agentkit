@@ -5,7 +5,7 @@
 
 use agentkit_tackle::agent_client_protocol::schema::v1::{
     InitializeRequest, ListSessionsRequest, LoadSessionRequest, NewSessionRequest,
-    SessionCapabilities,
+    SessionCapabilities, SessionNotification, SessionUpdate,
 };
 use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
@@ -19,6 +19,7 @@ type Seen = StdArc<StdMutex<Vec<(String, Option<String>, String)>>>;
 fn spawn_agent(dir: &std::path::Path) -> AcpAgent {
     AcpAgent::from_args([
         env!("CARGO_BIN_EXE_agentkit-tackle"),
+        "stdio",
         "--config-dir",
         dir.join("cfg").to_str().unwrap(),
         "--db-path",
@@ -200,4 +201,81 @@ async fn session_load_replays_history_with_stable_ids() {
         })
         .await
         .expect("session/load on an empty session");
+}
+
+/// Command names from each `available_commands_update`, in arrival order.
+type CommandsSeen = StdArc<StdMutex<Vec<Vec<String>>>>;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn available_commands_are_advertised_after_session_new_and_load() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = spawn_agent(dir.path());
+
+    let seen: CommandsSeen = StdArc::default();
+    let seen_handler = seen.clone();
+
+    Client
+        .builder()
+        .on_receive_notification(
+            async move |notification: SessionNotification, _cx| {
+                if let SessionUpdate::AvailableCommandsUpdate(update) = &notification.update {
+                    seen_handler.lock().unwrap().push(
+                        update
+                            .available_commands
+                            .iter()
+                            .map(|command| command.name.clone())
+                            .collect(),
+                    );
+                }
+                Ok(())
+            },
+            agentkit_tackle::agent_client_protocol::on_receive_notification!(),
+        )
+        .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
+            connection
+                .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            let created = connection
+                .send_request(NewSessionRequest::new(std::path::PathBuf::from("/work")))
+                .block_task()
+                .await?;
+
+            // The advertisement follows the session/new response on the
+            // wire; the dispatch loop runs notification handlers inline,
+            // so this round-trip orders behind it.
+            connection
+                .send_request(ListSessionsRequest::new())
+                .block_task()
+                .await?;
+            {
+                let seen = seen.lock().unwrap();
+                assert_eq!(seen.len(), 1, "one advertisement after session/new");
+                // The `!` prefix leads, then the built-in prompts (the
+                // fixture has no user-layer definitions).
+                assert_eq!(seen[0][0], "!", "{:?}", seen[0]);
+                assert!(seen[0].iter().any(|name| name == "compact"), "{:?}", seen[0]);
+                assert!(seen[0].iter().any(|name| name == "fork"), "{:?}", seen[0]);
+            }
+
+            connection
+                .send_request(LoadSessionRequest::new(
+                    created.session_id.clone(),
+                    std::path::PathBuf::from("/work"),
+                ))
+                .block_task()
+                .await?;
+            connection
+                .send_request(ListSessionsRequest::new())
+                .block_task()
+                .await?;
+            {
+                let seen = seen.lock().unwrap();
+                assert_eq!(seen.len(), 2, "re-advertised after session/load");
+                assert_eq!(seen[1], seen[0], "the load advertisement matches");
+            }
+            Ok(())
+        })
+        .await
+        .expect("available commands advertisement");
 }

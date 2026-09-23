@@ -13,6 +13,7 @@ use agentkit_tackle::store::SessionStore;
 fn spawn_agent(dir: &std::path::Path, name: &str) -> AcpAgent {
     AcpAgent::from_args([
         env!("CARGO_BIN_EXE_agentkit-tackle"),
+        "stdio",
         "--config-dir",
         dir.join(name).to_str().unwrap(),
         "--db-path",
@@ -39,6 +40,7 @@ fn spawn_agent_with_slow_compaction(dir: &std::path::Path, name: &str) -> AcpAge
     .unwrap();
     AcpAgent::from_args([
         env!("CARGO_BIN_EXE_agentkit-tackle"),
+        "stdio",
         "--config-dir",
         cfg.to_str().unwrap(),
         "--db-path",

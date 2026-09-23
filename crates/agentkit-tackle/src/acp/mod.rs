@@ -17,12 +17,13 @@ pub mod fork;
 pub mod http;
 pub mod titling;
 use agent_client_protocol::schema::v1::{
-    AgentCapabilities, CloseSessionResponse, DeleteSessionResponse, InitializeRequest,
-    InitializeResponse, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
-    McpCapabilities, NewSessionRequest, NewSessionResponse, PromptCapabilities,
-    ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities, SessionCloseCapabilities,
-    SessionDeleteCapabilities, SessionForkCapabilities, SessionId, SessionInfo,
-    SessionListCapabilities, SessionNotification, SessionResumeCapabilities, SessionUpdate,
+    AgentCapabilities, AvailableCommandsUpdate, CloseSessionResponse, DeleteSessionResponse,
+    InitializeRequest, InitializeResponse, ListSessionsResponse, LoadSessionRequest,
+    LoadSessionResponse, McpCapabilities, NewSessionRequest, NewSessionResponse,
+    PromptCapabilities, ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities,
+    SessionCloseCapabilities, SessionDeleteCapabilities, SessionForkCapabilities, SessionId,
+    SessionInfo, SessionListCapabilities, SessionNotification, SessionResumeCapabilities,
+    SessionUpdate,
 };
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{Agent, Error, Stdio};
@@ -129,6 +130,27 @@ impl TackleState {
 /// boundary).
 fn wire_session_id(id: &crate::store::SessionId) -> SessionId {
     SessionId::new(format!("sess_{id}"))
+}
+
+/// The `available_commands_update` payload for a session: the registry
+/// view over the loaded definitions — the `!` prefix command plus every
+/// user-invokable prompt, with parameter hints from frontmatter. The
+/// registry carries no MCP tools here; individual tools are never
+/// advertised as commands (only reached through `/!`).
+fn available_commands_update(state: &TackleState) -> SessionUpdate {
+    let registry = match crate::invokables::Registry::build(&state.definitions, &[]) {
+        Ok(registry) => registry,
+        Err(err) => {
+            // Namespaced keys over BTreeMap definitions cannot collide;
+            // degrade to the bare registry rather than failing the
+            // session lifecycle on a configuration error.
+            tracing::warn!("registry build failed for available_commands_update: {err}");
+            crate::invokables::Registry::default()
+        }
+    };
+    SessionUpdate::AvailableCommandsUpdate(AvailableCommandsUpdate::new(
+        registry.available_commands(),
+    ))
 }
 
 /// Strips the wire prefix back to the bare store id.
@@ -281,10 +303,15 @@ where
                         ));
                     }
                 }
-                responder.respond(
-                    NewSessionResponse::new(wire_session_id(&session.id))
-                        .config_options(selectors.options),
-                )
+                let wire_id = wire_session_id(&session.id);
+                let commands = available_commands_update(&state_for_new);
+                let response =
+                    NewSessionResponse::new(wire_id.clone()).config_options(selectors.options);
+                // Zed drops session updates that arrive before the
+                // session/new response registers the session
+                // (zed-industries/zed#60199) — advertise after.
+                responder.respond(response)?;
+                cx.send_notification(SessionNotification::new(wire_id, commands))
             },
             agent_client_protocol::on_receive_request!(),
         )
@@ -851,7 +878,16 @@ where
                     cx.send_notification(replay)
                         .map_err(|err| Error::internal_error().data(err.to_string()))?;
                 }
-                responder.respond(LoadSessionResponse::new())
+                // Re-advertise on load: older Zed builds rebuild the
+                // thread UI from retained state and treat commands as
+                // transient (zed-industries/zed#53209), and the
+                // pre-response window drops updates outright.
+                let commands = available_commands_update(&state_for_load);
+                responder.respond(LoadSessionResponse::new())?;
+                cx.send_notification(SessionNotification::new(
+                    request.session_id.clone(),
+                    commands,
+                ))
             },
             agent_client_protocol::on_receive_request!(),
         )
