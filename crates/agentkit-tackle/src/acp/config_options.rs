@@ -89,6 +89,50 @@ async fn discover_models(
 pub struct Selectors {
     pub options: Vec<SessionConfigOption>,
     pub notices: Vec<Notice>,
+    /// The first listed model option (endpoint-qualified), when the
+    /// selector was built — the unset default in the resolution chain.
+    pub first_model: Option<String>,
+}
+
+/// The pure resolution chain: session metadata (the config-option
+/// switch), then the actor's frontmatter override, then
+/// `[defaults].model`, then the first listed selector option. Display
+/// and prompt resolution share this so they never disagree.
+pub fn resolve_model(
+    session_model: Option<&str>,
+    actor_model: Option<&str>,
+    defaults_model: Option<&str>,
+    first_listed: Option<&str>,
+) -> Option<String> {
+    session_model
+        .map(str::to_owned)
+        .or_else(|| actor_model.map(str::to_owned))
+        .or_else(|| defaults_model.map(str::to_owned))
+        .or_else(|| first_listed.map(str::to_owned))
+}
+
+/// The effective model for a session against the loaded state: the
+/// shared chain, with `first_listed` the selector's unset default when
+/// the listed options are known.
+pub fn resolve_model_for(
+    state: &TackleState,
+    session: &Session,
+    first_listed: Option<&str>,
+) -> Option<String> {
+    let session_model = crate::store::session_model_free(session);
+    let actor_name =
+        crate::acp::session_actor(session, state.config.config.defaults.actor.as_deref());
+    let actor_model = state
+        .definitions
+        .actors
+        .get(&actor_name)
+        .and_then(|actor| actor.frontmatter.model.clone());
+    resolve_model(
+        session_model.as_deref(),
+        actor_model.as_deref(),
+        state.config.config.defaults.model.as_deref(),
+        first_listed,
+    )
 }
 
 /// Builds the config options for a session: the model selector
@@ -143,20 +187,21 @@ pub async fn build(state: &TackleState, session: &Session) -> Selectors {
             ));
         }
     }
+    let first_model = model_options
+        .first()
+        .map(|option| option.value.0.to_string());
     if !model_options.is_empty() {
-        let current = crate::store::session_model_free(session);
+        // The effective model when unset: the shared resolution chain,
+        // ending at the first listed option — never a silent mismatch
+        // with what the prompt will actually run.
+        let current = resolve_model_for(state, session, first_model.as_deref())
+            .map(SessionConfigValueId::new)
+            .unwrap_or_else(|| model_options[0].value.clone());
         options.push(
             SessionConfigOption::new(
                 SessionConfigId::new(MODEL_SELECTOR_ID),
                 "Model".to_owned(),
-                SessionConfigKind::Select(SessionConfigSelect::new(
-                    // The switch's default when unset: the first
-                    // listed model.
-                    current
-                        .map(SessionConfigValueId::new)
-                        .unwrap_or_else(|| model_options[0].value.clone()),
-                    model_options,
-                )),
+                SessionConfigKind::Select(SessionConfigSelect::new(current, model_options)),
             )
             .category(SessionConfigOptionCategory::Model),
         );
@@ -191,6 +236,7 @@ pub async fn build(state: &TackleState, session: &Session) -> Selectors {
     Selectors {
         options,
         notices,
+        first_model,
     }
 }
 
@@ -270,4 +316,38 @@ pub async fn apply_actor_switch(
         .await
         .map_err(|err| err.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_model;
+
+    #[test]
+    fn resolution_chain_prefers_session_then_actor_then_defaults_then_first() {
+        assert_eq!(
+            resolve_model(Some("s/m"), Some("a/m"), Some("d/m"), Some("f/m")).as_deref(),
+            Some("s/m"),
+            "session metadata wins"
+        );
+        assert_eq!(
+            resolve_model(None, Some("a/m"), Some("d/m"), Some("f/m")).as_deref(),
+            Some("a/m"),
+            "actor frontmatter next"
+        );
+        assert_eq!(
+            resolve_model(None, None, Some("d/m"), Some("f/m")).as_deref(),
+            Some("d/m"),
+            "[defaults].model next"
+        );
+        assert_eq!(
+            resolve_model(None, None, None, Some("f/m")).as_deref(),
+            Some("f/m"),
+            "first listed option last"
+        );
+        assert_eq!(
+            resolve_model(None, None, None, None),
+            None,
+            "nothing listed"
+        );
+    }
 }
