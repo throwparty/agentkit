@@ -11,6 +11,77 @@ use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, Connection
 use agentkit_tackle::store::SessionStore;
 use std::sync::{Arc as StdArc, Mutex as StdMutex};
 
+fn spawn_agent_with_config(dir: &std::path::Path, config: &str) -> AcpAgent {
+    let db_path = dir.join("sessions.db");
+    let cfg = dir.join("cfg");
+    std::fs::create_dir_all(&cfg).unwrap();
+    std::fs::write(cfg.join("config.toml"), config).unwrap();
+    AcpAgent::from_args([
+        env!("CARGO_BIN_EXE_agentkit-tackle"),
+        "stdio",
+        "--config-dir",
+        cfg.to_str().unwrap(),
+        "--db-path",
+        db_path.to_str().unwrap(),
+    ])
+    .unwrap()
+}
+
+/// Session/new seeds the effective model so the selector's current and
+/// the prompt's resolution agree without an explicit client switch —
+/// even with no `[defaults].model`.
+#[tokio::test(flavor = "multi_thread")]
+async fn session_new_seeds_the_effective_model_into_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("sessions.db");
+    let agent = spawn_agent_with_config(
+        dir.path(),
+        "[endpoints.primary]\nbase_url = \"http://127.0.0.1:1\"\nwire_format = \"openai-chat-completions\"\nauth = \"none\"\nmodels = [\"primary-a\", \"primary-b\"]\n",
+    );
+
+    Client
+        .builder()
+        .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
+            connection
+                .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            let created = connection
+                .send_request(NewSessionRequest::new(std::path::PathBuf::from("/work")))
+                .block_task()
+                .await?;
+
+            let options = created.config_options.expect("selectors populated");
+            let model_selector = options
+                .iter()
+                .find(|option| option.id.0.as_ref() == "model")
+                .expect("model selector");
+            let agentkit_tackle::agent_client_protocol::schema::v1::SessionConfigKind::Select(
+                select,
+            ) = &model_selector.kind
+            else {
+                panic!("the model selector is a select");
+            };
+            let current = select.current_value.0.to_string();
+
+            let db = SessionStore::connect_sqlite(&db_path).await.unwrap();
+            let session = db
+                .get_session(&created.session_id.to_string().replace("sess_", ""))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                agentkit_tackle::store::session_model_free(&session).as_deref(),
+                Some(current.as_str()),
+                "metadata seeds the selector's current"
+            );
+            assert_eq!(current, "primary/primary-a", "first listed option");
+            Ok(())
+        })
+        .await
+        .expect("seed the effective model");
+}
+
 /// Discovery is primary: the discoverable endpoint's models list
 /// endpoint-qualified; the dead endpoint falls back to its static list.
 #[tokio::test(flavor = "multi_thread")]

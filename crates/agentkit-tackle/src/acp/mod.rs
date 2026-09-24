@@ -294,13 +294,35 @@ where
                     .map_err(|err| Error::internal_error().data(err.to_string()))?;
                 // The selectors ride the response; degraded discovery
                 // surfaces as notices.
-                let selectors = config_options::build(&state_for_new, &session).await;
+                let mut selectors = config_options::build(&state_for_new, &session).await;
                 for notice in &selectors.notices {
                     if negotiation_for_new.supports(UnstableFeature::SessionNotices) {
                         let _ = cx.send_notification(SessionNotification::new(
                             wire_session_id(&session.id),
                             SessionUpdate::Notice(notice.clone()),
                         ));
+                    }
+                }
+                // Seed the effective model into session metadata when
+                // unset: display and the first prompt agree without an
+                // explicit client switch.
+                if crate::store::session_model_free(&session).is_none() {
+                    if let Some(model) = config_options::resolve_model_for(
+                        &state_for_new,
+                        &session,
+                        selectors.first_model.as_deref(),
+                    ) {
+                        state_for_new
+                            .db
+                            .set_model(&session.id, &model)
+                            .await
+                            .map_err(|err| Error::internal_error().data(err.to_string()))?;
+                        // Refresh so the response's current matches the
+                        // seeded metadata (the chain is pure; rebuild
+                        // picks the same effective model).
+                        if let Ok(Some(fresh)) = state_for_new.db.get_session(&session.id).await {
+                            selectors = config_options::build(&state_for_new, &fresh).await;
+                        }
                     }
                 }
                 let wire_id = wire_session_id(&session.id);
