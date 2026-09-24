@@ -190,7 +190,11 @@ where
     let state_for_close = state.clone();
     let state_for_delete = state.clone();
     let state_for_load = state.clone();
+    let state_for_resume = state.clone();
     let state_for_fork = state.clone();
+    let negotiation_for_load = negotiation.clone();
+    let negotiation_for_resume = negotiation.clone();
+    let negotiation_for_fork = negotiation.clone();
     let negotiation_for_compaction = negotiation.clone();
     // The connection's lease-owner id: turns acquire it for their
     // lifetime; released when the turn responds.
@@ -900,9 +904,28 @@ where
                 // Re-advertise on load: older Zed builds rebuild the
                 // thread UI from retained state and treat commands as
                 // transient (zed-industries/zed#53209), and the
-                // pre-response window drops updates outright.
+                // pre-response window drops updates outright. Selectors
+                // ride the response so a reopened session can switch
+                // models before the next prompt.
+                let session = state_for_load
+                    .db
+                    .get_session(&store_session_id(&request.session_id))
+                    .await
+                    .map_err(|err| Error::internal_error().data(err.to_string()))?
+                    .ok_or_else(|| Error::internal_error().data("no such session".to_owned()))?;
+                let selectors = config_options::build(&state_for_load, &session).await;
                 let commands = available_commands_update(&state_for_load);
-                responder.respond(LoadSessionResponse::new())?;
+                responder.respond(
+                    LoadSessionResponse::new().config_options(selectors.options),
+                )?;
+                for notice in &selectors.notices {
+                    if negotiation_for_load.supports(UnstableFeature::SessionNotices) {
+                        let _ = cx.send_notification(SessionNotification::new(
+                            request.session_id.clone(),
+                            SessionUpdate::Notice(notice.clone()),
+                        ));
+                    }
+                }
                 cx.send_notification(SessionNotification::new(
                     request.session_id.clone(),
                     commands,
@@ -911,10 +934,28 @@ where
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
-            async move |_request: ResumeSessionRequest, responder, _cx| {
-                // Resume reattaches WITHOUT replay (FR-003); config state
-                // in the response arrives with T-031.
-                responder.respond(ResumeSessionResponse::new())
+            async move |request: ResumeSessionRequest, responder, cx| {
+                // Resume reattaches WITHOUT replay (FR-003); config
+                // selectors ride the response like session/new.
+                let session = state_for_resume
+                    .db
+                    .get_session(&store_session_id(&request.session_id))
+                    .await
+                    .map_err(|err| Error::internal_error().data(err.to_string()))?
+                    .ok_or_else(|| Error::internal_error().data("no such session".to_owned()))?;
+                let selectors = config_options::build(&state_for_resume, &session).await;
+                responder.respond(
+                    ResumeSessionResponse::new().config_options(selectors.options),
+                )?;
+                for notice in &selectors.notices {
+                    if negotiation_for_resume.supports(UnstableFeature::SessionNotices) {
+                        let _ = cx.send_notification(SessionNotification::new(
+                            request.session_id.clone(),
+                            SessionUpdate::Notice(notice.clone()),
+                        ));
+                    }
+                }
+                Ok(())
             },
             agent_client_protocol::on_receive_request!(),
         )
@@ -1025,7 +1066,7 @@ where
         builder.on_receive_request(
             async move |request: agent_client_protocol::schema::v1::ForkSessionRequest,
                         responder,
-                        _cx| {
+                        cx| {
                 // No session updates flow here — the client attaches
                 // (session/load) and updates follow.
                 let source = store_session_id(&request.session_id);
@@ -1040,9 +1081,23 @@ where
                     &source,
                     fork.fork_point_turn_id.as_ref(),
                 );
-                responder.respond(agent_client_protocol::schema::v1::ForkSessionResponse::new(
-                    wire_session_id(&fork.id),
-                ))
+                // Selectors on the fork response: the client attaching
+                // can switch before the first prompt.
+                let selectors = config_options::build(&state_for_fork, &fork).await;
+                for notice in &selectors.notices {
+                    if negotiation_for_fork.supports(UnstableFeature::SessionNotices) {
+                        let _ = cx.send_notification(SessionNotification::new(
+                            wire_session_id(&fork.id),
+                            SessionUpdate::Notice(notice.clone()),
+                        ));
+                    }
+                }
+                responder.respond(
+                    agent_client_protocol::schema::v1::ForkSessionResponse::new(wire_session_id(
+                        &fork.id,
+                    ))
+                    .config_options(selectors.options),
+                )
             },
             agent_client_protocol::on_receive_request!(),
         )
