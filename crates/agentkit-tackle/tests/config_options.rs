@@ -3,8 +3,8 @@
 //! config_option_update.
 
 use agentkit_tackle::agent_client_protocol::schema::v1::{
-    InitializeRequest, NewSessionRequest, SessionNotification, SessionUpdate,
-    SetSessionConfigOptionRequest,
+    ForkSessionRequest, InitializeRequest, LoadSessionRequest, NewSessionRequest,
+    ResumeSessionRequest, SessionNotification, SessionUpdate, SetSessionConfigOptionRequest,
 };
 use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
@@ -25,61 +25,6 @@ fn spawn_agent_with_config(dir: &std::path::Path, config: &str) -> AcpAgent {
         db_path.to_str().unwrap(),
     ])
     .unwrap()
-}
-
-/// Session/new seeds the effective model so the selector's current and
-/// the prompt's resolution agree without an explicit client switch —
-/// even with no `[defaults].model`.
-#[tokio::test(flavor = "multi_thread")]
-async fn session_new_seeds_the_effective_model_into_metadata() {
-    let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("sessions.db");
-    let agent = spawn_agent_with_config(
-        dir.path(),
-        "[endpoints.primary]\nbase_url = \"http://127.0.0.1:1\"\nwire_format = \"openai-chat-completions\"\nauth = \"none\"\nmodels = [\"primary-a\", \"primary-b\"]\n",
-    );
-
-    Client
-        .builder()
-        .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
-            connection
-                .send_request(InitializeRequest::new(ProtocolVersion::V1))
-                .block_task()
-                .await?;
-            let created = connection
-                .send_request(NewSessionRequest::new(std::path::PathBuf::from("/work")))
-                .block_task()
-                .await?;
-
-            let options = created.config_options.expect("selectors populated");
-            let model_selector = options
-                .iter()
-                .find(|option| option.id.0.as_ref() == "model")
-                .expect("model selector");
-            let agentkit_tackle::agent_client_protocol::schema::v1::SessionConfigKind::Select(
-                select,
-            ) = &model_selector.kind
-            else {
-                panic!("the model selector is a select");
-            };
-            let current = select.current_value.0.to_string();
-
-            let db = SessionStore::connect_sqlite(&db_path).await.unwrap();
-            let session = db
-                .get_session(&created.session_id.to_string().replace("sess_", ""))
-                .await
-                .unwrap()
-                .unwrap();
-            assert_eq!(
-                agentkit_tackle::store::session_model_free(&session).as_deref(),
-                Some(current.as_str()),
-                "metadata seeds the selector's current"
-            );
-            assert_eq!(current, "primary/primary-a", "first listed option");
-            Ok(())
-        })
-        .await
-        .expect("seed the effective model");
 }
 
 /// Discovery is primary: the discoverable endpoint's models list
@@ -261,4 +206,132 @@ fn window_validation_and_the_context_note() {
     // The bundled snapshot's windows back the validation.
     assert_eq!(context_window("models/MiniMax-M2"), Some(204_800));
     assert_eq!(context_window("models/no-such-model"), None);
+}
+
+/// Session/new seeds the effective model so the selector's current and
+/// the prompt's resolution agree without an explicit client switch —
+/// even with no `[defaults].model`.
+#[tokio::test(flavor = "multi_thread")]
+async fn session_new_seeds_the_effective_model_into_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("sessions.db");
+    let agent = spawn_agent_with_config(
+        dir.path(),
+        "[endpoints.primary]\nbase_url = \"http://127.0.0.1:1\"\nwire_format = \"openai-chat-completions\"\nauth = \"none\"\nmodels = [\"primary-a\", \"primary-b\"]\n",
+    );
+
+    Client
+        .builder()
+        .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
+            connection
+                .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            let created = connection
+                .send_request(NewSessionRequest::new(std::path::PathBuf::from("/work")))
+                .block_task()
+                .await?;
+
+            let options = created.config_options.expect("selectors populated");
+            let model_selector = options
+                .iter()
+                .find(|option| option.id.0.as_ref() == "model")
+                .expect("model selector");
+            let agentkit_tackle::agent_client_protocol::schema::v1::SessionConfigKind::Select(
+                select,
+            ) = &model_selector.kind
+            else {
+                panic!("the model selector is a select");
+            };
+            let current = select.current_value.0.to_string();
+
+            let db = SessionStore::connect_sqlite(&db_path).await.unwrap();
+            let session = db
+                .get_session(&created.session_id.to_string().replace("sess_", ""))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                agentkit_tackle::store::session_model_free(&session).as_deref(),
+                Some(current.as_str()),
+                "metadata seeds the selector's current"
+            );
+            assert_eq!(current, "primary/primary-a", "first listed option");
+            Ok(())
+        })
+        .await
+        .expect("seed the effective model");
+}
+
+/// Load and resume both carry selectors so a reopened session can
+/// switch models before the next prompt; fork does the same for the
+/// new session.
+#[tokio::test(flavor = "multi_thread")]
+async fn load_resume_and_fork_return_config_options() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = spawn_agent_with_config(
+        dir.path(),
+        "[endpoints.primary]\nbase_url = \"http://127.0.0.1:1\"\nwire_format = \"openai-chat-completions\"\nauth = \"none\"\nmodels = [\"primary-a\"]\n",
+    );
+
+    Client
+        .builder()
+        .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
+            connection
+                .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            let created = connection
+                .send_request(NewSessionRequest::new(std::path::PathBuf::from("/work")))
+                .block_task()
+                .await?;
+
+            let loaded = connection
+                .send_request(LoadSessionRequest::new(
+                    created.session_id.clone(),
+                    std::path::PathBuf::from("/work"),
+                ))
+                .block_task()
+                .await?;
+            let load_options = loaded.config_options.expect("load carries selectors");
+            assert!(
+                load_options
+                    .iter()
+                    .any(|option| option.id.0.as_ref() == "model"),
+                "load has the model selector"
+            );
+
+            let resumed = connection
+                .send_request(ResumeSessionRequest::new(
+                    created.session_id.clone(),
+                    std::path::PathBuf::from("/work"),
+                ))
+                .block_task()
+                .await?;
+            let resume_options = resumed.config_options.expect("resume carries selectors");
+            assert!(
+                resume_options
+                    .iter()
+                    .any(|option| option.id.0.as_ref() == "model"),
+                "resume has the model selector"
+            );
+
+            let forked = connection
+                .send_request(ForkSessionRequest::new(
+                    created.session_id.clone(),
+                    std::path::PathBuf::from("/work"),
+                ))
+                .block_task()
+                .await?;
+            let fork_options = forked.config_options.expect("fork carries selectors");
+            assert!(
+                fork_options
+                    .iter()
+                    .any(|option| option.id.0.as_ref() == "model"),
+                "fork has the model selector"
+            );
+            Ok(())
+        })
+        .await
+        .expect("selectors on load/resume/fork");
 }
