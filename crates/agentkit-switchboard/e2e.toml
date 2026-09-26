@@ -11,9 +11,7 @@ api_surface = "openai-chat-completions"
 base_url = "https://opencode.ai/zen/v1"
 billing = "pay_as_you_go"
 models = [
-  "big-pickle",
   "deepseek-v4-flash",
-  "deepseek-v4-pro",
   "glm-5",
   "glm-5.1",
   "glm-5.2",
@@ -21,13 +19,9 @@ models = [
   "kimi-k2.6",
   "kimi-k2.7-code",
   "kimi-k3",
-  "ling-3.0-flash-fin-free",
-  "mimo-v2.5-free",
   "minimax-m2.5",
   "minimax-m2.7",
-  "minimax-m3",
-  "nemotron-3-ultra-free",
-  "nemotron-3.5-lightning-free"
+  "minimax-m3"
 ]
 
 [providers.auth]
@@ -66,8 +60,7 @@ models = [
   "grok-4.5",
   "grok-4.6",
   "grok-build-0.1",
-  "muse-spark-1.2",
-  "muse-spark-1.2-contributor-free"
+  "muse-spark-1.2"
 ]
 
 [providers.auth]
