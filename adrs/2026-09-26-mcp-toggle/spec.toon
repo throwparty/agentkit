@@ -1,0 +1,26 @@
+title: Toggling of Configured MCP Server Availability
+status: draft
+created: 2026-09-26
+author: Luke Carrier
+context: The tackle agent currently connects to all configured MCP servers automatically and maintains persistent connections. There is no mechanism to temporarily disable or re-enable individual MCP servers without modifying configuration files and restarting the agent. This limits operational flexibility for maintenance, troubleshooting, or resource management.
+problem: Users cannot selectively enable or disable configured MCP servers at runtime, requiring configuration changes and agent restarts to manage MCP server availability. Users need an intuitive command-based interface to control MCP server availability that works across all ACP clients.
+goals[3]:
+  - Add runtime capability to enable/disable individual MCP servers
+  - Maintain connection state when servers are re-enabled
+  - Provide intuitive command-based user interface for MCP server management
+nonFunctional[2]{id,title,slug,description}:
+  NFR-001,Backward Compatibility,backward-compatibility,"Existing behavior unchanged when feature not used"
+  NFR-002,State Persistence,state-persistence,"Connection state preserved when toggling servers"
+requirements[4]{id,title,slug,description}:
+  FR-001,MCP Server Toggle Command,mcp-server-toggle-command,"Users can disable individual configured MCP servers via command interface (e.g. /mcp disable <server-id>)"
+  FR-002,MCP Server Re-enable Command,mcp-server-reenable-command,"Users can re-enable previously disabled MCP servers via command interface (e.g. /mcp enable <server-id>)"
+  FR-003,Toggle Status Query Command,mcp-toggle-status-command,"Users can query the enabled/disabled status of MCP servers via command interface (e.g. /mcp status [<server-id>])"
+  FR-004,Automatic Reconnection,mcp-auto-reconnect,"Re-enabled servers automatically attempt to reconnect"
+acceptance[4]{id,title,slug,description}:
+  AC-001,Disable Server,disable-server,"Disabling a server prevents new connections and closes existing ones"
+  AC-002,Enable Server,enable-server,"Enabling a server initiates connection attempts"
+  AC-003,Status Reporting,status-reporting,"Toggle status is accurately reported in MCP pool statuses"
+  AC-004,Connection Preservation,connection-preservation,"Re-enabled servers attempt to restore previous connection state"
+edgeCases[2]{id,title,slug,description}:
+  EC-001,Already Disabled Server,already-disabled,"Attempting to disable an already-disabled server is a no-op"
+  EC-002,Failed Reconnection,failed-reconnect,"Re-enabling a server that fails to connect reports the failure appropriately"
