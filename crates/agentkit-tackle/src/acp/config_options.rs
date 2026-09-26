@@ -147,16 +147,13 @@ pub async fn build(state: &TackleState, session: &Session) -> Selectors {
     for (name, endpoint) in &state.config.config.endpoints {
         let credential = match endpoint.auth {
             Auth::None => None,
-            Auth::Helper => state
-                .config
-                .config
-                .credential_helper
-                .as_deref()
-                .and_then(|helper| crate::agent::provider::resolve_credential(helper, name))
-                .map(|secret| {
+            Auth::Helper => {
+                let helper = crate::agent::provider::credential_helper_name(&state.config.config);
+                crate::agent::provider::resolve_credential(&helper, name).map(|secret| {
                     use secrecy::ExposeSecret as _;
                     secret.expose_secret().to_owned()
-                }),
+                })
+            }
         };
         let qualified = |model: &str| format!("{name}/{model}");
         let discovered =

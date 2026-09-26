@@ -31,7 +31,7 @@ models = []  # optional static fallback when /models discovery fails
 
 ## `credential_helper` (user layer only)
 
-Name of the credential helper binary. `auth = "helper"` endpoints run `agentkit-credential-<helper> get <endpoint-name>` and read `access_token` from its JSON output.
+Name of the credential helper binary; defaults to `keychain`. `auth = "helper"` endpoints run `agentkit-credential-<helper> get tackle <endpoint-name>` and read `access_token` from its JSON output — store one with `agentkit-credential-keychain put tackle <endpoint-name>` (the JSON blob on stdin).
 
 ## `defaults`
 
