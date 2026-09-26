@@ -112,13 +112,24 @@ pub async fn forward_request(
     let mut out_headers = HeaderMap::new();
     for (key, value) in &headers {
         let key_str = key.as_str().to_ascii_lowercase();
-        if key_str != "authorization" && key_str != "host" && key_str != "content-length" {
+        if key_str != "authorization"
+            && key_str != "host"
+            && key_str != "content-length"
+            && key_str != "user-agent"
+        {
             out_headers.insert(key.clone(), value.clone());
         }
     }
     if !out_headers.contains_key("content-type") {
         out_headers.insert("Content-Type", HeaderValue::from_static("application/json"));
     }
+    out_headers.insert(
+        "User-Agent",
+        HeaderValue::from_static(concat!(
+            "agentkit-switchboard/",
+            env!("CARGO_PKG_VERSION")
+        )),
+    );
     http.inject_headers(&mut out_headers, credential);
 
     let client = shared_client();
@@ -217,6 +228,29 @@ pub async fn forward_request(
 mod tests {
     use super::*;
     use reqwest::header::HeaderMap as ReqwestHeaderMap;
+    use std::sync::Arc;
+
+    struct MockHttpEndpoint {
+        captured_headers: Arc<std::sync::Mutex<Option<reqwest::header::HeaderMap>>>,
+    }
+
+    impl MockHttpEndpoint {
+        fn new() -> Self {
+            Self {
+                captured_headers: Arc::new(std::sync::Mutex::new(None)),
+            }
+        }
+    }
+
+    impl HttpEndpoint for MockHttpEndpoint {
+        fn build_url(&self, _base_url: &str, _parsed_body: &serde_json::Value) -> String {
+            "http://mock-upstream.example.com".to_string()
+        }
+
+        fn inject_headers(&self, headers: &mut reqwest::header::HeaderMap, _credential: &ResolvedCredential) {
+            *self.captured_headers.lock().unwrap() = Some(headers.clone());
+        }
+    }
 
     #[test]
     fn verify_build_response_includes_switchboard() {
@@ -238,5 +272,43 @@ mod tests {
             resp.headers().get("x-switchboard-billing").unwrap(),
             "subscription"
         );
+    }
+
+    #[tokio::test]
+    async fn forwards_correct_user_agent_header() {
+        // Arrange
+        let mock_endpoint = MockHttpEndpoint::new();
+        let credential = ResolvedCredential {
+            value: "test-token".to_string(),
+            source: crate::credential::CredentialSource::None,
+            oauth: None,
+        };
+        let billing = BillingModel::Subscription;
+        let mut headers = HeaderMap::new();
+        headers.insert("user-agent", HeaderValue::from_static("test-client/1.0"));
+        headers.insert("authorization", HeaderValue::from_static("Bearer token"));
+        headers.insert("content-type", HeaderValue::from_static("application/json"));
+
+        let request = ForwardRequest {
+            method: Method::POST,
+            headers,
+            body: axum::body::Bytes::from(r#"{"test": "data"}"#),
+            credential: &credential,
+            billing: &billing,
+            base_url: "http://example.com",
+            provider_identity: "test_provider",
+            session_id: None,
+        };
+
+        // Act
+        let _ = forward_request(request, &mock_endpoint).await;
+
+        // Assert
+        let captured_headers = mock_endpoint.captured_headers.lock().unwrap().clone().unwrap();
+        let user_agent = captured_headers.get("user-agent").unwrap();
+        let user_agent_str = user_agent.to_str().unwrap();
+        assert!(user_agent_str.starts_with("agentkit-switchboard/"));
+        // Ensure the original user-agent was filtered out
+        assert!(!captured_headers.keys().any(|k| k == "user-agent" && captured_headers.get(k).unwrap() == "test-client/1.0"));
     }
 }
