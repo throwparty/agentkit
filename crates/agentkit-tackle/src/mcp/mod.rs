@@ -17,7 +17,7 @@
 
 use crate::config::McpServerConfig;
 use rmcp::model::{
-    CallToolRequestParams, ClientCapabilities, ClientInfo, ElicitRequestParams, ElicitResult,
+    CallToolRequestParams, ClientCapabilities, ClientConfig, ElicitRequestParams, ElicitResult,
     ElicitationAction, Implementation,
 };
 use rmcp::service::{RequestContext, RoleClient, RunningService};
@@ -333,9 +333,9 @@ pub(crate) struct ForwardingHandler<S: ElicitationSink> {
 }
 
 impl<S: ElicitationSink> ClientHandler for ForwardingHandler<S> {
-    fn get_info(&self) -> ClientInfo {
+    fn get_info(&self) -> ClientConfig {
         let capabilities = ClientCapabilities::builder().enable_elicitation().build();
-        ClientInfo::new(
+        ClientConfig::new(
             capabilities,
             Implementation::new("agentkit-tackle", env!("CARGO_PKG_VERSION")),
         )
