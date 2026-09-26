@@ -24,7 +24,7 @@ async fn connects_lists_and_calls_across_the_pool() {
 
     assert_eq!(
         pool.statuses().get("echo"),
-        Some(&agentkit_tackle::mcp::ServerStatus::Connected)
+        Some(&(agentkit_tackle::mcp::ServerStatus::Connected, true))
     );
     assert!(pool.is_connected("echo"));
 
@@ -80,7 +80,7 @@ async fn failed_connections_are_statuses_not_panics() {
     pool.connect("broken", &config).await;
     assert!(matches!(
         pool.statuses().get("broken"),
-        Some(agentkit_tackle::mcp::ServerStatus::Failed { .. })
+        Some(&(agentkit_tackle::mcp::ServerStatus::Failed { .. }, _))
     ));
     assert!(!pool.is_connected("broken"));
 }
@@ -110,7 +110,10 @@ async fn elicitations_surface_with_origin_and_never_touch_grants() {
     };
     let mut pool = McpPool::with_sink(sink);
     pool.connect("echo", &echo_server_config()).await;
-    assert_eq!(pool.statuses().get("echo"), Some(&ServerStatus::Connected));
+    assert_eq!(
+        pool.statuses().get("echo"),
+        Some(&(ServerStatus::Connected, true))
+    );
 
     let result = pool
         .call_tool("echo", "elicit", serde_json::json!({}))
