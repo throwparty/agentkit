@@ -433,6 +433,11 @@ impl<S: ElicitationSink> McpPool<S> {
     /// Connects one configured server (stdio argv or HTTP URL), recording
     /// the outcome as status. Never panics; failures are statuses.
     pub async fn connect(&mut self, name: &str, config: &McpServerConfig) {
+        // Skip connection if server is disabled
+        if !self.enabled.get(name).unwrap_or(&true) {
+            return;
+        }
+        
         let handler = ForwardingHandler {
             sink: Arc::clone(&self.sink),
             server: name.to_owned(),
