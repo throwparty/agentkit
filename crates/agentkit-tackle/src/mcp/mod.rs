@@ -496,6 +496,41 @@ impl<S: ElicitationSink> McpPool<S> {
         self.connections.contains_key(name)
     }
 
+    /// Whether a server is enabled for connection.
+    pub fn is_enabled(&self, name: &str) -> bool {
+        *self.enabled.get(name).unwrap_or(&true)
+    }
+
+    /// Enable a server for connection.
+    pub fn enable_server(&mut self, name: &str) -> Result<(), McpPoolError> {
+        self.enabled.insert(name.to_owned(), true);
+        Ok(())
+    }
+
+    /// Disable a server, preventing new connections and closing existing ones.
+    pub fn disable_server(&mut self, name: &str) -> Result<(), McpPoolError> {
+        self.enabled.insert(name.to_owned(), false);
+        // Close existing connection if any
+        self.connections.remove(name);
+        self.statuses.remove(name);
+        Ok(())
+    }
+
+    /// Toggle a server's enabled state, returning the new state.
+    pub fn toggle_server(&mut self, name: &str) -> Result<bool, McpPoolError> {
+        let current_state = *self.enabled.get(name).unwrap_or(&true);
+        let new_state = !current_state;
+        self.enabled.insert(name.to_owned(), new_state);
+        
+        // If disabling and there's an active connection, close it
+        if !new_state {
+            self.connections.remove(name);
+            self.statuses.remove(name);
+        }
+        
+        Ok(new_state)
+    }
+
     /// All connected servers' tools, namespaced `mcp.<server>.<tool>`.
     pub async fn list_tools(&self) -> Vec<NamespacedTool> {
         let mut tools = Vec::new();
