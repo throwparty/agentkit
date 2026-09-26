@@ -425,9 +425,25 @@ impl<S: ElicitationSink> McpPool<S> {
     }
 
     /// Statuses for the first-turn report: every declared server with its
-    /// connected/failed state.
-    pub fn statuses(&self) -> &BTreeMap<String, ServerStatus> {
-        &self.statuses
+    /// connected/failed state and enabled/disabled state.
+    pub fn statuses(&self) -> BTreeMap<String, (ServerStatus, bool)> {
+        let mut status_map = BTreeMap::new();
+        for (name, status) in &self.statuses {
+            status_map.insert(
+                name.clone(),
+                (status.clone(), *self.enabled.get(name).unwrap_or(&true)),
+            );
+        }
+        // Also include servers that are configured but have no status yet
+        for (name, &enabled) in &self.enabled {
+            if !status_map.contains_key(name) {
+                status_map.insert(
+                    name.clone(),
+                    (ServerStatus::Failed { reason: "Not connected".to_owned() }, enabled),
+                );
+            }
+        }
+        status_map
     }
 
     /// Connects one configured server (stdio argv or HTTP URL), recording
