@@ -17,3 +17,7 @@ This directory contains ADRs organized by status. ADRs follow a structured workf
 - [`2026-02-05-git-sdk`](./2026-02-05-git-sdk/) - Specification for Git SDK Selection
 - [`2026-02-05-docker-sdk`](./2026-02-05-docker-sdk/) - ADR: Docker SDK for Rust
 - [`2026-02-03-mcp-server-sdk`](./2026-02-03-mcp-server-sdk/) - Specification: Choose an MCP server SDK for Rust
+
+## Draft
+
+- [`2026-09-26-mcp-toggle`](./2026-09-26-mcp-toggle/) - Toggling of Configured MCP Server Availability
