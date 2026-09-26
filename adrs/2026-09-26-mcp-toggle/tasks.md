@@ -2,7 +2,7 @@
 
 ## Tasks
 
-### T-001: Add enabled state tracking to McpPool
+### T-001: [x] Add enabled state tracking to McpPool
 
 Add enabled: BTreeMap<String, bool> field to McpPool struct and initialize all configured servers as enabled: true in constructor
 

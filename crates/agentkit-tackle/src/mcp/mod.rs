@@ -380,6 +380,7 @@ impl<S: ElicitationSink> ClientHandler for ForwardingHandler<S> {
 pub struct McpPool<S: ElicitationSink = AutoDecline> {
     connections: BTreeMap<String, Connection<S>>,
     statuses: BTreeMap<String, ServerStatus>,
+    enabled: BTreeMap<String, bool>,
     sink: Arc<S>,
     /// The helper that resolves `{cred:IDENTITY}` env markers at spawn.
     credential_helper: String,
@@ -408,6 +409,7 @@ impl<S: ElicitationSink> McpPool<S> {
         Self {
             connections: BTreeMap::new(),
             statuses: BTreeMap::new(),
+            enabled: BTreeMap::new(),
             sink: Arc::new(sink),
             credential_helper: crate::agent::provider::DEFAULT_CREDENTIAL_HELPER.to_owned(),
         }
