@@ -1,0 +1,15 @@
+flowchart TB
+    Client["ACP Client\n(e.g. Zed)"] -- "ACP v1\nstdio / HTTP" --> ACP
+
+    subgraph Tackle["tackle (agentkit-tackle)"]
+        ACP["ACP Server\nversion negotiation\ncapability gating"]
+        Loop["Agent Loop\nrig-core behind\nown provider trait"]
+        Perm["Permission Pipeline\ngrant store → policy script → ask"]
+        Scripts["Script Host\nRhai: policy + behaviour scripts"]
+        Registry["Invokable Registry\nmcp.* · prompt.* · agent.*"]
+        Storage["Session Store\nturn DAG · SQLite WAL"]
+    end
+
+    Loop -- "configured endpoint\n(openai-chat-completions)" --> Endpoint["Model Endpoint\nswitchboard proxy or\ndirect provider"]
+    Tackle -- "MCP (rmcp)" --> MCPServers["MCP Servers\n(e.g. Litterbox)"]
+    Config["Config\n.agentkit/tackle/ (project)\n~/.config/agentkit/tackle/ (user)"] --> Tackle
