@@ -57,6 +57,15 @@ transport = "http"
 url = "https://example.com/mcp"
 ```
 
+An `env` value that is exactly `{cred:IDENTITY}` resolves through `credential_helper` when the server spawns — `agentkit-credential-<helper> get tackle <IDENTITY>`, reading `access_token` from the JSON output:
+
+```toml
+[mcp_servers.github.env]
+GITHUB_PERSONAL_ACCESS_TOKEN = "{cred:github}"
+```
+
+The marker must be the entire value; any other value passes through literally. Resolution happens at spawn, never at config load, so secrets never enter the configuration — a failed lookup fails that server's connection (reported in the first-turn status) instead.
+
 ## `scripts`
 
 Behaviour scripts, registered per event:
