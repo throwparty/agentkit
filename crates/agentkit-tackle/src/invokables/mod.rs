@@ -507,6 +507,32 @@ impl Registry {
             .await
             .map_err(DirectError::Pool)
     }
+
+    /// Executes a model-initiated invokable call: MCP tools run against
+    /// the pool; model-invokable prompts expand their body into context.
+    pub async fn execute_model<S: ElicitationSink>(
+        &self,
+        pool: &McpPool<S>,
+        name: &str,
+        arguments: &serde_json::Value,
+    ) -> Result<String, String> {
+        let invokable = self
+            .resolve(name)
+            .ok_or_else(|| format!("unknown invokable `{name}`"))?;
+        match invokable {
+            Invokable::Mcp { server, tool, .. } => pool
+                .call_tool(server, tool, arguments.clone())
+                .await
+                .map(|result| result.content_json)
+                .map_err(|err| err.to_string()),
+            Invokable::Prompt { .. } => self
+                .expand_model(name, arguments)
+                .map_err(|err| err.to_string()),
+            Invokable::Agent { .. } => {
+                Err(format!("agent invokables are not executable here: `{name}`"))
+            }
+        }
+    }
 }
 
 /// User-typed `/!name arguments` input, exact first-token match. Only

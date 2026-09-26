@@ -1,6 +1,7 @@
 //! Tackle: ACP-native agentic coding harness. Binary entrypoint.
 
 use agentkit_tackle::acp::{self, TackleState};
+use agentkit_tackle::mcp::McpPool;
 use agentkit_tackle::store::SessionStore;
 use agentkit_tackle::{cli, config, loader, telemetry};
 use clap::Parser;
@@ -95,10 +96,20 @@ async fn run(args: cli::Cli) -> ExitCode {
         Err(err) => return fail(err),
     };
 
+    let mut mcp_pool = McpPool::new();
+    // Configure the MCP pool with servers from the loaded configuration
+    for server_name in loaded.config.mcp_servers.keys() {
+        // Initialize all configured servers as enabled by default
+        mcp_pool.enabled.insert(server_name.clone(), true);
+        // TODO: Actually configure the connection details for each server
+        // For MVP command handling, we just need the enabled tracking
+    }
     let state = Arc::new(TackleState {
         db: Arc::new(db),
         config: loaded,
         definitions,
+        mcp_pool: tokio::sync::Mutex::new(mcp_pool),
+        grants: tokio::sync::Mutex::new(agentkit_tackle::permissions::GrantStore::default()),
     });
 
     match bind {
