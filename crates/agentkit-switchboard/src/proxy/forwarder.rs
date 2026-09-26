@@ -112,13 +112,24 @@ pub async fn forward_request(
     let mut out_headers = HeaderMap::new();
     for (key, value) in &headers {
         let key_str = key.as_str().to_ascii_lowercase();
-        if key_str != "authorization" && key_str != "host" && key_str != "content-length" {
+        if key_str != "authorization"
+            && key_str != "host"
+            && key_str != "content-length"
+            && key_str != "user-agent"
+        {
             out_headers.insert(key.clone(), value.clone());
         }
     }
     if !out_headers.contains_key("content-type") {
         out_headers.insert("Content-Type", HeaderValue::from_static("application/json"));
     }
+    out_headers.insert(
+        "User-Agent",
+        HeaderValue::from_static(concat!(
+            "agentkit-switchboard/",
+            env!("CARGO_PKG_VERSION")
+        )),
+    );
     http.inject_headers(&mut out_headers, credential);
 
     let client = shared_client();
