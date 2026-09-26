@@ -8,10 +8,12 @@
 //!
 //! Spawn hygiene: stdio servers start with explicit argv (no shell
 //! interpretation) and only the named environment entries — tackle's
-//! own environment is never forwarded. Child stderr is relayed to
-//! tackle's stderr line-prefixed with the server name under a rate
-//! cap; the child's stdout is the MCP protocol channel and is never
-//! touched by the relay.
+//! own environment is never forwarded. A whole env value of the form
+//! `{cred:IDENTITY}` resolves through the credential helper at spawn
+//! (never at config load), so secrets never enter `Config`. Child
+//! stderr is relayed to tackle's stderr line-prefixed with the server
+//! name under a rate cap; the child's stdout is the MCP protocol
+//! channel and is never touched by the relay.
 
 use crate::config::McpServerConfig;
 use rmcp::model::{
@@ -74,21 +76,93 @@ impl ConfigureCommand for Command {
     }
 }
 
+/// An env value failed to resolve for a stdio spawn.
+#[derive(Debug, thiserror::Error)]
+pub enum EnvValueError {
+    /// A value containing the marker was not the marker alone.
+    #[error("env `{key}`: a `{{cred:...}}` marker must be the entire value")]
+    MarkerNotEntire {
+        key: String,
+    },
+    /// The marker carried no identity.
+    #[error("env `{key}`: the `{{cred:...}}` marker has an empty identity")]
+    EmptyIdentity {
+        key: String,
+    },
+    /// The credential helper failed to produce the secret.
+    #[error("env `{key}`: {source}")]
+    Credential {
+        key: String,
+        #[source]
+        source: crate::agent::provider::CredentialError,
+    },
+}
+
+/// The `{cred:IDENTITY}` marker prefix: a whole env value of this form
+/// resolves through the credential helper at spawn.
+const CRED_MARKER_PREFIX: &str = "{cred:";
+
+/// Resolves one env value for a spawn: a value that is the entire
+/// `{cred:IDENTITY}` marker resolves through `credential_helper`
+/// (component [`crate::agent::provider::CREDENTIAL_COMPONENT`]); any
+/// value without the marker passes through verbatim. Resolution runs
+/// at spawn, never at config load, so secrets never enter `Config`.
+fn resolve_env_value(
+    credential_helper: &str,
+    key: &str,
+    value: &str,
+) -> Result<String, EnvValueError> {
+    if !value.contains(CRED_MARKER_PREFIX) {
+        return Ok(value.to_owned());
+    }
+    let Some(rest) = value.strip_prefix(CRED_MARKER_PREFIX) else {
+        return Err(EnvValueError::MarkerNotEntire {
+            key: key.to_owned(),
+        });
+    };
+    let Some(identity) = rest.strip_suffix('}') else {
+        return Err(EnvValueError::MarkerNotEntire {
+            key: key.to_owned(),
+        });
+    };
+    if identity.is_empty() {
+        return Err(EnvValueError::EmptyIdentity {
+            key: key.to_owned(),
+        });
+    }
+    crate::agent::provider::resolve_credential_value(credential_helper, identity).map_err(
+        |source| EnvValueError::Credential {
+            key: key.to_owned(),
+            source,
+        },
+    )
+}
+
 /// Applies spawn hygiene to a stdio server spawn: explicit argv (no
 /// shell interpretation) and only the named environment entries —
-/// no blanket forwarding of tackle's own environment.
+/// no blanket forwarding of tackle's own environment. Env values
+/// resolve first: a failed `{cred:IDENTITY}` resolution returns
+/// before the command is mutated at all.
 pub fn configure_stdio_spawn(
     cmd: &mut impl ConfigureCommand,
     command: &str,
     args: &[String],
     env: &BTreeMap<String, String>,
-) {
+    credential_helper: &str,
+) -> Result<(), EnvValueError> {
+    let resolved = env
+        .iter()
+        .map(|(key, value)| {
+            resolve_env_value(credential_helper, key, value).map(|value| (key, value))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     cmd.set_program(command);
     cmd.set_args(args);
     cmd.clear_env();
-    for (key, value) in env {
-        cmd.set_env(key, value);
+    for (key, value) in resolved {
+        cmd.set_env(key, &value);
     }
+    Ok(())
 }
 
 /// A rate-cap admission decision for one stderr line.
@@ -307,6 +381,8 @@ pub struct McpPool<S: ElicitationSink = AutoDecline> {
     connections: BTreeMap<String, Connection<S>>,
     statuses: BTreeMap<String, ServerStatus>,
     sink: Arc<S>,
+    /// The helper that resolves `{cred:IDENTITY}` env markers at spawn.
+    credential_helper: String,
 }
 
 struct Connection<S: ElicitationSink> {
@@ -333,7 +409,17 @@ impl<S: ElicitationSink> McpPool<S> {
             connections: BTreeMap::new(),
             statuses: BTreeMap::new(),
             sink: Arc::new(sink),
+            credential_helper: crate::agent::provider::DEFAULT_CREDENTIAL_HELPER.to_owned(),
         }
+    }
+
+    /// Overrides the helper that resolves `{cred:IDENTITY}` env
+    /// markers at spawn; wiring passes the configured value via
+    /// [`crate::agent::provider::credential_helper_name`]. Defaults to
+    /// [`crate::agent::provider::DEFAULT_CREDENTIAL_HELPER`].
+    pub fn with_credential_helper(mut self, helper: impl Into<String>) -> Self {
+        self.credential_helper = helper.into();
+        self
     }
 
     /// Statuses for the first-turn report: every declared server with its
@@ -353,7 +439,8 @@ impl<S: ElicitationSink> McpPool<S> {
             match config {
                 McpServerConfig::Stdio { command, args, env } => {
                     let mut cmd = Command::new(command);
-                    configure_stdio_spawn(&mut cmd, command, args, env);
+                    configure_stdio_spawn(&mut cmd, command, args, env, &self.credential_helper)
+                        .map_err(|err| err.to_string())?;
                     let (transport, stderr) = rmcp::transport::TokioChildProcess::builder(cmd)
                         .stderr(std::process::Stdio::piped())
                         .spawn()
@@ -530,7 +617,9 @@ mod spawn_hygiene_tests {
             "mcp-server-everything",
             &["--verbose".into()],
             &BTreeMap::new(),
-        );
+            "keychain",
+        )
+        .unwrap();
         assert_eq!(cmd.program.as_deref(), Some("mcp-server-everything"));
         assert_eq!(cmd.args, vec!["--verbose".to_owned()]);
         // No shell: the program name is the argv[0] verbatim, never a
@@ -545,13 +634,104 @@ mod spawn_hygiene_tests {
         env.insert("PATH".to_owned(), "/custom/bin".to_owned());
 
         let mut cmd = RecordingCommand::default();
-        configure_stdio_spawn(&mut cmd, "server", &[], &env);
+        configure_stdio_spawn(&mut cmd, "server", &[], &env, "keychain").unwrap();
 
         assert!(cmd.cleared, "no blanket environment forwarding");
         assert_eq!(cmd.env, env);
         // Entries are set only after the clear, so the parent's env is
         // never forwarded.
         assert_eq!(cmd.env_set_after_clear.len(), 2);
+    }
+
+    /// Writes an `agentkit-credential-test` helper that rejects any
+    /// invocation missing the `get tackle <identity>` shape, like the
+    /// shipped helpers do.
+    fn write_fake_helper(dir: &std::path::Path, body: &str) {
+        let path = dir.join("agentkit-credential-test");
+        let mut file = std::fs::File::create(&path).unwrap();
+        use std::io::Write as _;
+        writeln!(
+            file,
+            "#!/bin/sh\n\
+             [ \"$#\" -eq 3 ] && [ \"$1\" = get ] && [ \"$2\" = tackle ] || exit 3\n\
+             echo '{body}'"
+        )
+        .unwrap();
+        file.flush().unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+
+    #[test]
+    fn cred_markers_resolve_through_the_credential_helper() {
+        let dir = tempfile::tempdir().unwrap();
+        write_fake_helper(dir.path(), "{\"access_token\": \"tok\"}");
+
+        let mut env = BTreeMap::new();
+        env.insert("GITHUB_TOKEN".to_owned(), "{cred:github}".to_owned());
+        env.insert("LITERAL".to_owned(), "plain-value".to_owned());
+
+        let mut cmd = RecordingCommand::default();
+        let _guard = crate::agent::provider::PATH_LOCK.lock().unwrap();
+        let path_var = std::env::var("PATH").unwrap();
+        std::env::set_var("PATH", format!("{}:{}", dir.path().display(), path_var));
+        let resolved = configure_stdio_spawn(&mut cmd, "server", &[], &env, "test");
+        std::env::set_var("PATH", path_var);
+
+        resolved.unwrap();
+        assert_eq!(
+            cmd.env.get("GITHUB_TOKEN").map(String::as_str),
+            Some("tok"),
+        );
+        assert_eq!(
+            cmd.env.get("LITERAL").map(String::as_str),
+            Some("plain-value"),
+        );
+    }
+
+    #[test]
+    fn a_failed_cred_resolution_leaves_the_command_untouched() {
+        let mut env = BTreeMap::new();
+        env.insert("GITHUB_TOKEN".to_owned(), "{cred:github}".to_owned());
+
+        let mut cmd = RecordingCommand::default();
+        let err = configure_stdio_spawn(
+            &mut cmd,
+            "server",
+            &[],
+            &env,
+            "definitely-missing-helper",
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("GITHUB_TOKEN"), "{err}");
+        // Resolution happens before any mutation: a failure never
+        // half-spawns with an unresolved secret.
+        assert_eq!(cmd.program, None, "the command was not configured");
+        assert!(cmd.env.is_empty());
+    }
+
+    #[test]
+    fn an_empty_cred_identity_is_rejected() {
+        let mut env = BTreeMap::new();
+        env.insert("GITHUB_TOKEN".to_owned(), "{cred:}".to_owned());
+
+        let mut cmd = RecordingCommand::default();
+        let err = configure_stdio_spawn(&mut cmd, "server", &[], &env, "test").unwrap_err();
+        assert!(err.to_string().contains("empty identity"), "{err}");
+    }
+
+    #[test]
+    fn a_cred_marker_must_be_the_entire_value() {
+        let mut env = BTreeMap::new();
+        env.insert("AUTH".to_owned(), "Bearer {cred:github}".to_owned());
+
+        let mut cmd = RecordingCommand::default();
+        let err = configure_stdio_spawn(&mut cmd, "server", &[], &env, "test").unwrap_err();
+        assert!(err.to_string().contains("entire value"), "{err}");
     }
 
     #[tokio::test]

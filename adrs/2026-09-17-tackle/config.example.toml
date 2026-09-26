@@ -57,6 +57,15 @@ args = ["mcp"]
 [mcp_servers.litterbox.env]                   # explicit named entries only; no blanket forwarding
 LITTERBOX_LOG = "debug"
 
+[mcp_servers.github]
+transport = "stdio"
+command = "github-mcp-server"
+args = ["stdio"]
+
+[mcp_servers.github.env]
+GITHUB_PERSONAL_ACCESS_TOKEN = "{cred:github}" # whole-value marker: resolved when the server
+                                               # spawns via credential_helper (get tackle github)
+
 [mcp_servers.docs]
 transport = "http"
 url = "https://mcp.example.com/v1"
