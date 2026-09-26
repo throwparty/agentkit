@@ -10,9 +10,12 @@
 # appear twice under different wire formats. Wire presentation (Bearer vs
 # x-api-key) is derived from the wire format, never configured.
 # Credentials always resolve through a credential helper command on PATH,
-# invoked with the endpoint name as its identity — the same model as
-# switchboard. No secret values or env var names live in this file.
-credential_helper = "agentkit-credential"
+# invoked as `agentkit-credential-<helper> get <component> <identity>` — the
+# component is "tackle", the identity is the endpoint name (or a
+# `{cred:...}` marker identity below) — and the helper's JSON `access_token`
+# is the secret, the same model as switchboard. Defaults to "keychain".
+# No secret values or env var names live in this file.
+credential_helper = "keychain"
 
 [endpoints.switchboard]
 base_url = "http://localhost:3812/openai/v1"
