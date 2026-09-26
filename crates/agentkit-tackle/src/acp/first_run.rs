@@ -59,14 +59,12 @@ pub fn first_run_seed(state: &TackleState) -> String {
 /// `authenticate` method instead of failing at first prompt.
 pub fn missing_credentials(state: &TackleState) -> bool {
     use crate::config::Auth;
+    let helper = crate::agent::provider::credential_helper_name(&state.config.config);
     for (name, endpoint) in &state.config.config.endpoints {
         if endpoint.auth != Auth::Helper {
             continue;
         }
-        let Some(helper) = &state.config.config.credential_helper else {
-            continue;
-        };
-        if crate::agent::provider::resolve_credential(helper, name).is_none() {
+        if crate::agent::provider::resolve_credential(&helper, name).is_none() {
             return true;
         }
     }
