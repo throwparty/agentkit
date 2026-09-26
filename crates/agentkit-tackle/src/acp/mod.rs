@@ -552,6 +552,86 @@ where
                     return responder.respond(PromptResponse::new(StopReason::EndTurn));
                 }
 
+                // Handle /mcp slash commands for MCP server management
+                if first_text.starts_with("/mcp ") {
+                    // Parse the command: /mcp <subcommand> [args...]
+                    let parts: Vec<&str> = first_text.split_whitespace().collect();
+                    if parts.len() < 2 {
+                        // Not enough parts for a subcommand
+                        let message = state_for_prompt
+                            .db
+                            .append_message(
+                                &turn.id,
+                                crate::store::Role::Assistant,
+                                &serde_json::json!([{ "type": "text", "text": "Usage: /mcp <enable|disable|status> [server-name]" }])
+                                .to_string(),
+                            )
+                            .await
+                            .map_err(|err| Error::internal_error().data(err.to_string()))?;
+                        let chunk =
+                            agent_client_protocol::schema::v1::ContentChunk::new(ContentBlock::Text(
+                                agent_client_protocol::schema::v1::TextContent::new(
+                                    "Usage: /mcp <enable|disable|status> [server-name]".to_owned(),
+                                ),
+                            ))
+                            .message_id(
+                                agent_client_protocol::schema::v1::MessageId::new(message.id.clone()),
+                            );
+                        let _ = cx.send_notification(SessionNotification::new(
+                            request.session_id.clone(),
+                            agent_client_protocol::schema::v1::SessionUpdate::AgentMessageChunk(chunk),
+                        ));
+                        state_for_prompt
+                            .db
+                            .release_lease(&session_id, &owner_for_prompt)
+                            .await
+                            .ok();
+                        return responder.respond(PromptResponse::new(StopReason::EndTurn));
+                    }
+
+                    let subcommand = parts[1];
+                    match subcommand {
+                        "enable" | "disable" | "status" => {
+                            // These commands will be handled by the ACP command handlers
+                            // For now, we just acknowledge receipt and let the normal agent processing continue
+                            // The actual command handling will be implemented in T-007 and T-008
+                            // We'll add a simple acknowledgment message
+                            let response_text = format!("MCP command received: {}", first_text);
+                            let message = state_for_prompt
+                                .db
+                                .append_message(
+                                    &turn.id,
+                                    crate::store::Role::Assistant,
+                                    &serde_json::json!([{ "type": "text", "text": response_text }])
+                                    .to_string(),
+                                )
+                                .await
+                                .map_err(|err| Error::internal_error().data(err.to_string()))?;
+                            let chunk =
+                                agent_client_protocol::schema::v1::ContentChunk::new(ContentBlock::Text(
+                                    agent_client_protocol::schema::v1::TextContent::new(response_text),
+                                ))
+                                .message_id(
+                                    agent_client_protocol::schema::v1::MessageId::new(message.id.clone()),
+                                );
+                            let _ = cx.send_notification(SessionNotification::new(
+                                request.session_id.clone(),
+                                agent_client_protocol::schema::v1::SessionUpdate::AgentMessageChunk(chunk),
+                            ));
+                            state_for_prompt
+                                .db
+                                .release_lease(&session_id, &owner_for_prompt)
+                                .await
+                                .ok();
+                            return responder.respond(PromptResponse::new(StopReason::EndTurn));
+                        }
+                        _ => {
+                            // Unknown subcommand, let normal processing continue
+                            // (the agent will likely respond with "unknown command")
+                        }
+                    }
+                }
+
                 // Resolve the actor for this session (compaction's
                 // event payload and the model turn both need it).
                 let session_row = state_for_prompt
