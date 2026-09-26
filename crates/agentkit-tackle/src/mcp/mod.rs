@@ -496,11 +496,6 @@ impl<S: ElicitationSink> McpPool<S> {
         self.connections.contains_key(name)
     }
 
-    /// Whether a server is enabled for connection.
-    pub fn is_enabled(&self, name: &str) -> bool {
-        *self.enabled.get(name).unwrap_or(&true)
-    }
-
     /// Enable a server for connection.
     pub fn enable_server(&mut self, name: &str) -> Result<(), McpPoolError> {
         self.enabled.insert(name.to_owned(), true);
