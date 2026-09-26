@@ -376,8 +376,7 @@ impl<S: ElicitationSink> ClientHandler for ForwardingHandler<S> {
 pub struct McpPool<S: ElicitationSink = AutoDecline> {
     connections: BTreeMap<String, Connection<S>>,
     statuses: BTreeMap<String, ServerStatus>,
-    #[allow(dead_code)]
-    enabled: BTreeMap<String, bool>,
+    pub enabled: BTreeMap<String, bool>,
     sink: Arc<S>,
     /// The helper that resolves `{cred:IDENTITY}` env markers at spawn.
     credential_helper: String,
