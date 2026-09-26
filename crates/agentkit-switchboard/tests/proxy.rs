@@ -53,6 +53,7 @@ async fn test_state_with(
                 models: HashMap::new(),
             },
             models: Some(models.into_iter().map(|m| m.to_string()).collect()),
+            user_agent: None,
         },
     );
 
@@ -143,16 +144,17 @@ async fn forwarder_preserves_upstream_content_type() {
     .unwrap();
 
     let outcome = forward_request(
-        ForwardRequest {
-            method: Method::POST,
-            headers: HeaderMap::new(),
-            body: axum::body::Bytes::from(body),
-            credential: &credential,
-            billing: &BillingModel::PayAsYouGo,
-            base_url: &mock_server.uri(),
-            provider_identity: "mock_openai",
-            session_id: None,
-        },
+         ForwardRequest {
+             method: Method::POST,
+             headers: HeaderMap::new(),
+             body: axum::body::Bytes::from(body),
+             credential: &credential,
+             billing: &BillingModel::PayAsYouGo,
+             base_url: &mock_server.uri(),
+             provider_identity: "mock_openai",
+             session_id: None,
+             provider_user_agent: None,
+         },
         &OpenAiChatCompletionsProvider,
     )
     .await;

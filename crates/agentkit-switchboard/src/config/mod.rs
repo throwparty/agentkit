@@ -37,6 +37,8 @@ pub struct ProviderConfig {
     pub auth: AuthConfig,
     pub pricing: PricingConfig,
     pub models: Option<Vec<String>>,
+    #[serde(default)]
+    pub user_agent: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

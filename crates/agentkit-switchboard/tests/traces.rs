@@ -37,6 +37,7 @@ async fn test_state(mock_base_url: &str) -> Arc<routes::AppState> {
                 models: HashMap::new(),
             },
             models: Some(vec!["gpt-4o".to_string()]),
+            user_agent: None,
         },
     );
 

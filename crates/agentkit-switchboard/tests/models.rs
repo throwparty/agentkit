@@ -24,6 +24,7 @@ fn make_provider(id: &str, models: Vec<&str>) -> ProviderConfig {
             models: HashMap::new(),
         },
         models: Some(models.into_iter().map(|m| m.to_string()).collect()),
+        user_agent: None,
     }
 }
 

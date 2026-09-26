@@ -27,6 +27,7 @@ pub struct ForwardRequest<'a> {
     pub base_url: &'a str,
     pub provider_identity: &'a str,
     pub session_id: Option<&'a str>,
+    pub provider_user_agent: Option<&'a str>,
 }
 
 fn upstream_headers(headers: &reqwest::header::HeaderMap) -> Vec<(String, String)> {
@@ -101,6 +102,7 @@ pub async fn forward_request(
         base_url,
         provider_identity,
         session_id,
+        provider_user_agent,
     } = request;
 
     let parsed_body = serde_json::from_slice::<serde_json::Value>(&body).ok();
@@ -109,27 +111,33 @@ pub async fn forward_request(
 
     let request_body = body.to_vec();
 
-    let mut out_headers = HeaderMap::new();
-    for (key, value) in &headers {
-        let key_str = key.as_str().to_ascii_lowercase();
-        if key_str != "authorization"
-            && key_str != "host"
-            && key_str != "content-length"
-            && key_str != "user-agent"
-        {
-            out_headers.insert(key.clone(), value.clone());
-        }
-    }
-    if !out_headers.contains_key("content-type") {
-        out_headers.insert("Content-Type", HeaderValue::from_static("application/json"));
-    }
-    out_headers.insert(
-        "User-Agent",
-        HeaderValue::from_static(concat!(
-            "agentkit-switchboard/",
-            env!("CARGO_PKG_VERSION")
-        )),
-    );
+      let mut out_headers = HeaderMap::new();
+      for (key, value) in &headers {
+          let key_str = key.as_str().to_ascii_lowercase();
+          if key_str != "authorization"
+              && key_str != "host"
+              && key_str != "content-length"
+              && key_str != "user-agent"
+          {
+              out_headers.insert(key.clone(), value.clone());
+          }
+      }
+      if !out_headers.contains_key("content-type") {
+          out_headers.insert("Content-Type", HeaderValue::from_static("application/json"));
+      }
+      // Use provider-specific user-agent if available, otherwise fall back to default
+      let user_agent_value = if let Some(ref ua) = provider_user_agent {
+          HeaderValue::from_str(ua).unwrap_or_else(|_| HeaderValue::from_static(concat!(
+              "agentkit-switchboard/",
+              env!("CARGO_PKG_VERSION")
+          )))
+      } else {
+          HeaderValue::from_static(concat!(
+              "agentkit-switchboard/",
+              env!("CARGO_PKG_VERSION")
+          ))
+      };
+      out_headers.insert("User-Agent", user_agent_value);
     http.inject_headers(&mut out_headers, credential);
 
     let client = shared_client();
@@ -298,6 +306,7 @@ mod tests {
             base_url: "http://example.com",
             provider_identity: "test_provider",
             session_id: None,
+            provider_user_agent: None,
         };
 
         // Act
@@ -310,5 +319,42 @@ mod tests {
         assert!(user_agent_str.starts_with("agentkit-switchboard/"));
         // Ensure the original user-agent was filtered out
         assert!(!captured_headers.keys().any(|k| k == "user-agent" && captured_headers.get(k).unwrap() == "test-client/1.0"));
+    }
+
+    #[tokio::test]
+    async fn forwards_provider_specific_user_agent() {
+        // Arrange
+        let mock_endpoint = MockHttpEndpoint::new();
+        let credential = ResolvedCredential {
+            value: "test-token".to_string(),
+            source: crate::credential::CredentialSource::None,
+            oauth: None,
+        };
+        let billing = BillingModel::Subscription;
+        let mut headers = HeaderMap::new();
+        headers.insert("content-type", HeaderValue::from_static("application/json"));
+
+        let request = ForwardRequest {
+            method: Method::POST,
+            headers,
+            body: axum::body::Bytes::from(r#"{"test": "data"}"#),
+            credential: &credential,
+            billing: &billing,
+            base_url: "http://example.com",
+            provider_identity: "test_provider",
+            session_id: None,
+            provider_user_agent: Some("custom-agent/1.0"),
+        };
+
+        // Act
+        let _ = forward_request(request, &mock_endpoint).await;
+
+        // Assert
+        let captured_headers = mock_endpoint.captured_headers.lock().unwrap().clone().unwrap();
+        let user_agent = captured_headers.get("user-agent").unwrap();
+        let user_agent_str = user_agent.to_str().unwrap();
+        assert_eq!(user_agent_str, "custom-agent/1.0");
+        // Ensure the default user-agent was not used
+        assert!(!user_agent_str.starts_with("agentkit-switchboard/"));
     }
 }
