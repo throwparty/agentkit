@@ -16,6 +16,7 @@ pub mod first_run;
 pub mod fork;
 pub mod http;
 pub mod titling;
+use crate::mcp::{McpPool, NamespacedTool, ServerStatus};
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
     AgentCapabilities, AvailableCommandsUpdate, CloseSessionResponse, DeleteSessionResponse,
@@ -94,6 +95,10 @@ pub struct TackleState {
     pub db: std::sync::Arc<SessionStore>,
     pub config: Loaded,
     pub definitions: Definitions,
+    pub mcp_pool: tokio::sync::Mutex<McpPool>,
+    /// The in-memory permission grant store, per connection (FR-014):
+    /// gone on close, process exit, and resume after restart.
+    pub grants: tokio::sync::Mutex<crate::permissions::GrantStore>,
 }
 
 impl TackleState {
@@ -138,7 +143,12 @@ fn wire_session_id(id: &crate::store::SessionId) -> SessionId {
 /// registry carries no MCP tools here; individual tools are never
 /// advertised as commands (only reached through `/!`).
 fn available_commands_update(state: &TackleState) -> SessionUpdate {
-    let registry = match crate::invokables::Registry::build(&state.definitions, &[]) {
+    // Get the actual MCP tools from the pool
+    let mcp_tokens =
+        futures::executor::block_on(async { state.mcp_pool.lock().await.list_tools().await });
+    let mcp_tool_names: Vec<NamespacedTool> = mcp_tokens;
+
+    let registry = match crate::invokables::Registry::build(&state.definitions, &mcp_tool_names) {
         Ok(registry) => registry,
         Err(err) => {
             // Namespaced keys over BTreeMap definitions cannot collide;
@@ -595,18 +605,253 @@ where
 
                     let subcommand = parts[1];
                     match subcommand {
-                        "enable" | "disable" | "status" => {
-                            // These commands will be handled by the ACP command handlers
-                            // For now, we just acknowledge receipt and let the normal agent processing continue
-                            // The actual command handling will be implemented in T-007 and T-008
-                            // We'll add a simple acknowledgment message
-                            let response_text = format!("MCP command received: {}", first_text);
+                        "enable" => {
+                            let server_name = parts.get(2).copied().unwrap_or("");
+                            if server_name.is_empty() {
+                                let message = state_for_prompt
+                                    .db
+                                    .append_message(
+                                        &turn.id,
+                                        crate::store::Role::Assistant,
+                                        &serde_json::json!([{ "type": "text", "text": "Usage: /mcp enable <server-name>" }])
+                                        .to_string(),
+                                        None,
+                                        None,
+                                        None,
+                                        None,
+                                    )
+                                    .await
+                                    .map_err(|err| Error::internal_error().data(err.to_string()))?;
+                                let chunk =
+                                    agent_client_protocol::schema::v1::ContentChunk::new(ContentBlock::Text(
+                                        agent_client_protocol::schema::v1::TextContent::new(
+                                            "Usage: /mcp enable <server-name>".to_owned(),
+                                        ),
+                                    ))
+                                    .message_id(
+                                        agent_client_protocol::schema::v1::MessageId::new(message.id.clone()),
+                                    );
+                                let _ = cx.send_notification(SessionNotification::new(
+                                    request.session_id.clone(),
+                                    agent_client_protocol::schema::v1::SessionUpdate::AgentMessageChunk(chunk),
+                                ));
+                                state_for_prompt
+                                    .db
+                                    .release_lease(&session_id, &owner_for_prompt)
+                                    .await
+                                    .ok();
+                                return responder.respond(PromptResponse::new(StopReason::EndTurn));
+                            }
+
+                            // Call the McpPool method
+                            match state_for_prompt.mcp_pool.lock().await.enable_server(server_name) {
+                                Ok(_) => {
+                                    let response_text = format!("Enabled MCP server: {}", server_name);
+                                    let message = state_for_prompt
+                                        .db
+                                        .append_message(
+                                            &turn.id,
+                                            crate::store::Role::Assistant,
+                                            &serde_json::json!([{ "type": "text", "text": response_text }])
+                                            .to_string(),
+                                            None,
+                                            None,
+                                            None,
+                                            None,
+                                        )
+                                        .await
+                                        .map_err(|err| Error::internal_error().data(err.to_string()))?;
+                                    let chunk =
+                                        agent_client_protocol::schema::v1::ContentChunk::new(ContentBlock::Text(
+                                            agent_client_protocol::schema::v1::TextContent::new(response_text),
+                                        ))
+                                        .message_id(
+                                            agent_client_protocol::schema::v1::MessageId::new(message.id.clone()),
+                                        );
+                                    let _ = cx.send_notification(SessionNotification::new(
+                                        request.session_id.clone(),
+                                        agent_client_protocol::schema::v1::SessionUpdate::AgentMessageChunk(chunk),
+                                    ));
+                                }
+                                Err(err) => {
+                                    let error_text = format!("Failed to enable MCP server {}: {}", server_name, err);
+                                    let message = state_for_prompt
+                                        .db
+                                        .append_message(
+                                            &turn.id,
+                                            crate::store::Role::Assistant,
+                                            &serde_json::json!([{ "type": "text", "text": error_text }])
+                                            .to_string(),
+                                            None,
+                                            None,
+                                            None,
+                                            None,
+                                        )
+                                        .await
+                                        .map_err(|err| Error::internal_error().data(err.to_string()))?;
+                                    let chunk =
+                                        agent_client_protocol::schema::v1::ContentChunk::new(ContentBlock::Text(
+                                            agent_client_protocol::schema::v1::TextContent::new(error_text),
+                                        ))
+                                        .message_id(
+                                            agent_client_protocol::schema::v1::MessageId::new(message.id.clone()),
+                                        );
+                                    let _ = cx.send_notification(SessionNotification::new(
+                                        request.session_id.clone(),
+                                        agent_client_protocol::schema::v1::SessionUpdate::AgentMessageChunk(chunk),
+                                    ));
+                                }
+                            }
+                            state_for_prompt
+                                .db
+                                .release_lease(&session_id, &owner_for_prompt)
+                                .await
+                                .ok();
+                            return responder.respond(PromptResponse::new(StopReason::EndTurn));
+                        }
+                        "disable" => {
+                            let server_name = parts.get(2).copied().unwrap_or("");
+                            if server_name.is_empty() {
+                                let message = state_for_prompt
+                                    .db
+                                    .append_message(
+                                        &turn.id,
+                                        crate::store::Role::Assistant,
+                                        &serde_json::json!([{ "type": "text", "text": "Usage: /mcp disable <server-name>" }])
+                                        .to_string(),
+                                        None,
+                                        None,
+                                        None,
+                                        None,
+                                    )
+                                    .await
+                                    .map_err(|err| Error::internal_error().data(err.to_string()))?;
+                                let chunk =
+                                    agent_client_protocol::schema::v1::ContentChunk::new(ContentBlock::Text(
+                                        agent_client_protocol::schema::v1::TextContent::new(
+                                            "Usage: /mcp disable <server-name>".to_owned(),
+                                        ),
+                                    ))
+                                    .message_id(
+                                        agent_client_protocol::schema::v1::MessageId::new(message.id.clone()),
+                                    );
+                                let _ = cx.send_notification(SessionNotification::new(
+                                    request.session_id.clone(),
+                                    agent_client_protocol::schema::v1::SessionUpdate::AgentMessageChunk(chunk),
+                                ));
+                                state_for_prompt
+                                    .db
+                                    .release_lease(&session_id, &owner_for_prompt)
+                                    .await
+                                    .ok();
+                                return responder.respond(PromptResponse::new(StopReason::EndTurn));
+                            }
+
+                            // Call the McpPool method
+                            match state_for_prompt.mcp_pool.lock().await.disable_server(server_name) {
+                                 Ok(_) => {
+                                    let response_text = format!("Disabled MCP server: {}", server_name);
+                                    let message = state_for_prompt
+                                        .db
+                                        .append_message(
+                                            &turn.id,
+                                            crate::store::Role::Assistant,
+                                            &serde_json::json!([{ "type": "text", "text": response_text }])
+                                            .to_string(),
+                                            None,
+                                            None,
+                                            None,
+                                            None,
+                                        )
+                                        .await
+                                        .map_err(|err| Error::internal_error().data(err.to_string()))?;
+                                    let chunk =
+                                        agent_client_protocol::schema::v1::ContentChunk::new(ContentBlock::Text(
+                                            agent_client_protocol::schema::v1::TextContent::new(response_text),
+                                        ))
+                                        .message_id(
+                                            agent_client_protocol::schema::v1::MessageId::new(message.id.clone()),
+                                        );
+                                    let _ = cx.send_notification(SessionNotification::new(
+                                        request.session_id.clone(),
+                                        agent_client_protocol::schema::v1::SessionUpdate::AgentMessageChunk(chunk),
+                                    ));
+                                }
+                                Err(err) => {
+                                    let error_text = format!("Failed to disable MCP server {}: {}", server_name, err);
+                                    let message = state_for_prompt
+                                        .db
+                                        .append_message(
+                                            &turn.id,
+                                            crate::store::Role::Assistant,
+                                            &serde_json::json!([{ "type": "text", "text": error_text }])
+                                            .to_string(),
+                                            None,
+                                            None,
+                                            None,
+                                            None,
+                                        )
+                                        .await
+                                        .map_err(|err| Error::internal_error().data(err.to_string()))?;
+                                    let chunk =
+                                        agent_client_protocol::schema::v1::ContentChunk::new(ContentBlock::Text(
+                                            agent_client_protocol::schema::v1::TextContent::new(error_text),
+                                        ))
+                                        .message_id(
+                                            agent_client_protocol::schema::v1::MessageId::new(message.id.clone()),
+                                        );
+                                    let _ = cx.send_notification(SessionNotification::new(
+                                        request.session_id.clone(),
+                                        agent_client_protocol::schema::v1::SessionUpdate::AgentMessageChunk(chunk),
+                                    ));
+                                }
+                            }
+                            state_for_prompt
+                                .db
+                                .release_lease(&session_id, &owner_for_prompt)
+                                .await
+                                .ok();
+                            return responder.respond(PromptResponse::new(StopReason::EndTurn));
+                        }
+                        "status" => {
+                            let server_name = parts.get(2).copied().unwrap_or("");
+                            let statuses = state_for_prompt.mcp_pool.lock().await.statuses();
+                            let status_text = if server_name.is_empty() {
+                                // Show status of all servers
+                                let mut lines = Vec::new();
+                                for (name, (status, enabled)) in &statuses {
+                                    let status_str = match status {
+                                        ServerStatus::Connected => "connected".to_owned(),
+                                        ServerStatus::Failed { reason } => format!("failed ({reason})"),
+                                    };
+                                    let enabled_str = if *enabled { "enabled" } else { "disabled" };
+                                    lines.push(format!("{}: {} [{}]", name, status_str, enabled_str));
+                                }
+                                if lines.is_empty() {
+                                    "No MCP servers configured".to_owned()
+                                } else {
+                                    lines.join("\n")
+                                }
+                            } else {
+                                // Show status of specific server
+                                match statuses.get(server_name) {
+                                    Some((status, enabled)) => {
+                                        let status_str = match status {
+                                            ServerStatus::Connected => "connected".to_owned(),
+                                            ServerStatus::Failed { reason } => format!("failed ({reason})"),
+                                        };
+                                        let enabled_str = if *enabled { "enabled" } else { "disabled" };
+                                        format!("{}: {} [{}]", server_name, status_str, enabled_str)
+                                    }
+                                    None => format!("MCP server not found: {}", server_name),
+                                }
+                            };
                             let message = state_for_prompt
                                 .db
                                 .append_message(
                                     &turn.id,
                                     crate::store::Role::Assistant,
-                                    &serde_json::json!([{ "type": "text", "text": response_text }])
+                                    &serde_json::json!([{ "type": "text", "text": status_text }])
                                     .to_string(),
                                     None,
                                     None,
@@ -617,7 +862,7 @@ where
                                 .map_err(|err| Error::internal_error().data(err.to_string()))?;
                             let chunk =
                                 agent_client_protocol::schema::v1::ContentChunk::new(ContentBlock::Text(
-                                    agent_client_protocol::schema::v1::TextContent::new(response_text),
+                                    agent_client_protocol::schema::v1::TextContent::new(status_text),
                                 ))
                                 .message_id(
                                     agent_client_protocol::schema::v1::MessageId::new(message.id.clone()),
@@ -632,11 +877,11 @@ where
                                 .await
                                 .ok();
                             return responder.respond(PromptResponse::new(StopReason::EndTurn));
-                        }
-                        _ => {
-                            // Unknown subcommand, let normal processing continue
-                            // (the agent will likely respond with "unknown command")
-                        }
+                         }
+                         _ => {
+                             // Unknown subcommand, let normal processing continue
+                             // (the agent will likely respond with "unknown command")
+                         }
                     }
                 }
 
@@ -760,6 +1005,15 @@ where
                     return responder.respond(PromptResponse::new(StopReason::EndTurn));
                 }
 
+                // The model turn is long and awaits client messages
+                // (request_permission); the connection processes messages
+                // on one task, so the turn runs spawned, keeping the loop
+                // free to route the client's replies.
+                let cx = cx.clone();
+                let state_for_prompt = state_for_prompt.clone();
+                let owner_for_prompt = owner_for_prompt.clone();
+                let spawn_cx = cx.clone();
+                spawn_cx.spawn(async move {
                 let actor = state_for_prompt.definitions.actors.get(&actor_name);
                 let persona = actor.and_then(|a| {
                     state_for_prompt
@@ -767,7 +1021,22 @@ where
                         .personas
                         .get(&a.frontmatter.persona)
                 });
-                let system = persona.map(|p| p.body.clone()).unwrap_or_default();
+                let mcp_tokens = {
+                    let pool = state_for_prompt.mcp_pool.lock().await;
+                    pool.list_tools().await
+                };
+                let registry = crate::invokables::Registry::build(
+                    &state_for_prompt.definitions,
+                    &mcp_tokens,
+                )
+                .unwrap_or_default();
+                let tools = registry.model_tools();
+                // FR-012: the invokable listing rides the system prompt.
+                let mut system = persona.map(|p| p.body.clone()).unwrap_or_default();
+                if !tools.is_empty() {
+                    system.push_str("\n\n");
+                    system.push_str(&registry.manifest());
+                }
                 // The model: the shared resolution chain — metadata,
                 // actor frontmatter, [defaults].model, then the first
                 // listed selector option. Nothing left is a clear
@@ -803,7 +1072,19 @@ where
                     .map_err(|err| Error::internal_error().data(err.to_string()))?;
                 let prior: Vec<crate::agent::ChatMessage> =
                     compaction::prior_messages(&assembled, &turn.id);
-                let prompt_text = prompt_text_of(&blocks_json);
+                // FR-010: a user-typed `/name` prompt expands into the
+                // model prompt (the stored message stays literal).
+                let prompt_text = match first_text.strip_prefix('/') {
+                    Some(rest) => {
+                        let mut parts = rest.splitn(2, char::is_whitespace);
+                        let name = parts.next().unwrap_or("");
+                        let args = parts.next().unwrap_or("").trim();
+                        registry
+                            .expand_user(name, args)
+                            .unwrap_or_else(|_| prompt_text_of(&blocks_json))
+                    }
+                    None => prompt_text_of(&blocks_json),
+                };
 
                 let provider = crate::agent::provider::provider_for(
                     &model_ref,
@@ -848,7 +1129,7 @@ where
                     &system,
                     &prompt_text,
                     prior,
-                    Vec::new(),
+                    tools,
                     state_for_prompt
                         .config
                         .config
@@ -909,18 +1190,36 @@ where
                             ));
                         }
                     },
-                    move |_call: crate::agent::ModelToolCall| -> std::pin::Pin<
-                        Box<
-                            dyn std::future::Future<Output = crate::agent::ToolCallOutcome>
-                                + Send,
-                        >,
-                    > {
-                        Box::pin(async move {
-                            crate::agent::ToolCallOutcome {
-                                content: String::new(),
-                                is_error: true,
-                            }
-                        })
+                    // Model tool calls: announce, run the permission
+                    // pipeline, execute via the registry, report the result
+                    // back into the loop.
+                    {
+                        let registry = registry.clone();
+                        let state = state_for_prompt.clone();
+                        let cx = cx.clone();
+                        let session = request.session_id.clone();
+                        let actor = actor_name.clone();
+                        let sources = policy_script_sources(&state_for_prompt);
+                        move |call: crate::agent::ModelToolCall| -> std::pin::Pin<
+                            Box<
+                                dyn std::future::Future<
+                                        Output = crate::agent::ToolCallOutcome,
+                                    > + Send,
+                            >,
+                        > {
+                            let registry = registry.clone();
+                            let state = state.clone();
+                            let cx = cx.clone();
+                            let session = session.clone();
+                            let actor = actor.clone();
+                            let sources = sources.clone();
+                            Box::pin(async move {
+                                run_model_tool_call(
+                                    &registry, &state, &cx, &session, &actor, &sources, call,
+                                )
+                                .await
+                            })
+                        }
                     },
                 )
                 .await;
@@ -974,6 +1273,8 @@ where
                             .data(serde_json::json!({ "error": err.to_string() })),
                     ),
                 }
+                })?;
+                Ok(())
             },
             agent_client_protocol::on_receive_request!(),
         )
@@ -1313,6 +1614,200 @@ fn replay_updates(
 
 fn notification(session_id: &SessionId, update: SessionUpdate) -> SessionNotification {
     SessionNotification::new(session_id.clone(), update)
+}
+
+/// The registered `pre_tool_use` policy script sources (FR-015).
+fn policy_script_sources(state: &TackleState) -> Vec<String> {
+    let user_dir = state
+        .config
+        .user_layer
+        .as_deref()
+        .and_then(std::path::Path::parent);
+    state
+        .config
+        .config
+        .scripts
+        .values()
+        .filter(|script| {
+            script.enabled && script.events.iter().any(|event| event == "pre_tool_use")
+        })
+        .filter_map(|script| {
+            crate::builtins::script_source(&script.file)
+                .map(str::to_owned)
+                .or_else(|| {
+                    user_dir.and_then(|dir| {
+                        std::fs::read_to_string(dir.join("scripts").join(&script.file)).ok()
+                    })
+                })
+        })
+        .collect()
+}
+
+/// Runs one model tool call: announce it, run the permission pipeline,
+/// execute on allow, report the terminal status, and return the result
+/// for the next model request (FR-009/014).
+async fn run_model_tool_call(
+    registry: &crate::invokables::Registry,
+    state: &Arc<TackleState>,
+    cx: &agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
+    session_id: &SessionId,
+    actor: &str,
+    policy_sources: &[String],
+    call: crate::agent::ModelToolCall,
+) -> crate::agent::ToolCallOutcome {
+    use agent_client_protocol::schema::v1;
+    let arguments: serde_json::Value =
+        serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
+    let kind = if call.name.starts_with("mcp.") {
+        "mcp"
+    } else if call.name.starts_with("prompt.") {
+        "prompt"
+    } else {
+        "agent"
+    };
+
+    let _ = cx.send_notification(SessionNotification::new(
+        session_id.clone(),
+        SessionUpdate::ToolCall(
+            v1::ToolCall::new(v1::ToolCallId::new(call.id.clone()), call.name.clone())
+                .status(v1::ToolCallStatus::InProgress)
+                .raw_input(Some(arguments.clone())),
+        ),
+    ));
+
+    let policy = crate::scripts::PolicyScripts::load(policy_sources);
+    let requester = AcpPermissionRequester {
+        cx: cx.clone(),
+        session_id: session_id.clone(),
+    };
+    let verdict = {
+        let mut grants = state.grants.lock().await;
+        let assessment = crate::permissions::Assessment {
+            session_id: session_id.to_string(),
+            actor: actor.to_owned(),
+            invokable: call.name.clone(),
+            kind,
+            arguments: arguments.clone(),
+            interactive: true,
+        };
+        let mut pipeline =
+            crate::permissions::PermissionPipeline::new(&mut grants, &policy, &requester);
+        pipeline.assess(&assessment).await
+    };
+
+    let (content, is_error) = match verdict {
+        crate::permissions::Verdict::Allow => {
+            let pool = state.mcp_pool.lock().await;
+            match registry.execute_model(&pool, &call.name, &arguments).await {
+                Ok(text) => (text, false),
+                Err(err) => (err, true),
+            }
+        }
+        crate::permissions::Verdict::Deny { reason } => {
+            (format!("Permission denied: {reason}"), true)
+        }
+    };
+
+    let status = if is_error {
+        v1::ToolCallStatus::Failed
+    } else {
+        v1::ToolCallStatus::Completed
+    };
+    let _ = cx.send_notification(SessionNotification::new(
+        session_id.clone(),
+        SessionUpdate::ToolCallUpdate(v1::ToolCallUpdate::new(
+            v1::ToolCallId::new(call.id.clone()),
+            v1::ToolCallUpdateFields::new().status(status).content(vec![
+                v1::ToolCallContent::from(v1::ContentBlock::Text(v1::TextContent::new(
+                    content.clone(),
+                ))),
+            ]),
+        )),
+    ));
+
+    crate::agent::ToolCallOutcome { content, is_error }
+}
+
+/// The ACP `session/request_permission` bridge (FR-014).
+struct AcpPermissionRequester {
+    cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
+    session_id: SessionId,
+}
+
+fn permission_option_id(choice: crate::permissions::PermissionChoice) -> &'static str {
+    use crate::permissions::PermissionChoice as C;
+    match choice {
+        C::AllowOnce => "allow_once",
+        C::AllowAlways => "allow_always",
+        C::RejectOnce => "reject_once",
+        C::RejectAlways => "reject_always",
+        C::Cancelled => "cancelled",
+    }
+}
+
+fn permission_option_kind(
+    choice: crate::permissions::PermissionChoice,
+) -> agent_client_protocol::schema::v1::PermissionOptionKind {
+    use crate::permissions::PermissionChoice as C;
+    use agent_client_protocol::schema::v1::PermissionOptionKind as K;
+    match choice {
+        C::AllowOnce => K::AllowOnce,
+        C::AllowAlways => K::AllowAlways,
+        C::RejectOnce => K::RejectOnce,
+        C::RejectAlways => K::RejectAlways,
+        C::Cancelled => K::RejectOnce,
+    }
+}
+
+impl crate::permissions::PermissionRequester for AcpPermissionRequester {
+    fn request(
+        &self,
+        request: crate::permissions::PermissionRequest,
+    ) -> impl std::future::Future<Output = crate::permissions::PermissionChoice> + Send {
+        use agent_client_protocol::schema::v1;
+        let choices = crate::permissions::ask_options();
+        let options: Vec<v1::PermissionOption> = choices
+            .iter()
+            .map(|(label, choice)| {
+                v1::PermissionOption::new(
+                    permission_option_id(*choice),
+                    (*label).to_owned(),
+                    permission_option_kind(*choice),
+                )
+            })
+            .collect();
+        let mut fields = v1::ToolCallUpdateFields::new()
+            .name(request.invokable.clone())
+            .title(request.invokable.clone());
+        if let Some(reason) = &request.ask_reason {
+            fields = fields.content(vec![v1::ToolCallContent::from(v1::ContentBlock::Text(
+                v1::TextContent::new(reason.clone()),
+            ))]);
+        }
+        let tool_call = v1::ToolCallUpdate::new(
+            v1::ToolCallId::new(format!("ask-{}", request.invokable)),
+            fields,
+        );
+        let acp_request =
+            v1::RequestPermissionRequest::new(self.session_id.clone(), tool_call, options);
+        let cx = self.cx.clone();
+        async move {
+            match cx.send_request(acp_request).block_task().await {
+                Ok(response) => match response.outcome {
+                    v1::RequestPermissionOutcome::Selected(selected) => {
+                        let id = selected.option_id.0.to_string();
+                        choices
+                            .iter()
+                            .find(|(_, choice)| permission_option_id(*choice) == id)
+                            .map(|(_, choice)| *choice)
+                            .unwrap_or(crate::permissions::PermissionChoice::Cancelled)
+                    }
+                    _ => crate::permissions::PermissionChoice::Cancelled,
+                },
+                Err(_) => crate::permissions::PermissionChoice::Cancelled,
+            }
+        }
+    }
 }
 
 /// The session's selected actor: created in session metadata, falling
