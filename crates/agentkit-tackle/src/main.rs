@@ -95,10 +95,19 @@ async fn run(args: cli::Cli) -> ExitCode {
         Err(err) => return fail(err),
     };
 
+    let mut mcp_pool = McpPool::with_sink(agent_client_protocol::schema::v1::agent::agent::NullSink);
+    // Configure the MCP pool with servers from the loaded configuration
+    for (server_name, server_config) in &loaded.config.mcp_servers {
+        // Initialize all configured servers as enabled by default
+        mcp_pool.enabled.insert(server_name.clone(), true);
+        // TODO: Actually configure the connection details for each server
+        // For MVP command handling, we just need the enabled tracking
+    }
     let state = Arc::new(TackleState {
         db: Arc::new(db),
         config: loaded,
         definitions,
+        mcp_pool,
     });
 
     match bind {
