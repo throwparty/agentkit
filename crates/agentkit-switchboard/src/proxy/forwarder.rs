@@ -298,6 +298,7 @@ mod tests {
             base_url: "http://example.com",
             provider_identity: "test_provider",
             session_id: None,
+            provider_user_agent: None,
         };
 
         // Act
@@ -310,5 +311,42 @@ mod tests {
         assert!(user_agent_str.starts_with("agentkit-switchboard/"));
         // Ensure the original user-agent was filtered out
         assert!(!captured_headers.keys().any(|k| k == "user-agent" && captured_headers.get(k).unwrap() == "test-client/1.0"));
+    }
+
+    #[tokio::test]
+    async fn forwards_provider_specific_user_agent() {
+        // Arrange
+        let mock_endpoint = MockHttpEndpoint::new();
+        let credential = ResolvedCredential {
+            value: "test-token".to_string(),
+            source: crate::credential::CredentialSource::None,
+            oauth: None,
+        };
+        let billing = BillingModel::Subscription;
+        let mut headers = HeaderMap::new();
+        headers.insert("content-type", HeaderValue::from_static("application/json"));
+
+        let request = ForwardRequest {
+            method: Method::POST,
+            headers,
+            body: axum::body::Bytes::from(r#"{"test": "data"}"#),
+            credential: &credential,
+            billing: &billing,
+            base_url: "http://example.com",
+            provider_identity: "test_provider",
+            session_id: None,
+            provider_user_agent: Some("custom-agent/1.0"),
+        };
+
+        // Act
+        let _ = forward_request(request, &mock_endpoint).await;
+
+        // Assert
+        let captured_headers = mock_endpoint.captured_headers.lock().unwrap().clone().unwrap();
+        let user_agent = captured_headers.get("user-agent").unwrap();
+        let user_agent_str = user_agent.to_str().unwrap();
+        assert_eq!(user_agent_str, "custom-agent/1.0");
+        // Ensure the default user-agent was not used
+        assert!(!user_agent_str.starts_with("agentkit-switchboard/"));
     }
 }

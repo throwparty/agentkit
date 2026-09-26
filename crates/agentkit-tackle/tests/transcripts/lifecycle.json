@@ -1,0 +1,71 @@
+{
+  "description": "Initialize and session lifecycle over the raw JSON-RPC wire",
+  "steps": [
+    {
+      "method": "initialize",
+      "params": {
+        "protocolVersion": 1,
+        "clientCapabilities": {}
+      },
+      "expect": {
+        "result": {
+          "protocolVersion": 1,
+          "agentCapabilities": {
+            "loadSession": true,
+            "sessionCapabilities": {
+              "list": {},
+              "close": {},
+              "resume": {},
+              "delete": {}
+            }
+          },
+          "authMethods": []
+        }
+      }
+    },
+    {
+      "method": "session/new",
+      "params": {
+        "cwd": "/work",
+        "mcpServers": []
+      },
+      "expect": {
+        "result": {
+          "sessionId": "sess_*"
+        }
+      }
+    },
+    {
+      "method": "session/list",
+      "expect": {
+        "result": {}
+      }
+    },
+    {
+      "method": "session/close",
+      "params": {
+        "sessionId": "$sessionId"
+      },
+      "expect": {
+        "result": {}
+      }
+    },
+    {
+      "method": "session/delete",
+      "params": {
+        "sessionId": "$sessionId"
+      },
+      "expect": {
+        "result": {}
+      }
+    },
+    {
+      "method": "session/list",
+      "expect": {
+        "result": {
+          "sessions": []
+        }
+      }
+    }
+  ]
+}

@@ -20,6 +20,13 @@ builds:
       - --release
       - --package=agentkit-litterbox
     targets: *default_targets
+  - id: tackle
+    binary: agentkit-tackle
+    builder: rust
+    flags:
+      - --release
+      - --package=agentkit-tackle
+    targets: *default_targets
 
 archives:
   - formats: [tar.gz, zip]
