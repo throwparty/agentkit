@@ -1,6 +1,7 @@
 //! Tackle: ACP-native agentic coding harness. Binary entrypoint.
 
 use agentkit_tackle::acp::{self, TackleState};
+use agentkit_tackle::mcp::McpPool;
 use agentkit_tackle::store::SessionStore;
 use agentkit_tackle::{cli, config, loader, telemetry};
 use clap::Parser;
@@ -95,19 +96,42 @@ async fn run(args: cli::Cli) -> ExitCode {
         Err(err) => return fail(err),
     };
 
-    let mut mcp_pool = McpPool::with_sink(agent_client_protocol::schema::v1::agent::agent::NullSink);
-    // Configure the MCP pool with servers from the loaded configuration
+    // Every configured server is registered, then connected
+    // concurrently: a dead server must not hold up the rest, and a
+    // failure is a status rather than a startup error. Connections are
+    // made on throwaway single-server pools — `connect` needs unique
+    // access — and folded back in. Each is registered enabled, so
+    // `/mcp disable` is the only thing that takes one offline.
+    let helper = agentkit_tackle::agent::provider::credential_helper_name(&loaded.config);
+    let new_pool = || McpPool::new().with_credential_helper(helper.clone());
+    let mut mcp_pool = new_pool();
     for (server_name, server_config) in &loaded.config.mcp_servers {
-        // Initialize all configured servers as enabled by default
-        mcp_pool.enabled.insert(server_name.clone(), true);
-        // TODO: Actually configure the connection details for each server
-        // For MVP command handling, we just need the enabled tracking
+        mcp_pool.register(server_name, server_config.clone());
     }
+    let connecting = loaded
+        .config
+        .mcp_servers
+        .iter()
+        .map(|(server_name, server_config)| {
+            let server_name = server_name.clone();
+            let server_config = server_config.clone();
+            let mut one = new_pool();
+            one.register(&server_name, server_config.clone());
+            async move {
+                one.connect(&server_name, &server_config).await;
+                one
+            }
+        })
+        .collect::<Vec<_>>();
+    for connected in futures::future::join_all(connecting).await {
+        mcp_pool.absorb(connected);
+    }
+    tracing::info!(servers = mcp_pool.server_names().len(), "mcp pool ready");
     let state = Arc::new(TackleState {
         db: Arc::new(db),
         config: loaded,
         definitions,
-        mcp_pool,
+        mcp_pool: tokio::sync::Mutex::new(mcp_pool),
     });
 
     match bind {
