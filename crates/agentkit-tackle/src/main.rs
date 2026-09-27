@@ -99,14 +99,37 @@ async fn run(args: cli::Cli) -> ExitCode {
         Err(err) => return fail(err),
     };
 
-    let mut mcp_pool = McpPool::new();
-    // Configure the MCP pool with servers from the loaded configuration
-    for server_name in loaded.config.mcp_servers.keys() {
-        // Initialize all configured servers as enabled by default
-        mcp_pool.enabled.insert(server_name.clone(), true);
-        // TODO: Actually configure the connection details for each server
-        // For MVP command handling, we just need the enabled tracking
+    // Every configured server is registered, then connected
+    // concurrently: a dead server must not hold up the rest, and a
+    // failure is a status rather than a startup error. Connections are
+    // made on throwaway single-server pools — `connect` needs unique
+    // access — and folded back in. Each is registered enabled, so
+    // `/mcp disable` is the only thing that takes one offline.
+    let helper = agentkit_tackle::agent::provider::credential_helper_name(&loaded.config);
+    let new_pool = || McpPool::new().with_credential_helper(helper.clone());
+    let mut mcp_pool = new_pool();
+    for (server_name, server_config) in &loaded.config.mcp_servers {
+        mcp_pool.register(server_name, server_config.clone());
     }
+    let connecting = loaded
+        .config
+        .mcp_servers
+        .iter()
+        .map(|(server_name, server_config)| {
+            let server_name = server_name.clone();
+            let server_config = server_config.clone();
+            let mut one = new_pool();
+            one.register(&server_name, server_config.clone());
+            async move {
+                one.connect(&server_name, &server_config).await;
+                one
+            }
+        })
+        .collect::<Vec<_>>();
+    for connected in futures::future::join_all(connecting).await {
+        mcp_pool.absorb(connected);
+    }
+    tracing::info!(servers = mcp_pool.server_names().len(), "mcp pool ready");
     let state = Arc::new(TackleState {
         db: Arc::new(db),
         config: loaded,
