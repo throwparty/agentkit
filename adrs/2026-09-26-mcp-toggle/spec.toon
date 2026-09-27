@@ -1,5 +1,5 @@
 title: Toggling of Configured MCP Server Availability
-status: draft
+status: implemented
 created: 2026-09-26
 author: Luke Carrier
 context: The tackle agent currently connects to all configured MCP servers automatically and maintains persistent connections. There is no mechanism to temporarily disable or re-enable individual MCP servers without modifying configuration files and restarting the agent. This limits operational flexibility for maintenance, troubleshooting, or resource management.
