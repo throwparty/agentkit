@@ -264,6 +264,7 @@ mod tests {
             db: Arc::clone(db),
             config: crate::config::Loaded::default(),
             definitions: crate::loader::Definitions::default().with_builtins(),
+            mcp_pool: tokio::sync::Mutex::new(crate::mcp::McpPool::new()),
         })
     }
 
@@ -327,6 +328,7 @@ mod tests {
             db: Arc::clone(&db),
             config,
             definitions: crate::loader::Definitions::default().with_builtins(),
+            mcp_pool: tokio::sync::Mutex::new(crate::mcp::McpPool::new()),
         });
         let access: Arc<dyn SessionAccess> = Arc::new(StoreAccess::new(
             Arc::clone(&db),

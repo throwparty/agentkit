@@ -8,6 +8,7 @@
 
 use crate::config::Loaded;
 use crate::loader::Definitions;
+use crate::mcp::{McpPool, ServerStatus};
 use crate::store::SessionStore;
 
 pub mod compaction;
@@ -25,8 +26,8 @@ use agent_client_protocol::schema::v1::{
     SessionInfo, SessionListCapabilities, SessionNotification, SessionResumeCapabilities,
     SessionUpdate,
 };
+use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{Agent, Error, Stdio};
-use futures::executor;
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
@@ -94,7 +95,12 @@ pub struct TackleState {
     pub db: std::sync::Arc<SessionStore>,
     pub config: Loaded,
     pub definitions: Definitions,
-    pub mcp_pool: McpPool<agent_client_protocol::schema::v1::agent::agent::NullSink>,
+    /// The MCP pool, shared across every session on this connection and
+    /// mutable: `/mcp` toggles server availability at runtime, so a turn
+    /// changes what later turns can call. The default sink is
+    /// fail-closed, so an elicitation no client surface answers is
+    /// declined rather than blocking a turn.
+    pub mcp_pool: tokio::sync::Mutex<McpPool>,
 }
 
 impl TackleState {
@@ -136,14 +142,18 @@ fn wire_session_id(id: &crate::store::SessionId) -> SessionId {
 /// The `available_commands_update` payload for a session: the registry
 /// view over the loaded definitions — the `!` prefix command plus every
 /// user-invokable prompt, with parameter hints from frontmatter. The
-/// registry carries no MCP tools here; individual tools are never
-/// advertised as commands (only reached through `/!`).
-fn available_commands_update(state: &TackleState) -> SessionUpdate {
-    // Get the actual MCP tools from the pool
-    let mcp_tokens = futures::executor::block_on(state.mcp_pool.list_tools());
-    let mcp_tool_names: Vec<NamespacedTool> = mcp_tokens.into_iter().map(|t| t.namespaced).collect();
-    
-    let registry = match crate::invokables::Registry::build(&state.definitions, &mcp_tool_names) {
+/// registry carries the pool's MCP tools here; individual tools are
+/// never advertised as commands (only reached through `/!`).
+///
+/// The tool listing is per-connection state, not configuration, so it is
+/// read live: a server disabled by `/mcp disable` drops out of the
+/// listing for the rest of the connection.
+async fn available_commands_update(state: &TackleState) -> SessionUpdate {
+    let pool = state.mcp_pool.lock().await;
+    let mcp_tools = pool.list_tools().await;
+    drop(pool);
+
+    let registry = match crate::invokables::Registry::build(&state.definitions, &mcp_tools) {
         Ok(registry) => registry,
         Err(err) => {
             // Namespaced keys over BTreeMap definitions cannot collide;
@@ -164,6 +174,75 @@ fn store_session_id(id: &SessionId) -> String {
         .strip_prefix("sess_")
         .unwrap_or(id.to_string().as_str())
         .to_owned()
+}
+
+/// One server's line in the `/mcp status` report. A disabled server
+/// reads as disabled and carries no connection state: disabling closes
+/// the connection, so a status alongside it would be noise.
+fn mcp_status_line(name: &str, status: &ServerStatus, enabled: bool) -> String {
+    if !enabled {
+        return format!("{name}: disabled");
+    }
+    match status {
+        ServerStatus::Connected => format!("{name}: connected"),
+        ServerStatus::Failed { reason } => format!("{name}: failed ({reason})"),
+    }
+}
+
+/// Handles a `/mcp` command, returning the text to answer the turn with,
+/// or `None` for a subcommand that is not ours so the caller can fall
+/// through to normal processing.
+///
+/// The user is the authority on availability, so a disabled server is
+/// one keystroke away from being off for the rest of the connection and
+/// one from being back. Enabling reconnects from the config held at
+/// registration; a failure to reconnect answers with the reason rather
+/// than leaving the user guessing.
+async fn mcp_command(state: &TackleState, first_text: &str) -> Option<String> {
+    let mut parts = first_text.split_whitespace();
+    parts.next(); // the `/mcp` command itself
+    let (subcommand, argument) = match parts.next() {
+        None => return Some("Usage: /mcp <enable|disable|status> [server-name]".to_owned()),
+        Some(subcommand) => (subcommand, parts.next()),
+    };
+
+    let mut pool = state.mcp_pool.lock().await;
+    match subcommand {
+        "enable" => Some(match argument {
+            None => "Usage: /mcp enable <server-name>".to_owned(),
+            Some(name) => match pool.enable_server(name).await {
+                Ok(()) if pool.is_connected(name) => format!("Enabled MCP server: {name}"),
+                Ok(()) => format!("Enabled MCP server: {name} (not connected)"),
+                Err(err) => format!("Failed to enable MCP server {name}: {err}"),
+            },
+        }),
+        "disable" => Some(match argument {
+            None => "Usage: /mcp disable <server-name>".to_owned(),
+            Some(name) => match pool.disable_server(name) {
+                Ok(()) => format!("Disabled MCP server: {name}"),
+                Err(err) => format!("Failed to disable MCP server {name}: {err}"),
+            },
+        }),
+        "status" => Some(match argument {
+            None => {
+                let statuses = pool.statuses();
+                if statuses.is_empty() {
+                    "No MCP servers configured".to_owned()
+                } else {
+                    statuses
+                        .iter()
+                        .map(|(name, (status, enabled))| mcp_status_line(name, status, *enabled))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                }
+            }
+            Some(name) => match pool.statuses().get(name) {
+                Some((status, enabled)) => mcp_status_line(name, status, *enabled),
+                None => format!("MCP server not found: {name}"),
+            },
+        }),
+        _ => None,
+    }
 }
 
 /// Runs the ACP agent over stdio until the transport closes.
@@ -335,7 +414,7 @@ where
                     }
                 }
                 let wire_id = wire_session_id(&session.id);
-                let commands = available_commands_update(&state_for_new);
+                let commands = available_commands_update(&state_for_new).await;
                 let response =
                     NewSessionResponse::new(wire_id.clone()).config_options(selectors.options);
                 // Zed drops session updates that arrive before the
@@ -557,34 +636,43 @@ where
                     return responder.respond(PromptResponse::new(StopReason::EndTurn));
                 }
 
-                // Handle /mcp slash commands for MCP server management
-                if first_text.starts_with("/mcp ") {
-                    // Parse the command: /mcp <subcommand> [args...]
-                    let parts: Vec<&str> = first_text.split_whitespace().collect();
-                    if parts.len() < 2 {
-                        // Not enough parts for a subcommand
+                // Runtime MCP server availability: `/mcp` is handled
+                // before any model request. An unrecognised
+                // subcommand yields no reply and falls through to
+                // normal processing.
+                if first_text == "/mcp" || first_text.starts_with("/mcp ") {
+                    if let Some(reply) = mcp_command(&state_for_prompt, &first_text).await {
                         let message = state_for_prompt
                             .db
                             .append_message(
                                 &turn.id,
                                 crate::store::Role::Assistant,
-                                &serde_json::json!([{ "type": "text", "text": "Usage: /mcp <enable|disable|status> [server-name]" }])
-                                .to_string(),
+                                &serde_json::json!([{ "type": "text", "text": reply }])
+                                    .to_string(),
+                                None,
+                                None,
+                                None,
+                                None,
                             )
                             .await
                             .map_err(|err| Error::internal_error().data(err.to_string()))?;
                         let chunk =
                             agent_client_protocol::schema::v1::ContentChunk::new(ContentBlock::Text(
-                                agent_client_protocol::schema::v1::TextContent::new(
-                                    "Usage: /mcp <enable|disable|status> [server-name]".to_owned(),
-                                ),
+                                agent_client_protocol::schema::v1::TextContent::new(reply),
                             ))
-                            .message_id(
-                                agent_client_protocol::schema::v1::MessageId::new(message.id.clone()),
-                            );
+                            .message_id(agent_client_protocol::schema::v1::MessageId::new(
+                                message.id.clone(),
+                            ));
                         let _ = cx.send_notification(SessionNotification::new(
                             request.session_id.clone(),
                             agent_client_protocol::schema::v1::SessionUpdate::AgentMessageChunk(chunk),
+                        ));
+                        // The tool surface changed shape, so the command
+                        // listing is republished for the session.
+                        let commands = available_commands_update(&state_for_prompt).await;
+                        let _ = cx.send_notification(SessionNotification::new(
+                            request.session_id.clone(),
+                            commands,
                         ));
                         state_for_prompt
                             .db
@@ -592,263 +680,6 @@ where
                             .await
                             .ok();
                         return responder.respond(PromptResponse::new(StopReason::EndTurn));
-                    }
-
-                    let subcommand = parts[1];
-                    match subcommand {
-                        "enable" => {
-                            let server_name = parts.get(2).copied().unwrap_or("");
-                            if server_name.is_empty() {
-                                let message = state_for_prompt
-                                    .db
-                                    .append_message(
-                                        &turn.id,
-                                        crate::store::Role::Assistant,
-                                        &serde_json::json!([{ "type": "text", "text": "Usage: /mcp enable <server-name>" }])
-                                        .to_string(),
-                                    )
-                                    .await
-                                    .map_err(|err| Error::internal_error().data(err.to_string()))?;
-                                let chunk =
-                                    agent_client_protocol::schema::v1::ContentChunk::new(ContentBlock::Text(
-                                        agent_client_protocol::schema::v1::TextContent::new(
-                                            "Usage: /mcp enable <server-name>".to_owned(),
-                                        ),
-                                    ))
-                                    .message_id(
-                                        agent_client_protocol::schema::v1::MessageId::new(message.id.clone()),
-                                    );
-                                let _ = cx.send_notification(SessionNotification::new(
-                                    request.session_id.clone(),
-                                    agent_client_protocol::schema::v1::SessionUpdate::AgentMessageChunk(chunk),
-                                ));
-                                state_for_prompt
-                                    .db
-                                    .release_lease(&session_id, &owner_for_prompt)
-                                    .await
-                                    .ok();
-                                return responder.respond(PromptResponse::new(StopReason::EndTurn));
-                            }
-                            
-                            // Call the McpPool method
-                            match state_for_prompt.mcp_pool.enable_server(server_name) {
-                                Ok(_) => {
-                                    let response_text = format!("Enabled MCP server: {}", server_name);
-                                    let message = state_for_prompt
-                                        .db
-                                        .append_message(
-                                            &turn.id,
-                                            crate::store::Role::Assistant,
-                                            &serde_json::json!([{ "type": "text", "text": response_text }])
-                                            .to_string(),
-                                        )
-                                        .await
-                                        .map_err(|err| Error::internal_error().data(err.to_string()))?;
-                                    let chunk =
-                                        agent_client_protocol::schema::v1::ContentChunk::new(ContentBlock::Text(
-                                            agent_client_protocol::schema::v1::TextContent::new(response_text),
-                                        ))
-                                        .message_id(
-                                            agent_client_protocol::schema::v1::MessageId::new(message.id.clone()),
-                                        );
-                                    let _ = cx.send_notification(SessionNotification::new(
-                                        request.session_id.clone(),
-                                        agent_client_protocol::schema::v1::SessionUpdate::AgentMessageChunk(chunk),
-                                    ));
-                                }
-                                Err(err) => {
-                                    let error_text = format!("Failed to enable MCP server {}: {}", server_name, err);
-                                    let message = state_for_prompt
-                                        .db
-                                        .append_message(
-                                            &turn.id,
-                                            crate::store::Role::Assistant,
-                                            &serde_json::json!([{ "type": "text", "text": error_text }])
-                                            .to_string(),
-                                        )
-                                        .await
-                                        .map_err(|err| Error::internal_error().data(err.to_string()))?;
-                                    let chunk =
-                                        agent_client_protocol::schema::v1::ContentChunk::new(ContentBlock::Text(
-                                            agent_client_protocol::schema::v1::TextContent::new(error_text),
-                                        ))
-                                        .message_id(
-                                            agent_client_protocol::schema::v1::MessageId::new(message.id.clone()),
-                                        );
-                                    let _ = cx.send_notification(SessionNotification::new(
-                                        request.session_id.clone(),
-                                        agent_client_protocol::schema::v1::SessionUpdate::AgentMessageChunk(chunk),
-                                    ));
-                                }
-                            }
-                            state_for_prompt
-                                .db
-                                .release_lease(&session_id, &owner_for_prompt)
-                                .await
-                                .ok();
-                            return responder.respond(PromptResponse::new(StopReason::EndTurn));
-                        }
-                        "disable" => {
-                            let server_name = parts.get(2).copied().unwrap_or("");
-                            if server_name.is_empty() {
-                                let message = state_for_prompt
-                                    .db
-                                    .append_message(
-                                        &turn.id,
-                                        crate::store::Role::Assistant,
-                                        &serde_json::json!([{ "type": "text", "text": "Usage: /mcp disable <server-name>" }])
-                                        .to_string(),
-                                    )
-                                    .await
-                                    .map_err(|err| Error::internal_error().data(err.to_string()))?;
-                                let chunk =
-                                    agent_client_protocol::schema::v1::ContentChunk::new(ContentBlock::Text(
-                                        agent_client_protocol::schema::v1::TextContent::new(
-                                            "Usage: /mcp disable <server-name>".to_owned(),
-                                        ),
-                                    ))
-                                    .message_id(
-                                        agent_client_protocol::schema::v1::MessageId::new(message.id.clone()),
-                                    );
-                                let _ = cx.send_notification(SessionNotification::new(
-                                    request.session_id.clone(),
-                                    agent_client_protocol::schema::v1::SessionUpdate::AgentMessageChunk(chunk),
-                                ));
-                                state_for_prompt
-                                    .db
-                                    .release_lease(&session_id, &owner_for_prompt)
-                                    .await
-                                    .ok();
-                                return responder.respond(PromptResponse::new(StopReason::EndTurn));
-                            }
-                            
-                            // Call the McpPool method
-                            match state_for_prompt.mcp_pool.disable_server(server_name) {
-                                 Ok(_) => {
-                                    let response_text = format!("Disabled MCP server: {}", server_name);
-                                    let message = state_for_prompt
-                                        .db
-                                        .append_message(
-                                            &turn.id,
-                                            crate::store::Role::Assistant,
-                                            &serde_json::json!([{ "type": "text", "text": response_text }])
-                                            .to_string(),
-                                        )
-                                        .await
-                                        .map_err(|err| Error::internal_error().data(err.to_string()))?;
-                                    let chunk =
-                                        agent_client_protocol::schema::v1:ContentChunk::new(ContentBlock::Text(
-                                            agent_client_protocol::schema::v1:TextContent::new(response_text),
-                                        ))
-                                        .message_id(
-                                            agent_client_protocol::schema::v1:MessageId::new(message.id.clone()),
-                                        );
-                                    let _ = cx.send_notification(SessionNotification::new(
-                                        request.session_id.clone(),
-                                        agent_client_protocol::schema::v1:SessionUpdate::AgentMessageChunk(chunk),
-                                    ));
-                                }
-                                }
-                                Err(err) => {
-                                    let error_text = format!("Failed to disable MCP server {}: {}", server_name, err);
-                                    let message = state_for_prompt
-                                        .db
-                                        .append_message(
-                                            &turn.id,
-                                            crate::store::Role::Assistant,
-                                            &serde_json::json!([{ "type": "text", "text": error_text }])
-                                            .to_string(),
-                                        )
-                                        .await
-                                        .map_err(|err| Error::internal_error().data(err.to_string()))?;
-                                    let chunk =
-                                        agent_client_protocol::schema::v1::ContentChunk::new(ContentBlock::Text(
-                                            agent_client_protocol::schema::v1::TextContent::new(error_text),
-                                        ))
-                                        .message_id(
-                                            agent_client_protocol::schema::v1::MessageId::new(message.id.clone()),
-                                        );
-                                    let _ = cx.send_notification(SessionNotification::new(
-                                        request.session_id.clone(),
-                                        agent_client_protocol::schema::v1:SessionUpdate::AgentMessageChunk(chunk),
-                                    ));
-                                }
-                            }
-                            state_for_prompt
-                                .db
-                                .release_lease(&session_id, &owner_for_prompt)
-                                .await
-                                .ok();
-                            return responder.respond(PromptResponse::new(StopReason::EndTurn));
-                        }
-                        "status" => {
-                            let server_name = parts.get(2).copied().unwrap_or("");
-                            let status_text = if server_name.is_empty() {
-                                // Show status of all servers
-                                let mut lines = Vec::new();
-                                for (name, &(status, enabled)) in state_for_prompt.mcp_pool.statuses().iter() {
-                                    let status_str = match status {
-                                        ServerStatus::Connected => "connected",
-                                        ServerStatus::Failed { reason } => format!("failed ({reason})"),
-                                    };
-                                    let enabled_str = if enabled { "enabled" } else { "disabled" };
-                                    lines.push(format!("{}: {} [{}]", name, status_str, enabled_str));
-                                }
-                                if lines.is_empty() {
-                                    "No MCP servers configured".to_owned()
-                                } else {
-                                    lines.join("\n")
-                                }
-                            } else {
-                                // Show status of specific server
-                                match state_for_prompt.mcp_pool.statuses().get(server_name) {
-                                    Some(&(status, enabled)) => {
-                                        let status_str = match status {
-                                            ServerStatus::Connected => "connected",
-                                            ServerStatus::Failed { reason } => format!("failed ({reason})"),
-                                        };
-                                        let enabled_str = if enabled { "enabled" } else { "disabled" };
-                                        format!("{}: {} [{}]", server_name, status_str, enabled_str)
-                                    }
-                                    None => format!("MCP server not found: {}", server_name),
-                                }
-                            };
-                            let message = state_for_prompt
-                                .db
-                                .append_message(
-                                    &turn.id,
-                                    crate::store::Role::Assistant,
-                                    &serde_json::json!([{ "type": "text", "text": status_text }])
-                                    .to_string(),
-                                )
-                                .await
-                                .map_err(|err| Error::internal_error().data(err.to_string()))?;
-                            let chunk =
-                                agent_client_protocol::schema::v1:ContentChunk::new(ContentBlock::Text(
-                                    agent_client_protocol::schema::v1:TextContent::new(status_text),
-                                ))
-                                .message_id(
-                                    agent_client_protocol::schema::v1:MessageId::new(message.id.clone()),
-                                );
-                            let _ = cx.send_notification(SessionNotification::new(
-                                request.session_id.clone(),
-                                agent_client_protocol::schema::v1:SessionUpdate::AgentMessageChunk(chunk),
-                            ));
-                            state_for_prompt
-                                .db
-                                .release_lease(&session_id, &owner_for_prompt)
-                                .await
-                                .ok();
-                            return responder.respond(PromptResponse::new(StopReason::EndTurn));
-                         }
-                         _ => {
-                             // Unknown subcommand, let normal processing continue
-                             // (the agent will likely respond with "unknown command")
-                         }
-                     }
-                            // Unknown subcommand, let normal processing continue
-                            // (the agent will likely respond with "unknown command")
-                        }
                     }
                 }
 
@@ -1214,7 +1045,7 @@ where
                     .map_err(|err| Error::internal_error().data(err.to_string()))?
                     .ok_or_else(|| Error::internal_error().data("no such session".to_owned()))?;
                 let selectors = config_options::build(&state_for_load, &session).await;
-                let commands = available_commands_update(&state_for_load);
+                let commands = available_commands_update(&state_for_load).await;
                 responder.respond(
                     LoadSessionResponse::new().config_options(selectors.options),
                 )?;
