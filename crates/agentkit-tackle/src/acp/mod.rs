@@ -644,7 +644,7 @@ where
                             }
 
                             // Call the McpPool method
-                            match state_for_prompt.mcp_pool.lock().await.enable_server(server_name) {
+                            match state_for_prompt.mcp_pool.lock().await.enable_server(server_name).await {
                                 Ok(_) => {
                                     let response_text = format!("Enabled MCP server: {}", server_name);
                                     let message = state_for_prompt
