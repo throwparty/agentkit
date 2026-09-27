@@ -1,5 +1,5 @@
 title: Toggling of Configured MCP Server Availability - Implementation Tasks
-status: draft
+status: completed
 created: 2026-09-26
 author: Luke Carrier
 items[8]{id,title,description,criteria,complexity,effort,dependencies,refs}:
