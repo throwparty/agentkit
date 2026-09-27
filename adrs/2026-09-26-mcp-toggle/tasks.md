@@ -15,7 +15,7 @@ Add enabled: BTreeMap<String, bool> field to McpPool struct and initialize all c
 | Depends On |  |
 | References | FR-001,FR-002,FR-003,FR-004 |
 
-### T-002: Modify McpPool connection logic
+### T-002: [x] Modify McpPool connection logic
 
 Update McpPool::connect method to skip servers where enabled.get(server) == Some(false)
 
@@ -28,7 +28,7 @@ Update McpPool::connect method to skip servers where enabled.get(server) == Some
 | Depends On | T-001 |
 | References | FR-001,FR-002 |
 
-### T-003: Add public toggle methods to McpPool
+### T-003: [x] Add public toggle methods to McpPool
 
 Implement McpPool::enable_server, disable_server, is_enabled, and toggle_server methods
 
@@ -41,7 +41,7 @@ Implement McpPool::enable_server, disable_server, is_enabled, and toggle_server 
 | Depends On | T-001 |
 | References | FR-001,FR-002,FR-003,FR-004 |
 
-### T-004: Handle connection lifecycle on toggle
+### T-004: [x] Handle connection lifecycle on toggle
 
 When disabling a server with active connection: close the connection; when enabling a previously connected server: attempt reconnection
 
@@ -54,7 +54,7 @@ When disabling a server with active connection: close the connection; when enabl
 | Depends On | T-003 |
 | References | FR-001,FR-002,FR-004 |
 
-### T-005: Update McpPool status reporting
+### T-005: [x] Update McpPool status reporting
 
 Modify McpPool::statuses method to include enabled/disabled state in returned status
 
@@ -67,7 +67,7 @@ Modify McpPool::statuses method to include enabled/disabled state in returned st
 | Depends On | T-003 |
 | References | FR-003 |
 
-### T-006: Add ACP command handler detection
+### T-006: [x] Add ACP command handler detection
 
 In acp::run_agent_over PromptRequest handler, add condition to detect /mcp slash commands
 
@@ -80,7 +80,7 @@ In acp::run_agent_over PromptRequest handler, add condition to detect /mcp slash
 | Depends On |  |
 | References | FR-001,FR-002,FR-003 |
 
-### T-007: Implement ACP /mcp disable command
+### T-007: [x] Implement ACP /mcp disable command
 
 Handle /mcp disable <server> by calling mcp_pool.disable_server(server) and returning appropriate response
 
@@ -93,7 +93,7 @@ Handle /mcp disable <server> by calling mcp_pool.disable_server(server) and retu
 | Depends On | T-006 |
 | References | FR-001 |
 
-### T-008: Implement ACP /mcp enable and status commands
+### T-008: [x] Implement ACP /mcp enable and status commands
 
 Handle /mcp enable <server> and /mcp status [<server-id>] by calling appropriate McpPool methods
 
