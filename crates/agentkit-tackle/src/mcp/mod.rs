@@ -381,6 +381,10 @@ pub struct McpPool<S: ElicitationSink = AutoDecline> {
     connections: BTreeMap<String, Connection<S>>,
     statuses: BTreeMap<String, ServerStatus>,
     enabled: BTreeMap<String, bool>,
+    /// The registered servers' spawn configuration, by name. Held so
+    /// re-enabling a server can reconnect it without the caller
+    /// re-supplying the config.
+    configs: BTreeMap<String, McpServerConfig>,
     sink: Arc<S>,
     /// The helper that resolves `{cred:IDENTITY}` env markers at spawn.
     credential_helper: String,
@@ -410,6 +414,7 @@ impl<S: ElicitationSink> McpPool<S> {
             connections: BTreeMap::new(),
             statuses: BTreeMap::new(),
             enabled: BTreeMap::new(),
+            configs: BTreeMap::new(),
             sink: Arc::new(sink),
             credential_helper: crate::agent::provider::DEFAULT_CREDENTIAL_HELPER.to_owned(),
         }
@@ -424,6 +429,31 @@ impl<S: ElicitationSink> McpPool<S> {
         self
     }
 
+    /// Declares a configured server, enabled. Registering is what makes
+    /// a server name addressable at all: toggling an unregistered name
+    /// is an error rather than a silent no-op. Re-registering a name
+    /// keeps its current enabled state, so a configuration reload does
+    /// not silently re-enable a server the user turned off.
+    pub fn register(&mut self, name: &str, config: McpServerConfig) {
+        self.configs.insert(name.to_owned(), config);
+        self.enabled.entry(name.to_owned()).or_insert(true);
+    }
+
+    /// The registered server names, in name order.
+    pub fn server_names(&self) -> Vec<&str> {
+        self.configs.keys().map(String::as_str).collect()
+    }
+
+    /// Moves another pool's connections and statuses into this one,
+    /// leaving this pool's registered servers and enabled flags alone.
+    /// Startup connects servers concurrently on throwaway single-server
+    /// pools — `connect` needs unique access — and folds the results in
+    /// here, so one dead server cannot hold up the rest.
+    pub fn absorb(&mut self, other: Self) {
+        self.connections.extend(other.connections);
+        self.statuses.extend(other.statuses);
+    }
+
     /// Statuses for the first-turn report: every declared server with its
     /// connected/failed state and enabled/disabled state.
     pub fn statuses(&self) -> BTreeMap<String, (ServerStatus, bool)> {
@@ -434,7 +464,8 @@ impl<S: ElicitationSink> McpPool<S> {
                 (status.clone(), *self.enabled.get(name).unwrap_or(&true)),
             );
         }
-        // Also include servers that are configured but have no status yet
+        // Registered servers that have no status yet: configured, never
+        // connected (or re-enabled without a successful reconnect).
         for (name, &enabled) in &self.enabled {
             if !status_map.contains_key(name) {
                 status_map.insert(
@@ -447,13 +478,13 @@ impl<S: ElicitationSink> McpPool<S> {
     }
 
     /// Connects one configured server (stdio argv or HTTP URL), recording
-    /// the outcome as status. Never panics; failures are statuses.
+    /// the outcome as status. Never panics; failures are statuses. A
+    /// server that is explicitly disabled is not connected.
     pub async fn connect(&mut self, name: &str, config: &McpServerConfig) {
-        // Skip connection if server is disabled
-        if !self.enabled.get(name).unwrap_or(&true) {
+        if self.enabled.get(name) == Some(&false) {
             return;
         }
-        
+
         let handler = ForwardingHandler {
             sink: Arc::clone(&self.sink),
             server: name.to_owned(),
@@ -512,34 +543,54 @@ impl<S: ElicitationSink> McpPool<S> {
         self.connections.contains_key(name)
     }
 
-    /// Enable a server for connection.
-    pub fn enable_server(&mut self, name: &str) -> Result<(), McpPoolError> {
+    /// Whether a registered server is enabled. Unregistered names are
+    /// not addressable, so they read as disabled.
+    pub fn is_enabled(&self, name: &str) -> bool {
+        *self.enabled.get(name).unwrap_or(&false)
+    }
+
+    /// Enables a server and attempts to reconnect it, restoring the
+    /// connection state a disable tore down. A connection failure is a
+    /// status, not an error: the server stays enabled and
+    /// [`Self::statuses`] carries the reason.
+    pub async fn enable_server(&mut self, name: &str) -> Result<(), McpPoolError> {
+        self.require_registered(name)?;
         self.enabled.insert(name.to_owned(), true);
+        if let Some(config) = self.configs.get(name).cloned() {
+            self.connect(name, &config).await;
+        }
         Ok(())
     }
 
-    /// Disable a server, preventing new connections and closing existing ones.
+    /// Disables a server: no further connections, and any live
+    /// connection is closed. Disabling an already-disabled server is a
+    /// no-op.
     pub fn disable_server(&mut self, name: &str) -> Result<(), McpPoolError> {
+        self.require_registered(name)?;
         self.enabled.insert(name.to_owned(), false);
-        // Close existing connection if any
         self.connections.remove(name);
         self.statuses.remove(name);
         Ok(())
     }
 
-    /// Toggle a server's enabled state, returning the new state.
-    pub fn toggle_server(&mut self, name: &str) -> Result<bool, McpPoolError> {
-        let current_state = *self.enabled.get(name).unwrap_or(&true);
-        let new_state = !current_state;
-        self.enabled.insert(name.to_owned(), new_state);
-        
-        // If disabling and there's an active connection, close it
-        if !new_state {
-            self.connections.remove(name);
-            self.statuses.remove(name);
+    /// Toggles a server, returning the new enabled state. Enabling
+    /// reconnects, per [`Self::enable_server`].
+    pub async fn toggle_server(&mut self, name: &str) -> Result<bool, McpPoolError> {
+        if self.is_enabled(name) {
+            self.disable_server(name)?;
+            Ok(false)
+        } else {
+            self.enable_server(name).await?;
+            Ok(true)
         }
-        
-        Ok(new_state)
+    }
+
+    fn require_registered(&self, name: &str) -> Result<(), McpPoolError> {
+        if self.configs.contains_key(name) {
+            Ok(())
+        } else {
+            Err(McpPoolError::UnknownServer(name.to_owned()))
+        }
     }
 
     /// All connected servers' tools, namespaced `mcp.<server>.<tool>`.
@@ -623,6 +674,8 @@ impl<S: ElicitationSink> McpPool<S> {
 pub enum McpPoolError {
     #[error("MCP server `{0}` is not connected")]
     ServerNotConnected(String),
+    #[error("no MCP server named `{0}` is configured")]
+    UnknownServer(String),
     #[error("tool call failed: {0}")]
     Call(String),
 }

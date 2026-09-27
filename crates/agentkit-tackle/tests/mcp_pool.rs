@@ -77,12 +77,142 @@ async fn failed_connections_are_statuses_not_panics() {
         args: Vec::new(),
         env: BTreeMap::new(),
     };
-        pool.connect("broken", &config).await;
-        assert!(matches!(
-            pool.statuses().get("broken"),
-            Some(&(agentkit_tackle::mcp::ServerStatus::Failed { .. }, _))
-        ));
+    pool.connect("broken", &config).await;
+    assert!(matches!(
+        pool.statuses().get("broken"),
+        Some(&(agentkit_tackle::mcp::ServerStatus::Failed { .. }, _))
+    ));
     assert!(!pool.is_connected("broken"));
+}
+
+fn broken_server_config() -> McpServerConfig {
+    McpServerConfig::Stdio {
+        command: "/nonexistent/tackle-mcp-nothing".into(),
+        args: Vec::new(),
+        env: BTreeMap::new(),
+    }
+}
+
+/// AC-001: disabling prevents new connections and closes the existing
+/// one, so the server's tools stop being listed.
+#[tokio::test]
+async fn disabling_closes_the_connection_and_hides_its_tools() {
+    let mut pool = McpPool::new();
+    pool.register("echo", echo_server_config());
+    pool.connect("echo", &echo_server_config()).await;
+    assert!(pool.is_connected("echo"));
+    assert!(!pool.list_tools().await.is_empty());
+
+    pool.disable_server("echo").unwrap();
+    assert!(!pool.is_enabled("echo"));
+    assert!(!pool.is_connected("echo"));
+    assert!(pool.list_tools().await.is_empty());
+    assert_eq!(
+        pool.statuses().get("echo"),
+        Some(&(
+            ServerStatus::Failed {
+                reason: "Not connected".into()
+            },
+            false
+        ))
+    );
+}
+
+/// AC-004/FR-004: re-enabling restores the connection the disable tore
+/// down, from the config held at registration.
+#[tokio::test]
+async fn enabling_reconnects_from_the_registered_config() {
+    let mut pool = McpPool::new();
+    pool.register("echo", echo_server_config());
+    pool.connect("echo", &echo_server_config()).await;
+    pool.disable_server("echo").unwrap();
+
+    pool.enable_server("echo").await.unwrap();
+    assert!(pool.is_enabled("echo"));
+    assert!(pool.is_connected("echo"));
+    assert_eq!(
+        pool.statuses().get("echo"),
+        Some(&(ServerStatus::Connected, true))
+    );
+    assert!(pool
+        .list_tools()
+        .await
+        .iter()
+        .any(|tool| tool.name == "mcp.echo.echo"));
+}
+
+/// Toggling flips the state and does the matching lifecycle work.
+#[tokio::test]
+async fn toggling_flips_state_and_drives_the_connection() {
+    let mut pool = McpPool::new();
+    pool.register("echo", echo_server_config());
+
+    assert!(!pool.toggle_server("echo").await.unwrap());
+    assert!(!pool.is_connected("echo"));
+
+    assert!(pool.toggle_server("echo").await.unwrap());
+    assert!(pool.is_connected("echo"));
+}
+
+/// EC-001: disabling an already-disabled server changes nothing and is
+/// not an error.
+#[tokio::test]
+async fn disabling_twice_is_a_no_op() {
+    let mut pool = McpPool::new();
+    pool.register("echo", echo_server_config());
+    pool.connect("echo", &echo_server_config()).await;
+
+    pool.disable_server("echo").unwrap();
+    pool.disable_server("echo").unwrap();
+    assert!(!pool.is_enabled("echo"));
+    assert!(!pool.is_connected("echo"));
+}
+
+/// EC-002: a server that fails to reconnect stays enabled and carries
+/// the failure as a status rather than as an error.
+#[tokio::test]
+async fn a_failed_reconnect_is_a_status_not_an_error() {
+    let mut pool = McpPool::new();
+    pool.register("broken", broken_server_config());
+    pool.enable_server("broken").await.unwrap();
+
+    assert!(pool.is_enabled("broken"));
+    assert!(!pool.is_connected("broken"));
+    assert!(matches!(
+        pool.statuses().get("broken"),
+        Some(&(ServerStatus::Failed { .. }, true))
+    ));
+}
+
+/// Toggling an unregistered name is an error: a name that is not
+/// configured cannot be turned on or off.
+#[tokio::test]
+async fn toggling_an_unregistered_server_is_an_error() {
+    let mut pool = McpPool::new();
+    assert!(matches!(
+        pool.enable_server("nope").await,
+        Err(agentkit_tackle::mcp::McpPoolError::UnknownServer(name)) if name == "nope"
+    ));
+    assert!(matches!(
+        pool.disable_server("nope"),
+        Err(agentkit_tackle::mcp::McpPoolError::UnknownServer(name)) if name == "nope"
+    ));
+    assert!(pool.server_names().is_empty());
+    assert!(pool.statuses().is_empty());
+}
+
+/// Registering declares the server enabled; re-registering keeps a
+/// user's earlier disable rather than silently re-enabling it.
+#[test]
+fn registering_defaults_to_enabled_and_preserves_an_existing_disable() {
+    let mut pool = McpPool::new();
+    pool.register("echo", echo_server_config());
+    assert!(pool.is_enabled("echo"));
+    assert_eq!(pool.server_names(), vec!["echo"]);
+
+    pool.disable_server("echo").unwrap();
+    pool.register("echo", echo_server_config());
+    assert!(!pool.is_enabled("echo"));
 }
 
 struct RecordingSink {
@@ -110,7 +240,10 @@ async fn elicitations_surface_with_origin_and_never_touch_grants() {
     };
     let mut pool = McpPool::with_sink(sink);
     pool.connect("echo", &echo_server_config()).await;
-    assert_eq!(pool.statuses().get("echo"), Some(&(ServerStatus::Connected, true)));
+    assert_eq!(
+        pool.statuses().get("echo"),
+        Some(&(ServerStatus::Connected, true))
+    );
 
     let result = pool
         .call_tool("echo", "elicit", serde_json::json!({}))
