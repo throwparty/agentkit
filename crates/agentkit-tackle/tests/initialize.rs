@@ -359,19 +359,28 @@ async fn direct_invocation_runs_an_mcp_tool_and_reports_the_result() {
             // The tool must be advertised under its own name. A client
             // that exact-matches the advertised command name refuses to
             // send anything else, so an unadvertised tool is unreachable
-            // no matter how well the handler works.
+            // no matter how well the handler works. The advertisement is
+            // a notification sent after the session/new response (the Zed
+            // ordering workaround), so wait for it to land rather than
+            // asserting on the response's return.
+            let advertised_deadline =
+                std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while !advertised.lock().unwrap().iter().any(|n| n == "!mcp.echo.echo")
+                && std::time::Instant::now() < advertised_deadline
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
             assert!(
-                advertised.lock().unwrap().iter().any(|n| n == "mcp.echo.echo"),
-                "the tool is advertised: {:?}",
+                advertised.lock().unwrap().iter().any(|n| n == "!mcp.echo.echo"),
+                "the tool is advertised under its !-prefixed name: {:?}",
                 advertised.lock().unwrap()
             );
 
-            // Both spellings a client can send reach the same path: the
-            // `/!` prefix, and the bare namespaced name that a client
-            // exact-matching the advertised command name will insist on.
+            // The `!` spelling, with and without the separating space a
+            // client may or may not insert after the command name.
             for command in [
                 r#"/!mcp.echo.echo {"text":"hello"}"#,
-                r#"/mcp.echo.echo {"text":"hello"}"#,
+                r#"/!mcp.echo.echo{"text":"hello"}"#,
             ] {
                 calls.lock().unwrap().clear();
                 let response = connection
