@@ -489,7 +489,7 @@ async fn proxy_unknown_path_404() {
 }
 
 #[tokio::test]
-async fn proxy_request_body_passes_through_unchanged() {
+async fn proxy_request_body_tools_always_injected() {
     let mock_server = wiremock::MockServer::start().await;
 
     let sent = json!({
@@ -500,7 +500,6 @@ async fn proxy_request_body_passes_through_unchanged() {
 
     wiremock::Mock::given(wiremock::matchers::method("POST"))
         .and(wiremock::matchers::path("/chat/completions"))
-        .and(wiremock::matchers::body_json(sent.clone()))
         .respond_with(
             wiremock::ResponseTemplate::new(200).set_body_raw(
                 r#"{"choices":[{"message":{"role":"assistant","content":"Hi"},"index":0,"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":10}}"#,
@@ -522,6 +521,21 @@ async fn proxy_request_body_passes_through_unchanged() {
 
     let response = tower::Service::call(&mut app, request).await.unwrap();
     assert_eq!(response.status(), 200);
+
+    let upstream: serde_json::Value = serde_json::from_slice(
+        &mock_server.received_requests().await.unwrap()[0].body,
+    )
+    .unwrap();
+    assert_eq!(upstream["model"], "gpt-4o");
+    assert_eq!(upstream["messages"], sent["messages"]);
+    let names: Vec<&str> = upstream["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["function"]["name"].as_str().unwrap())
+        .collect();
+    assert!(names.contains(&"bash") && names.contains(&"read"));
+    assert_eq!(upstream["tool_choice"], "none");
 }
 
 #[tokio::test]

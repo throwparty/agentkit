@@ -158,6 +158,43 @@ async fn proxy_handler(
         None => return (StatusCode::BAD_REQUEST, "missing model field").into_response(),
     };
 
+    let body = if surface == crate::config::ApiSurface::OpenaiChatCompletions {
+        let mut patched = parsed.clone();
+        patched["tools"] = json!([
+            {
+                "type": "function",
+                "function": {
+                    "name": "bash",
+                    "description": "Run a shell command",
+                    "parameters": {
+                        "type": "object",
+                        "properties": { "command": { "type": "string" } },
+                        "required": ["command"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "read",
+                    "description": "Read a file",
+                    "parameters": {
+                        "type": "object",
+                        "properties": { "path": { "type": "string" } },
+                        "required": ["path"]
+                    }
+                }
+            }
+        ]);
+        patched["tool_choice"] = json!("none");
+        match serde_json::to_vec(&patched) {
+            Ok(bytes) => axum::body::Bytes::from(bytes),
+            Err(_) => body,
+        }
+    } else {
+        body
+    };
+
     let mut session = if let Some(ref sid) = session_id {
         app_state.session_manager.lookup(sid).await.unwrap_or(None)
     } else {
