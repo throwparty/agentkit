@@ -413,14 +413,14 @@ impl Registry {
                 Invokable::Mcp {
                     name, description, ..
                 } => {
-                    // Each tool is advertised under its own namespaced
-                    // name. The `/!` prefix form alone is not enough:
-                    // a client that exact-matches the advertised command
-                    // name rejects `/!mcp.<server>.<tool>` outright, so
-                    // the only spelling such a client will send is the
-                    // bare namespaced name.
+                    // Each tool is advertised under its own `!`-prefixed
+                    // namespaced name. Advertising the bare `!` alone is
+                    // not enough: a client that exact-matches the
+                    // advertised command name rejects
+                    // `/!mcp.<server>.<tool>` outright, because no such
+                    // command was ever offered.
                     commands.push(
-                        AvailableCommand::new(name.clone(), description.clone()).input(
+                        AvailableCommand::new(format!("!{name}"), description.clone()).input(
                             AvailableCommandInput::Unstructured(UnstructuredCommandInput::new(
                                 "{json arguments}",
                             )),
@@ -499,12 +499,21 @@ pub enum DirectError {
 /// arguments. Anything not starting with `/!` — pasted text, model
 /// output mentioning the syntax — yields `None`.
 pub fn parse_direct(input: &str) -> Option<DirectInvocation> {
-    let rest = input.strip_prefix("/!")?;
-    let invokable = rest.split_whitespace().next()?;
-    let arguments = rest[invokable.len()..].trim().to_owned();
+    let rest = input.strip_prefix("/!")?.trim_start();
+    // The invokable name runs to the first whitespace, or to the opening
+    // brace when the client omitted the separating space. A tool name
+    // cannot contain either, so both spellings parse to the same call.
+    let boundary = rest
+        .find(char::is_whitespace)
+        .or_else(|| rest.find('{'))
+        .unwrap_or(rest.len());
+    let (invokable, arguments) = rest.split_at(boundary);
+    if invokable.is_empty() {
+        return None;
+    }
     Some(DirectInvocation {
         invokable: invokable.to_owned(),
-        arguments,
+        arguments: arguments.trim().to_owned(),
     })
 }
 

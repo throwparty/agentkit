@@ -361,17 +361,16 @@ async fn direct_invocation_runs_an_mcp_tool_and_reports_the_result() {
             // send anything else, so an unadvertised tool is unreachable
             // no matter how well the handler works.
             assert!(
-                advertised.lock().unwrap().iter().any(|n| n == "mcp.echo.echo"),
-                "the tool is advertised: {:?}",
+                advertised.lock().unwrap().iter().any(|n| n == "!mcp.echo.echo"),
+                "the tool is advertised under its !-prefixed name: {:?}",
                 advertised.lock().unwrap()
             );
 
-            // Both spellings a client can send reach the same path: the
-            // `/!` prefix, and the bare namespaced name that a client
-            // exact-matching the advertised command name will insist on.
+            // The `!` spelling, with and without the separating space a
+            // client may or may not insert after the command name.
             for command in [
                 r#"/!mcp.echo.echo {"text":"hello"}"#,
-                r#"/mcp.echo.echo {"text":"hello"}"#,
+                r#"/!mcp.echo.echo{"text":"hello"}"#,
             ] {
                 calls.lock().unwrap().clear();
                 let response = connection
