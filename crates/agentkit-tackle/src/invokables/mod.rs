@@ -387,28 +387,47 @@ impl Registry {
             if !invokable.user_invokable() {
                 continue;
             }
-            if let Invokable::Prompt {
-                name,
-                description,
-                parameters,
-                ..
-            } = invokable
-            {
-                // The user types /<name>; the hint previews the
-                // positional parameters the expansion will fill.
-                let name = name.strip_prefix("prompt.").unwrap_or(name).to_owned();
-                let mut command = AvailableCommand::new(name, description.clone());
-                if !parameters.is_empty() {
-                    let hint = parameters
-                        .iter()
-                        .map(|parameter| format!("<{parameter}>"))
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    command = command.input(AvailableCommandInput::Unstructured(
-                        UnstructuredCommandInput::new(hint),
-                    ));
+            match invokable {
+                Invokable::Prompt {
+                    name,
+                    description,
+                    parameters,
+                    ..
+                } => {
+                    // The user types /<name>; the hint previews the
+                    // positional parameters the expansion will fill.
+                    let name = name.strip_prefix("prompt.").unwrap_or(name).to_owned();
+                    let mut command = AvailableCommand::new(name, description.clone());
+                    if !parameters.is_empty() {
+                        let hint = parameters
+                            .iter()
+                            .map(|parameter| format!("<{parameter}>"))
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        command = command.input(AvailableCommandInput::Unstructured(
+                            UnstructuredCommandInput::new(hint),
+                        ));
+                    }
+                    commands.push(command);
                 }
-                commands.push(command);
+                Invokable::Mcp {
+                    name, description, ..
+                } => {
+                    // Each tool is advertised under its own namespaced
+                    // name. The `/!` prefix form alone is not enough:
+                    // a client that exact-matches the advertised command
+                    // name rejects `/!mcp.<server>.<tool>` outright, so
+                    // the only spelling such a client will send is the
+                    // bare namespaced name.
+                    commands.push(
+                        AvailableCommand::new(name.clone(), description.clone()).input(
+                            AvailableCommandInput::Unstructured(UnstructuredCommandInput::new(
+                                "{json arguments}",
+                            )),
+                        ),
+                    );
+                }
+                Invokable::Agent { .. } => {}
             }
         }
         commands

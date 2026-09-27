@@ -636,12 +636,27 @@ where
                     return responder.respond(PromptResponse::new(StopReason::EndTurn));
                 }
 
-                // `/!mcp.<server>.<tool> {json}`: the user calls an MCP
-                // tool directly. No model request, and no permission
-                // prompt — the call is the user's own keystroke, so the
-                // pipeline has nothing to ask. The result is reported as
-                // a tool call and stored in the turn.
-                if let Some(input) = crate::invokables::parse_direct(&first_text) {
+                // Direct invocation, in either spelling a client can
+                // send: `/!mcp.<server>.<tool> {json}`, or the bare
+                // `/mcp.<server>.<tool> {json}` a client that
+                // exact-matches the advertised command name will insist
+                // on. No model request, and no permission prompt — the
+                // call is the user's own keystroke, so the pipeline has
+                // nothing to ask. The result is reported as a tool call
+                // and stored in the turn.
+                let direct = if first_text.starts_with("/!") || first_text.starts_with("/mcp.") {
+                    crate::invokables::parse_direct(&first_text).or_else(|| {
+                        let rest = first_text.strip_prefix('/')?;
+                        let name = rest.split_whitespace().next()?;
+                        Some(crate::invokables::DirectInvocation {
+                            invokable: name.to_owned(),
+                            arguments: rest[name.len()..].trim().to_owned(),
+                        })
+                    })
+                } else {
+                    None
+                };
+                if let Some(input) = direct {
                     let call_id = format!("direct-{}", uuid::Uuid::new_v4());
                     let announce = agent_client_protocol::schema::v1::ToolCall::new(
                         agent_client_protocol::schema::v1::ToolCallId::new(call_id.clone()),

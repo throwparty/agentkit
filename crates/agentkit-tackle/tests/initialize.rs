@@ -305,6 +305,8 @@ async fn direct_invocation_runs_an_mcp_tool_and_reports_the_result() {
 
     let calls: StdArc<StdMutex<Vec<(String, String)>>> = StdArc::default();
     let calls_handler = calls.clone();
+    let advertised: StdArc<StdMutex<Vec<String>>> = StdArc::default();
+    let advertised_handler = advertised.clone();
 
     Client
         .builder()
@@ -330,6 +332,14 @@ async fn direct_invocation_runs_an_mcp_tool_and_reports_the_result() {
                             .unwrap()
                             .push((status.unwrap_or_default(), text));
                     }
+                    SessionUpdate::AvailableCommandsUpdate(update) => {
+                        advertised_handler.lock().unwrap().extend(
+                            update
+                                .available_commands
+                                .iter()
+                                .map(|command| command.name.clone()),
+                        );
+                    }
                     _ => {}
                 }
                 Ok(())
@@ -346,38 +356,63 @@ async fn direct_invocation_runs_an_mcp_tool_and_reports_the_result() {
                 .block_task()
                 .await?;
 
-            let response = connection
-                .send_request(agentkit_tackle::agent_client_protocol::schema::v1::PromptRequest::new(
-                    created.session_id.clone(),
-                    vec![agentkit_tackle::agent_client_protocol::schema::v1::ContentBlock::Text(
-                        agentkit_tackle::agent_client_protocol::schema::v1::TextContent::new(
-                            r#"/!mcp.echo.echo {"text":"hello"}"#.to_owned(),
-                        ),
-                    )],
-                ))
-                .block_task()
-                .await?;
-
-            assert_eq!(
-                response.stop_reason,
-                agentkit_tackle::agent_client_protocol::schema::v1::StopReason::EndTurn
+            // The tool must be advertised under its own name. A client
+            // that exact-matches the advertised command name refuses to
+            // send anything else, so an unadvertised tool is unreachable
+            // no matter how well the handler works.
+            assert!(
+                advertised.lock().unwrap().iter().any(|n| n == "mcp.echo.echo"),
+                "the tool is advertised: {:?}",
+                advertised.lock().unwrap()
             );
+
+            // Both spellings a client can send reach the same path: the
+            // `/!` prefix, and the bare namespaced name that a client
+            // exact-matching the advertised command name will insist on.
+            for command in [
+                r#"/!mcp.echo.echo {"text":"hello"}"#,
+                r#"/mcp.echo.echo {"text":"hello"}"#,
+            ] {
+                calls.lock().unwrap().clear();
+                let response = connection
+                    .send_request(
+                        agentkit_tackle::agent_client_protocol::schema::v1::PromptRequest::new(
+                            created.session_id.clone(),
+                            vec![
+                                agentkit_tackle::agent_client_protocol::schema::v1::ContentBlock::Text(
+                                    agentkit_tackle::agent_client_protocol::schema::v1::TextContent::new(
+                                        command.to_owned(),
+                                    ),
+                                ),
+                            ],
+                        ),
+                    )
+                    .block_task()
+                    .await?;
+
+                assert_eq!(
+                    response.stop_reason,
+                    agentkit_tackle::agent_client_protocol::schema::v1::StopReason::EndTurn,
+                    "{command}"
+                );
+
+                let seen = calls.lock().unwrap().clone();
+                assert!(
+                    seen.iter()
+                        .any(|(kind, value)| kind == "call" && value == "mcp.echo.echo"),
+                    "the call is announced for {command}: {seen:?}"
+                );
+                let (_, output) = seen
+                    .iter()
+                    .find(|(kind, _)| kind.contains("Completed"))
+                    .unwrap_or_else(|| panic!("the result is reported for {command}: {seen:?}"));
+                assert!(
+                    output.contains("hello"),
+                    "the tool ran for {command}: {output}"
+                );
+            }
             Ok(())
         })
         .await
         .unwrap();
-
-    let seen = calls.lock().unwrap().clone();
-    assert!(
-        seen.iter().any(|(kind, value)| kind == "call" && value == "mcp.echo.echo"),
-        "the call is announced: {seen:?}"
-    );
-    let (_, output) = seen
-        .iter()
-        .find(|(kind, _)| kind.contains("Completed"))
-        .unwrap_or_else(|| panic!("the result is reported: {seen:?}"));
-    assert!(
-        output.contains("hello"),
-        "the tool actually ran and echoed its input: {output}"
-    );
 }
