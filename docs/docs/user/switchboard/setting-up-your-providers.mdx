@@ -103,6 +103,24 @@ pricing = {}
 
 **Credentials:** None required.
 
+## Custom request headers
+
+Providers can declare extra headers that Switchboard attaches to every outbound request. Configured values override any header sent by the client of the same name.
+
+```toml
+[providers.headers]
+x-custom-header = "custom-value"
+```
+
+This is useful when a provider expects a header that your client does not send — for example, opencode's Zen gateway requires an `x-opencode-session` header shaped like a session id before it will serve `-free` models:
+
+```toml
+[providers.headers]
+x-opencode-session = "ses_aaaaaaaaaaaaaaaaaaaaaaaaaa"
+```
+
+Invalid header names or values are skipped with a warning; they never fail the request.
+
 ## Starting the proxy
 
 ```shell

@@ -1,0 +1,17 @@
+[[providers]]
+identity = "test_provider"
+api_surface = "openai-chat-completions"
+base_url = "https://api.example.com/v1"
+billing = "pay_as_you_go"
+models = ["some-model"]
+
+[providers.headers]
+x-custom-header = "custom-value"
+x-request-id = "some-static-value"
+
+[providers.auth]
+type = "bearer_token"
+
+[providers.pricing]
+input_per_mtok = 1.0
+output_per_mtok = 2.0

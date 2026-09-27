@@ -39,6 +39,8 @@ pub struct ProviderConfig {
     pub models: Option<Vec<String>>,
     #[serde(default)]
     pub user_agent: Option<String>,
+    #[serde(default)]
+    pub headers: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

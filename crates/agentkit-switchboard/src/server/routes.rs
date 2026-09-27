@@ -246,6 +246,7 @@ async fn proxy_handler(
                         provider_identity: &selection.identity,
                         session_id: session_id.as_deref(),
                         provider_user_agent: configured_provider.user_agent.as_deref(),
+                        provider_headers: Some(&configured_provider.headers),
                     },
                     &*p.http,
                 )
@@ -264,6 +265,7 @@ async fn proxy_handler(
                             provider_identity: &selection.identity,
                             session_id: session_id.as_deref(),
                             provider_user_agent: configured_provider.user_agent.as_deref(),
+                            provider_headers: Some(&configured_provider.headers),
                         },
                         &*fallback.http,
                     )

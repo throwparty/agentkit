@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 fn make_provider(id: &str, models: Vec<&str>) -> ProviderConfig {
     ProviderConfig {
+        headers: Default::default(),
         identity: id.to_string(),
         api_surface: ApiSurface::OpenaiChatCompletions,
         base_url: "https://api.openai.com/v1".into(),

@@ -19,6 +19,7 @@ async fn test_state(mock_base_url: &str) -> Arc<routes::AppState> {
     providers.insert(
         "mock_openai".to_string(),
         ProviderConfig {
+            headers: Default::default(),
             identity: "mock_openai".to_string(),
             api_surface: ApiSurface::OpenaiChatCompletions,
             base_url: mock_base_url.to_string(),

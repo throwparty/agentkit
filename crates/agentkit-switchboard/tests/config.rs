@@ -24,6 +24,31 @@ fn config_parse_valid() {
 }
 
 #[test]
+fn config_parse_custom_headers() {
+    let cfg =
+        agentkit_switchboard::config::loader::load_config(&fixture_path("custom-headers.toml"))
+            .expect("config with custom headers should parse");
+    let provider = cfg.providers.get("test_provider").unwrap();
+    assert_eq!(provider.headers.len(), 2);
+    assert_eq!(
+        provider.headers.get("x-custom-header").unwrap(),
+        "custom-value"
+    );
+    assert_eq!(
+        provider.headers.get("x-request-id").unwrap(),
+        "some-static-value"
+    );
+}
+
+#[test]
+fn config_headers_default_empty() {
+    let cfg = agentkit_switchboard::config::loader::load_config(&fixture_path("minimal.toml"))
+        .expect("valid config should parse");
+    let provider = cfg.providers.get("test_provider").unwrap();
+    assert!(provider.headers.is_empty());
+}
+
+#[test]
 fn config_parse_duplicate_identity() {
     let err =
         agentkit_switchboard::config::loader::load_config(&fixture_path("duplicate-identity.toml"))
