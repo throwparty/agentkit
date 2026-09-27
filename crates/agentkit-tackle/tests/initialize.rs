@@ -256,6 +256,10 @@ async fn available_commands_are_advertised_after_session_new_and_load() {
                 assert_eq!(seen[0][0], "!", "{:?}", seen[0]);
                 assert!(seen[0].iter().any(|name| name == "compact"), "{:?}", seen[0]);
                 assert!(seen[0].iter().any(|name| name == "fork"), "{:?}", seen[0]);
+                // The /mcp toggle is a harness command, not a model
+                // prompt; the stub builtin prompt is what puts it in the
+                // client's command palette at all.
+                assert!(seen[0].iter().any(|name| name == "mcp"), "{:?}", seen[0]);
             }
 
             connection

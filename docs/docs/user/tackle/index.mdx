@@ -13,6 +13,7 @@ Tackle is an [Agent Client Protocol](https://agentclientprotocol.com) (ACP) serv
 - **MCP tool pools** — namespaced tools from multiple MCP servers, with spawn hygiene, timeout handling, and elicitation forwarding.
 - **Session ergonomics** — fork sessions down a new path, compact long histories with in-band announcements, and let the model pick its own title.
 - **Direct invocation** — call MCP tools explicitly with `/!tool-name`, bypassing the model.
+- **Runtime MCP availability** — `/mcp disable <server>` takes a server offline for the connection, closing its connection and dropping its tools; `/mcp enable <server>` reconnects it; `/mcp status [server]` reports both the toggle state and the connection state.
 - **Behaviour scripting** — respond to events like `post_turn` and `compaction_requested` with Rhai scripts and persona/actor overrides.
 - **Observability** — OpenTelemetry spans for turns, tool calls, and token usage, with type-level redaction of sensitive payloads.
 
