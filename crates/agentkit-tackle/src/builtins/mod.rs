@@ -34,6 +34,13 @@ pub const FORK_PROMPT: &str = include_str!("fork-prompt.md");
 /// harness into a compaction_requested turn.
 pub const COMPACT_PROMPT: &str = include_str!("compact-prompt.md");
 
+/// The shipped /mcp prompt: the discoverability stub for the harness
+/// command that toggles configured MCP server availability. The prompt
+/// body is never expanded — the harness intercepts the command — but
+/// without a registered prompt the command is not advertised to the
+/// client, and a command no client offers is one no user finds.
+pub const MCP_PROMPT: &str = include_str!("mcp-prompt.md");
+
 /// Resolves a built-in script file reference (`builtin:<name>.rhai`) to
 /// the shipped source.
 pub fn script_source(file: &str) -> Option<&'static str> {
@@ -52,6 +59,7 @@ pub fn defaults() -> impl Iterator<Item = (&'static str, &'static str, &'static 
         ("actor", "summariser", SUMMARISER_ACTOR),
         ("prompt", "fork", FORK_PROMPT),
         ("prompt", "compact", COMPACT_PROMPT),
+        ("prompt", "mcp", MCP_PROMPT),
     ]
     .into_iter()
 }
