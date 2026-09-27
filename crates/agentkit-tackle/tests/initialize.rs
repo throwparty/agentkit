@@ -283,3 +283,101 @@ async fn available_commands_are_advertised_after_session_new_and_load() {
         .await
         .expect("available commands advertisement");
 }
+
+/// T-024 direct invocation: `/!mcp.<server>.<tool>` runs the tool with
+/// no model request and reports the result as a tool call. This is the
+/// only MCP path wired end to end, so it is also the proof that a
+/// configured server reaches a session at all.
+#[tokio::test(flavor = "multi_thread")]
+async fn direct_invocation_runs_an_mcp_tool_and_reports_the_result() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = dir.path().join("cfg");
+    std::fs::create_dir_all(&cfg).unwrap();
+    std::fs::write(
+        cfg.join("config.toml"),
+        format!(
+            "[mcp_servers.echo]\ntransport = \"stdio\"\ncommand = {}\n",
+            serde_json::to_string(env!("CARGO_BIN_EXE_tackle-mcp-echo")).unwrap()
+        ),
+    )
+    .unwrap();
+    let agent = spawn_agent(dir.path());
+
+    let calls: StdArc<StdMutex<Vec<(String, String)>>> = StdArc::default();
+    let calls_handler = calls.clone();
+
+    Client
+        .builder()
+        .on_receive_notification(
+            async move |notification: SessionNotification, _cx| {
+                match &notification.update {
+                    SessionUpdate::ToolCall(call) => {
+                        calls_handler
+                            .lock()
+                            .unwrap()
+                            .push(("call".to_owned(), call.title.clone()));
+                    }
+                    SessionUpdate::ToolCallUpdate(update) => {
+                        let status = update.fields.status.map(|s| format!("{s:?}"));
+                        let text = update
+                            .fields
+                            .content
+                            .as_ref()
+                            .map(|content| serde_json::to_string(content).unwrap_or_default())
+                            .unwrap_or_default();
+                        calls_handler
+                            .lock()
+                            .unwrap()
+                            .push((status.unwrap_or_default(), text));
+                    }
+                    _ => {}
+                }
+                Ok(())
+            },
+            agentkit_tackle::agent_client_protocol::on_receive_notification!(),
+        )
+        .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
+            connection
+                .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            let created = connection
+                .send_request(NewSessionRequest::new(std::path::PathBuf::from("/work")))
+                .block_task()
+                .await?;
+
+            let response = connection
+                .send_request(agentkit_tackle::agent_client_protocol::schema::v1::PromptRequest::new(
+                    created.session_id.clone(),
+                    vec![agentkit_tackle::agent_client_protocol::schema::v1::ContentBlock::Text(
+                        agentkit_tackle::agent_client_protocol::schema::v1::TextContent::new(
+                            r#"/!mcp.echo.echo {"text":"hello"}"#.to_owned(),
+                        ),
+                    )],
+                ))
+                .block_task()
+                .await?;
+
+            assert_eq!(
+                response.stop_reason,
+                agentkit_tackle::agent_client_protocol::schema::v1::StopReason::EndTurn
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    let seen = calls.lock().unwrap().clone();
+    assert!(
+        seen.iter().any(|(kind, value)| kind == "call" && value == "mcp.echo.echo"),
+        "the call is announced: {seen:?}"
+    );
+    let (_, output) = seen
+        .iter()
+        .find(|(kind, _)| kind.contains("Completed"))
+        .unwrap_or_else(|| panic!("the result is reported: {seen:?}"));
+    assert!(
+        output.contains("hello"),
+        "the tool actually ran and echoed its input: {output}"
+    );
+}

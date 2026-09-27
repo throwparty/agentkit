@@ -636,6 +636,104 @@ where
                     return responder.respond(PromptResponse::new(StopReason::EndTurn));
                 }
 
+                // `/!mcp.<server>.<tool> {json}`: the user calls an MCP
+                // tool directly. No model request, and no permission
+                // prompt — the call is the user's own keystroke, so the
+                // pipeline has nothing to ask. The result is reported as
+                // a tool call and stored in the turn.
+                if let Some(input) = crate::invokables::parse_direct(&first_text) {
+                    let call_id = format!("direct-{}", uuid::Uuid::new_v4());
+                    let announce = agent_client_protocol::schema::v1::ToolCall::new(
+                        agent_client_protocol::schema::v1::ToolCallId::new(call_id.clone()),
+                        input.invokable.clone(),
+                    )
+                    .status(agent_client_protocol::schema::v1::ToolCallStatus::InProgress)
+                    .raw_input(serde_json::from_str(&input.arguments).ok());
+                    let _ = cx.send_notification(SessionNotification::new(
+                        request.session_id.clone(),
+                        agent_client_protocol::schema::v1::SessionUpdate::ToolCall(announce),
+                    ));
+
+                    let pool = state_for_prompt.mcp_pool.lock().await;
+                    let tools = pool.list_tools().await;
+                    let executed = match crate::invokables::Registry::build(
+                        &state_for_prompt.definitions,
+                        &tools,
+                    ) {
+                        Ok(registry) => registry
+                            .execute_direct(&pool, &input)
+                            .await
+                            .map_err(|err| err.to_string()),
+                        Err(err) => Err(err.to_string()),
+                    };
+                    drop(pool);
+
+                    let (text, is_error) = match executed {
+                        Ok(result) => (result.content_json, result.is_error),
+                        Err(err) => (err, true),
+                    };
+                    let status = if is_error {
+                        agent_client_protocol::schema::v1::ToolCallStatus::Failed
+                    } else {
+                        agent_client_protocol::schema::v1::ToolCallStatus::Completed
+                    };
+                    let _ = cx.send_notification(SessionNotification::new(
+                        request.session_id.clone(),
+                        SessionUpdate::ToolCallUpdate(
+                            agent_client_protocol::schema::v1::ToolCallUpdate::new(
+                                agent_client_protocol::schema::v1::ToolCallId::new(call_id),
+                                agent_client_protocol::schema::v1::ToolCallUpdateFields::new()
+                                    .status(status)
+                                    .content(vec![
+                                        agent_client_protocol::schema::v1::ToolCallContent::from(
+                                            ContentBlock::Text(
+                                                agent_client_protocol::schema::v1::TextContent::new(
+                                                    text.clone(),
+                                                ),
+                                            ),
+                                        ),
+                                    ]),
+                            ),
+                        ),
+                    ));
+                    // Two stored messages per the schema: the call
+                    // (namespaced invokable plus arguments) and the
+                    // result that answers it.
+                    let call = state_for_prompt
+                        .db
+                        .append_message(
+                            &turn.id,
+                            crate::store::Role::ToolCall,
+                            &input.arguments,
+                            Some(&input.invokable),
+                            None,
+                            None,
+                            None,
+                        )
+                        .await
+                        .map_err(|err| Error::internal_error().data(err.to_string()))?;
+                    state_for_prompt
+                        .db
+                        .append_message(
+                            &turn.id,
+                            crate::store::Role::ToolResult,
+                            &serde_json::json!([{ "type": "text", "text": text }]).to_string(),
+                            Some(&input.invokable),
+                            Some(&call.id),
+                            Some(is_error),
+                            None,
+                        )
+                        .await
+                        .map_err(|err| Error::internal_error().data(err.to_string()))?;
+
+                    state_for_prompt
+                        .db
+                        .release_lease(&session_id, &owner_for_prompt)
+                        .await
+                        .ok();
+                    return responder.respond(PromptResponse::new(StopReason::EndTurn));
+                }
+
                 // Runtime MCP server availability: `/mcp` is handled
                 // before any model request. An unrecognised
                 // subcommand yields no reply and falls through to
