@@ -12,7 +12,7 @@ opentelemetry_sdk = {version = "0.32", features = ["trace", "metrics", "logs", "
 opentelemetry-stdout = "0.32"
 thiserror = "2"
 tracing = {version = "0.1", features = ["attributes"]}
-tracing-opentelemetry = "0.33"
+tracing-opentelemetry = "0.34"
 tracing-subscriber = {version = "0.3", features = ["json", "env-filter", "registry"]}
 uuid = {version = "1", features = ["v4"]}
 axum = {version = "0.8", features = ["macros"]}
