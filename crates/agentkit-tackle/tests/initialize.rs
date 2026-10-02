@@ -148,8 +148,11 @@ async fn session_lifecycle_round_trips() {
         .expect("session lifecycle round-trip");
 }
 
+/// `session/load` on a session with no turns: answers without error and
+/// replays nothing. History replay with stable ids lives in
+/// `restart_load.rs`, which pairs it with a real turn.
 #[tokio::test(flavor = "multi_thread")]
-async fn session_load_replays_history_with_stable_ids() {
+async fn session_load_on_an_empty_session_answers() {
     use agentkit_tackle::agent_client_protocol::schema::v1::SessionNotification;
 
     let dir = tempfile::tempdir().unwrap();
