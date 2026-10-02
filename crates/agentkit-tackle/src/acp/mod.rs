@@ -522,11 +522,18 @@ where
                 // content blocks, stored as the JSON block array).
                 let blocks_json =
                     serde_json::to_string(&request.prompt).unwrap_or_else(|_| "[]".to_owned());
+                let head = state_for_prompt
+                    .db
+                    .get_session(&session_id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .and_then(|session| session.head_turn_id);
                 let turn = state_for_prompt
                     .db
                     .append_turn(
                         &session_id,
-                        None, // head-following turns chain via the store's head
+                        head.as_ref(),
                         crate::store::TurnKind::Interaction,
                         None,
                         crate::store::TurnUsage::default(),
@@ -1217,6 +1224,25 @@ where
                     .ok_or_else(|| Error::internal_error().data("no such session".to_owned()))?;
                 let selectors = config_options::build(&state_for_load, &session).await;
                 let commands = available_commands_update(&state_for_load).await;
+                // The usage snapshot: exactly one after replay, so a
+                // reopened client shows the session's context state
+                // (FR-005, FR-007).
+                let size = config_options::resolve_model_for(&state_for_load, &session, None)
+                    .and_then(|model_ref| context_window(&model_ref))
+                    .unwrap_or(0);
+                if size > 0 {
+                    let used: u64 = assembled
+                        .iter()
+                        .map(|item| item.message.content.len() as u64)
+                        .sum();
+                    cx.send_notification(SessionNotification::new(
+                        request.session_id.clone(),
+                        SessionUpdate::UsageUpdate(
+                            agent_client_protocol::schema::v1::UsageUpdate::new(used, size),
+                        ),
+                    ))
+                    .map_err(|err| Error::internal_error().data(err.to_string()))?;
+                }
                 responder.respond(
                     LoadSessionResponse::new().config_options(selectors.options),
                 )?;
@@ -1463,11 +1489,33 @@ fn replay_updates(
     let mut updates = Vec::new();
     for assembled in assembled {
         let message = &assembled.message;
+        let message_id = MessageId::new(message.id.clone());
+
+        // Tool messages carry raw JSON (arguments/results), not content
+        // blocks, so handle them before the block parser.
+        match message.role {
+            crate::store::Role::ToolCall => {
+                // The pair collapses: one completed tool-call update.
+                updates.push(notification(
+                    session_id,
+                    SessionUpdate::ToolCall(
+                        ToolCall::new(
+                            message.id.clone(),
+                            message.tool_name.clone().unwrap_or_default(),
+                        )
+                        .status(ToolCallStatus::Completed),
+                    ),
+                ));
+                continue;
+            }
+            crate::store::Role::ToolResult => continue,
+            _ => {}
+        }
+
         let blocks: Vec<ContentBlock> = match serde_json::from_str(&message.content) {
             Ok(blocks) => blocks,
             Err(_) => continue, // unparseable stored content: skip, never crash replay
         };
-        let message_id = MessageId::new(message.id.clone());
 
         match message.role {
             crate::store::Role::User => {
@@ -1490,22 +1538,7 @@ fn replay_updates(
                     ));
                 }
             }
-            crate::store::Role::ToolCall => {
-                // The pair collapses: one completed tool-call update.
-                updates.push(notification(
-                    session_id,
-                    SessionUpdate::ToolCall(
-                        ToolCall::new(
-                            message.id.clone(),
-                            message.tool_name.clone().unwrap_or_default(),
-                        )
-                        .status(ToolCallStatus::Completed),
-                    ),
-                ));
-            }
-            crate::store::Role::ToolResult => {
-                // Collapsed into the tool_call update above.
-            }
+            _ => {}
         }
     }
     updates
