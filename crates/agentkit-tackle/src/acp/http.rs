@@ -118,6 +118,13 @@ async fn dispatch_and_await(connection: &Connection, body: &str) -> String {
         Some(other) => Some(other.to_string()),
         None => None,
     };
+    // A response-only POST (id, no method) answers an agent-initiated
+    // request: the agent never replies to a reply, so registering a
+    // pending entry would hang this POST until the connection reaped.
+    if id.is_some() && parsed.get("method").is_none() {
+        let _ = connection.incoming.send(body.to_owned()).await;
+        return "{}".to_owned();
+    }
     let (response_tx, response_rx) = oneshot::channel::<String>();
     if let Some(id) = &id {
         connection
