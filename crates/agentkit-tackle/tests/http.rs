@@ -151,6 +151,46 @@ fn initialize_through_session_lifecycle_over_http() {
 }
 
 #[test]
+fn a_response_only_post_answers_immediately() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = spawn_http_agent(dir.path(), "a");
+    wait_for_port(&agent);
+
+    let (_, connection) = rpc(&agent, None, initialize());
+    let connection = connection.expect("the connection id");
+
+    // A client answering an agent-initiated request POSTs a response
+    // (id, no method). The transport must forward it and reply `{}` —
+    // never wait for a response to a response. The client timeout turns
+    // the hang into a fast failure.
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .unwrap();
+    let response = client
+        .post(format!(
+            "http://127.0.0.1:{}/rpc?connection={connection}",
+            agent.port
+        ))
+        .header("content-type", "application/json")
+        .body(
+            json!({
+                "jsonrpc": "2.0",
+                "id": "agent-requested-7",
+                "result": { "outcome": { "outcome": "selected", "optionId": "allow" } }
+            })
+            .to_string(),
+        )
+        .send()
+        .expect("the response-only POST timed out: the transport awaited a reply to a reply");
+    let body = response.text().unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&body).unwrap(),
+        json!({})
+    );
+}
+
+#[test]
 fn multiple_concurrent_connections_are_served() {
     let dir = tempfile::tempdir().unwrap();
     let agent = spawn_http_agent(dir.path(), "a");
