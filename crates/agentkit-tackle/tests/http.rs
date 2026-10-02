@@ -17,7 +17,13 @@ impl Drop for HttpAgent {
     }
 }
 
+/// The bind → drop → spawn window must not interleave with a sibling
+/// test's: another test could grab the dropped port and this agent would
+/// fail to bind (its `wait_for_port` would then connect to the thief).
+static SPAWN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn spawn_http_agent(dir: &std::path::Path, name: &str) -> HttpAgent {
+    let _spawn = SPAWN.lock().unwrap_or_else(|poison| poison.into_inner());
     std::fs::create_dir_all(dir.join(name)).unwrap();
     // Pick a free port by binding one first.
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -40,7 +46,14 @@ fn spawn_http_agent(dir: &std::path::Path, name: &str) -> HttpAgent {
         .stderr(Stdio::null())
         .spawn()
         .unwrap();
-    HttpAgent { child, port }
+    let mut agent = HttpAgent { child, port };
+    wait_for_port(&agent);
+    // A stolen port surfaces as the child exiting immediately (the
+    // readiness probe may have reached the thief instead).
+    if agent.child.try_wait().unwrap().is_some() {
+        panic!("the HTTP agent exited instead of listening on {port}");
+    }
+    agent
 }
 
 /// POSTs one JSON-RPC message; the optional connection header continues
