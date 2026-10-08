@@ -27,7 +27,7 @@
     "prism-react-renderer": "^2.4.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "vscode-jsonrpc": "9.0.2",
+    "vscode-jsonrpc": "9.0.3",
     "vscode-languageserver-types": "3.18.4"
   },
   "devDependencies": {
