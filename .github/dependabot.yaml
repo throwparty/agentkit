@@ -8,6 +8,11 @@ updates:
     open-pull-requests-limit: 10
     cooldown:
       default-days: 7
+    groups:
+      opentelemetry:
+        patterns:
+          - "opentelemetry*"
+          - "tracing-opentelemetry"
 
   - package-ecosystem: github-actions
     directory: /
