@@ -5048,7 +5048,7 @@ __metadata:
     react-dom: "npm:^19.3.0"
     typescript: "npm:~7.0.2"
     vscode-jsonrpc: "npm:9.0.2"
-    vscode-languageserver-types: "npm:3.18.3"
+    vscode-languageserver-types: "npm:3.18.4"
   languageName: unknown
   linkType: soft
 
@@ -15478,10 +15478,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"vscode-languageserver-types@npm:3.18.3":
-  version: 3.18.3
-  resolution: "vscode-languageserver-types@npm:3.18.3"
-  checksum: 10c0/a750da5edbfb08a009b9fcfd780accff17c6312658eab7fcd29baf1bf8318578fdcd4de87a1e25754af7aec72aa5ee9218712614763f27e93313c85768ea17bf
+"vscode-languageserver-types@npm:3.18.4":
+  version: 3.18.4
+  resolution: "vscode-languageserver-types@npm:3.18.4"
+  checksum: 10c0/95a58eba94900bd9e685b44b840497c40709a8f643a4fa0945daa40affa45246ee843d786aa5ce9d64fe573cec1ef9530d3519ae01e8b4aa0ff2c83ba7608ccc
   languageName: node
   linkType: hard
 
