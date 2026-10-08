@@ -34,9 +34,9 @@
     "@docusaurus/module-type-aliases": "^3.10.2",
     "@docusaurus/tsconfig": "^3.10.2",
     "@docusaurus/types": "^3.10.2",
-    "@rspack/binding": "^2.2.7",
-    "@rspack/binding-darwin-arm64": "^2.2.7",
-    "@rspack/core": "^2.2.7",
+    "@rspack/binding": "^2.2.8",
+    "@rspack/binding-darwin-arm64": "^2.2.8",
+    "@rspack/core": "^2.2.8",
     "@types/react": "^19.3.0",
     "typescript": "~7.0.2"
   },
