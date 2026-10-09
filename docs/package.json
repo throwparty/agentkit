@@ -23,6 +23,7 @@
     "@docusaurus/preset-classic": "^3.10.2",
     "@docusaurus/theme-mermaid": "^3.10.2",
     "@mdx-js/react": "^3.1.1",
+    "@throwparty/docusaurus-theme": "^0.1.0",
     "clsx": "^2.1.1",
     "prism-react-renderer": "^2.4.1",
     "react": "^19.3.0",
@@ -55,7 +56,7 @@
   "engines": {
     "node": ">=20.0"
   },
-  "packageManager": "yarn@4.17.1",
+  "packageManager": "yarn@4.18.1",
   "resolutions": {
     "ajv@^8.0.0": "^8.18.0",
     "ajv@ajv@npm:^8.9.0": "^8.18.0",

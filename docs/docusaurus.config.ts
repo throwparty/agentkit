@@ -136,7 +136,7 @@ const config: Config = {
     ],
   ],
 
-  themes: ["@docusaurus/theme-mermaid"],
+  themes: ["@docusaurus/theme-mermaid", "@throwparty/docusaurus-theme"],
 
   themeConfig: {
     image: "img/docusaurus-social-card.jpg",
@@ -148,6 +148,8 @@ const config: Config = {
       logo: {
         alt: "AgentKit logo, depicting a briefcase filled with tools for maintaining and troubleshooting a software engineering workspace backed by AI agents.",
         src: "img/logo.svg",
+        width: 1408,
+        height: 768,
       },
       items: [
         {
