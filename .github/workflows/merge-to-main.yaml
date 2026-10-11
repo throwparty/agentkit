@@ -62,6 +62,7 @@ jobs:
     permissions:
       contents: read
       pages: read # To configure Pages and upload build artifact
+      packages: read # To pull @throwparty/* from GitHub Packages
       id-token: write # Required by actions/configure-pages
     uses: $/.github/workflows/docs.build.yaml
 

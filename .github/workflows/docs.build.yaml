@@ -16,6 +16,7 @@ jobs:
     permissions:
       contents: read
       pages: read # To configure Pages and upload build artifact
+      packages: read # To pull @throwparty/* from GitHub Packages
       id-token: write # Required by actions/configure-pages
     defaults:
       run:
@@ -41,6 +42,17 @@ jobs:
             docs/build
           key: "${{ runner.os }}-build-and-deploy-${{ hashFiles('**/package-lock.json', '**/yarn.lock') }}-${{ hashFiles('**.css', '**.html', '**.json', '**.mdx', '**.svg', '**.tsx', '**.yml') }}"
           restore-keys: "${{ runner.os }}-build-and-deploy-${{ hashFiles('**/package-lock.json', '**/yarn.lock') }}-"
+      - name: Configure Yarn
+        run: |
+          yarn config set --home "npmScopes.$SCOPE.npmRegistryServer" "$REGISTRY"
+          yarn config set --home "npmScopes.$SCOPE.npmAlwaysAuth" true
+          yarn config set --home "npmScopes.$SCOPE.npmAuthToken" "$TOKEN"
+          yarn config set --home "npmRegistries[\"$REGISTRY\"].npmAuthToken" "$TOKEN"
+          yarn config set --home "npmRegistries[\"$REGISTRY\"].npmAlwaysAuth" true
+        env:
+          REGISTRY: https://npm.pkg.github.com
+          SCOPE: throwparty
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Install dependencies
         run: yarn
       - name: Build
