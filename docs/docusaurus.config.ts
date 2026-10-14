@@ -200,6 +200,7 @@ const config: Config = {
       copyright: `Copyright © ${new Date().getFullYear()} throw.party`,
     },
     prism: {
+      additionalLanguages: ["toml", "powershell"],
       theme: prismThemes.github,
       darkTheme: prismThemes.dracula,
     },
