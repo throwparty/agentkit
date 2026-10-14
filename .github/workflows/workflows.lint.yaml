@@ -1,7 +1,14 @@
 name: "Workflows: lint"
 
 on:
-  workflow_call: {}
+  workflow_call:
+    secrets:
+      CACHIX_AUTH_TOKEN:
+        description: Cachix authentication token used to push built store paths
+        required: false
+      CACHIX_SIGNING_KEY:
+        description: Cachix signing key used to push built store paths
+        required: false
 
 concurrency:
   group: workflows.lint-${{ github.event.pull_request.number || github.ref }}
@@ -26,7 +33,10 @@ jobs:
       - name: Setup Nix
         uses: $/.github/actions/setup-nix
         with:
-          cachix-cache: ${{ vars.CACHIX_CACHE }}
+          push-name: ${{ vars.CACHIX_PUSH_CACHE }}
+          pull-names: ${{ vars.CACHIX_PULL_CACHES }}
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }} # zizmor: ignore[secrets-outside-env]
+          cachix-signing-key: ${{ secrets.CACHIX_SIGNING_KEY }} # zizmor: ignore[secrets-outside-env]
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Run actionlint
         run: just workflows actionlint

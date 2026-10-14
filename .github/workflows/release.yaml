@@ -18,3 +18,6 @@ jobs:
       contents: write # Called workflow publishes release artifacts
       id-token: write # Called workflow uses keyless signing
     uses: $/.github/workflows/agentkit.build-and-release.yaml
+    secrets:
+      CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      CACHIX_SIGNING_KEY: ${{ secrets.CACHIX_SIGNING_KEY }}
