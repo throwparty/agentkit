@@ -63,6 +63,9 @@ jobs:
       actions: write # Called workflow uses it for cargo caches
       contents: read
     uses: $/.github/workflows/agentkit.build-and-test.yaml
+    secrets:
+      CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      CACHIX_SIGNING_KEY: ${{ secrets.CACHIX_SIGNING_KEY }}
 
   docs:
     name: Build docs
@@ -82,6 +85,9 @@ jobs:
     permissions:
       contents: read
     uses: $/.github/workflows/workflows.lint.yaml
+    secrets:
+      CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      CACHIX_SIGNING_KEY: ${{ secrets.CACHIX_SIGNING_KEY }}
 
   lint-nix:
     name: Lint Nix
@@ -93,6 +99,9 @@ jobs:
     permissions:
       contents: read
     uses: $/.github/workflows/nix.lint.yaml
+    secrets:
+      CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      CACHIX_SIGNING_KEY: ${{ secrets.CACHIX_SIGNING_KEY }}
 
   release-snapshot:
     name: Release snapshot
@@ -106,6 +115,9 @@ jobs:
       contents: write # Called workflow publishes snapshot artifacts
       id-token: write # Called workflow uses keyless signing
     uses: $/.github/workflows/agentkit.build-and-release.yaml
+    secrets:
+      CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      CACHIX_SIGNING_KEY: ${{ secrets.CACHIX_SIGNING_KEY }}
     with:
       build-is-snapshot: true
 

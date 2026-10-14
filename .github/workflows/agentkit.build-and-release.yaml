@@ -6,6 +6,13 @@ on:
       build-is-snapshot:
         type: boolean
         default: false
+    secrets:
+      CACHIX_AUTH_TOKEN:
+        description: Cachix authentication token used to push built store paths
+        required: false
+      CACHIX_SIGNING_KEY:
+        description: Cachix signing key used to push built store paths
+        required: false
 
 concurrency:
   group: agentkit.build-and-release-${{ inputs.build-is-snapshot && format('actor-{0}', github.actor) || 'release' }}
@@ -33,7 +40,10 @@ jobs:
       - name: Setup Nix
         uses: $/.github/actions/setup-nix
         with:
-          cachix-cache: ${{ vars.CACHIX_CACHE }}
+          push-name: ${{ vars.CACHIX_PUSH_CACHE }}
+          pull-names: ${{ vars.CACHIX_PULL_CACHES }}
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }} # zizmor: ignore[secrets-outside-env]
+          cachix-signing-key: ${{ secrets.CACHIX_SIGNING_KEY }} # zizmor: ignore[secrets-outside-env]
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Cache macOS SDK
         id: cache-macos-sdk
