@@ -1,0 +1,196 @@
+---
+sidebar_position: 2
+---
+
+# 🔳 OpenCode
+
+The [OpenCode Zen](https://opencode.ai/docs/zen/) gateway serves several model families across three wire formats under a single base URL and API key. Because a Switchboard provider is pinned to one `api_surface` per entry, Zen is configured as three entries sharing the same `base_url` and credential:
+
+| Identity | `api_surface` | Model families |
+| --- | --- | --- |
+| `zen_chat` | `openai-chat-completions` | DeepSeek, GLM, Kimi, MiniMax, and Zen's `-free` models |
+| `zen_responses` | `openai-responses` | GPT, Grok, Muse |
+| `zen_messages` | `anthropic-messages` | Claude, Qwen Plus |
+
+```toml
+[[providers]]
+identity = "zen_chat"
+api_surface = "openai-chat-completions"
+base_url = "https://opencode.ai/zen/v1"
+user_agent = "opencode/1.18.31 ai-sdk/provider-utils/4.0.23 runtime/bun/1.4.2"
+billing = "pay_as_you_go"
+models = [
+  "deepseek-v4-flash",
+  "deepseek-v4-flash-free",
+  "glm-5.2",
+  "glm-5.3-flash",
+  "kimi-k3",
+  "minimax-m3",
+  "qwen3.8-max",
+]
+
+[providers.headers]
+x-opencode-session = "ses_aaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+[providers.auth]
+type = "bearer_token"
+
+[providers.pricing]
+input_per_mtok = 0
+output_per_mtok = 0
+
+[[providers]]
+identity = "zen_responses"
+api_surface = "openai-responses"
+base_url = "https://opencode.ai/zen/v1"
+user_agent = "opencode/1.18.31 ai-sdk/provider-utils/4.0.23 runtime/bun/1.4.2"
+billing = "pay_as_you_go"
+models = [
+  "gpt-5.4",
+  "gpt-5.5",
+  "gpt-5.6-luna",
+  "grok-4.6",
+  "muse-spark-1.3",
+]
+
+[providers.headers]
+x-opencode-session = "ses_aaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+[providers.auth]
+type = "bearer_token"
+
+[providers.pricing]
+input_per_mtok = 0
+output_per_mtok = 0
+
+[[providers]]
+identity = "zen_messages"
+api_surface = "anthropic-messages"
+base_url = "https://opencode.ai/zen/v1"
+user_agent = "opencode/1.18.31 ai-sdk/provider-utils/4.0.23 runtime/bun/1.4.2"
+billing = "pay_as_you_go"
+models = [
+  "claude-haiku-4-5",
+  "claude-opus-5",
+  "claude-sonnet-5",
+  "qwen3.6-plus",
+]
+
+[providers.headers]
+x-opencode-session = "ses_aaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+[providers.auth]
+type = "bearer_token"
+
+[providers.pricing]
+input_per_mtok = 0
+output_per_mtok = 0
+```
+
+The model lists above are a representative subset — Zen's catalogue churns, and the full lists are long. Regenerate them with the script at the bottom of this page.
+
+A few details worth calling out:
+
+- **`x-opencode-session`** — Zen requires this header, shaped like a session id, before it will serve `-free` models. Pick any stable opaque value.
+- **`user_agent`** — Switchboard identifies itself upstream as `agentkit-switchboard/<version>` by default; Zen behaves better when presented as an OpenCode client, so each entry overrides it. See the [configuration reference](../reference/config) for the field.
+- **Claude models** — Zen's `anthropic-messages` surface is currently the only way to get Claude models through Switchboard; native Anthropic support is on the [roadmap](../roadmap).
+
+## Credentials
+
+All three entries present the same Zen API key. Store it under each identity:
+
+```shell
+switchboard auth add zen_chat sk-...
+switchboard auth add zen_responses sk-...
+switchboard auth add zen_messages sk-...
+```
+
+## Regenerating the model list
+
+The authoritative source for model families is the models.dev catalog (classified by the SDK package each model declares, `providers.opencode.models[*].provider.npm`), intersected with what Zen's `/models` endpoint actually serves right now. This script rebuilds all three `models` lists from both:
+
+<details>
+    <summary>Regenerating the model list</summary>
+
+```bash
+#!/usr/bin/env bash
+# Generate OpenCode Zen [[providers]] blocks for switchboard config.toml.
+# Surface: models.dev providers.opencode.models[*].provider.npm
+# Membership: GET https://opencode.ai/zen/v1/models
+#
+# Usage: opencode-zen-models.sh >> ~/.config/agentkit/switchboard/config.toml
+set -euo pipefail
+
+MODELS_DEV_URL="${MODELS_DEV_URL:-https://models.dev/api.json}"
+ZEN_MODELS_URL="${ZEN_MODELS_URL:-https://opencode.ai/zen/v1/models}"
+
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "$tmpdir"' EXIT
+
+curl -fsSL "$MODELS_DEV_URL" -o "$tmpdir/models.dev.json"
+curl -fsSL "$ZEN_MODELS_URL" -o "$tmpdir/zen-models.json"
+
+# model ids live on zen /models, classified by models.dev provider.npm
+#   @ai-sdk/openai    -> openai-responses
+#   @ai-sdk/anthropic -> anthropic-messages
+#   null / missing    -> openai-chat-completions
+#   anything else     -> skip (google, systemone, unknown)
+jq -r --slurpfile live "$tmpdir/zen-models.json" '
+  ($live[0].data | map(.id) | unique) as $live_ids
+  | .opencode.models
+  | to_entries
+  | map(select(.key as $id | $live_ids | index($id)))
+  | map(
+      .key as $id
+      | (.value.provider.npm // null) as $npm
+      | {
+          id: $id,
+          surface: (
+            if $npm == "@ai-sdk/openai" then "openai-responses"
+            elif $npm == "@ai-sdk/anthropic" then "anthropic-messages"
+            elif $npm == null then "openai-chat-completions"
+            else empty
+            end
+          ),
+        }
+    )
+  | group_by(.surface)
+  | map({ key: .[0].surface, value: map(.id) | sort })
+  | from_entries
+' "$tmpdir/models.dev.json" > "$tmpdir/by-surface.json"
+
+emit_provider() {
+  local identity="$1" surface="$2"
+  local models
+  models="$(jq -r --arg s "$surface" '.[$s] // [] | .[]' "$tmpdir/by-surface.json")"
+  if [ -z "$models" ]; then
+    echo "error: no models for $identity ($surface)" >&2
+    exit 1
+  fi
+
+  echo '[[providers]]'
+  echo "identity = \"$identity\""
+  echo "api_surface = \"$surface\""
+  echo 'base_url = "https://opencode.ai/zen/v1"'
+  echo 'billing = "pay_as_you_go"'
+  echo 'models = ['
+  printf '  "%s",\n' $models
+  echo ']'
+  echo
+  echo '[providers.auth]'
+  echo 'type = "bearer_token"'
+  echo
+  echo '[providers.pricing]'
+  echo 'input_per_mtok = 0'
+  echo 'output_per_mtok = 0'
+  echo
+}
+
+emit_provider zen_chat openai-chat-completions
+emit_provider zen_responses openai-responses
+emit_provider zen_messages anthropic-messages
+```
+
+</details>
+
+The generated blocks don't include `headers` or `user_agent` — merge them in by hand, and make sure the generated `[[providers]]` blocks replace (rather than duplicate) any existing Zen entries.

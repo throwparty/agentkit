@@ -54,7 +54,7 @@ Providers are defined as an array of tables, keyed by `identity`:
 ```toml
 [[providers]]
 identity = "openai_codex_sub"
-api_surface = "openai"
+api_surface = "openai-responses"
 base_url = "https://chatgpt.com/backend-api/codex"
 billing = "subscription"
 models = ["gpt-4o", "gpt-4o-mini"]
@@ -79,7 +79,13 @@ Unique key for this provider. Used for credential resolution, session affinity l
 
 ### `api_surface`
 
-The wire protocol format. Currently only `"openai"` is supported.
+The wire protocol format. One of:
+
+- `"openai-chat-completions"` — OpenAI Chat Completions.
+- `"openai-responses"` — OpenAI Responses.
+- `"anthropic-messages"` — Anthropic Messages.
+
+A provider entry is pinned to a single surface; multi-surface gateways are configured as multiple entries sharing a `base_url` (see [OpenCode](../setting-up-your-providers/opencode)).
 
 ### `base_url`
 
@@ -97,8 +103,21 @@ Explicit list of model IDs this provider can serve. When absent, models are infe
 
 ### `auth.type`
 
-- `"bearer_token"` — sends credentials as `Authorization: Bearer <value>`. Reads from credential helper with env var fallback.
+- `"bearer_token"` — sends credentials as `Authorization: Bearer <value>`, resolved from the credential helper via `switchboard auth add` or `switchboard auth login`.
 - `"none"` — no authentication header.
+
+### `user_agent`
+
+Optional. Overrides the `User-Agent` header sent upstream for this provider. Defaults to `agentkit-switchboard/<version>`.
+
+### `headers`
+
+Extra headers attached to every outbound request to this provider. Configured values override any header sent by the client of the same name; invalid names or values are skipped with a warning.
+
+```toml
+[providers.headers]
+x-custom-header = "custom-value"
+```
 
 ### `auth.oauth`
 
