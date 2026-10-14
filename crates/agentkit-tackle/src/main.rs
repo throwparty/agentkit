@@ -3,7 +3,7 @@
 use agentkit_tackle::acp::{self, TackleState};
 use agentkit_tackle::mcp::McpPool;
 use agentkit_tackle::store::SessionStore;
-use agentkit_tackle::{cli, config, loader, telemetry};
+use agentkit_tackle::{auth, cli, config, loader, telemetry};
 use clap::Parser;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -13,6 +13,11 @@ fn main() -> ExitCode {
 
     match &args.command {
         cli::Commands::Docgen { kind } => handle_docgen(kind),
+        cli::Commands::Auth {
+            config_dir,
+            credential_helper,
+            command,
+        } => handle_auth(config_dir.as_ref(), credential_helper.as_deref(), command),
         _ => {
             let _telemetry = telemetry::init();
 
@@ -41,6 +46,7 @@ async fn run(args: cli::Cli) -> ExitCode {
             config_dir.as_ref(),
         ),
         cli::Commands::Docgen { .. } => unreachable!("handled before the runtime"),
+        cli::Commands::Auth { .. } => unreachable!("handled before the runtime"),
     };
 
     tracing::info!("tackle starting");
@@ -151,6 +157,40 @@ async fn run(args: cli::Cli) -> ExitCode {
             }
             Err(err) => fail(err),
         },
+    }
+}
+
+fn handle_auth(
+    config_dir: Option<&std::path::PathBuf>,
+    credential_helper: Option<&str>,
+    command: &cli::AuthCommands,
+) -> ExitCode {
+    let user_config_dir = cli::config_dir(config_dir);
+    let loaded = match config::load_layered(&user_config_dir, None, None) {
+        Ok(loaded) => loaded,
+        Err(err) => return fail(err),
+    };
+    let command = match command {
+        cli::AuthCommands::Add { identity, value } => auth::AuthCommand::Add {
+            identity: identity.clone(),
+            value: value.clone(),
+        },
+        cli::AuthCommands::Status { identity } => auth::AuthCommand::Status {
+            identity: identity.clone(),
+        },
+        cli::AuthCommands::Token { identity } => auth::AuthCommand::Token {
+            identity: identity.clone(),
+        },
+        cli::AuthCommands::Logout { identity } => auth::AuthCommand::Logout {
+            identity: identity.clone(),
+        },
+    };
+    match auth::handle_auth(command, &loaded.config, credential_helper) {
+        Ok(message) => {
+            println!("{message}");
+            ExitCode::SUCCESS
+        }
+        Err(err) => fail(err),
     }
 }
 

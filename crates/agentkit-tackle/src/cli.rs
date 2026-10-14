@@ -52,6 +52,24 @@ pub enum Commands {
         #[arg(long)]
         config_dir: Option<PathBuf>,
     },
+    /// Manage stored credentials
+    ///
+    /// Store, inspect, and remove the bearer tokens Tackle resolves
+    /// through the credential helper.
+    Auth {
+        /// Override the user configuration directory (defaults to the platform
+        /// config directory).
+        #[arg(long)]
+        config_dir: Option<PathBuf>,
+
+        /// Override the credential helper name (defaults to the configured
+        /// helper, or `keychain`).
+        #[arg(long)]
+        credential_helper: Option<String>,
+
+        #[command(subcommand)]
+        command: AuthCommands,
+    },
     /// Generate reference documentation
     ///
     /// Prints docs to stdout.
@@ -60,6 +78,18 @@ pub enum Commands {
         #[command(subcommand)]
         kind: DocgenCommand,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AuthCommands {
+    /// Store a bearer token for an identity
+    Add { identity: String, value: String },
+    /// Report configured identities and their credential sources
+    Status { identity: Option<String> },
+    /// Print the resolved credential for an identity
+    Token { identity: String },
+    /// Remove a stored credential
+    Logout { identity: String },
 }
 
 #[derive(Debug, Subcommand)]
