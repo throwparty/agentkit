@@ -98,6 +98,16 @@ pub enum EnvValueError {
 /// resolves through the credential helper at spawn.
 const CRED_MARKER_PREFIX: &str = "{cred:";
 
+/// The identity in a whole-value `{cred:IDENTITY}` marker, if `value`
+/// is exactly one. A marker that is not the entire value, or that
+/// carries an empty identity, yields `None` here; [`resolve_env_value`]
+/// reports those as errors at spawn.
+pub fn credential_marker_identity(value: &str) -> Option<&str> {
+    let rest = value.strip_prefix(CRED_MARKER_PREFIX)?;
+    let identity = rest.strip_suffix('}')?;
+    (!identity.is_empty()).then_some(identity)
+}
+
 /// Resolves one env value for a spawn: a value that is the entire
 /// `{cred:IDENTITY}` marker resolves through `credential_helper`
 /// (component [`crate::agent::provider::CREDENTIAL_COMPONENT`]); any
@@ -887,5 +897,14 @@ mod spawn_hygiene_tests {
         let later = start + Duration::from_secs(11);
         assert_eq!(cap.admit(later), Admission::WindowReset { dropped: 2 });
         assert_eq!(cap.admit(later), Admission::Relay);
+    }
+
+    #[test]
+    fn credential_marker_identity_only_accepts_the_whole_marker() {
+        assert_eq!(credential_marker_identity("{cred:github}"), Some("github"));
+        assert_eq!(credential_marker_identity("Bearer {cred:github}"), None);
+        assert_eq!(credential_marker_identity("{cred:}"), None);
+        assert_eq!(credential_marker_identity("{cred:github"), None);
+        assert_eq!(credential_marker_identity("plain"), None);
     }
 }
