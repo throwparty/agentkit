@@ -1,0 +1,78 @@
+---
+sidebar_position: 1
+---
+
+# 🟢 OpenAI
+
+Switchboard supports both OpenAI billing models: the ChatGPT subscription via the Codex API, and pay-as-you-go platform API keys.
+
+## ChatGPT subscription
+
+The ChatGPT subscription uses OAuth tokens via the Codex API at `chatgpt.com/backend-api/codex`, speaking the Responses API:
+
+```toml
+[[providers]]
+identity = "openai_codex_sub"
+api_surface = "openai-responses"
+base_url = "https://chatgpt.com/backend-api/codex"
+billing = "subscription"
+models = ["gpt-4o", "gpt-4o-mini", "gpt-5.4", "gpt-5.3-codex"]
+
+[providers.auth]
+type = "bearer_token"
+
+[providers.auth.oauth]
+authorize_url = "https://provider.example.com/oauth/authorize"
+token_url = "https://provider.example.com/oauth/token"
+scopes = "openid email profile"
+
+[providers.pricing]
+input_per_mtok = 0
+output_per_mtok = 0
+```
+
+Substitute your OAuth application's authorize and token endpoints; `client_id` is optional and falls back to a known default.
+
+**Credentials:** Run the OAuth login flow to store tokens via the credential helper:
+
+```shell
+switchboard auth login openai_codex_sub
+```
+
+This opens a browser, completes the OAuth authorization code flow with PKCE, and stores the access + refresh tokens via `agentkit-credential-keychain`. Refresh happens automatically.
+
+For CI/headless environments, set `credential_helper = "file"` and pre-populate the credentials file:
+
+```shell
+switchboard auth add openai_codex_sub <access_token>
+```
+
+## OpenAI platform
+
+The OpenAI platform API uses a standard API key for pay-as-you-go, per-token billing. Requests are forwarded directly to `api.openai.com/v1`:
+
+```toml
+[[providers]]
+identity = "openai_payg"
+api_surface = "openai-chat-completions"
+base_url = "https://api.openai.com/v1"
+billing = "pay_as_you_go"
+models = ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"]
+
+[providers.auth]
+type = "bearer_token"
+
+[providers.pricing]
+input_per_mtok = 2.50
+output_per_mtok = 10.00
+
+[providers.pricing.models."gpt-4o-mini"]
+input_per_mtok = 0.15
+output_per_mtok = 0.60
+```
+
+**Credentials:** Store the API key through the credential helper:
+
+```shell
+switchboard auth add openai_payg sk-proj-...
+```

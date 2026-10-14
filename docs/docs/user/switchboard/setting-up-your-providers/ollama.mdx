@@ -1,0 +1,23 @@
+---
+sidebar_position: 3
+---
+
+# 🦙 Ollama (local)
+
+Local models via Ollama need no credentials or pricing — they are free with no rate limits.
+
+```toml
+[[providers]]
+identity = "ollama_local"
+api_surface = "openai-chat-completions"
+base_url = "http://localhost:11434/v1"
+billing = "free"
+models = ["llama-3.2", "mistral"]
+
+[providers.auth]
+type = "none"
+
+pricing = {}
+```
+
+**Credentials:** None required.

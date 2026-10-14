@@ -1,0 +1,42 @@
+---
+sidebar_position: 2
+---
+
+# 🔧 Setting up your providers
+
+Each provider is a `[[providers]]` block in your Switchboard configuration, declaring where requests go, which wire format to speak, how to authenticate, and what they cost. Configured blocks are grouped by vendor:
+
+- [OpenAI](openai) — the ChatGPT subscription via the Codex API, and platform API keys
+- [OpenCode](opencode) — the Zen gateway, serving several model families across three wire formats
+- [Ollama](ollama) — local models, no credentials
+
+Field-by-field documentation for every key in a provider block lives in the [configuration reference](../reference/config).
+
+## Custom request headers
+
+Providers can declare extra headers that Switchboard attaches to every outbound request. Configured values override any header sent by the client of the same name.
+
+```toml
+[providers.headers]
+x-custom-header = "custom-value"
+```
+
+This is useful when a provider expects a header that your client does not send — for example, OpenCode's Zen gateway requires an `x-opencode-session` header shaped like a session id before it will serve `-free` models. See the [OpenCode provider page](opencode) for a full configuration.
+
+Invalid header names or values are skipped with a warning; they never fail the request.
+
+## Starting the proxy
+
+```shell
+switchboard --config switchboard.toml
+```
+
+The HTTP server starts on `127.0.0.1:3812` by default. The session database is created at `~/.switchboard/sessions.db`.
+
+## Checking it works
+
+```shell
+curl http://127.0.0.1:3812/openai/v1/models
+```
+
+This returns the merged model list from the bundled models.dev data plus your TOML overrides. Once you see models, you're ready to [configure your agent](../agents/opencode) to point at Switchboard.
