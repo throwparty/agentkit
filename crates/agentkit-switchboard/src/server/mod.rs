@@ -120,18 +120,15 @@ mod tests {
         let set = compiled.get("test_provider").unwrap();
         let mut headers = axum::http::HeaderMap::new();
         let mut body = Vec::new();
+        let provider = config.providers.get("test_provider").unwrap();
         let context = crate::proxy::mutation::MutationContext {
-            provider_identity: "test_provider",
-            surface: &config
-                .providers
-                .get("test_provider")
-                .unwrap()
-                .api_surface,
-            model: "some-model",
+            provider_identity: provider.identity.clone(),
+            surface: provider.api_surface.clone(),
+            model: "some-model".to_string(),
             session_id: None,
         };
 
-        set.apply(context, &mut headers, &mut body).unwrap();
+        set.apply(&context, &mut headers, &mut body).unwrap();
 
         assert_eq!(headers.get("x-fixture-provider").unwrap(), "test_provider");
     }
