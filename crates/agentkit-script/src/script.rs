@@ -31,6 +31,14 @@ impl CompiledScript {
         })
     }
 
+    pub(crate) fn ast(&self) -> &AST {
+        &self.ast
+    }
+
+    pub(crate) fn origin_owned(&self) -> String {
+        self.origin.to_string()
+    }
+
 }
 
 #[cfg(test)]

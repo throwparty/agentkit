@@ -1,10 +1,23 @@
+use std::cell::Cell;
 use std::path::Path;
+use std::time::Instant;
 
+use rhai::{Dynamic, EvalAltResult, Scope, AST};
 use rhai::packages::Package;
+use serde_json::Value;
 
 use crate::error::ScriptError;
 use crate::limits::Limits;
 use crate::script::CompiledScript;
+
+/// Token returned from the progress callback once the wall-clock deadline has
+/// passed. Its presence in an [`EvalAltResult::ErrorTerminated`] is what
+/// distinguishes a timeout from any other termination.
+const TIMEOUT_TOKEN: &str = "agentkit-script:timeout";
+
+thread_local! {
+    static DEADLINE: Cell<Option<Instant>> = const { Cell::new(None) };
+}
 
 /// A sandboxed Rhai engine with no host capabilities.
 ///
@@ -58,6 +71,11 @@ impl ScriptEngine {
         engine.set_max_array_size(limits.max_array_size);
         engine.set_max_map_size(limits.max_map_size);
         engine.set_max_strings_interned(limits.max_strings_interned);
+        engine.on_progress(|_| {
+            let expired = DEADLINE
+                .with(|deadline| deadline.get().is_some_and(|deadline| Instant::now() > deadline));
+            expired.then(|| Dynamic::from(TIMEOUT_TOKEN))
+        });
 
         Self { engine, limits }
     }
@@ -94,6 +112,114 @@ impl ScriptEngine {
             source,
         })?;
         self.compile(path.display().to_string(), &source)
+    }
+
+    /// Call `function` on `script` with a JSON input, returning a JSON value.
+    ///
+    /// `function` must be a global function taking a single argument. JSON is
+    /// converted to Rhai values on the way in and back again on the way out, so
+    /// scripts have no access to host types. A script that returns anything
+    /// other than a JSON object fails with [`ScriptError::InvalidReturn`].
+    pub fn call(
+        &self,
+        script: &CompiledScript,
+        function: &str,
+        input: &Value,
+    ) -> Result<Value, ScriptError> {
+        let origin = script.origin_owned();
+        if !script.defines(function, 1) {
+            return Err(ScriptError::MissingFunction {
+                origin,
+                function: function.to_string(),
+                arity: 1,
+            });
+        }
+
+        let argument = rhai::serde::to_dynamic(input).map_err(|error| ScriptError::Runtime {
+            origin: origin.clone(),
+            message: format!("cannot convert input: {error}"),
+        })?;
+
+        let previous = DEADLINE.with(|deadline| {
+            let previous = deadline.get();
+            deadline.set(Some(Instant::now() + self.limits.timeout));
+            previous
+        });
+        let outcome = self.call_dynamic(script, function, argument);
+        DEADLINE.with(|deadline| deadline.set(previous));
+
+        match outcome {
+            Ok(value) => {
+                let value: Value = rhai::serde::from_dynamic(&value.flatten()).map_err(|error| {
+                    ScriptError::InvalidReturn {
+                        origin: origin.clone(),
+                        message: error.to_string(),
+                    }
+                })?;
+                if !value.is_object() {
+                    return Err(ScriptError::InvalidReturn {
+                        origin,
+                        message: "returned a non-map value".to_string(),
+                    });
+                }
+                Ok(value)
+            }
+            Err(error) => Err(map_error(&origin, *error, self.limits.timeout)),
+        }
+    }
+
+    fn call_dynamic(
+        &self,
+        script: &CompiledScript,
+        function: &str,
+        argument: Dynamic,
+    ) -> Result<Dynamic, Box<EvalAltResult>> {
+        let ast: &AST = script.ast();
+        let mut scope = Scope::new();
+        self.engine
+            .call_fn::<Dynamic>(&mut scope, ast, function, (argument,))
+    }
+}
+
+/// Translate a Rhai evaluation error into a [`ScriptError`].
+fn map_error(origin: &str, error: EvalAltResult, timeout: std::time::Duration) -> ScriptError {
+    match error {
+        EvalAltResult::ErrorTooManyOperations(..) => ScriptError::LimitExceeded {
+            origin: origin.to_string(),
+            limit: "max_operations",
+        },
+        EvalAltResult::ErrorDataTooLarge(kind, ..) => ScriptError::LimitExceeded {
+            origin: origin.to_string(),
+            limit: data_limit(&kind),
+        },
+        EvalAltResult::ErrorStackOverflow(..) => ScriptError::LimitExceeded {
+            origin: origin.to_string(),
+            limit: "max_call_levels",
+        },
+        EvalAltResult::ErrorTerminated(ref token, ..) if is_timeout_token(token) => {
+            ScriptError::Timeout {
+                origin: origin.to_string(),
+                timeout,
+            }
+        }
+        other => ScriptError::Runtime {
+            origin: origin.to_string(),
+            message: other.to_string(),
+        },
+    }
+}
+
+fn is_timeout_token(token: &Dynamic) -> bool {
+    token.clone().into_string().ok().as_deref() == Some(TIMEOUT_TOKEN)
+}
+
+/// Name the [`Limits`] field a data-size violation belongs to.
+fn data_limit(kind: &str) -> &'static str {
+    match kind {
+        "Length of string" => "max_string_size",
+        "Size of array/BLOB" => "max_array_size",
+        "Size of object map" => "max_map_size",
+        _ => "max_data_size",
     }
 }
 
