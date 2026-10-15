@@ -4,7 +4,7 @@ api_surface = "openai-chat-completions"
 base_url = "https://api.example.com/v1"
 billing = "pay_as_you_go"
 models = ["some-model"]
-mutations = ["./mutations/example.rhai", "/etc/agentkit/shared.rhai"]
+mutations = ["./mutations/example.rhai"]
 
 [providers.auth]
 type = "bearer_token"

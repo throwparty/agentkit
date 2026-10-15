@@ -82,6 +82,7 @@ async fn test_state_with(
         credential_helper: "none".to_string(),
         session_db_path: std::path::PathBuf::from("/tmp/test_switchboard.db"),
         started_at: std::time::Instant::now(),
+        mutations: std::collections::HashMap::new(),
     })
 }
 

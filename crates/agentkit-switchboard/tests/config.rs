@@ -28,12 +28,12 @@ fn config_parse_mutations() {
     let cfg = agentkit_switchboard::config::loader::load_config(&fixture_path("mutations.toml"))
         .expect("config with mutations should parse");
     let provider = cfg.providers.get("test_provider").unwrap();
-    assert_eq!(provider.mutations.len(), 2);
+    assert_eq!(provider.mutations.len(), 1);
 }
 
 #[test]
 fn config_resolves_relative_mutation_paths_against_the_config_directory() {
-    let cfg = agentkit_switchboard::config::loader::load_config(&fixture_path("mutations.toml"))
+    let cfg = agentkit_switchboard::config::loader::load_config(&fixture_path("mutations-paths.toml"))
         .expect("config with mutations should parse");
     let provider = cfg.providers.get("test_provider").unwrap();
 
@@ -43,7 +43,7 @@ fn config_resolves_relative_mutation_paths_against_the_config_directory() {
 
 #[test]
 fn config_keeps_absolute_mutation_paths() {
-    let cfg = agentkit_switchboard::config::loader::load_config(&fixture_path("mutations.toml"))
+    let cfg = agentkit_switchboard::config::loader::load_config(&fixture_path("mutations-paths.toml"))
         .expect("config with mutations should parse");
     let provider = cfg.providers.get("test_provider").unwrap();
 

@@ -7,6 +7,7 @@ use crate::provider::registry::ProviderRegistry;
 use crate::provider::router::{RoutingError, select_provider};
 use crate::proxy::forwarder;
 use crate::server::middleware::RequestId;
+use crate::proxy::mutation::MutationSet;
 use crate::session::sqlite::SqliteSessionManager;
 use crate::session::{RoutingEvent, SessionAffinity};
 use axum::extract::{Query, State};
@@ -27,6 +28,8 @@ pub struct AppState {
     pub credential_helper: String,
     pub session_db_path: PathBuf,
     pub started_at: Instant,
+    /// Per-provider mutation sets, compiled once at startup.
+    pub mutations: std::collections::HashMap<String, MutationSet>,
 }
 
 pub fn build_router(state: Arc<AppState>) -> Router {

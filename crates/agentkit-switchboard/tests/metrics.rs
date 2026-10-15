@@ -65,6 +65,7 @@ async fn test_state(mock_base_url: &str) -> Arc<routes::AppState> {
         credential_helper: "none".to_string(),
         session_db_path: std::path::PathBuf::from("/tmp/test_switchboard.db"),
         started_at: std::time::Instant::now(),
+        mutations: std::collections::HashMap::new(),
     })
 }
 

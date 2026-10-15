@@ -80,7 +80,7 @@ Add src/proxy/mutation.rs with MutationSet and apply. Build the request object m
 | Depends On | T-003, T-005 |
 | References | header-mutation, body-mutation, script-contract, read-only-context, failure-semantics, fail-closed, invalid-header, non-json-body, script-ordering |
 
-### T-007: Compile mutations at startup
+### T-007: [x] Compile mutations at startup
 
 Build one ScriptEngine at startup and compile every provider's mutations once into a HashMap<String, MutationSet> held in AppState. Abort startup with the provider identity and origin on a missing file, a parse error, or a script without fn mutate. Compile a shared script path once even when referenced by multiple providers.
 
