@@ -106,7 +106,7 @@ Replace ForwardRequest's provider_user_agent and provider_headers with mutations
 | Depends On | T-006, T-007 |
 | References | pipeline-placement, credential-isolation, tools-emulation, hack-removed, empty-mutation-list, no-session-id |
 
-### T-009: Switchboard mutation integration tests
+### T-009: [x] Switchboard mutation integration tests
 
 Add tests for header mutation reaching upstream, body tools mutation reaching upstream via a fixture script under tests/fixtures/mutations/, script ordering, invalid header failing the request, fail-closed on script error, credential isolation, and no-mutation passthrough. Replace proxy_request_body_tools_always_injected with a provider-scoped mutation test.
 
