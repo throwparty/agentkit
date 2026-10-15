@@ -1,0 +1,31 @@
+flowchart TB
+    subgraph Client["Agent client"]
+        req["POST /openai/v1/chat/completions"]
+    end
+
+    subgraph Switchboard["agentkit-switchboard"]
+        route["Axum route (surface)"]
+        router["Router: select provider"]
+        cred["resolve_credential"]
+        fwd["forward_request"]
+        subgraph Mutation["Mutation stage"]
+            build["Build request map\n(headers + body + context)"]
+            call["ScriptEngine::call\nfn mutate(request)"]
+            apply["Validate + apply headers/body"]
+        end
+        inject["inject_headers (credentials last)"]
+        appstate["AppState\nHashMap identity to MutationSet"]
+    end
+
+    subgraph Library["agentkit-script"]
+        engine["ScriptEngine (sandboxed)"]
+        scripts["CompiledScript array"]
+    end
+
+    cfg["switchboard.toml\nproviders mutations"] -->|startup compile| appstate
+    appstate --> Mutation
+    req --> route --> router --> cred --> fwd
+    fwd --> build --> call --> apply --> inject
+    call --> engine
+    engine --> scripts
+    inject --> upstream["Upstream provider"]
