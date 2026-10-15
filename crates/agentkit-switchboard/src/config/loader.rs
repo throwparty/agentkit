@@ -28,9 +28,15 @@ pub fn load_config(path: &Path) -> Result<SwitchboardConfig, ConfigError> {
     let contents = std::fs::read_to_string(path)?;
     let raw: RawConfig = toml::from_str(&contents)?;
 
+    let config_dir = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+
     let mut providers = HashMap::new();
     if let Some(list) = raw.providers {
-        for p in list {
+        for mut p in list {
             if providers.contains_key(&p.identity) {
                 return Err(ConfigError::DuplicateIdentity(p.identity));
             }
@@ -40,6 +46,11 @@ pub fn load_config(path: &Path) -> Result<SwitchboardConfig, ConfigError> {
                     p.base_url.clone(),
                 ));
             }
+            p.mutations = p
+                .mutations
+                .iter()
+                .map(|mutation| resolve_script_path(&config_dir, mutation))
+                .collect();
             providers.insert(p.identity.clone(), p);
         }
     }
@@ -50,4 +61,17 @@ pub fn load_config(path: &Path) -> Result<SwitchboardConfig, ConfigError> {
         credential_helper: raw.credential_helper,
         session_db_path: raw.session_db_path,
     })
+}
+
+/// Resolve a mutation script path against the config file's directory.
+///
+/// Absolute paths pass through untouched; relative paths are interpreted
+/// relative to the directory holding the config file so a configuration can be
+/// relocated wholesale.
+fn resolve_script_path(config_dir: &Path, path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        config_dir.join(path)
+    }
 }

@@ -29,6 +29,7 @@ pub struct Capabilities {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProviderConfig {
     pub identity: String,
     pub api_surface: ApiSurface,
@@ -37,6 +38,10 @@ pub struct ProviderConfig {
     pub auth: AuthConfig,
     pub pricing: PricingConfig,
     pub models: Option<Vec<String>>,
+    /// Ordered mutation scripts run against every outbound request to this
+    /// provider. Relative paths resolve against the config file's directory.
+    #[serde(default)]
+    pub mutations: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
