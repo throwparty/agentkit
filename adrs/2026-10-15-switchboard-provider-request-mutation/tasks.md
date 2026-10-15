@@ -119,7 +119,7 @@ Add tests for header mutation reaching upstream, body tools mutation reaching up
 | Depends On | T-008 |
 | References | script-header, script-body, hack-removed, fail-closed-accepted, credential-isolation-accepted, script-ordering, invalid-header, non-json-body, empty-mutation-list |
 
-### T-010: Update docs and run quality gates
+### T-010: [x] Update docs and run quality gates
 
 Remove the stale custom-headers documentation and document the mutations field and the fn mutate contract. Run cargo clippy --all-targets -- -D warnings and cargo test across the workspace.
 

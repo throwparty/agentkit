@@ -106,18 +106,42 @@ Explicit list of model IDs this provider can serve. When absent, models are infe
 - `"bearer_token"` — sends credentials as `Authorization: Bearer <value>`, resolved from the credential helper via `switchboard auth add` or `switchboard auth login`.
 - `"none"` — no authentication header.
 
-### `user_agent`
+### `mutations`
 
-Optional. Overrides the `User-Agent` header sent upstream for this provider. Defaults to `agentkit-switchboard/<version>`.
-
-### `headers`
-
-Extra headers attached to every outbound request to this provider. Configured values override any header sent by the client of the same name; invalid names or values are skipped with a warning.
+Optional. Paths to mutation scripts applied to every outbound request for this provider, in declaration order. Relative paths resolve against the directory containing the configuration file.
 
 ```toml
-[providers.headers]
-x-custom-header = "custom-value"
+mutations = ["scripts/zen.rhai", "scripts/add-tools.rhai"]
 ```
+
+Every script must define a global `fn mutate(request)` that takes the request map and returns it:
+
+```rhai
+fn mutate(request) {
+    request.headers["user-agent"] = "opencode/1.18.31";
+    request
+}
+```
+
+The request map carries:
+
+- `provider` — the provider `identity` (read-only).
+- `surface` — the provider's `api_surface` (read-only).
+- `model` — the model id from the inbound request (read-only).
+- `session_id` — the inbound session id, or `null` (read-only).
+- `headers` — the outbound headers as a map of strings. Mutable.
+- `body` — the outbound body as a parsed JSON value, or `null` for a non-JSON body. Mutable.
+
+What scripts can and cannot do:
+
+- Scripts run once per provider attempt, after the default headers are assembled and **before** the provider credential is injected, and the injected credential always wins over anything a script sets. Switchboard performs no inbound authentication, so an `Authorization` header from the client is assembled like every other header and is visible to scripts.
+- Scripts never see the outbound method or URL.
+- The returned map's `headers` and `body` replace the outbound values wholesale, so keep every header you want to send when you modify `headers`. A header name or value that is not a valid header fails the request; nothing is forwarded unmutated.
+- Scripts run inside a sandbox with bounded execution time, operations, call depth, and container sizes. `eval` and module imports are disabled.
+
+Scripts are compiled once at startup. A missing file, a parse error, or a script without `fn mutate` aborts startup with the provider identity and the script path. Compilation is shared: two providers listing the same path compile it once.
+
+See [Setting up your providers](../setting-up-your-providers) for worked examples.
 
 ### `auth.oauth`
 

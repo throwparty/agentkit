@@ -1,5 +1,5 @@
 title: "Switchboard: Provider Request Mutations"
-status: draft
+status: implemented
 created: 2026-10-15
 author: adrian
 context: "The switchboard has grown three ad-hoc mechanisms for bending requests to a provider's quirks: a per-provider headers table, a per-provider user_agent field, and a hardcoded rewrite in routes.rs that injects tools and sets tool_choice to none on every openai-chat-completions request. The first two are static and cannot express dynamic values. The third is unconditional and therefore applied to every provider whether or not it is wanted. All three were added to work around a specific provider's requirements.\n\nThis ADR replaces them with one formal mechanism: sandboxed Rhai mutation scripts attached to a provider and executed on the assembled outbound request before credentials are injected. Scripts may set or remove headers and modify the parsed JSON request body, covering both the header and the tools-emulation cases. Provider-specific workarounds become user-supplied scripts maintained by the community at users' own risk and the switchboard ships none.\n\nThe sandboxed Rhai engine is packaged as a reusable library crate. Tackle will use the same library."
