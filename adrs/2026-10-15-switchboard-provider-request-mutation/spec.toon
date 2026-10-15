@@ -1,0 +1,58 @@
+title: "Switchboard: Provider Request Mutations"
+status: draft
+created: 2026-10-15
+author: adrian
+context: "The switchboard has grown three ad-hoc mechanisms for bending requests to a provider's quirks: a per-provider headers table, a per-provider user_agent field, and a hardcoded rewrite in routes.rs that injects tools and sets tool_choice to none on every openai-chat-completions request. The first two are static and cannot express dynamic values. The third is unconditional and therefore applied to every provider whether or not it is wanted. All three were added to work around a specific provider's requirements.\n\nThis ADR replaces them with one formal mechanism: sandboxed Rhai mutation scripts attached to a provider and executed on the assembled outbound request before credentials are injected. Scripts may set or remove headers and modify the parsed JSON request body, covering both the header and the tools-emulation cases. Provider-specific workarounds become user-supplied scripts maintained by the community at users' own risk and the switchboard ships none.\n\nThe sandboxed Rhai engine is packaged as a reusable library crate. Tackle will use the same library."
+problem: Switchboard cannot mutate outbound provider requests in a general or dynamic way. The current static header table and user_agent field are baked into the binary and cannot express dynamic values. The hardcoded tools injection is applied to every chat-completions provider rather than the one that needs it.
+goals[5]:
+  - Provide a formal reusable mechanism for mutating outbound provider requests before submission
+  - Support dynamic header setting and JSON request-body mutation including tool emulation
+  - Remove the hardcoded provider workarounds from the switchboard binary
+  - Delegate provider-specific workarounds to user and community maintained scripts at users' own risk
+  - Keep the mechanism fully sandboxed with a minimal API surface
+nonGoals[5]:
+  - Response mutation (request-side only)
+  - Mutating the request method or URL
+  - A mutation package registry or installer (future consideration)
+  - Shipping or bundling community mutation scripts
+  - Hot-reloading scripts at runtime
+requirements[14]{id,title,slug,description}:
+  FR-001,Mutation Scripts,mutation-scripts,A provider declares an ordered list of Rhai script paths that are compiled at startup and executed before each outbound request to that provider
+  FR-002,Script Contract,script-contract,A mutation script defines a global function fn mutate(request) that receives and returns a request map with mutable headers and body plus read-only provider surface model and session_id
+  FR-003,Header Mutation,header-mutation,Scripts can set or remove outbound request headers dynamically
+  FR-004,Body Mutation,body-mutation,Scripts can read and modify the parsed JSON request body
+  FR-005,Tools Emulation,tools-emulation,The hardcoded chat-completions tools and tool_choice injection is removed from routes.rs and expressed as a provider-scoped mutation script
+  FR-006,Static Config Removal,static-config-removal,The per-provider headers table and the user_agent field are removed from ProviderConfig so all request mutation happens through scripts
+  FR-007,Sandboxed Engine,sandboxed-engine,Scripts execute in a sandbox with no filesystem network or module access and no host functions while eval import and export are disabled
+  FR-008,Resource Limits,resource-limits,Script execution is bounded by operation call-depth expression-depth string array and map size limits and by a wall-clock timeout
+  FR-009,Startup Compilation,startup-compilation,Scripts are read and compiled once at startup and a missing or unparseable script aborts startup
+  FR-010,Pipeline Placement,pipeline-placement,Mutations run once per provider attempt on the assembled outbound request before credential injection
+  FR-011,Failure Semantics,failure-semantics,A script that errors exceeds a limit or yields an invalid request fails the request rather than forwarding it unmutated
+  FR-012,Script Path Resolution,script-path-resolution,Relative script paths resolve against the config file directory and multiple scripts run in declared order with later scripts observing earlier output
+  FR-013,Read-Only Context,read-only-context,provider surface model and session_id are supplied to scripts read-only and the method and URL are never exposed
+  FR-014,Reusable Engine Library,engine-library,The sandboxed Rhai engine is packaged as a standalone library crate with no switchboard-specific types so other components can embed it
+nonFunctional[5]{id,title,slug,description}:
+  NFR-001,No Host Capabilities,no-host-capabilities,No host functions are registered so the script API is exactly the request map schema
+  NFR-002,Fail-Closed,fail-closed,Script failure never results in an unmutated request being forwarded upstream
+  NFR-003,Credential Isolation,credential-isolation,Scripts never receive credential values because mutation runs before credentials are injected
+  NFR-004,Bounded Execution,bounded-execution,Per-call limits prevent a runaway script from stalling request handling
+  NFR-005,Self-Contained Scripts,self-contained-scripts,A mutation is a single self-contained file with no imports or external dependencies
+acceptance[10]{id,title,slug,description}:
+  AC-001,Script Header Mutation,script-header,A provider script that sets a header results in that header on the outbound request
+  AC-002,Script Body Mutation,script-body,A provider script that adds tools and sets tool_choice produces the expected upstream body
+  AC-003,Static Config Removed,static-config-removed,ProviderConfig no longer has a headers table or a user_agent field
+  AC-004,Hack Removed,hack-removed,routes.rs contains no hardcoded tools or tool_choice injection
+  AC-005,Sandbox Enforced,sandbox-enforced,A script that attempts filesystem network eval or import access fails
+  AC-006,Limits Enforced,limits-enforced,A script containing an infinite loop terminates with a limit error
+  AC-007,Fail-Closed,fail-closed-accepted,A script error returns an error response and no request reaches the provider
+  AC-008,Script Ordering,script-ordering,With two scripts declared in order the second observes the first script's mutations
+  AC-009,Credential Isolation,credential-isolation-accepted,A script cannot read or alter the injected credential
+  AC-010,Quality Gates,quality-gates,cargo clippy --all-targets -- -D warnings is clean and cargo test passes
+edgeCases[7]{id,title,slug,description}:
+  EC-001,Non-JSON Body,non-json-body,When the request body is not JSON the body field is () and a script that mutates it fails
+  EC-002,Missing Function,missing-function,A script without a global mutate function is rejected at startup
+  EC-003,Invalid Header,invalid-header,A script that produces an invalid header name or value fails the request
+  EC-004,Empty Mutation List,empty-mutation-list,A provider with an empty mutation list behaves exactly as before
+  EC-005,Non-Map Return,non-map-return,A script that returns a non-map value fails the request
+  EC-006,No Session,no-session-id,session_id is () when the client sends no X-Session-Id header
+  EC-007,Shared Script,shared-script,The same script path may be referenced by multiple providers and is compiled once
