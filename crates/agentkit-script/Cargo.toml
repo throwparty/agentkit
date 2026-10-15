@@ -1,5 +1,5 @@
 [dependencies]
-rhai = {version = "1.26", features = ["serde", "sync", "no_module", "no_closure", "no_time"]}
+rhai = { version = "1.26", features = ["serde", "sync", "no_module", "no_closure", "no_time"] }
 serde_json = "1"
 thiserror = "2"
 

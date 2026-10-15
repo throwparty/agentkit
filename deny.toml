@@ -2,6 +2,9 @@
 db-urls = ["https://github.com/rustsec/advisory-db"]
 unmaintained = "all"
 git-fetch-with-cli = true
+# smartstring is unmaintained (RUSTSEC-2026-0249) and MPL-2.0+, pulled in only by
+# rhai 1.x; rhai 2.0 drops it. Exempt until we can upgrade.
+ignore = ["RUSTSEC-2026-0249"]
 
 [bans]
 multiple-versions = "warn"
@@ -16,6 +19,7 @@ allow = [
   "CDLA-Permissive-2.0",
   "ISC",
   "MIT",
+  "MPL-2.0", # smartstring, via rhai 1.x; removed in rhai 2.0
   "Unicode-3.0",
   "Unlicense",
   "Zlib"
