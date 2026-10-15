@@ -1,6 +1,6 @@
 # Switchboard: Provider Request Mutations
 
-**Status:** draft  **Created:** 2026-10-15  **Author:** adrian
+**Status:** implemented  **Created:** 2026-10-15  **Author:** adrian
 
 The switchboard has grown three ad-hoc mechanisms for bending requests to a provider's quirks: a per-provider headers table, a per-provider user_agent field, and a hardcoded rewrite in routes.rs that injects tools and sets tool_choice to none on every openai-chat-completions request. The first two are static and cannot express dynamic values. The third is unconditional and therefore applied to every provider whether or not it is wanted. All three were added to work around a specific provider's requirements.
 

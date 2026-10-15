@@ -12,18 +12,25 @@ Each provider is a `[[providers]]` block in your Switchboard configuration, decl
 
 Field-by-field documentation for every key in a provider block lives in the [configuration reference](../reference/config).
 
-## Custom request headers
+## Mutation scripts
 
-Providers can declare extra headers that Switchboard attaches to every outbound request. Configured values override any header sent by the client of the same name.
+Providers can attach [mutation scripts](../reference/config#mutations) that rewrite every outbound request — headers and body — just before it is forwarded.
 
-```toml
-[providers.headers]
-x-custom-header = "custom-value"
+```rhai
+// scripts/custom-header.rhai
+fn mutate(request) {
+    request.headers["x-custom-header"] = "custom-value";
+    request
+}
 ```
 
-This is useful when a provider expects a header that your client does not send — for example, OpenCode's Zen gateway requires an `x-opencode-session` header shaped like a session id before it will serve `-free` models. See the [OpenCode provider page](opencode) for a full configuration.
+```toml
+mutations = ["scripts/custom-header.rhai"]
+```
 
-Invalid header names or values are skipped with a warning; they never fail the request.
+This is useful when a provider expects something your client does not send — for example, OpenCode's Zen gateway requires an `x-opencode-session` header shaped like a session id before it will serve `-free` models. See the [OpenCode provider page](opencode) for a full configuration.
+
+Scripts run in declaration order, in a sandbox, before the provider credential is injected. An invalid header or a script error fails the request: nothing is forwarded unmutated.
 
 ## Starting the proxy
 
