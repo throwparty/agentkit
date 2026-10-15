@@ -26,6 +26,7 @@ base64 = "0.23"
 agentkit-models = {path = "../agentkit-models"}
 agentkit-docgen = {path = "../agentkit-docgen"}
 agentkit-path = {path = "../agentkit-path"}
+agentkit-script = {path = "../agentkit-script"}
 
 [dev-dependencies]
 wiremock = "0.6"

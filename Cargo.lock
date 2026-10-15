@@ -116,6 +116,7 @@ dependencies = [
  "agentkit-docgen",
  "agentkit-models",
  "agentkit-path",
+ "agentkit-script",
  "axum",
  "base64 0.23.1",
  "chrono",
