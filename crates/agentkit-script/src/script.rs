@@ -38,7 +38,6 @@ impl CompiledScript {
     pub(crate) fn origin_owned(&self) -> String {
         self.origin.to_string()
     }
-
 }
 
 #[cfg(test)]

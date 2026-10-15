@@ -227,45 +227,227 @@ fn data_limit(kind: &str) -> &'static str {
 mod tests {
     use super::*;
     use crate::INLINE_ORIGIN;
+    use serde_json::json;
 
-    #[test]
-    fn compile_records_the_origin_and_defines_functions() {
-        let engine = ScriptEngine::new();
+    fn engine() -> ScriptEngine {
+        ScriptEngine::new()
+    }
 
-        let script = engine
-            .compile(INLINE_ORIGIN, "fn mutate(request) { request }")
-            .unwrap();
-
-        assert_eq!(script.origin(), INLINE_ORIGIN);
-        assert!(script.defines("mutate", 1));
-        assert!(!script.defines("mutate", 2));
+    fn compile(engine: &ScriptEngine, source: &str) -> CompiledScript {
+        engine.compile(INLINE_ORIGIN, source).unwrap()
     }
 
     #[test]
-    fn eval_import_and_export_are_disabled() {
-        let engine = ScriptEngine::new();
+    fn call_round_trips_a_json_map() {
+        let engine = engine();
+        let script = compile(
+            &engine,
+            "fn mutate(request) { request.headers[\"x-added\"] = \"yes\"; request }",
+        );
+        let input = json!({"headers": {}, "body": {"model": "gpt-4o"}});
+
+        let output = engine.call(&script, "mutate", &input).unwrap();
+
+        assert_eq!(output["headers"]["x-added"], "yes");
+        assert_eq!(output["body"]["model"], "gpt-4o");
+    }
+
+    #[test]
+    fn call_converts_json_null_to_unit() {
+        let engine = engine();
+        let script = compile(
+            &engine,
+            "fn mutate(request) { let r = #{}; r[\"was_unit\"] = (request == ()); r }",
+        );
+
+        let output = engine.call(&script, "mutate", &Value::Null).unwrap();
+
+        assert_eq!(output["was_unit"], true);
+    }
+
+    #[test]
+    fn call_rejects_a_missing_function() {
+        let engine = engine();
+        let script = compile(&engine, "fn other() { 1 }");
+
+        let error = engine.call(&script, "mutate", &json!({})).unwrap_err();
+
+        assert!(matches!(error, ScriptError::MissingFunction { .. }));
+    }
+
+    #[test]
+    fn call_reports_runtime_errors() {
+        let engine = engine();
+        let script = compile(&engine, "fn mutate(request) { undefined_function() }");
+
+        let error = engine.call(&script, "mutate", &json!({})).unwrap_err();
+
+        assert!(matches!(error, ScriptError::Runtime { .. }), "{error:?}");
+    }
+
+    #[test]
+    fn an_infinite_loop_hits_the_operation_limit() {
+        let engine = engine();
+        let script = compile(&engine, "fn mutate(request) { loop {} }");
+
+        let error = engine.call(&script, "mutate", &json!({})).unwrap_err();
+
+        assert!(
+            matches!(error, ScriptError::LimitExceeded { .. }),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn a_slow_script_hits_the_timeout() {
+        let engine = ScriptEngine::with_limits(Limits {
+            max_operations: u64::MAX,
+            timeout: std::time::Duration::from_millis(20),
+            ..Limits::default()
+        });
+        let script = compile(&engine, "fn mutate(request) { loop {} }");
+
+        let error = engine.call(&script, "mutate", &json!({})).unwrap_err();
+
+        assert!(matches!(error, ScriptError::Timeout { .. }), "{error:?}");
+    }
+
+    #[test]
+    fn an_oversized_string_is_rejected() {
+        let engine = ScriptEngine::with_limits(Limits {
+            max_string_size: 16,
+            ..Limits::default()
+        });
+        let script = compile(
+            &engine,
+            "fn mutate(request) { let s = \"aaaa\"; for i in 0..20 { s += \"aaaabbbb\"; } #{ \"value\": s } }",
+        );
+
+        let error = engine.call(&script, "mutate", &json!({})).unwrap_err();
+
+        assert!(
+            matches!(
+                &error,
+                ScriptError::LimitExceeded { limit, .. } if *limit == "max_string_size"
+            ),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn an_oversized_array_is_rejected() {
+        let engine = ScriptEngine::with_limits(Limits {
+            max_array_size: 8,
+            ..Limits::default()
+        });
+        let script = compile(
+            &engine,
+            "fn mutate(request) { let a = []; for i in 0..100 { a.push(i); } a }",
+        );
+
+        let error = engine.call(&script, "mutate", &json!({})).unwrap_err();
+
+        assert!(
+            matches!(
+                &error,
+                ScriptError::LimitExceeded { limit, .. } if *limit == "max_array_size"
+            ),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn an_oversized_map_is_rejected() {
+        let engine = ScriptEngine::with_limits(Limits {
+            max_map_size: 8,
+            ..Limits::default()
+        });
+        let script = compile(
+            &engine,
+            "fn mutate(request) { let a = #{}; let b = #{}; for i in 0..100 { b[\"k\" + i.to_string()] = i; } a.mixin(b); a }",
+        );
+        let error = engine.call(&script, "mutate", &json!({})).unwrap_err();
+
+        assert!(
+            matches!(
+                &error,
+                ScriptError::LimitExceeded { limit, .. } if *limit == "max_map_size"
+            ),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn eval_is_rejected_at_compile_time() {
+        let engine = engine();
+
+        let error = engine
+            .compile(INLINE_ORIGIN, "fn mutate(request) { eval(\"1 + 1\") }")
+            .unwrap_err();
+
+        assert!(matches!(error, ScriptError::Compile { .. }), "{error:?}");
+    }
+
+    #[test]
+    fn import_is_rejected_at_compile_time() {
+        let engine = engine();
+
+        let error = engine
+            .compile(INLINE_ORIGIN, "import \"some/module\" as m; fn mutate(request) { 1 }")
+            .unwrap_err();
+
+        assert!(matches!(error, ScriptError::Compile { .. }), "{error:?}");
+    }
+
+    #[test]
+    fn a_script_cannot_reach_the_filesystem_or_the_network() {
+        let engine = engine();
 
         for source in [
-            "fn mutate(request) { eval(\"1 + 1\") }",
-            "import \"some/module\" as m; fn mutate(request) { 1 }",
+            "import \"/etc/passwd\"; fn mutate(request) { 1 }",
+            "fn mutate(request) { eval(\"import \\\"/etc/passwd\\\";\") }",
         ] {
             let error = engine.compile(INLINE_ORIGIN, source).unwrap_err();
             assert!(
                 matches!(error, ScriptError::Compile { .. }),
-                "{source} should fail to compile: {error:?}"
+                "{source} must not reach the host: {error:?}"
             );
         }
     }
 
     #[test]
+    fn a_non_map_return_is_reported() {
+        let engine = engine();
+        let script = compile(&engine, "fn mutate(request) { 42 }");
+
+        let error = engine.call(&script, "mutate", &json!({})).unwrap_err();
+
+        assert!(matches!(error, ScriptError::InvalidReturn { .. }), "{error:?}");
+    }
+
+    #[test]
+    fn syntax_errors_are_compile_errors() {
+        let engine = engine();
+
+        let error = engine.compile(INLINE_ORIGIN, "fn mutate(request) {").unwrap_err();
+
+        assert!(matches!(error, ScriptError::Compile { .. }), "{error:?}");
+    }
+
+    #[test]
     fn a_missing_file_is_a_read_error() {
-        let engine = ScriptEngine::new();
+        let engine = engine();
 
         let error = engine
             .compile_file(std::path::Path::new("/nonexistent/nowhere.rhai"))
             .unwrap_err();
 
-        assert!(matches!(error, ScriptError::Read { .. }), "{error:?}");
+        match error {
+            ScriptError::Read { path, .. } => {
+                assert_eq!(path, std::path::Path::new("/nonexistent/nowhere.rhai"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 
     #[test]
@@ -275,7 +457,7 @@ mod tests {
         let path = dir.join("mutate.rhai");
         std::fs::write(&path, "fn mutate(request) { request }").unwrap();
 
-        let script = ScriptEngine::new().compile_file(&path).unwrap();
+        let script = engine().compile_file(&path).unwrap();
         assert_eq!(script.origin(), path.display().to_string());
 
         std::fs::remove_dir_all(&dir).ok();

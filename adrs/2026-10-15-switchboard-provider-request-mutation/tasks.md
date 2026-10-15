@@ -2,7 +2,7 @@
 
 ## Tasks
 
-### T-001: Create agentkit-script crate and Limits
+### T-001: [x] Create agentkit-script crate and Limits
 
 Add crates/agentkit-script to the workspace with Cargo.toml (rhai 1.26 with serde, sync, no_module, no_closure, no_time; serde_json; thiserror) and src/lib.rs, src/engine.rs, src/limits.rs, src/script.rs, src/error.rs. Define the Limits struct with the documented defaults and a Default impl.
 
@@ -15,7 +15,7 @@ Add crates/agentkit-script to the workspace with Cargo.toml (rhai 1.26 with serd
 | Depends On |  |
 | References | engine-library, resource-limits |
 
-### T-002: Build the sandboxed engine and compile scripts
+### T-002: [x] Build the sandboxed engine and compile scripts
 
 Implement ScriptEngine::new, with_limits, limits, compile, and compile_file. Construct the engine with Engine::new_raw plus StandardPackage (no FileModuleResolver), register no host functions, disable eval/import/export, and apply every Limits value via set_max_operations, set_max_call_levels, set_max_expr_depths, set_max_string_size, set_max_array_size, set_max_map_size, and set_max_strings_interned. compile_file reads the file and reports Read or Compile errors with the origin.
 
@@ -28,7 +28,7 @@ Implement ScriptEngine::new, with_limits, limits, compile, and compile_file. Con
 | Depends On | T-001 |
 | References | sandboxed-engine, no-host-capabilities, self-contained-scripts, startup-compilation, engine-library |
 
-### T-003: Implement call with conversion and timeout
+### T-003: [x] Implement call with conversion and timeout
 
 Implement ScriptEngine::call. Check defines(function, 1) first and return MissingFunction otherwise. Convert the JSON input with rhai::serde::to_dynamic, run engine.call_fn::<Dynamic> with a fresh Scope and a thread_local wall-clock deadline checked from on_progress, then flatten and convert back with rhai::serde::from_dynamic. Map Rhai errors and termination tokens to ScriptError variants.
 
@@ -41,7 +41,7 @@ Implement ScriptEngine::call. Check defines(function, 1) first and return Missin
 | Depends On | T-002 |
 | References | script-contract, resource-limits, bounded-execution, missing-function, non-map-return, engine-library |
 
-### T-004: Unit test the scripting engine
+### T-004: [x] Unit test the scripting engine
 
 Add unit tests in agentkit-script covering compile and call, missing function, runtime error, infinite loop hitting max_operations, string and array and map size limits, eval and import blocked, wall-clock timeout, and non-map return. Assert that no filesystem or network access is possible.
 
