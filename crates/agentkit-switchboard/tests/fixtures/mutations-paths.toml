@@ -1,0 +1,14 @@
+[[providers]]
+identity = "test_provider"
+api_surface = "openai-chat-completions"
+base_url = "https://api.example.com/v1"
+billing = "pay_as_you_go"
+models = ["some-model"]
+mutations = ["./mutations/example.rhai", "/etc/agentkit/shared.rhai"]
+
+[providers.auth]
+type = "bearer_token"
+
+[providers.pricing]
+input_per_mtok = 1.0
+output_per_mtok = 2.0

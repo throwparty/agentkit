@@ -35,6 +35,12 @@ pub async fn start(
     model_db.sync_to_db(&session_pool).await?;
     let session_manager = Arc::new(SqliteSessionManager::new(session_pool));
 
+    let mutations = crate::proxy::mutation::compile_provider_mutations(
+        &Arc::new(agentkit_script::ScriptEngine::new()),
+        &config.providers,
+    )
+    .map_err(|error| -> Box<dyn std::error::Error> { error.into() })?;
+
     let state = Arc::new(routes::AppState {
         config,
         registry,
@@ -43,6 +49,7 @@ pub async fn start(
         credential_helper,
         session_db_path,
         started_at: std::time::Instant::now(),
+        mutations,
     });
 
     let app = routes::build_router(state);
@@ -88,5 +95,67 @@ async fn shutdown_signal() {
     tokio::select! {
         _ = ctrl_c => {},
         _ = terminate => {},
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture(name: &str) -> PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join(name)
+    }
+
+    #[test]
+    fn mutations_are_compiled_at_startup_from_the_loaded_config() {
+        let config = crate::config::loader::load_config(&fixture("mutations.toml")).unwrap();
+        let engine = Arc::new(agentkit_script::ScriptEngine::new());
+
+        let compiled =
+            crate::proxy::mutation::compile_provider_mutations(&engine, &config.providers).unwrap();
+
+        let set = compiled.get("test_provider").unwrap();
+        let mut headers = axum::http::HeaderMap::new();
+        let mut body = Vec::new();
+        let context = crate::proxy::mutation::MutationContext {
+            provider_identity: "test_provider",
+            surface: &config
+                .providers
+                .get("test_provider")
+                .unwrap()
+                .api_surface,
+            model: "some-model",
+            session_id: None,
+        };
+
+        set.apply(context, &mut headers, &mut body).unwrap();
+
+        assert_eq!(headers.get("x-fixture-provider").unwrap(), "test_provider");
+    }
+
+    #[test]
+    fn a_broken_mutation_script_aborts_startup() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("broken.rhai");
+        std::fs::write(&script, "fn mutate(request) { request }").unwrap();
+
+        let mut config = crate::config::loader::load_config(&fixture("minimal.toml")).unwrap();
+        config
+            .providers
+            .get_mut("test_provider")
+            .unwrap()
+            .mutations = vec![script.join("missing.rhai")];
+
+        let engine = Arc::new(agentkit_script::ScriptEngine::new());
+        let error = crate::proxy::mutation::compile_provider_mutations(&engine, &config.providers)
+            .unwrap_err();
+
+        assert!(
+            error.to_string().contains("test_provider"),
+            "the provider identity should be reported: {error}"
+        );
     }
 }
