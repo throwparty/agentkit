@@ -67,7 +67,7 @@ Remove headers and user_agent from ProviderConfig and add mutations: Vec<PathBuf
 | Depends On |  |
 | References | static-config-removal, static-config-removed, mutation-scripts, script-path-resolution |
 
-### T-006: Implement the mutation stage
+### T-006: [x] Implement the mutation stage
 
 Add src/proxy/mutation.rs with MutationSet and apply. Build the request object map from provider identity, surface, model, session_id, headers, and the parsed body; call each compiled script in order; read back headers and body; validate header names and values; serialise the body. Return a MutationError on any failure.
 
