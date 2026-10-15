@@ -154,8 +154,9 @@ async fn forwarder_preserves_upstream_content_type() {
              base_url: &mock_server.uri(),
              provider_identity: "mock_openai",
              session_id: None,
-             provider_user_agent: None,
-             provider_headers: None,
+             mutations: None,
+             surface: ApiSurface::OpenaiChatCompletions,
+             model: "gpt-4o",
          },
         &OpenAiChatCompletionsProvider,
     )

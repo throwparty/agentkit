@@ -34,7 +34,7 @@ impl MutationSet {
     /// request: nothing is forwarded unmutated.
     pub fn apply(
         &self,
-        context: MutationContext<'_>,
+        context: &MutationContext,
         headers: &mut HeaderMap,
         body: &mut Vec<u8>,
     ) -> Result<(), MutationError> {
@@ -93,12 +93,12 @@ impl MutationSet {
 }
 
 /// Read-only request context handed to mutation scripts.
-#[derive(Debug, Clone, Copy)]
-pub struct MutationContext<'a> {
-    pub provider_identity: &'a str,
-    pub surface: &'a ApiSurface,
-    pub model: &'a str,
-    pub session_id: Option<&'a str>,
+#[derive(Debug, Clone)]
+pub struct MutationContext {
+    pub provider_identity: String,
+    pub surface: ApiSurface,
+    pub model: String,
+    pub session_id: Option<String>,
 }
 
 /// A mutation failed and the request must not be forwarded.
@@ -137,7 +137,7 @@ pub enum MutationError {
 pub fn compile_provider_mutations(
     engine: &Arc<ScriptEngine>,
     providers: &HashMap<String, ProviderConfig>,
-) -> Result<HashMap<String, MutationSet>, MutationError> {
+) -> Result<HashMap<String, Arc<MutationSet>>, MutationError> {
     let mut compiled: HashMap<PathBuf, CompiledScript> = HashMap::new();
     let mut sets = HashMap::new();
 
@@ -175,7 +175,10 @@ pub fn compile_provider_mutations(
             scripts.push(script.clone());
             compiled.insert(key, script);
         }
-        sets.insert(identity.clone(), MutationSet::new(engine.clone(), scripts));
+        sets.insert(
+            identity.clone(),
+            Arc::new(MutationSet::new(engine.clone(), scripts)),
+        );
     }
 
     Ok(sets)
@@ -269,11 +272,11 @@ mod tests {
         path
     }
 
-    fn context() -> MutationContext<'static> {
+    fn context() -> MutationContext {
         MutationContext {
-            provider_identity: "test_provider",
-            surface: &ApiSurface::OpenaiChatCompletions,
-            model: "gpt-4o",
+            provider_identity: "test_provider".to_string(),
+            surface: ApiSurface::OpenaiChatCompletions,
+            model: "gpt-4o".to_string(),
             session_id: None,
         }
     }
@@ -312,7 +315,7 @@ mod tests {
         headers.insert("content-type", HeaderValue::from_static("application/json"));
         let mut body = br#"{"model":"gpt-4o","messages":[]}"#.to_vec();
 
-        set.apply(context(), &mut headers, &mut body).unwrap();
+        set.apply(&context(), &mut headers, &mut body).unwrap();
 
         assert_eq!(headers.get("x-provider-quirk").unwrap(), "on");
         let parsed: Value = serde_json::from_slice(&body).unwrap();
@@ -334,7 +337,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         let mut body = Vec::new();
 
-        set.apply(context(), &mut headers, &mut body).unwrap();
+        set.apply(&context(), &mut headers, &mut body).unwrap();
 
         assert_eq!(headers.get("x-order").unwrap(), "first-second");
     }
@@ -351,7 +354,7 @@ mod tests {
         let mut body = Vec::new();
 
         let error = set
-            .apply(context(), &mut headers, &mut body)
+            .apply(&context(), &mut headers, &mut body)
             .unwrap_err();
 
         assert!(matches!(error, MutationError::InvalidHeader { .. }), "{error:?}");
@@ -368,7 +371,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         let mut body = b"not json at all".to_vec();
 
-        set.apply(context(), &mut headers, &mut body).unwrap();
+        set.apply(&context(), &mut headers, &mut body).unwrap();
 
         assert_eq!(headers.get("x-body").unwrap(), "unit");
         assert_eq!(body, b"not json at all");
@@ -386,7 +389,7 @@ mod tests {
         let mut body = b"not json at all".to_vec();
 
         let error = set
-            .apply(context(), &mut headers, &mut body)
+            .apply(&context(), &mut headers, &mut body)
             .unwrap_err();
 
         assert!(matches!(error, MutationError::Script { .. }), "{error:?}");
@@ -402,7 +405,7 @@ mod tests {
         let mut body = Vec::new();
 
         let error = set
-            .apply(context(), &mut headers, &mut body)
+            .apply(&context(), &mut headers, &mut body)
             .unwrap_err();
 
         assert!(matches!(error, MutationError::Script { .. }), "{error:?}");
@@ -474,12 +477,16 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("content-type", HeaderValue::from_static("application/json"));
         let mut body = br#"{"model":"gpt-4o"}"#.to_vec();
-        bare.apply(MutationContext {
-            provider_identity: "bare",
-            surface: &ApiSurface::OpenaiChatCompletions,
-            model: "gpt-4o",
-            session_id: None,
-        }, &mut headers, &mut body)
+        bare.apply(
+            &MutationContext {
+                provider_identity: "bare".to_string(),
+                surface: ApiSurface::OpenaiChatCompletions,
+                model: "gpt-4o".to_string(),
+                session_id: None,
+            },
+            &mut headers,
+            &mut body,
+        )
         .unwrap();
 
         assert_eq!(body, br#"{"model":"gpt-4o"}"#);
@@ -496,7 +503,7 @@ mod tests {
         headers.insert("x-opaque", HeaderValue::from_bytes(b"\xff\xfe").unwrap());
         let mut body = br#"{ "model" :   "gpt-4o" }"#.to_vec();
 
-        set.apply(context(), &mut headers, &mut body).unwrap();
+        set.apply(&context(), &mut headers, &mut body).unwrap();
 
         assert_eq!(body, br#"{ "model" :   "gpt-4o" }"#);
         assert_eq!(headers.get("x-opaque").unwrap().as_bytes(), b"\xff\xfe");
@@ -513,7 +520,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         let mut body = Vec::new();
 
-        let error = set.apply(context(), &mut headers, &mut body).unwrap_err();
+        let error = set.apply(&context(), &mut headers, &mut body).unwrap_err();
 
         assert!(matches!(error, MutationError::Headers { .. }), "{error:?}");
     }
@@ -526,7 +533,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         let mut body = Vec::new();
 
-        let error = set.apply(context(), &mut headers, &mut body).unwrap_err();
+        let error = set.apply(&context(), &mut headers, &mut body).unwrap_err();
 
         assert!(matches!(error, MutationError::Headers { .. }), "{error:?}");
     }
@@ -539,7 +546,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         let mut body = br#"{"model":"gpt-4o"}"#.to_vec();
 
-        set.apply(context(), &mut headers, &mut body).unwrap();
+        set.apply(&context(), &mut headers, &mut body).unwrap();
 
         assert_eq!(body, b"null");
     }

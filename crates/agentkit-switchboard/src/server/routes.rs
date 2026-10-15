@@ -29,7 +29,7 @@ pub struct AppState {
     pub session_db_path: PathBuf,
     pub started_at: Instant,
     /// Per-provider mutation sets, compiled once at startup.
-    pub mutations: std::collections::HashMap<String, MutationSet>,
+    pub mutations: std::collections::HashMap<String, Arc<MutationSet>>,
 }
 
 pub fn build_router(state: Arc<AppState>) -> Router {
@@ -235,6 +235,7 @@ async fn proxy_handler(
         }
 
         let pack = app_state.registry.get_provider_pack(&selection.identity);
+        let mutations = app_state.mutations.get(&selection.identity).cloned();
         let request_started = Instant::now();
         let outcome = match pack {
             Some(p) => {
@@ -248,8 +249,9 @@ async fn proxy_handler(
                         base_url: &configured_provider.base_url,
                         provider_identity: &selection.identity,
                         session_id: session_id.as_deref(),
-                        provider_user_agent: None,
-                        provider_headers: None,
+                        mutations: mutations.clone(),
+                        surface: surface.clone(),
+                        model: &model,
                     },
                     &*p.http,
                 )
@@ -267,8 +269,9 @@ async fn proxy_handler(
                             base_url: &configured_provider.base_url,
                             provider_identity: &selection.identity,
                             session_id: session_id.as_deref(),
-                            provider_user_agent: None,
-                            provider_headers: None,
+                            mutations,
+                            surface: surface.clone(),
+                            model: &model,
                         },
                         &*fallback.http,
                     )

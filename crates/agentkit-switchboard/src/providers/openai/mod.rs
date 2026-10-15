@@ -32,6 +32,17 @@ impl HttpEndpoint for OpenAiResponsesProvider {
         format!("{}/responses", base_url.trim_end_matches('/'))
     }
 
+    fn default_headers(&self, headers: &mut HeaderMap) {
+        headers.insert(
+            "OpenAI-Beta",
+            HeaderValue::from_static("responses=experimental"),
+        );
+        headers.insert(
+            "originator",
+            HeaderValue::from_static("agentkit-switchboard"),
+        );
+    }
+
     fn inject_headers(&self, headers: &mut HeaderMap, credential: &ResolvedCredential) {
         headers.remove("authorization");
         if !matches!(credential.source, crate::credential::CredentialSource::None) {
@@ -41,14 +52,6 @@ impl HttpEndpoint for OpenAiResponsesProvider {
             );
         }
 
-        headers.insert(
-            "OpenAI-Beta",
-            HeaderValue::from_static("responses=experimental"),
-        );
-        headers.insert(
-            "originator",
-            HeaderValue::from_static("agentkit-switchboard"),
-        );
         if let Some(ref oauth) = credential.oauth {
             if let Some(ref account_id) = oauth.account_id {
                 if let Ok(hv) = HeaderValue::from_str(account_id) {

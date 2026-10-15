@@ -1,10 +1,11 @@
-use crate::config::BillingModel;
+use crate::config::{ApiSurface, BillingModel};
 use crate::credential::ResolvedCredential;
 use crate::domain::http::HttpEndpoint;
+use crate::proxy::mutation::{MutationContext, MutationError, MutationSet};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
 use axum::response::Response;
 use serde_json::Value;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 fn shared_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
@@ -27,8 +28,39 @@ pub struct ForwardRequest<'a> {
     pub base_url: &'a str,
     pub provider_identity: &'a str,
     pub session_id: Option<&'a str>,
-    pub provider_user_agent: Option<&'a str>,
-    pub provider_headers: Option<&'a std::collections::HashMap<String, String>>,
+    /// Mutations run before credentials are injected. `None` for a provider
+    /// with no configured scripts.
+    pub mutations: Option<Arc<MutationSet>>,
+    pub surface: ApiSurface,
+    pub model: &'a str,
+}
+
+/// Fail the request rather than forward an unmutated one.
+fn mutation_failed(
+    provider_identity: &str,
+    billing: &BillingModel,
+    error: &MutationError,
+) -> ForwardOutcome {
+    tracing::warn!(provider = provider_identity, %error, "mutation failed");
+    let body = format!("mutation failed: {error}");
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "X-Switchboard-Provider",
+        HeaderValue::from_str(provider_identity).unwrap(),
+    );
+    headers.insert(
+        "X-Switchboard-Billing",
+        HeaderValue::from_str(&billing.to_string()).unwrap(),
+    );
+    let mut response = Response::new(axum::body::Body::from(body.clone()));
+    *response.status_mut() = StatusCode::BAD_GATEWAY;
+    *response.headers_mut() = headers;
+    ForwardOutcome {
+        response,
+        status: StatusCode::BAD_GATEWAY,
+        headers: Vec::new(),
+        body_text: Some(body),
+    }
 }
 
 fn upstream_headers(headers: &reqwest::header::HeaderMap) -> Vec<(String, String)> {
@@ -103,69 +135,67 @@ pub async fn forward_request(
         base_url,
         provider_identity,
         session_id,
-        provider_user_agent,
-        provider_headers,
+        mutations,
+        surface,
+        model,
     } = request;
 
     let parsed_body = serde_json::from_slice::<serde_json::Value>(&body).ok();
 
     let target_url = http.build_url(base_url, parsed_body.as_ref().unwrap_or(&Value::Null));
 
-    let request_body = body.to_vec();
+    let mut request_body = body.to_vec();
 
-       let mut out_headers = HeaderMap::new();
-       for (key, value) in &headers {
-           let key_str = key.as_str().to_ascii_lowercase();
-           // Skip headers that are handled specially or could cause conflicts
-           if key_str != "authorization"
-               && key_str != "host"
-               && key_str != "content-length"
-           {
-               out_headers.insert(key.clone(), value.clone());
-           }
-       }
-      if !out_headers.contains_key("content-type") {
-          out_headers.insert("Content-Type", HeaderValue::from_static("application/json"));
-      }
-      // Use provider-specific user-agent if available, otherwise fall back to default
-      let user_agent_value = if let Some(ua) = provider_user_agent {
-          HeaderValue::from_str(ua).unwrap_or_else(|_| HeaderValue::from_static(concat!(
-              "agentkit-switchboard/",
-              env!("CARGO_PKG_VERSION")
-          )))
-      } else {
-          HeaderValue::from_static(concat!(
-              "agentkit-switchboard/",
-              env!("CARGO_PKG_VERSION")
-          ))
-      };
-      out_headers.insert("User-Agent", user_agent_value);
+    let mut out_headers = HeaderMap::new();
+    for (key, value) in &headers {
+        let key_str = key.as_str().to_ascii_lowercase();
+        // Skip headers that are handled specially or could cause conflicts
+        if key_str != "host" && key_str != "content-length" {
+            out_headers.insert(key.clone(), value.clone());
+        }
+    }
+  if !out_headers.contains_key("content-type") {
+      out_headers.insert("Content-Type", HeaderValue::from_static("application/json"));
+  }
+  out_headers.insert(
+      "User-Agent",
+      HeaderValue::from_static(concat!("agentkit-switchboard/", env!("CARGO_PKG_VERSION"))),
+  );
+    http.default_headers(&mut out_headers);
 
-    if let Some(extra) = provider_headers {
-        for (name, value) in extra {
-            let parsed_name = match HeaderName::from_bytes(name.as_bytes()) {
-                Ok(n) => n,
-                Err(_) => {
-                    tracing::warn!(
-                        provider = provider_identity,
-                        header = %name,
-                        "invalid configured header name, skipping"
-                    );
-                    continue;
-                }
-            };
-            match HeaderValue::from_str(value) {
-                Ok(v) => {
-                    out_headers.insert(parsed_name, v);
-                }
-                Err(_) => {
-                    tracing::warn!(
-                        provider = provider_identity,
-                        header = %name,
-                        "invalid configured header value, skipping"
-                    );
-                }
-            }
+    if let Some(mutations) = mutations {
+        let context = MutationContext {
+            provider_identity: provider_identity.to_string(),
+            surface,
+            model: model.to_string(),
+            session_id: session_id.map(str::to_string),
+        };
+        let moved_headers = std::mem::take(&mut out_headers);
+        let moved_body = std::mem::take(&mut request_body);
+        let (result, headers, body) = tokio::task::spawn_blocking(move || {
+            let mut headers = moved_headers;
+            let mut body = moved_body;
+            let outcome = mutations.apply(&context, &mut headers, &mut body);
+            (outcome, headers, body)
+        })
+        .await
+        .unwrap_or_else(|error| {
+            (
+                Err(MutationError::Script {
+                    origin: provider_identity.to_string(),
+                    error: agentkit_script::ScriptError::Runtime {
+                        origin: provider_identity.to_string(),
+                        message: error.to_string(),
+                    },
+                }),
+                HeaderMap::new(),
+                Vec::new(),
+            )
+        });
+        out_headers = headers;
+        request_body = body;
+        if let Err(error) = result {
+            return mutation_failed(provider_identity, billing, &error);
         }
     }
 
@@ -266,6 +296,7 @@ pub async fn forward_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proxy::mutation::MutationSet;
     use reqwest::header::HeaderMap as ReqwestHeaderMap;
     use std::sync::Arc;
 
@@ -286,7 +317,20 @@ mod tests {
             "http://mock-upstream.example.com".to_string()
         }
 
-        fn inject_headers(&self, headers: &mut reqwest::header::HeaderMap, _credential: &ResolvedCredential) {
+        fn default_headers(&self, headers: &mut reqwest::header::HeaderMap) {
+            headers.insert(
+                "x-endpoint-default",
+                reqwest::header::HeaderValue::from_static("from-endpoint"),
+            );
+        }
+
+        fn inject_headers(
+            &self,
+            headers: &mut reqwest::header::HeaderMap,
+            credential: &ResolvedCredential,
+        ) {
+            let value = reqwest::header::HeaderValue::from_str(&credential.value).unwrap();
+            headers.insert("authorization", value);
             *self.captured_headers.lock().unwrap() = Some(headers.clone());
         }
     }
@@ -313,173 +357,160 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn forwards_correct_user_agent_header() {
-        // Arrange
-        let mock_endpoint = MockHttpEndpoint::new();
-        let credential = ResolvedCredential {
-            value: "test-token".to_string(),
-            source: crate::credential::CredentialSource::None,
-            oauth: None,
-        };
-        let billing = BillingModel::Subscription;
-        let mut headers = HeaderMap::new();
-        headers.insert("user-agent", HeaderValue::from_static("test-client/1.0"));
-        headers.insert("authorization", HeaderValue::from_static("Bearer token"));
-        headers.insert("content-type", HeaderValue::from_static("application/json"));
-
-        let request = ForwardRequest {
-            method: Method::POST,
-            headers,
-            body: axum::body::Bytes::from(r#"{"test": "data"}"#),
-            credential: &credential,
-            billing: &billing,
-            base_url: "http://example.com",
-            provider_identity: "test_provider",
-            session_id: None,
-            provider_user_agent: None,
-            provider_headers: None,
-        };
-
-        // Act
-        let _ = forward_request(request, &mock_endpoint).await;
-
-        // Assert
-        let captured_headers = mock_endpoint.captured_headers.lock().unwrap().clone().unwrap();
-        let user_agent = captured_headers.get("user-agent").unwrap();
-        let user_agent_str = user_agent.to_str().unwrap();
-        assert!(user_agent_str.starts_with("agentkit-switchboard/"));
-        // Ensure the original user-agent was filtered out
-        assert!(!captured_headers.keys().any(|k| k == "user-agent" && captured_headers.get(k).unwrap() == "test-client/1.0"));
-    }
-
-    #[tokio::test]
-    async fn forwards_provider_specific_user_agent() {
-        // Arrange
-        let mock_endpoint = MockHttpEndpoint::new();
-        let credential = ResolvedCredential {
-            value: "test-token".to_string(),
-            source: crate::credential::CredentialSource::None,
-            oauth: None,
-        };
-        let billing = BillingModel::Subscription;
-        let mut headers = HeaderMap::new();
-        headers.insert("content-type", HeaderValue::from_static("application/json"));
-
-        let request = ForwardRequest {
-            method: Method::POST,
-            headers,
-            body: axum::body::Bytes::from(r#"{"test": "data"}"#),
-            credential: &credential,
-            billing: &billing,
-            base_url: "http://example.com",
-            provider_identity: "test_provider",
-            session_id: None,
-            provider_user_agent: Some("custom-agent/1.0"),
-            provider_headers: None,
-        };
-
-        // Act
-        let _ = forward_request(request, &mock_endpoint).await;
-
-        // Assert
-        let captured_headers = mock_endpoint.captured_headers.lock().unwrap().clone().unwrap();
-        let user_agent = captured_headers.get("user-agent").unwrap();
-        let user_agent_str = user_agent.to_str().unwrap();
-        assert_eq!(user_agent_str, "custom-agent/1.0");
-        // Ensure the default user-agent was not used
-        assert!(!user_agent_str.starts_with("agentkit-switchboard/"));
-    }
-
-    fn configured(pairs: &[(&str, &str)]) -> std::collections::HashMap<String, String> {
-        pairs
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect()
-    }
-
-    async fn forward_with_headers(
+    fn request(
         client_headers: HeaderMap,
-        configured: Option<&std::collections::HashMap<String, String>>,
-    ) -> reqwest::header::HeaderMap {
-        let mock_endpoint = MockHttpEndpoint::new();
-        let credential = ResolvedCredential {
-            value: "test-token".to_string(),
-            source: crate::credential::CredentialSource::None,
-            oauth: None,
-        };
-        let billing = BillingModel::Subscription;
+        mutations: Option<Arc<MutationSet>>,
+    ) -> ForwardRequest<'static> {
+        static CREDENTIAL: OnceLock<ResolvedCredential> = OnceLock::new();
+        static BILLING: OnceLock<BillingModel> = OnceLock::new();
+        static BODY: OnceLock<axum::body::Bytes> = OnceLock::new();
 
-        let request = ForwardRequest {
+        ForwardRequest {
             method: Method::POST,
             headers: client_headers,
-            body: axum::body::Bytes::from(r#"{"test": "data"}"#),
-            credential: &credential,
-            billing: &billing,
+            body: BODY
+                .get_or_init(|| axum::body::Bytes::from_static(br#"{"model":"gpt-4o","messages":[]}"#))
+                .clone(),
+            credential: CREDENTIAL.get_or_init(|| ResolvedCredential {
+                value: "test-token".to_string(),
+                source: crate::credential::CredentialSource::None,
+                oauth: None,
+            }),
+            billing: BILLING.get_or_init(|| BillingModel::Subscription),
             base_url: "http://example.com",
             provider_identity: "test_provider",
             session_id: None,
-            provider_user_agent: None,
-            provider_headers: configured,
-        };
+            mutations,
+            surface: crate::config::ApiSurface::OpenaiChatCompletions,
+            model: "gpt-4o",
+        }
+    }
 
-        let _ = forward_request(request, &mock_endpoint).await;
+    async fn forward(
+        client_headers: HeaderMap,
+        mutations: Option<Arc<MutationSet>>,
+    ) -> reqwest::header::HeaderMap {
+        let mock_endpoint = MockHttpEndpoint::new();
+        let _ = forward_request(request(client_headers, mutations), &mock_endpoint).await;
         let captured = mock_endpoint.captured_headers.lock().unwrap().clone();
         captured.unwrap()
     }
 
     #[tokio::test]
-    async fn injects_configured_headers() {
+    async fn forwards_the_default_user_agent() {
+        let mut client_headers = HeaderMap::new();
+        client_headers.insert("user-agent", HeaderValue::from_static("test-client/1.0"));
+        client_headers.insert("authorization", HeaderValue::from_static("Bearer token"));
+
+        let captured = forward(client_headers, None).await;
+
+        let user_agent = captured.get("user-agent").unwrap().to_str().unwrap();
+        assert!(user_agent.starts_with("agentkit-switchboard/"));
+    }
+
+    #[tokio::test]
+    async fn client_headers_pass_through_when_no_mutations_are_configured() {
         let mut client_headers = HeaderMap::new();
         client_headers.insert("content-type", HeaderValue::from_static("application/json"));
-        let configured = configured(&[("x-custom-header", "custom-value")]);
+        client_headers.insert("x-client-header", HeaderValue::from_static("client-value"));
 
-        let captured = forward_with_headers(client_headers, Some(&configured)).await;
+        let captured = forward(client_headers, None).await;
 
-        assert_eq!(
-            captured.get("x-custom-header").unwrap().to_str().unwrap(),
-            "custom-value"
+        assert_eq!(captured.get("x-client-header").unwrap(), "client-value");
+    }
+
+    #[tokio::test]
+    async fn mutations_run_before_credentials_are_injected() {
+        let engine = Arc::new(agentkit_script::ScriptEngine::new());
+        let script = engine
+            .compile(
+                agentkit_script::INLINE_ORIGIN,
+                r#"fn mutate(request) { request.headers["x-from-mutation"] = "yes"; request.headers["authorization"] = "Bearer script-token"; request }"#,
+            )
+            .unwrap();
+
+        let captured = forward(HeaderMap::new(), Some(Arc::new(MutationSet::new(engine, vec![script])))).await;
+
+        assert_eq!(captured.get("x-from-mutation").unwrap(), "yes");
+        assert_ne!(
+            captured.get("authorization").map(|v| v.to_str().unwrap()),
+            Some("Bearer script-token"),
+            "credential injection must win over the mutation"
         );
     }
 
     #[tokio::test]
-    async fn configured_headers_override_client_headers() {
+    async fn mutations_can_override_provider_defaults_but_not_credentials() {
+        let engine = Arc::new(agentkit_script::ScriptEngine::new());
+        let script = engine
+            .compile(
+                agentkit_script::INLINE_ORIGIN,
+                r#"fn mutate(request) { request.headers["x-endpoint-default"] = "from-script"; request }"#,
+            )
+            .unwrap();
+
+        let captured = forward(
+            HeaderMap::new(),
+            Some(Arc::new(MutationSet::new(engine, vec![script]))),
+        )
+        .await;
+
+        assert_eq!(
+            captured.get("x-endpoint-default").unwrap(),
+            "from-script",
+            "a mutation must be able to override a provider default"
+        );
+        assert_eq!(
+            captured.get("authorization").unwrap(),
+            "test-token",
+            "credential injection must still win"
+        );
+    }
+
+    #[tokio::test]
+    async fn scripts_see_the_raw_client_headers() {
+        let engine = Arc::new(agentkit_script::ScriptEngine::new());
+        let script = engine
+            .compile(
+                agentkit_script::INLINE_ORIGIN,
+                r#"fn mutate(request) { request.headers["x-echo-authorization"] = request.headers["authorization"]; request }"#,
+            )
+            .unwrap();
+
         let mut client_headers = HeaderMap::new();
-        client_headers.insert("x-custom-header", HeaderValue::from_static("client-value"));
-        let configured = configured(&[("x-custom-header", "configured-value")]);
+        client_headers.insert("authorization", HeaderValue::from_static("Bearer client-token"));
 
-        let captured = forward_with_headers(client_headers, Some(&configured)).await;
+        let captured = forward(
+            client_headers,
+            Some(Arc::new(MutationSet::new(engine, vec![script]))),
+        )
+        .await;
 
         assert_eq!(
-            captured.get("x-custom-header").unwrap().to_str().unwrap(),
-            "configured-value"
+            captured.get("x-echo-authorization").unwrap(),
+            "Bearer client-token",
+            "switchboard does no inbound auth, so scripts see the raw client headers"
         );
     }
 
     #[tokio::test]
-    async fn configured_headers_pass_through_unchanged() {
-        let configured = configured(&[("x-static-value", "plain-value")]);
-        let captured = forward_with_headers(HeaderMap::new(), Some(&configured)).await;
+    async fn a_failing_mutation_fails_the_request() {
+        let engine = Arc::new(agentkit_script::ScriptEngine::new());
+        let script = engine
+            .compile(
+                agentkit_script::INLINE_ORIGIN,
+                "fn mutate(request) { throw \"no\"; }",
+            )
+            .unwrap();
 
-        assert_eq!(
-            captured.get("x-static-value").unwrap().to_str().unwrap(),
-            "plain-value"
-        );
-    }
+        let mock_endpoint = MockHttpEndpoint::new();
+        let outcome = forward_request(
+            request(HeaderMap::new(), Some(Arc::new(MutationSet::new(engine, vec![script])))),
+            &mock_endpoint,
+        )
+        .await;
 
-    #[tokio::test]
-    async fn invalid_configured_header_is_skipped_without_panicking() {
-        let configured = configured(&[
-            ("bad header name!!", "value"),
-            ("x-valid-header", "value-2"),
-        ]);
-
-        let captured = forward_with_headers(HeaderMap::new(), Some(&configured)).await;
-
-        assert!(captured.get("bad header name!!").is_none());
-        assert_eq!(
-            captured.get("x-valid-header").unwrap().to_str().unwrap(),
-            "value-2"
-        );
+        assert_eq!(outcome.status, StatusCode::BAD_GATEWAY);
+        assert!(mock_endpoint.captured_headers.lock().unwrap().is_none());
     }
 }

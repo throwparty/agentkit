@@ -93,7 +93,7 @@ Build one ScriptEngine at startup and compile every provider's mutations once in
 | Depends On | T-005, T-006 |
 | References | startup-compilation, mutation-scripts, script-path-resolution, shared-script, empty-mutation-list |
 
-### T-008: Integrate mutations into the forwarder and remove the hack
+### T-008: [x] Integrate mutations into the forwarder and remove the hack
 
 Replace ForwardRequest's provider_user_agent and provider_headers with mutations: Option<&MutationSet> and a surface. In forward_request, assemble out_headers, call MutationSet::apply, then inject credentials last. Delete the hardcoded tools and tool_choice rewrite and the unconditional body mutation from routes.rs.
 
