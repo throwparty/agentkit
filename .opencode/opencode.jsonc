@@ -6,6 +6,7 @@
       "api": "openai",
       "options": {
         "baseURL": "http://127.0.0.1:3812/openai/v1",
+        "apiKey": "dummy",
       },
        "models": {
         "deepseek-v4-flash": { "name": "deepseek-v4-flash" },

@@ -24,6 +24,44 @@ fn config_parse_valid() {
 }
 
 #[test]
+fn config_parse_mutations() {
+    let cfg = agentkit_switchboard::config::loader::load_config(&fixture_path("mutations.toml"))
+        .expect("config with mutations should parse");
+    let provider = cfg.providers.get("test_provider").unwrap();
+    assert_eq!(provider.mutations.len(), 2);
+}
+
+#[test]
+fn config_resolves_relative_mutation_paths_against_the_config_directory() {
+    let cfg = agentkit_switchboard::config::loader::load_config(&fixture_path("mutations.toml"))
+        .expect("config with mutations should parse");
+    let provider = cfg.providers.get("test_provider").unwrap();
+
+    let expected = fixture_path("mutations/example.rhai");
+    assert_eq!(provider.mutations[0], expected);
+}
+
+#[test]
+fn config_keeps_absolute_mutation_paths() {
+    let cfg = agentkit_switchboard::config::loader::load_config(&fixture_path("mutations.toml"))
+        .expect("config with mutations should parse");
+    let provider = cfg.providers.get("test_provider").unwrap();
+
+    assert_eq!(
+        provider.mutations[1],
+        std::path::PathBuf::from("/etc/agentkit/shared.rhai")
+    );
+}
+
+#[test]
+fn config_mutations_default_empty() {
+    let cfg = agentkit_switchboard::config::loader::load_config(&fixture_path("minimal.toml"))
+        .expect("valid config should parse");
+    let provider = cfg.providers.get("test_provider").unwrap();
+    assert!(provider.mutations.is_empty());
+}
+
+#[test]
 fn config_parse_duplicate_identity() {
     let err =
         agentkit_switchboard::config::loader::load_config(&fixture_path("duplicate-identity.toml"))

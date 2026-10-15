@@ -54,7 +54,7 @@ Add unit tests in agentkit-script covering compile and call, missing function, r
 | Depends On | T-003 |
 | References | sandbox-enforced, limits-enforced, missing-function, non-map-return, self-contained-scripts |
 
-### T-005: Change ProviderConfig to mutations
+### T-005: [x] Change ProviderConfig to mutations
 
 Remove headers and user_agent from ProviderConfig and add mutations: Vec<PathBuf> with a serde default. Update the loader to resolve relative paths against the config file directory. Reject a config that still supplies the removed fields.
 

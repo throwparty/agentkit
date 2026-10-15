@@ -245,6 +245,8 @@ async fn proxy_handler(
                         base_url: &configured_provider.base_url,
                         provider_identity: &selection.identity,
                         session_id: session_id.as_deref(),
+                        provider_user_agent: None,
+                        provider_headers: None,
                     },
                     &*p.http,
                 )
@@ -252,19 +254,21 @@ async fn proxy_handler(
             }
             None => {
                 let fallback = crate::providers::pack_for_provider(configured_provider);
-                forwarder::forward_request(
-                    forwarder::ForwardRequest {
-                        method: axum::http::Method::POST,
-                        headers: headers.clone(),
-                        body: body.clone(),
-                        credential: &credential,
-                        billing: &provider_cfg.billing,
-                        base_url: &configured_provider.base_url,
-                        provider_identity: &selection.identity,
-                        session_id: session_id.as_deref(),
-                    },
-                    &*fallback.http,
-                )
+                    forwarder::forward_request(
+                        forwarder::ForwardRequest {
+                            method: axum::http::Method::POST,
+                            headers: headers.clone(),
+                            body: body.clone(),
+                            credential: &credential,
+                            billing: &provider_cfg.billing,
+                            base_url: &configured_provider.base_url,
+                            provider_identity: &selection.identity,
+                            session_id: session_id.as_deref(),
+                            provider_user_agent: None,
+                            provider_headers: None,
+                        },
+                        &*fallback.http,
+                    )
                 .await
             }
         };
