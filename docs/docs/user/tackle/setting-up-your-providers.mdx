@@ -46,7 +46,13 @@ wire_format = "openai-chat-completions"
 auth = "helper"
 ```
 
-At request time Tackle runs `agentkit-credential-keychain get rogue` and reads the `access_token` from its JSON output. If the credential can't be resolved, the endpoint isn't removed — it's advertised through ACP's `authMethods` and the `authenticate` method, so your harness can prompt for login instead of failing at first prompt.
+At request time Tackle resolves the endpoint's bearer token through the named helper and reads `access_token` from its JSON output. Store the token with [`tackle auth`](./reference/cli#auth), which writes through that same helper:
+
+```bash
+tackle auth add rogue sk-...
+```
+
+`tackle auth status` reports which identities resolve. If the credential can't be resolved, the endpoint isn't removed — it's advertised through ACP's `authMethods` and the `authenticate` method, so your harness can prompt for login instead of failing at first prompt.
 
 ## Examples
 
@@ -68,7 +74,7 @@ wire_format = "anthropic-messages"
 auth = "helper"
 ```
 
-Or a proxy you already run — for example, [Switchboard](../switchboard/setting-up-your-providers.mdx), which fronts your OpenAI, Anthropic, and local subscriptions and handles their credentials itself, leaving Tackle nothing to authenticate:
+Or a proxy you already run — for example, [Switchboard](../switchboard/setting-up-your-providers), which fronts your OpenAI, Anthropic, and local subscriptions and handles their credentials itself, leaving Tackle nothing to authenticate:
 
 ```toml
 [endpoints.switchboard]
