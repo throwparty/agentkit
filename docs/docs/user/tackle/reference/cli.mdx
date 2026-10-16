@@ -8,6 +8,48 @@ Tackle is a server launched by ACP clients — all session interaction, includin
 
 {/* Generated with `tackle docgen cli`; keep the sections below in sync with the output. */}
 
+## `auth`
+
+Manage stored credentials — store, inspect, and remove the bearer tokens Tackle resolves through the credential helper. Every credential lives under the helper's `tackle` component, keyed by identity: an endpoint name, or an MCP `{cred:IDENTITY}` marker.
+
+### `add`
+
+Store a bearer token for an identity.
+
+Arguments:
+
+- `identity` Endpoint name or MCP credential identity
+- `value` The bearer token
+
+### `status`
+
+Report each configured endpoint and MCP credential identity with whether its credential resolves.
+
+Arguments:
+
+- `[identity]` Restrict the report to one identity (optional — omitting shows all)
+
+### `token`
+
+Print the resolved credential for an identity.
+
+Arguments:
+
+- `identity` Identity to resolve
+
+### `logout`
+
+Remove a stored credential.
+
+Arguments:
+
+- `identity` Identity to remove
+
+Options:
+
+- `--config-dir <CONFIG_DIR>` Override the user configuration directory (defaults to the platform config directory)
+- `--credential-helper <CREDENTIAL_HELPER>` Override the credential helper name (defaults to the configured helper, or `keychain`)
+
 ## `http`
 
 Serve the streamable HTTP transport
