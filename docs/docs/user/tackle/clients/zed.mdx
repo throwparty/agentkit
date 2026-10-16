@@ -1,0 +1,38 @@
+# 🆉 Zed
+
+Zed speaks ACP natively: add Tackle as an external agent and it appears in the agent panel alongside Zed's built-in agents.
+
+## Prerequisites
+
+- You have [installed Tackle](../../install), or at least know the path to its binary.
+- You have [installed Zed](https://zed.dev/docs/installation).
+
+## Adding an agent
+
+Use the `zed: open settings file` command, or the _External Agents_ page of `agent: open settings`, and add a `Tackle` entry under `agent_servers`. Substituting the path to the Tackle binary from the installation step:
+
+```json
+{
+  // snip
+  "agent_servers": {
+    // snip
+    "Tackle": {
+      "type": "custom",
+      "command": "/path/to/agentkit-tackle",
+      "args": ["stdio"],
+      "env": {}
+    }
+  }
+  // snip
+}
+```
+
+Zed detects settings changes without a restart. See the [external agents documentation](https://zed.dev/docs/ai/external-agents) for details, including registry-installed agents and per-agent settings.
+
+## MCP servers
+
+Zed forwards the MCP servers configured in its own settings to external agents over ACP. Tackle also connects to the servers declared in its [own configuration](../setting-up-your-tools); both sets are available to the session.
+
+## Testing
+
+Verify that _Tackle_ now appears in Zed's agent selector. Start a thread, pick a model — the selector is populated from your [configured providers](../setting-up-your-providers) — and send a prompt. On first run Tackle seeds the session with the configuration layers it loaded.
