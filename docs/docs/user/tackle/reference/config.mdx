@@ -31,7 +31,7 @@ models = []  # optional static fallback when /models discovery fails
 
 ## `credential_helper` (user layer only)
 
-Name of the credential helper binary; defaults to `keychain`. `auth = "helper"` endpoints run `agentkit-credential-<helper> get tackle <endpoint-name>` and read `access_token` from its JSON output — store one with `agentkit-credential-keychain put tackle <endpoint-name>` (the JSON blob on stdin).
+Name of the credential helper binary; defaults to `keychain`. `auth = "helper"` endpoints run `agentkit-credential-<helper> get tackle <endpoint-name>` and read `access_token` from its JSON output — store one with `tackle auth add <endpoint-name> <token>` (see the [CLI reference](./cli#auth)).
 
 ## `defaults`
 
@@ -43,7 +43,7 @@ actor = "builtins/actuator"              # persona/actor override
 
 ## `mcp_servers`
 
-Tool providers, namespaced by server name:
+Tool providers, namespaced by server name; a session's tools are addressed as `mcp.<server>.<tool>`. Both layers may declare servers, with project entries trust-gated (see [Setting up your tools](../setting-up-your-tools)):
 
 ```toml
 [mcp_servers.litterbox]
@@ -57,6 +57,13 @@ transport = "http"
 url = "https://example.com/mcp"
 ```
 
+- `transport = "stdio"` — `command` (argv[0]), optional `args`, and optional `env`. Spawns with explicit argv (no shell) and only the named environment entries; Tackle's own environment, `PATH` included, is never forwarded.
+- `transport = "http"` — the streamable HTTP endpoint `url`.
+
+Servers connect asynchronously with a per-server timeout; every declared server's status (connected, or failed with a reason) is reported in the first turn and by `/mcp status`.
+
+### Credential markers
+
 An `env` value that is exactly `{cred:IDENTITY}` resolves through `credential_helper` when the server spawns — `agentkit-credential-<helper> get tackle <IDENTITY>`, reading `access_token` from the JSON output:
 
 ```toml
@@ -64,7 +71,7 @@ An `env` value that is exactly `{cred:IDENTITY}` resolves through `credential_he
 GITHUB_PERSONAL_ACCESS_TOKEN = "{cred:github}"
 ```
 
-The marker must be the entire value; any other value passes through literally. Resolution happens at spawn, never at config load, so secrets never enter the configuration — a failed lookup fails that server's connection (reported in the first-turn status) instead.
+The marker must be the entire value; any other value passes through literally. Resolution happens at spawn, never at config load, so secrets never enter the configuration — a failed lookup fails that server's connection (reported in the first-turn status) instead. Store the secret with `tackle auth add github <token>`; see [Setting up your tools](../setting-up-your-tools).
 
 ## `scripts`
 

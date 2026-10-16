@@ -1,0 +1,33 @@
+# 🥨 Visual Studio Code
+
+Visual Studio Code has no built-in ACP support; the community [ACP Client](https://github.com/formulahendry/vscode-acp) extension connects any ACP agent, including Tackle. It's published on both the VS Code Marketplace and Open VSX, so it also works in compatible editors such as Cursor and Windsurf.
+
+## Prerequisites
+
+- You have [installed Tackle](../../install), or at least know the path to its binary.
+- You have [installed the ACP Client extension](https://marketplace.visualstudio.com/items?itemName=formulahendry.acp-client).
+
+## Adding an agent
+
+Use the `ACP: Add Agent Configuration` command in the Command Palette, or add a `Tackle` entry to `acp.agents` in your user or workspace `settings.json`. Substituting the path to the Tackle binary from the installation step:
+
+```json
+{
+  // snip
+  "acp.agents": {
+    // snip
+    "Tackle": {
+      "command": "/path/to/agentkit-tackle",
+      "args": ["stdio"],
+      "env": {}
+    }
+  }
+  // snip
+}
+```
+
+## Testing
+
+Click the ACP icon in the Activity Bar, connect to _Tackle_, and start a new conversation. Pick a model — the selector is populated from your [configured providers](../setting-up-your-providers) — and send a prompt.
+
+If something goes wrong, `ACP: Show Log` and `ACP: Show Protocol Traffic` in the Command Palette show the extension's log and the raw ACP JSON-RPC traffic respectively.
