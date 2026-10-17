@@ -1,0 +1,115 @@
+---
+sidebar_position: 2
+---
+
+# 🎛️ Configuration
+
+Tackle configuration is sourced from two layers, merged in order:
+
+1. **Built-in registrations** — the built-in scripts (compaction, titling) at the lowest precedence.
+2. **User layer** — `config.toml` in the user config directory (`~/.config/agentkit/tackle` on Linux, `~/Library/Application Support/AgentKit/tackle` on macOS). Overridable with `--config-dir`.
+3. **Project layer** — `.agentkit/tackle/config.toml` in the session's working directory.
+
+The project layer may not set `endpoints` or `credential_helper` — a project trying to change where model traffic goes is rejected outright. Project `mcp_servers`, `scripts`, and definitions (personas, actors, prompts) are trust-gated: the first session in a project prompts for consent, keyed on a hash of each entry, so any change re-prompts.
+
+Maps merge per key: a project entry with the same name replaces one wholesale, so a disabling entry needs no file. Scalars merge per field.
+
+## `endpoints`
+
+Named model endpoints; models are addressed as `<endpoint>/<model>` (user layer only):
+
+```toml
+[endpoints.switchboard]
+base_url = "http://localhost:3812/openai/v1"
+wire_format = "openai-chat-completions"
+auth = "none"
+models = []  # optional static fallback when /models discovery fails
+```
+
+- `wire_format` — `openai-chat-completions` (the only wire format implemented in v1).
+- `auth` — `none` or `helper` (resolve a bearer token via the credential helper).
+
+## `credential_helper` (user layer only)
+
+Name of the credential helper binary; defaults to `keychain`. `auth = "helper"` endpoints run `agentkit-credential-<helper> get tackle <endpoint-name>` and read `access_token` from its JSON output — store one with `tackle auth add <endpoint-name> <token>` (see the [CLI reference](./cli#auth)).
+
+## `defaults`
+
+```toml
+[defaults]
+model = "switchboard/claude-sonnet-4-5"  # endpoint-qualified
+actor = "builtins/actuator"              # persona/actor override
+```
+
+## `mcp_servers`
+
+Tool providers, namespaced by server name; a session's tools are addressed as `mcp.<server>.<tool>`. Both layers may declare servers, with project entries trust-gated (see [Setting up your tools](../setting-up-your-tools)):
+
+```toml
+[mcp_servers.litterbox]
+transport = "stdio"
+command = "litterbox"
+args = ["serve"]
+env = { RUST_LOG = "info" }
+
+[mcp_servers.remote]
+transport = "http"
+url = "https://example.com/mcp"
+```
+
+- `transport = "stdio"` — `command` (argv[0]), optional `args`, and optional `env`. Spawns with explicit argv (no shell) and only the named environment entries; Tackle's own environment, `PATH` included, is never forwarded.
+- `transport = "http"` — the streamable HTTP endpoint `url`.
+
+Servers connect asynchronously with a per-server timeout; every declared server's status (connected, or failed with a reason) is reported in the first turn and by `/mcp status`.
+
+### Credential markers
+
+An `env` value that is exactly `{cred:IDENTITY}` resolves through `credential_helper` when the server spawns — `agentkit-credential-<helper> get tackle <IDENTITY>`, reading `access_token` from the JSON output:
+
+```toml
+[mcp_servers.github.env]
+GITHUB_PERSONAL_ACCESS_TOKEN = "{cred:github}"
+```
+
+The marker must be the entire value; any other value passes through literally. Resolution happens at spawn, never at config load, so secrets never enter the configuration — a failed lookup fails that server's connection (reported in the first-turn status) instead. Store the secret with `tackle auth add github <token>`; see [Setting up your tools](../setting-up-your-tools).
+
+## `client_tools`
+
+The ACP client advertises file-system and terminal capabilities; tackle reflects them to the model as `client.*` tools. This section toggles the two categories, and is user-layer only — a project layer may not set it:
+
+```toml
+[client_tools]
+fs_enabled = true        # client.fs.read_text_file / client.fs.write_text_file
+terminal_enabled = true  # the client.terminal.* family
+```
+
+Both default on. A category the client did not advertise is never exposed regardless of the toggle. `/editor <fs|terminal> <true|false>` overrides a category for the connection at runtime.
+
+## `scripts`
+
+Behaviour scripts, registered per event:
+
+```toml
+[scripts.compaction]
+events = ["post_turn", "compaction_requested"]
+file = "builtin:compaction.rhai"  # or a path
+enabled = true                    # set false to disable a built-in
+```
+
+The built-ins are `compaction` (on `post_turn` and `compaction_requested`) and `titling` (on `title_trigger`).
+
+## `turns`
+
+- `max_model_requests` — cap on model requests per turn (safety bound on agent loops).
+
+## `sessions`
+
+- `include_ephemeral` — whether ephemeral sessions appear in listings.
+
+## Built-in definitions
+
+Personas, actors, and prompts ship at the lowest precedence through the same discovery path as user definitions: any discovered definition with the same name replaces the built-in wholesale. (The built-in scripts — `compaction`, `titling` — register separately, as `scripts` entries; see above.)
+
+- **Personas**: `default`.
+- **Actors**: `default` (persona `default`), and `summariser` — the no-tools background actor the built-in scripts fork as for titling and compaction summaries.
+- **Prompts**: `fork`, `compact`, `mcp`, and `editor` — discoverability stubs for the harness commands of the same name. Their bodies are never expanded: the harness intercepts the command first, but without a registered prompt the command would not be advertised to the client.

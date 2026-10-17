@@ -1,0 +1,429 @@
+//! The MCP pool's happy-path and failure tests, driven through the
+//! tackle-mcp-echo stdio fixture.
+
+use agentkit_tackle::config::McpServerConfig;
+use agentkit_tackle::mcp::{
+    Elicitation, ElicitationResponse, ElicitationSink, McpPool, ServerStatus,
+};
+use agentkit_tackle::permissions::GrantStore;
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
+
+fn echo_server_config() -> McpServerConfig {
+    McpServerConfig::Stdio {
+        command: env!("CARGO_BIN_EXE_tackle-mcp-echo").into(),
+        args: Vec::new(),
+        env: BTreeMap::new(),
+    }
+}
+
+#[tokio::test]
+async fn connects_lists_and_calls_across_the_pool() {
+    let mut pool = McpPool::new();
+    pool.connect("echo", &echo_server_config()).await;
+
+    assert_eq!(
+        pool.statuses().get("echo"),
+        Some(&(agentkit_tackle::mcp::ServerStatus::Connected, true))
+    );
+    assert!(pool.is_connected("echo"));
+
+    let tools = pool.list_tools().await;
+    let echo = tools
+        .iter()
+        .find(|tool| tool.name == "mcp.echo.echo")
+        .expect("echo tool");
+    assert!(echo.description.contains("Echo"));
+
+    let result = pool
+        .call_tool("echo", "echo", serde_json::json!({ "text": "hello" }))
+        .await
+        .unwrap();
+    assert!(!result.is_error);
+    let blocks: serde_json::Value = serde_json::from_str(&result.content_json).unwrap();
+    assert_eq!(blocks[0]["text"], "hello");
+}
+
+#[tokio::test]
+async fn unknown_server_and_truncation_are_handled() {
+    let mut pool = McpPool::new();
+    pool.connect("echo", &echo_server_config()).await;
+
+    // A missing server's call is a pool error, never a panic.
+    let err = pool
+        .call_tool("missing", "echo", serde_json::json!({}))
+        .await;
+    assert!(err.is_err());
+
+    // Oversized results truncate at the fixed internal limit with the
+    // marker set.
+    let huge: String = "x".repeat(agentkit_tackle::mcp::TOOL_RESULT_LIMIT + 1024);
+    let result = pool
+        .call_tool("echo", "echo", serde_json::json!({ "text": huge }))
+        .await
+        .unwrap();
+    assert!(result.truncated);
+    assert_eq!(
+        result.content_json.len(),
+        agentkit_tackle::mcp::TOOL_RESULT_LIMIT
+    );
+}
+
+#[tokio::test]
+async fn failed_connections_are_statuses_not_panics() {
+    let mut pool = McpPool::new();
+    let config = McpServerConfig::Stdio {
+        command: "/nonexistent/tackle-mcp-nothing".into(),
+        args: Vec::new(),
+        env: BTreeMap::new(),
+    };
+    pool.connect("broken", &config).await;
+    assert!(matches!(
+        pool.statuses().get("broken"),
+        Some(&(agentkit_tackle::mcp::ServerStatus::Failed { .. }, _))
+    ));
+    assert!(!pool.is_connected("broken"));
+}
+
+fn broken_server_config() -> McpServerConfig {
+    McpServerConfig::Stdio {
+        command: "/nonexistent/tackle-mcp-nothing".into(),
+        args: Vec::new(),
+        env: BTreeMap::new(),
+    }
+}
+
+/// AC-001: disabling prevents new connections and closes the existing
+/// one, so the server's tools stop being listed.
+#[tokio::test]
+async fn disabling_closes_the_connection_and_hides_its_tools() {
+    let mut pool = McpPool::new();
+    pool.register("echo", echo_server_config());
+    pool.connect("echo", &echo_server_config()).await;
+    assert!(pool.is_connected("echo"));
+    assert!(!pool.list_tools().await.is_empty());
+
+    pool.disable_server("echo").unwrap();
+    assert!(!pool.is_enabled("echo"));
+    assert!(!pool.is_connected("echo"));
+    assert!(pool.list_tools().await.is_empty());
+    assert_eq!(
+        pool.statuses().get("echo"),
+        Some(&(
+            ServerStatus::Failed {
+                reason: "Not connected".into()
+            },
+            false
+        ))
+    );
+}
+
+/// AC-004/FR-004: re-enabling restores the connection the disable tore
+/// down, from the config held at registration.
+#[tokio::test]
+async fn enabling_reconnects_from_the_registered_config() {
+    let mut pool = McpPool::new();
+    pool.register("echo", echo_server_config());
+    pool.connect("echo", &echo_server_config()).await;
+    pool.disable_server("echo").unwrap();
+
+    pool.enable_server("echo").await.unwrap();
+    assert!(pool.is_enabled("echo"));
+    assert!(pool.is_connected("echo"));
+    assert_eq!(
+        pool.statuses().get("echo"),
+        Some(&(ServerStatus::Connected, true))
+    );
+    assert!(pool
+        .list_tools()
+        .await
+        .iter()
+        .any(|tool| tool.name == "mcp.echo.echo"));
+}
+
+/// Toggling flips the state and does the matching lifecycle work.
+#[tokio::test]
+async fn toggling_flips_state_and_drives_the_connection() {
+    let mut pool = McpPool::new();
+    pool.register("echo", echo_server_config());
+
+    assert!(!pool.toggle_server("echo").await.unwrap());
+    assert!(!pool.is_connected("echo"));
+
+    assert!(pool.toggle_server("echo").await.unwrap());
+    assert!(pool.is_connected("echo"));
+}
+
+/// EC-001: disabling an already-disabled server changes nothing and is
+/// not an error.
+#[tokio::test]
+async fn disabling_twice_is_a_no_op() {
+    let mut pool = McpPool::new();
+    pool.register("echo", echo_server_config());
+    pool.connect("echo", &echo_server_config()).await;
+
+    pool.disable_server("echo").unwrap();
+    pool.disable_server("echo").unwrap();
+    assert!(!pool.is_enabled("echo"));
+    assert!(!pool.is_connected("echo"));
+}
+
+/// EC-002: a server that fails to reconnect stays enabled and carries
+/// the failure as a status rather than as an error.
+#[tokio::test]
+async fn a_failed_reconnect_is_a_status_not_an_error() {
+    let mut pool = McpPool::new();
+    pool.register("broken", broken_server_config());
+    pool.enable_server("broken").await.unwrap();
+
+    assert!(pool.is_enabled("broken"));
+    assert!(!pool.is_connected("broken"));
+    assert!(matches!(
+        pool.statuses().get("broken"),
+        Some(&(ServerStatus::Failed { .. }, true))
+    ));
+}
+
+/// Toggling an unregistered name is an error: a name that is not
+/// configured cannot be turned on or off.
+#[tokio::test]
+async fn toggling_an_unregistered_server_is_an_error() {
+    let mut pool = McpPool::new();
+    assert!(matches!(
+        pool.enable_server("nope").await,
+        Err(agentkit_tackle::mcp::McpPoolError::UnknownServer(name)) if name == "nope"
+    ));
+    assert!(matches!(
+        pool.disable_server("nope"),
+        Err(agentkit_tackle::mcp::McpPoolError::UnknownServer(name)) if name == "nope"
+    ));
+    assert!(pool.server_names().is_empty());
+    assert!(pool.statuses().is_empty());
+}
+
+/// Registering declares the server enabled; re-registering keeps a
+/// user's earlier disable rather than silently re-enabling it.
+#[test]
+fn registering_defaults_to_enabled_and_preserves_an_existing_disable() {
+    let mut pool = McpPool::new();
+    pool.register("echo", echo_server_config());
+    assert!(pool.is_enabled("echo"));
+    assert_eq!(pool.server_names(), vec!["echo"]);
+
+    pool.disable_server("echo").unwrap();
+    pool.register("echo", echo_server_config());
+    assert!(!pool.is_enabled("echo"));
+}
+
+/// FR-013: a client-forwarded server of the same name wins over the
+/// config-declared one, which is recorded as shadowed for the first-turn
+/// report. A non-colliding forwarded server is added alongside it.
+#[tokio::test]
+async fn forwarded_servers_win_over_config_of_the_same_name() {
+    let mut pool = McpPool::new();
+    pool.register("echo", echo_server_config());
+    pool.connect("echo", &echo_server_config()).await;
+    assert!(pool.is_connected("echo"));
+
+    pool.add_forwarded(vec![
+        ("echo".to_owned(), broken_server_config()),
+        ("extra".to_owned(), echo_server_config()),
+    ])
+    .await;
+
+    assert_eq!(pool.shadowed_servers(), vec!["echo"]);
+    // The forwarded (broken) config replaced the working one, proving the
+    // client-declared server won.
+    assert!(matches!(
+        pool.statuses().get("echo"),
+        Some(&(ServerStatus::Failed { .. }, _))
+    ));
+    assert!(!pool.is_connected("echo"));
+    assert!(pool.is_connected("extra"));
+}
+
+struct RecordingSink {
+    received: Arc<Mutex<Vec<Elicitation>>>,
+    response: ElicitationResponse,
+}
+
+impl ElicitationSink for RecordingSink {
+    async fn elicit(&self, elicitation: Elicitation) -> ElicitationResponse {
+        self.received.lock().unwrap().push(elicitation);
+        self.response
+    }
+}
+
+#[tokio::test]
+async fn elicitations_surface_with_origin_and_never_touch_grants() {
+    // The grant store in scope for the whole exchange: elicitation
+    // forwarding must not write a single record into it.
+    let grants = GrantStore::default();
+
+    let received = Arc::new(Mutex::new(Vec::new()));
+    let sink = RecordingSink {
+        received: Arc::clone(&received),
+        response: ElicitationResponse::Decline,
+    };
+    let mut pool = McpPool::with_sink(sink);
+    pool.connect("echo", &echo_server_config()).await;
+    assert_eq!(
+        pool.statuses().get("echo"),
+        Some(&(ServerStatus::Connected, true))
+    );
+
+    let result = pool
+        .call_tool("echo", "elicit", serde_json::json!({}))
+        .await
+        .unwrap();
+    assert!(!result.is_error);
+    let text: serde_json::Value = serde_json::from_str(&result.content_json).unwrap();
+    assert_eq!(text[0]["text"], "elicit:declined");
+
+    let surfaced = received.lock().unwrap().clone();
+    assert_eq!(surfaced.len(), 1);
+    let elicitation = &surfaced[0];
+    // Explicit origin attribution: the elicitation names its server,
+    // semantically distinct from a tool permission prompt.
+    assert_eq!(elicitation.server, "echo");
+    assert_eq!(elicitation.message, "Name the project");
+    assert!(elicitation.requested_schema.is_some());
+    assert!(elicitation.url.is_none());
+
+    assert!(grants.is_empty());
+}
+
+#[tokio::test]
+async fn elicitation_cancellation_and_the_fail_closed_default() {
+    // A cancelled permission response surfaces as an elicit cancel.
+    let received = Arc::new(Mutex::new(Vec::new()));
+    let mut pool = McpPool::with_sink(RecordingSink {
+        received: Arc::clone(&received),
+        response: ElicitationResponse::Cancel,
+    });
+    pool.connect("echo", &echo_server_config()).await;
+    let result = pool
+        .call_tool("echo", "elicit", serde_json::json!({}))
+        .await
+        .unwrap();
+    let text: serde_json::Value = serde_json::from_str(&result.content_json).unwrap();
+    assert_eq!(text[0]["text"], "elicit:cancelled");
+
+    // The fail-closed default pool auto-declines every elicitation.
+    let mut pool = McpPool::new();
+    pool.connect("echo", &echo_server_config()).await;
+    let result = pool
+        .call_tool("echo", "elicit", serde_json::json!({}))
+        .await
+        .unwrap();
+    let text: serde_json::Value = serde_json::from_str(&result.content_json).unwrap();
+    assert_eq!(text[0]["text"], "elicit:declined");
+}
+
+mod direct_invocation {
+    use super::*;
+    use agentkit_tackle::invokables::{parse_direct, Registry};
+
+    #[tokio::test]
+    async fn execution_bypasses_the_pipeline_and_reports_the_shape() {
+        let definitions = agentkit_tackle::loader::Definitions::default();
+        let registry = Registry::build(
+            &definitions,
+            &[agentkit_tackle::mcp::NamespacedTool {
+                name: "mcp.echo.echo".into(),
+                description: "Echoes the provided text".into(),
+                schema: serde_json::json!({"type": "object"}),
+            }],
+        )
+        .unwrap();
+        // The grant store in scope for the whole exchange: direct
+        // invocation bypasses the pipeline and writes no records.
+        let grants = agentkit_tackle::permissions::GrantStore::default();
+
+        let mut pool = McpPool::new();
+        pool.connect("echo", &echo_server_config()).await;
+
+        let input = parse_direct("/!mcp.echo.echo {\"text\": \"hi\"}").unwrap();
+        let result = registry.execute_direct(&pool, &input).await.unwrap();
+
+        assert!(!result.is_error);
+        assert!(!result.truncated);
+        let text: serde_json::Value = serde_json::from_str(&result.content_json).unwrap();
+        assert_eq!(text[0]["text"], "hi");
+        assert!(grants.is_empty());
+    }
+
+    #[tokio::test]
+    async fn non_mcp_invokables_are_a_precise_error() {
+        // A registered user-invokable prompt: /! on it is the NotMcp
+        // error, not the unknown-invokable one.
+        let definitions = agentkit_tackle::loader::Definitions {
+            prompts: BTreeMap::from([(
+                "deploy".to_owned(),
+                agentkit_tackle::loader::Definition {
+                    name: "deploy".to_owned(),
+                    path: std::path::PathBuf::from("/prompts/deploy.md"),
+                    raw: String::new(),
+                    frontmatter: agentkit_tackle::loader::PromptMeta::default(),
+                    body: "Body.".to_owned(),
+                },
+            )]),
+            ..Default::default()
+        };
+        let registry = Registry::build(&definitions, &[]).unwrap();
+        let mut pool = McpPool::new();
+        pool.connect("echo", &echo_server_config()).await;
+
+        // A prompt cannot be invoked directly — /! supports MCP and
+        // client-capability tools only.
+        let input = agentkit_tackle::invokables::DirectInvocation {
+            invokable: "prompt.deploy".into(),
+            arguments: String::new(),
+        };
+        let err = registry.execute_direct(&pool, &input).await.unwrap_err();
+        assert!(
+            err.to_string().contains(
+                "cannot be invoked directly — direct invocation supports MCP and client-capability tools"
+            ),
+            "{err}"
+        );
+
+        // Unnamespaced or unknown names never execute.
+        let input = parse_direct("/!echo").unwrap();
+        let err = registry.execute_direct(&pool, &input).await.unwrap_err();
+        assert!(err.to_string().contains("unknown invokable"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn oversized_outputs_truncate_with_the_original_size() {
+        let definitions = agentkit_tackle::loader::Definitions::default();
+        let registry = Registry::build(
+            &definitions,
+            &[agentkit_tackle::mcp::NamespacedTool {
+                name: "mcp.echo.echo".into(),
+                description: "Echoes the provided text".into(),
+                schema: serde_json::json!({"type": "object"}),
+            }],
+        )
+        .unwrap();
+        let mut pool = McpPool::new();
+        pool.connect("echo", &echo_server_config()).await;
+
+        let huge = "x".repeat(agentkit_tackle::mcp::TOOL_RESULT_LIMIT + 1024);
+        let input = parse_direct(&format!(
+            "/!mcp.echo.echo {}",
+            serde_json::json!({ "text": huge })
+        ))
+        .unwrap();
+        let result = registry.execute_direct(&pool, &input).await.unwrap();
+
+        assert!(result.truncated);
+        assert_eq!(
+            result.content_json.len(),
+            agentkit_tackle::mcp::TOOL_RESULT_LIMIT
+        );
+        // The size marker records the original size — larger than the
+        // limit; full content is what storage keeps.
+        assert!(result.original_size > agentkit_tackle::mcp::TOOL_RESULT_LIMIT);
+    }
+}

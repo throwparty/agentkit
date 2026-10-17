@@ -1,0 +1,699 @@
+//! Initialize-phase integration tests: the golden transcript harness for
+//! the conformance suite (T-013) starts here. Each test spawns the tackle
+//! binary as a subprocess and drives it with the SDK's client — the same
+//! shape the golden transcripts replay.
+
+use agentkit_tackle::agent_client_protocol::schema::v1::{
+    ClientCapabilities, InitializeRequest, ListSessionsRequest, LoadSessionRequest, McpServer,
+    McpServerStdio, Meta, NewSessionRequest, SessionCapabilities, SessionNotification,
+    SessionUpdate,
+};
+use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
+use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
+use std::sync::{Arc as StdArc, Mutex as StdMutex};
+
+/// Replayed chunks observed by the notification handler: (role, message
+/// id, text).
+type Seen = StdArc<StdMutex<Vec<(String, Option<String>, String)>>>;
+
+/// Spawns tackle as a subprocess against an isolated configuration.
+fn spawn_agent(dir: &std::path::Path) -> AcpAgent {
+    AcpAgent::from_args([
+        env!("CARGO_BIN_EXE_agentkit-tackle"),
+        "stdio",
+        "--config-dir",
+        dir.join("cfg").to_str().unwrap(),
+        "--db-path",
+        dir.join("sessions.db").to_str().unwrap(),
+    ])
+    .expect("agent arguments")
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn initialize_negotiates_v1_and_advertises_capabilities() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = spawn_agent(dir.path());
+
+    Client
+        .builder()
+        .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
+            let response = connection
+                .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+
+            // Negotiation: the client asked for v1; the agent supports v1,
+            // so it responds with the same version.
+            assert_eq!(response.protocol_version, ProtocolVersion::V1);
+
+            // Capability advertisement per FR-002: the stable surface.
+            let capabilities = &response.agent_capabilities;
+            assert!(capabilities.load_session, "loadSession must be advertised");
+            let session_capabilities: &SessionCapabilities = &capabilities.session_capabilities;
+            assert!(session_capabilities.list.is_some(), "session/list");
+            assert!(session_capabilities.close.is_some(), "session/close");
+            assert!(session_capabilities.resume.is_some(), "session/resume");
+            assert!(session_capabilities.delete.is_some(), "session/delete");
+            assert!(capabilities.prompt_capabilities.image, "image prompts");
+            assert!(!capabilities.prompt_capabilities.audio, "no audio in v1");
+            assert!(
+                capabilities.prompt_capabilities.embedded_context,
+                "embedded context prompts"
+            );
+            assert!(capabilities.mcp_capabilities.http, "MCP over HTTP");
+            // No authentication in v1.
+            assert!(response.auth_methods.is_empty());
+
+            // Unstable features are advertised via _meta and the fork
+            // capability (gated on SENDING, not advertising — FR-002).
+            let meta = response
+                .agent_capabilities
+                .meta
+                .as_ref()
+                .expect("unstable _meta");
+            assert!(meta.contains_key("unstable_session_fork"));
+            assert!(meta.contains_key("unstable_session_compaction"));
+            assert!(meta.contains_key("unstable_session_notices"));
+            assert!(
+                session_capabilities.fork.is_some(),
+                "session/fork capability"
+            );
+
+            Ok(())
+        })
+        .await
+        .expect("initialize handshake");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn session_lifecycle_round_trips() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = spawn_agent(dir.path());
+
+    Client
+        .builder()
+        .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
+            connection
+                .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+
+            // session/new: immediate return with a session id.
+            let created = connection
+                .send_request(NewSessionRequest::new(std::path::PathBuf::from("/work")))
+                .block_task()
+                .await?;
+            let session_id = created.session_id.clone();
+
+            // session/list: the new session appears, ordered, with cwd.
+            let listed = connection
+                .send_request(ListSessionsRequest::new())
+                .block_task()
+                .await?;
+            assert_eq!(listed.sessions.len(), 1);
+            assert_eq!(listed.sessions[0].session_id, session_id);
+            assert_eq!(listed.sessions[0].cwd, std::path::PathBuf::from("/work"));
+            assert!(listed.next_cursor.is_none());
+
+            // session/close: the session stays listable.
+            let closed = connection
+                .send_request(
+                    agentkit_tackle::agent_client_protocol::schema::v1::CloseSessionRequest::new(
+                        session_id.clone(),
+                    ),
+                )
+                .block_task()
+                .await?;
+            let _ = closed;
+            let listed = connection
+                .send_request(ListSessionsRequest::new())
+                .block_task()
+                .await?;
+            assert_eq!(listed.sessions.len(), 1, "close keeps the session listable");
+
+            // session/delete: hides it.
+            let deleted = connection
+                .send_request(
+                    agentkit_tackle::agent_client_protocol::schema::v1::DeleteSessionRequest::new(
+                        session_id.clone(),
+                    ),
+                )
+                .block_task()
+                .await?;
+            let _ = deleted;
+            let listed = connection
+                .send_request(ListSessionsRequest::new())
+                .block_task()
+                .await?;
+            assert!(listed.sessions.is_empty(), "delete hides the session");
+
+            Ok(())
+        })
+        .await
+        .expect("session lifecycle round-trip");
+}
+
+/// `session/load` on a session with no turns: answers without error and
+/// replays nothing. History replay with stable ids lives in
+/// `restart_load.rs`, which pairs it with a real turn.
+#[tokio::test(flavor = "multi_thread")]
+async fn session_load_on_an_empty_session_answers() {
+    use agentkit_tackle::agent_client_protocol::schema::v1::SessionNotification;
+
+    let dir = tempfile::tempdir().unwrap();
+    let agent = spawn_agent(dir.path());
+
+    let seen: Seen = StdArc::default();
+    let seen_handler = seen.clone();
+
+    Client
+        .builder()
+        .on_receive_notification(
+            async move |notification: SessionNotification, _cx| {
+                if let agentkit_tackle::agent_client_protocol::schema::v1::SessionUpdate::UserMessageChunk(chunk) =
+                    &notification.update
+                {
+                    let mut seen = seen_handler.lock().unwrap();
+                    seen.push((
+                        "user".into(),
+                        chunk.message_id.as_ref().map(|id| id.to_string()),
+                        match &chunk.content {
+                            agentkit_tackle::agent_client_protocol::schema::v1::ContentBlock::Text(text) => {
+                                text.text.clone()
+                            }
+                            _ => String::new(),
+                        },
+                    ));
+                }
+                Ok(())
+            },
+            agentkit_tackle::agent_client_protocol::on_receive_notification!(),
+        )
+        .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
+            let created = connection
+                .send_request(NewSessionRequest::new(std::path::PathBuf::from("/work")))
+                .block_task()
+                .await?;
+            let session_id = created.session_id.clone();
+
+            // Load replays nothing (the session has no turns yet) and
+            // answers once.
+            connection
+                .send_request(LoadSessionRequest::new(
+                    session_id.clone(),
+                    std::path::PathBuf::from("/work"),
+                ))
+                .block_task()
+                .await?;
+            Ok(())
+        })
+        .await
+        .expect("session/load on an empty session");
+}
+
+/// Command names from each `available_commands_update`, in arrival order.
+type CommandsSeen = StdArc<StdMutex<Vec<Vec<String>>>>;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn available_commands_are_advertised_after_session_new_and_load() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = spawn_agent(dir.path());
+
+    let seen: CommandsSeen = StdArc::default();
+    let seen_handler = seen.clone();
+
+    Client
+        .builder()
+        .on_receive_notification(
+            async move |notification: SessionNotification, _cx| {
+                if let SessionUpdate::AvailableCommandsUpdate(update) = &notification.update {
+                    seen_handler.lock().unwrap().push(
+                        update
+                            .available_commands
+                            .iter()
+                            .map(|command| command.name.clone())
+                            .collect(),
+                    );
+                }
+                Ok(())
+            },
+            agentkit_tackle::agent_client_protocol::on_receive_notification!(),
+        )
+        .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
+            connection
+                .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            let created = connection
+                .send_request(NewSessionRequest::new(std::path::PathBuf::from("/work")))
+                .block_task()
+                .await?;
+
+            // The advertisement follows the session/new response on the
+            // wire; the dispatch loop runs notification handlers inline,
+            // so this round-trip orders behind it.
+            connection
+                .send_request(ListSessionsRequest::new())
+                .block_task()
+                .await?;
+            {
+                let seen = seen.lock().unwrap();
+                assert_eq!(seen.len(), 1, "one advertisement after session/new");
+                // The `!` prefix leads, then the built-in prompts (the
+                // fixture has no user-layer definitions).
+                assert_eq!(seen[0][0], "!", "{:?}", seen[0]);
+                assert!(seen[0].iter().any(|name| name == "compact"), "{:?}", seen[0]);
+                assert!(seen[0].iter().any(|name| name == "fork"), "{:?}", seen[0]);
+                // The /mcp toggle is a harness command, not a model
+                // prompt; the stub builtin prompt is what puts it in the
+                // client's command palette at all.
+                assert!(seen[0].iter().any(|name| name == "mcp"), "{:?}", seen[0]);
+                // /editor is advertised the same way: the harness command
+                // is unreachable unless a registered prompt carries it.
+                assert!(seen[0].iter().any(|name| name == "editor"), "{:?}", seen[0]);
+            }
+
+            connection
+                .send_request(LoadSessionRequest::new(
+                    created.session_id.clone(),
+                    std::path::PathBuf::from("/work"),
+                ))
+                .block_task()
+                .await?;
+            connection
+                .send_request(ListSessionsRequest::new())
+                .block_task()
+                .await?;
+            {
+                let seen = seen.lock().unwrap();
+                assert_eq!(seen.len(), 2, "re-advertised after session/load");
+                assert_eq!(seen[1], seen[0], "the load advertisement matches");
+            }
+            Ok(())
+        })
+        .await
+        .expect("available commands advertisement");
+}
+
+/// T-024 direct invocation: `/!mcp.<server>.<tool>` runs the tool with
+/// no model request and reports the result as a tool call. This is the
+/// only MCP path wired end to end, so it is also the proof that a
+/// configured server reaches a session at all.
+#[tokio::test(flavor = "multi_thread")]
+async fn direct_invocation_runs_an_mcp_tool_and_reports_the_result() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = dir.path().join("cfg");
+    std::fs::create_dir_all(&cfg).unwrap();
+    std::fs::write(
+        cfg.join("config.toml"),
+        format!(
+            "[mcp_servers.echo]\ntransport = \"stdio\"\ncommand = {}\n",
+            serde_json::to_string(env!("CARGO_BIN_EXE_tackle-mcp-echo")).unwrap()
+        ),
+    )
+    .unwrap();
+    let agent = spawn_agent(dir.path());
+
+    let calls: StdArc<StdMutex<Vec<(String, String)>>> = StdArc::default();
+    let calls_handler = calls.clone();
+    let advertised: StdArc<StdMutex<Vec<String>>> = StdArc::default();
+    let advertised_handler = advertised.clone();
+
+    Client
+        .builder()
+        .on_receive_notification(
+            async move |notification: SessionNotification, _cx| {
+                match &notification.update {
+                    SessionUpdate::ToolCall(call) => {
+                        calls_handler
+                            .lock()
+                            .unwrap()
+                            .push(("call".to_owned(), call.title.clone()));
+                    }
+                    SessionUpdate::ToolCallUpdate(update) => {
+                        let status = update.fields.status.map(|s| format!("{s:?}"));
+                        let text = update
+                            .fields
+                            .content
+                            .as_ref()
+                            .map(|content| serde_json::to_string(content).unwrap_or_default())
+                            .unwrap_or_default();
+                        calls_handler
+                            .lock()
+                            .unwrap()
+                            .push((status.unwrap_or_default(), text));
+                    }
+                    SessionUpdate::AvailableCommandsUpdate(update) => {
+                        advertised_handler.lock().unwrap().extend(
+                            update
+                                .available_commands
+                                .iter()
+                                .map(|command| command.name.clone()),
+                        );
+                    }
+                    _ => {}
+                }
+                Ok(())
+            },
+            agentkit_tackle::agent_client_protocol::on_receive_notification!(),
+        )
+        .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
+            connection
+                .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            let created = connection
+                .send_request(NewSessionRequest::new(std::path::PathBuf::from("/work")))
+                .block_task()
+                .await?;
+
+            // The tool must be advertised under its own name. A client
+            // that exact-matches the advertised command name refuses to
+            // send anything else, so an unadvertised tool is unreachable
+            // no matter how well the handler works. The advertisement is
+            // a notification sent after the session/new response (the Zed
+            // ordering workaround), so wait for it to land rather than
+            // asserting on the response's return.
+            let advertised_deadline =
+                std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while !advertised.lock().unwrap().iter().any(|n| n == "!mcp.echo.echo")
+                && std::time::Instant::now() < advertised_deadline
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            assert!(
+                advertised.lock().unwrap().iter().any(|n| n == "!mcp.echo.echo"),
+                "the tool is advertised under its !-prefixed name: {:?}",
+                advertised.lock().unwrap()
+            );
+
+            // The `!` spelling, with and without the separating space a
+            // client may or may not insert after the command name.
+            for command in [
+                r#"/!mcp.echo.echo {"text":"hello"}"#,
+                r#"/!mcp.echo.echo{"text":"hello"}"#,
+            ] {
+                calls.lock().unwrap().clear();
+                let response = connection
+                    .send_request(
+                        agentkit_tackle::agent_client_protocol::schema::v1::PromptRequest::new(
+                            created.session_id.clone(),
+                            vec![
+                                agentkit_tackle::agent_client_protocol::schema::v1::ContentBlock::Text(
+                                    agentkit_tackle::agent_client_protocol::schema::v1::TextContent::new(
+                                        command.to_owned(),
+                                    ),
+                                ),
+                            ],
+                        ),
+                    )
+                    .block_task()
+                    .await?;
+
+                assert_eq!(
+                    response.stop_reason,
+                    agentkit_tackle::agent_client_protocol::schema::v1::StopReason::EndTurn,
+                    "{command}"
+                );
+
+                let seen = calls.lock().unwrap().clone();
+                assert!(
+                    seen.iter()
+                        .any(|(kind, value)| kind == "call" && value == "mcp.echo.echo"),
+                    "the call is announced for {command}: {seen:?}"
+                );
+                let (_, output) = seen
+                    .iter()
+                    .find(|(kind, _)| kind.contains("Completed"))
+                    .unwrap_or_else(|| panic!("the result is reported for {command}: {seen:?}"));
+                assert!(
+                    output.contains("hello"),
+                    "the tool ran for {command}: {output}"
+                );
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+/// `/editor <kind> <bool>` toggles the runtime client-tool categories and
+/// reports the change, without ever becoming a model turn.
+#[tokio::test(flavor = "multi_thread")]
+async fn editor_command_toggles_and_reports() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = spawn_agent(dir.path());
+
+    let replies: StdArc<StdMutex<Vec<String>>> = StdArc::default();
+    let replies_handler = replies.clone();
+
+    Client
+        .builder()
+        .on_receive_notification(
+            async move |notification: SessionNotification, _cx| {
+                if let SessionUpdate::AgentMessageChunk(chunk) = &notification.update {
+                    if let agentkit_tackle::agent_client_protocol::schema::v1::ContentBlock::Text(
+                        text,
+                    ) = &chunk.content
+                    {
+                        replies_handler.lock().unwrap().push(text.text.clone());
+                    }
+                }
+                Ok(())
+            },
+            agentkit_tackle::agent_client_protocol::on_receive_notification!(),
+        )
+        .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
+            connection
+                .send_request(
+                    InitializeRequest::new(ProtocolVersion::V1)
+                        .client_capabilities(ClientCapabilities::new().terminal(true)),
+                )
+                .block_task()
+                .await?;
+            let created = connection
+                .send_request(NewSessionRequest::new(std::path::PathBuf::from("/work")))
+                .block_task()
+                .await?;
+
+            for (command, expected) in [
+                ("/editor terminal false", "Editor terminal tools: disabled"),
+                ("/editor fs true", "Editor fs tools: enabled"),
+                (
+                    "/editor bogus true",
+                    "Usage: /editor <fs|terminal> <true|false>",
+                ),
+            ] {
+                replies.lock().unwrap().clear();
+                let response = connection
+                    .send_request(
+                        agentkit_tackle::agent_client_protocol::schema::v1::PromptRequest::new(
+                            created.session_id.clone(),
+                            vec![
+                                agentkit_tackle::agent_client_protocol::schema::v1::ContentBlock::Text(
+                                    agentkit_tackle::agent_client_protocol::schema::v1::TextContent::new(
+                                        command,
+                                    ),
+                                ),
+                            ],
+                        ),
+                    )
+                    .block_task()
+                    .await?;
+                assert_eq!(
+                    response.stop_reason,
+                    agentkit_tackle::agent_client_protocol::schema::v1::StopReason::EndTurn,
+                    "{command}"
+                );
+                let seen = replies.lock().unwrap().clone();
+                assert!(
+                    seen.iter().any(|reply| reply.contains(expected)),
+                    "{command} answered {expected:?}: {seen:?}"
+                );
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+/// A client-forwarded MCP server (`session/new`'s `mcp_servers`) reaches
+/// the session exactly like a configured one — the same path Zed uses to
+/// hand the agent its own MCP servers.
+#[tokio::test(flavor = "multi_thread")]
+async fn forwarded_mcp_servers_reach_the_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = spawn_agent(dir.path());
+
+    let calls: StdArc<StdMutex<Vec<(String, String)>>> = StdArc::default();
+    let calls_handler = calls.clone();
+    let advertised: StdArc<StdMutex<Vec<String>>> = StdArc::default();
+    let advertised_handler = advertised.clone();
+
+    Client
+        .builder()
+        .on_receive_notification(
+            async move |notification: SessionNotification, _cx| {
+                match &notification.update {
+                    SessionUpdate::ToolCall(call) => {
+                        calls_handler
+                            .lock()
+                            .unwrap()
+                            .push(("call".to_owned(), call.title.clone()));
+                    }
+                    SessionUpdate::ToolCallUpdate(update) => {
+                        let status = update.fields.status.map(|s| format!("{s:?}"));
+                        let text = update
+                            .fields
+                            .content
+                            .as_ref()
+                            .map(|content| serde_json::to_string(content).unwrap_or_default())
+                            .unwrap_or_default();
+                        calls_handler
+                            .lock()
+                            .unwrap()
+                            .push((status.unwrap_or_default(), text));
+                    }
+                    SessionUpdate::AvailableCommandsUpdate(update) => {
+                        advertised_handler.lock().unwrap().extend(
+                            update
+                                .available_commands
+                                .iter()
+                                .map(|command| command.name.clone()),
+                        );
+                    }
+                    _ => {}
+                }
+                Ok(())
+            },
+            agentkit_tackle::agent_client_protocol::on_receive_notification!(),
+        )
+        .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
+            connection
+                .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            let forwarded = McpServer::Stdio(McpServerStdio::new(
+                "echo",
+                env!("CARGO_BIN_EXE_tackle-mcp-echo"),
+            ));
+            let created = connection
+                .send_request(
+                    NewSessionRequest::new(std::path::PathBuf::from("/work"))
+                        .mcp_servers(vec![forwarded]),
+                )
+                .block_task()
+                .await?;
+
+            // The advertisement follows the session/new response (the Zed
+            // ordering workaround), so wait for it to land.
+            let advertised_deadline =
+                std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while !advertised.lock().unwrap().iter().any(|n| n == "!mcp.echo.echo")
+                && std::time::Instant::now() < advertised_deadline
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            assert!(
+                advertised.lock().unwrap().iter().any(|n| n == "!mcp.echo.echo"),
+                "the forwarded server's tool is advertised: {:?}",
+                advertised.lock().unwrap()
+            );
+
+            let response = connection
+                .send_request(
+                    agentkit_tackle::agent_client_protocol::schema::v1::PromptRequest::new(
+                        created.session_id.clone(),
+                        vec![
+                            agentkit_tackle::agent_client_protocol::schema::v1::ContentBlock::Text(
+                                agentkit_tackle::agent_client_protocol::schema::v1::TextContent::new(
+                                    r#"/!mcp.echo.echo {"text":"forwarded"}"#.to_owned(),
+                                ),
+                            ),
+                        ],
+                    ),
+                )
+                .block_task()
+                .await?;
+            assert_eq!(
+                response.stop_reason,
+                agentkit_tackle::agent_client_protocol::schema::v1::StopReason::EndTurn,
+            );
+
+            let seen = calls.lock().unwrap().clone();
+            let (_, output) = seen
+                .iter()
+                .find(|(kind, _)| kind.contains("Completed"))
+                .unwrap_or_else(|| panic!("the forwarded tool ran: {seen:?}"));
+            assert!(output.contains("forwarded"), "the tool ran: {output}");
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+/// FR-013: a client-forwarded server that cannot connect is reported at
+/// the first turn as a warning notice (to clients advertising session
+/// notices), and does not fail session setup.
+#[tokio::test(flavor = "multi_thread")]
+async fn forwarded_failures_are_reported_at_the_first_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = spawn_agent(dir.path());
+
+    let notices: StdArc<StdMutex<Vec<(String, String)>>> = StdArc::default();
+    let notices_handler = notices.clone();
+
+    let mut meta = Meta::new();
+    meta.insert("unstable_session_notices".to_owned(), serde_json::json!({}));
+    let initialize = InitializeRequest::new(ProtocolVersion::V1)
+        .client_capabilities(ClientCapabilities::new().meta(Meta::from(meta)));
+
+    Client
+        .builder()
+        .on_receive_notification(
+            async move |notification: SessionNotification, _cx| {
+                if let SessionUpdate::Notice(notice) = &notification.update {
+                    notices_handler
+                        .lock()
+                        .unwrap()
+                        .push((format!("{:?}", notice.severity), notice.title.clone()));
+                }
+                Ok(())
+            },
+            agentkit_tackle::agent_client_protocol::on_receive_notification!(),
+        )
+        .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
+            connection.send_request(initialize).block_task().await?;
+            let forwarded = McpServer::Stdio(McpServerStdio::new(
+                "broken",
+                "/nonexistent/tackle-mcp-nothing",
+            ));
+            connection
+                .send_request(
+                    NewSessionRequest::new(std::path::PathBuf::from("/work"))
+                        .mcp_servers(vec![forwarded]),
+                )
+                .block_task()
+                .await?;
+
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while !notices
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|(_, title)| title.contains("broken"))
+                && std::time::Instant::now() < deadline
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            let seen = notices.lock().unwrap().clone();
+            assert!(
+                seen.iter()
+                    .any(|(severity, title)| severity.contains("Warning") && title.contains("broken")),
+                "the failed forwarded server is reported: {seen:?}"
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
