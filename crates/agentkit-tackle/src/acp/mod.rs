@@ -1618,10 +1618,11 @@ where
                     .and_then(|model_ref| context_window(&model_ref))
                     .unwrap_or(0);
                 if size > 0 {
-                    let used: u64 = assembled
+                    let used_bytes: u64 = assembled
                         .iter()
                         .map(|item| item.message.content.len() as u64)
                         .sum();
+                    let used = crate::scripts::host::estimate_tokens(used_bytes);
                     cx.send_notification(SessionNotification::new(
                         request.session_id.clone(),
                         SessionUpdate::UsageUpdate(
