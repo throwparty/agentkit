@@ -105,3 +105,11 @@ The built-ins are `compaction` (on `post_turn` and `compaction_requested`) and `
 ## `sessions`
 
 - `include_ephemeral` — whether ephemeral sessions appear in listings.
+
+## Built-in definitions
+
+Personas, actors, and prompts ship at the lowest precedence through the same discovery path as user definitions: any discovered definition with the same name replaces the built-in wholesale. (The built-in scripts — `compaction`, `titling` — register separately, as `scripts` entries; see above.)
+
+- **Personas**: `default`.
+- **Actors**: `default` (persona `default`), and `summariser` — the no-tools background actor the built-in scripts fork as for titling and compaction summaries.
+- **Prompts**: `fork`, `compact`, `mcp`, and `editor` — discoverability stubs for the harness commands of the same name. Their bodies are never expanded: the harness intercepts the command first, but without a registered prompt the command would not be advertised to the client.
