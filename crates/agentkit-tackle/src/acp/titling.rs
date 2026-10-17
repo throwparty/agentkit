@@ -88,9 +88,10 @@ pub fn fire_title_trigger(
     }
 }
 
-/// Resolves the titling scripts: the shipped built-in registration
-/// unless user configuration overrides it (same-name entries win);
-/// project-layer scripts wait for the trust gate (wired with the
+/// Resolves the titling scripts: the registrations declaring the
+/// `title_trigger` event (the shipped `titling` registration at the
+/// lowest precedence, replaceable wholesale by a same-name entry).
+/// Project-layer scripts wait for the trust gate (wired with the
 /// first-run flow).
 fn titling_sources(
     state: &TackleState,
@@ -98,19 +99,6 @@ fn titling_sources(
     project_dir: Option<&Path>,
 ) -> Vec<(String, String)> {
     let mut sources = Vec::new();
-    if !state
-        .config
-        .config
-        .scripts
-        .values()
-        .any(|config| config.events.iter().any(|event| event == "title_trigger"))
-    {
-        // No titling registration anywhere: the shipped default.
-        sources.push((
-            "titling".to_owned(),
-            crate::builtins::TITLING_SCRIPT.to_owned(),
-        ));
-    }
     for (name, config) in &state.config.config.scripts {
         if !config.enabled || !config.events.iter().any(|event| event == "title_trigger") {
             continue;
@@ -230,9 +218,21 @@ mod tests {
     }
 
     fn tackle_state(db: &Arc<SessionStore>) -> Arc<TackleState> {
+        // The shipped registration production gets from
+        // `config::builtin_registrations`: without it no titling script
+        // fires, exactly as in production when it is disabled.
+        let mut config = crate::config::Loaded::default();
+        config.config.scripts.insert(
+            "titling".to_owned(),
+            crate::config::ScriptConfig {
+                events: vec!["title_trigger".to_owned()],
+                file: "builtin:titling.rhai".to_owned(),
+                enabled: true,
+            },
+        );
         Arc::new(TackleState {
             db: Arc::clone(db),
-            config: crate::config::Loaded::default(),
+            config,
             definitions: crate::loader::Definitions::default().with_builtins(),
             grants: tokio::sync::Mutex::new(crate::permissions::GrantStore::default()),
         })
@@ -350,6 +350,38 @@ mod tests {
             ephemeral_count, 1,
             "no fork spawned from an ephemeral session"
         );
+    }
+
+    #[test]
+    fn disabling_the_built_in_titling_turns_it_off() {
+        // Symmetric with compaction: a disabled registration means no
+        // script fires, not a silent reversion to the shipped default.
+        let (db, origin, _dispatcher) = fixture("A Six Word Title");
+        let mut config = crate::config::Loaded::default();
+        config.config.scripts.insert(
+            "titling".to_owned(),
+            crate::config::ScriptConfig {
+                events: vec!["title_trigger".to_owned()],
+                file: "builtin:titling.rhai".to_owned(),
+                enabled: false,
+            },
+        );
+        let state = Arc::new(TackleState {
+            db: Arc::clone(&db),
+            config,
+            definitions: crate::loader::Definitions::default().with_builtins(),
+            grants: tokio::sync::Mutex::new(crate::permissions::GrantStore::default()),
+        });
+        let access: Arc<dyn SessionAccess> = Arc::new(StoreAccess::new(
+            Arc::clone(&db),
+            Arc::new(LoopPendingDispatcher),
+            Arc::new(LoopPendingCompletions),
+            100_000,
+        ));
+        fire_title_trigger(&state, access, &origin);
+
+        let session = block_on(db.get_session(&origin)).unwrap().unwrap();
+        assert_eq!(session.title, "", "a disabled titling script never fires");
     }
 
     #[test]
