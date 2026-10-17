@@ -32,9 +32,11 @@ pub enum StoreError {
     Io(#[from] std::io::Error),
 }
 
+#[cfg(test)]
 mod graph;
 mod memory;
 
+#[cfg(test)]
 pub use graph::SessionGraph;
 
 /// One message in assembled context, tagged with its turn's kind (the
