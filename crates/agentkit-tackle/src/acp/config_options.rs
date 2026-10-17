@@ -12,7 +12,7 @@
 //! note; the switch is effective the following turn.
 
 use crate::acp::TackleState;
-use crate::config::{Auth, WireFormat};
+use crate::config::Auth;
 use crate::store::{Session, SessionId};
 use agent_client_protocol::schema::v1::{Notice, NoticeSeverity};
 use agent_client_protocol::schema::v1::{
@@ -39,13 +39,12 @@ pub fn context_window(model_ref: &str) -> Option<u64> {
     crate::acp::context_window(model_ref)
 }
 
-/// Per-endpoint model discovery: the OpenAI list shape's `data[].id`
-/// (Anthropic's Models API paginates the same shape). Results cache per
-/// process; failures return nothing and surface as degraded discovery.
+/// Per-endpoint model discovery: the OpenAI list shape's `data[].id`.
+/// Results cache per process; failures return nothing and surface as
+/// degraded discovery.
 async fn discover_models(
     endpoint_name: &str,
     base_url: &str,
-    wire_format: WireFormat,
     credential: Option<String>,
 ) -> Option<Vec<String>> {
     if let Some(cached) = discovery_cache()
@@ -56,13 +55,8 @@ async fn discover_models(
     {
         return Some(cached);
     }
-    let url = match wire_format {
-        WireFormat::OpenaiChatCompletions | WireFormat::OpenaiResponses => {
-            format!("{base_url}/models")
-        }
-        // Anthropic's Models API lives under /v1.
-        WireFormat::AnthropicMessages => format!("{base_url}/v1/models"),
-    };
+    // The OpenAI list shape: `data[].id` under `/models`.
+    let url = format!("{base_url}/models");
     let request = reqwest::Client::new().get(url);
     let request = match &credential {
         Some(credential) => request.bearer_auth(credential),
@@ -156,8 +150,7 @@ pub async fn build(state: &TackleState, session: &Session) -> Selectors {
             }
         };
         let qualified = |model: &str| format!("{name}/{model}");
-        let discovered =
-            discover_models(name, &endpoint.base_url, endpoint.wire_format, credential).await;
+        let discovered = discover_models(name, &endpoint.base_url, credential).await;
         let models = match discovered {
             Some(models) => models,
             None => {

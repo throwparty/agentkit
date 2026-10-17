@@ -27,7 +27,7 @@ auth = "none"
 model = "local/llama-3.2"
 ```
 
-- `wire_format` — one of `openai-chat-completions`, `openai-responses`, or `anthropic-messages`.
+- `wire_format` — `openai-chat-completions` (the only wire format implemented in v1).
 - `auth` — `none` (no credentials sent) or `helper` (resolve a bearer token through the credential helper at request time).
 - `models` — an optional static list used as a fallback when `/models` discovery fails or returns nothing.
 
@@ -65,16 +65,7 @@ wire_format = "openai-chat-completions"
 auth = "none"
 ```
 
-The Anthropic Messages API:
-
-```toml
-[endpoints.anthropic]
-base_url = "https://api.anthropic.com"
-wire_format = "anthropic-messages"
-auth = "helper"
-```
-
-Or a proxy you already run — for example, [Switchboard](../switchboard/setting-up-your-providers), which fronts your OpenAI, Anthropic, and local subscriptions and handles their credentials itself, leaving Tackle nothing to authenticate:
+An Anthropic or OpenAI Responses endpoint can be fronted by an OpenAI-compatible proxy — for example, [Switchboard](../switchboard/setting-up-your-providers), which fronts your OpenAI, Anthropic, and local subscriptions, translates their APIs to the chat-completions shape, and handles their credentials itself, leaving Tackle nothing to authenticate:
 
 ```toml
 [endpoints.switchboard]
