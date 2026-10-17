@@ -4,8 +4,8 @@
 //! clients, and summary storage.
 
 use agentkit_tackle::agent_client_protocol::schema::v1::{
-    ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, SessionNotification,
-    SessionUpdate, TextContent,
+    ClientCapabilities, ContentBlock, InitializeRequest, Meta, NewSessionRequest, PromptRequest,
+    SessionNotification, SessionUpdate, TextContent,
 };
 use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
@@ -63,15 +63,16 @@ async fn compaction_intercepts_announces_and_records() {
     let compaction_handler = compaction_updates.clone();
     let info_handler = info_updates.clone();
 
-    // The client advertises the unstable compaction capability: the
-    // RFD-shaped update flows.
-    let mut meta = agentkit_tackle::agent_client_protocol::schema::v1::Meta::new();
+    // The client advertises the unstable compaction capability via
+    // `clientCapabilities._meta` — the negotiated source read by
+    // `ConnectionNegotiation::capture`. The RFD-shaped update flows.
+    let mut meta = Meta::new();
     meta.insert(
         "unstable_session_compaction".to_owned(),
         serde_json::json!({}),
     );
     let initialize = InitializeRequest::new(ProtocolVersion::V1)
-        .meta(agentkit_tackle::agent_client_protocol::schema::v1::Meta::from(meta));
+        .client_capabilities(ClientCapabilities::new().meta(Meta::from(meta)));
 
     Client
         .builder()
@@ -201,5 +202,14 @@ async fn compaction_intercepts_announces_and_records() {
         })
         .await
         .expect("compaction round-trip");
-    let _ = compaction_updates;
+
+    // The RFD-shaped update reached the advertising client — the gate is
+    // exercised, not merely captured.
+    let compaction_updates = compaction_updates.lock().unwrap().clone();
+    assert!(
+        compaction_updates
+            .iter()
+            .any(|status| status.contains("Completed")),
+        "the compaction update reached the advertising client: {compaction_updates:?}"
+    );
 }
