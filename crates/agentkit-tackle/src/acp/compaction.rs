@@ -14,7 +14,9 @@
 
 use crate::acp::TackleState;
 pub use crate::scripts::host::StoreAccess;
-use crate::scripts::host::{BehaviourHost, SessionAccess, block_on};
+use crate::scripts::host::{
+    BehaviourHost, LoopPendingCompletions, LoopPendingDispatcher, SessionAccess, block_on,
+};
 use crate::scripts::{behaviour_engine, host::register_host_api};
 use crate::store::{SessionId, TurnId, TurnKind};
 use std::path::Path;
@@ -321,35 +323,6 @@ pub async fn run_compaction(
         .map(|usage| usage.used)
         .unwrap_or(0);
     (before, after)
-}
-
-pub struct LoopPendingDispatcher;
-impl crate::scripts::host::PromptDispatcher for LoopPendingDispatcher {
-    fn dispatch(
-        &self,
-        _session: &SessionId,
-        _text: &str,
-    ) -> Result<(), crate::scripts::host::HostError> {
-        // The agent loop integration drives these model turns; the user
-        // message is already stored, so nothing is lost.
-        Ok(())
-    }
-}
-
-pub struct LoopPendingCompletions;
-impl crate::scripts::host::CompletionSink for LoopPendingCompletions {
-    fn publish(&self, _session: &SessionId, _completion: crate::scripts::host::Completion) {}
-    fn take(&self, _session: &SessionId) -> Option<crate::scripts::host::Completion> {
-        // The agent loop integration drives these model turns; scripts
-        // awaiting a completion degrade gracefully on a non-end_turn
-        // answer instead of hanging on their timeout.
-        Some(crate::scripts::host::Completion {
-            stop_reason: "model-loop-pending".to_owned(),
-            final_message: String::new(),
-            input_tokens: 0,
-            output_tokens: 0,
-        })
-    }
 }
 
 #[cfg(test)]
