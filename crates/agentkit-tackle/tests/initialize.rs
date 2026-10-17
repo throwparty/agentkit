@@ -55,6 +55,10 @@ async fn initialize_negotiates_v1_and_advertises_capabilities() {
             assert!(session_capabilities.delete.is_some(), "session/delete");
             assert!(capabilities.prompt_capabilities.image, "image prompts");
             assert!(!capabilities.prompt_capabilities.audio, "no audio in v1");
+            assert!(
+                capabilities.prompt_capabilities.embedded_context,
+                "embedded context prompts"
+            );
             assert!(capabilities.mcp_capabilities.http, "MCP over HTTP");
             // No authentication in v1.
             assert!(response.auth_methods.is_empty());

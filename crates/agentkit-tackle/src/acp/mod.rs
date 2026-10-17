@@ -122,7 +122,12 @@ impl TackleState {
         }
         AgentCapabilities::new()
             .load_session(true)
-            .prompt_capabilities(PromptCapabilities::new().image(true).audio(false))
+            .prompt_capabilities(
+                PromptCapabilities::new()
+                    .image(true)
+                    .audio(false)
+                    .embedded_context(true),
+            )
             .mcp_capabilities(McpCapabilities::new().http(true).sse(false))
             .session_capabilities(
                 SessionCapabilities::new()
