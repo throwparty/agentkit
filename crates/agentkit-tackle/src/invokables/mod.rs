@@ -431,7 +431,18 @@ impl Registry {
                         serde_json::json!({ "type": "object", "properties": properties })
                     }
                     Invokable::Agent { .. } => {
-                        serde_json::json!({ "type": "object", "properties": {} })
+                        // FR-026: the invocation arguments form the nested
+                        // agent's prompt.
+                        serde_json::json!({
+                            "type": "object",
+                            "properties": {
+                                "prompt": {
+                                    "type": "string",
+                                    "description": "The task for the sub-agent."
+                                }
+                            },
+                            "required": ["prompt"],
+                        })
                     }
                     Invokable::Client { schema, .. } => schema.clone(),
                 };
@@ -838,6 +849,32 @@ mod tests {
             .map(|invokable| invokable.name())
             .collect();
         assert_eq!(names, vec!["mcp.echo.echo", "prompt.shown"]);
+    }
+
+    #[test]
+    fn agent_tools_expose_a_required_prompt() {
+        let mut definitions = Definitions::default();
+        definitions.actors.insert(
+            "worker".to_owned(),
+            Definition {
+                name: "worker".to_owned(),
+                path: PathBuf::from("/actors/worker.md"),
+                raw: String::new(),
+                frontmatter: ActorMeta {
+                    persona: "default".to_owned(),
+                    model: None,
+                },
+                body: String::new(),
+            },
+        );
+        let registry = Registry::build(&definitions, &[]).unwrap();
+        let tool = registry
+            .model_tools()
+            .into_iter()
+            .find(|tool| tool.name == "agent.worker")
+            .expect("agent tool advertised");
+        assert_eq!(tool.parameters["properties"]["prompt"]["type"], "string");
+        assert_eq!(tool.parameters["required"], serde_json::json!(["prompt"]));
     }
 
     #[test]

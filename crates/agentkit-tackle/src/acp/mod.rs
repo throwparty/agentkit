@@ -1999,6 +1999,13 @@ async fn run_model_tool_call(
                         Err(err) => (err, true),
                     }
                 }
+            } else if call.name.starts_with("agent.") {
+                // FR-026: spawn a nested agent instance of the target
+                // actor and return its final message as the tool result.
+                match run_agent_invocation(state, session_id, &call.name, &arguments).await {
+                    Ok(text) => (text, false),
+                    Err(err) => (err, true),
+                }
             } else {
                 let pool = state.mcp_pool.lock().await;
                 match registry.execute_model(&pool, &call.name, &arguments).await {
@@ -2030,6 +2037,67 @@ async fn run_model_tool_call(
     ));
 
     crate::agent::ToolCallOutcome { content, is_error }
+}
+
+/// Runs an `agent.<actor>` invocation (FR-026): an ephemeral fork of the
+/// parent session runs one nested agent instance of the target actor and
+/// its final message becomes the tool result.
+async fn run_agent_invocation(
+    state: &Arc<TackleState>,
+    parent_session: &SessionId,
+    invokable: &str,
+    arguments: &serde_json::Value,
+) -> Result<String, String> {
+    let target = invokable.strip_prefix("agent.").unwrap_or(invokable);
+    let parent = store_session_id(parent_session);
+    let actor = state
+        .definitions
+        .actors
+        .get(target)
+        .ok_or_else(|| format!("unknown actor `{target}`"))?;
+    let persona = state
+        .definitions
+        .personas
+        .get(&actor.frontmatter.persona)
+        .map(|persona| persona.body.clone())
+        .unwrap_or_default();
+    let prompt = arguments
+        .get("prompt")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_owned();
+    if prompt.is_empty() {
+        return Err("agent invocations require a `prompt` argument".to_owned());
+    }
+    let session = state
+        .db
+        .get_session(&parent)
+        .await
+        .ok()
+        .flatten()
+        .ok_or_else(|| "no such session".to_owned())?;
+    let model_ref = actor
+        .frontmatter
+        .model
+        .clone()
+        .or_else(|| config_options::resolve_model_for(state, &session, None))
+        .ok_or_else(|| "no model configured for the nested agent".to_owned())?;
+    let provider = crate::agent::provider::provider_for(&model_ref, &state.config.config)
+        .map_err(|err| err.to_string())?;
+    let result = crate::agent::nested::run_nested_agent(
+        &provider,
+        &state.db,
+        &parent,
+        target,
+        &persona,
+        &model_ref,
+        &prompt,
+        state.config.config.turns.max_model_requests.unwrap_or(8),
+    )
+    .await
+    .map_err(|err| err.to_string())?;
+    Ok(result.final_message)
 }
 
 /// The ACP `session/request_permission` bridge (FR-014).
