@@ -432,7 +432,12 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
     let negotiation = Arc::new(ConnectionNegotiation::new(
         client_tools::EditorToggles::from_config(&state.config.config),
     ));
-    run_agent_over(state, negotiation, Stdio::new()).await
+    // Ctrl-C/SIGTERM ends the transport cleanly: the connection is
+    // dropped and the caller reports a normal shutdown.
+    tokio::select! {
+        result = run_agent_over(state, negotiation, Stdio::new()) => result,
+        _ = crate::cli::wait_for_shutdown() => Ok(()),
+    }
 }
 
 /// Runs one agent connection over `transport`: the handler chain is
