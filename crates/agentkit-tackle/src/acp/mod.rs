@@ -21,11 +21,11 @@ use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
     AgentCapabilities, AvailableCommandsUpdate, CloseSessionResponse, DeleteSessionResponse,
     InitializeRequest, InitializeResponse, ListSessionsResponse, LoadSessionRequest,
-    LoadSessionResponse, McpCapabilities, NewSessionRequest, NewSessionResponse,
-    PromptCapabilities, ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities,
-    SessionCloseCapabilities, SessionDeleteCapabilities, SessionForkCapabilities, SessionId,
-    SessionInfo, SessionListCapabilities, SessionNotification, SessionResumeCapabilities,
-    SessionUpdate,
+    LoadSessionResponse, McpCapabilities, NewSessionRequest, NewSessionResponse, Notice,
+    NoticeSeverity, PromptCapabilities, ResumeSessionRequest, ResumeSessionResponse,
+    SessionCapabilities, SessionCloseCapabilities, SessionDeleteCapabilities,
+    SessionForkCapabilities, SessionId, SessionInfo, SessionListCapabilities, SessionNotification,
+    SessionResumeCapabilities, SessionUpdate,
 };
 use agent_client_protocol::{Agent, Error, Stdio};
 use std::collections::BTreeSet;
@@ -174,6 +174,84 @@ async fn available_commands_update(state: &TackleState) -> SessionUpdate {
     SessionUpdate::AvailableCommandsUpdate(AvailableCommandsUpdate::new(
         registry.available_commands(),
     ))
+}
+
+/// Maps an ACP client-forwarded MCP server onto the pool's spawn
+/// configuration. SSE and ACP transports are not supported (tackle
+/// advertises neither), so those entries are skipped; HTTP headers are
+/// not modelled by the pool configuration and are dropped.
+fn forwarded_mcp_server(
+    server: &agent_client_protocol::schema::v1::McpServer,
+) -> Option<(String, crate::config::McpServerConfig)> {
+    use agent_client_protocol::schema::v1::McpServer;
+    match server {
+        McpServer::Stdio(stdio) => Some((
+            stdio.name.clone(),
+            crate::config::McpServerConfig::Stdio {
+                command: stdio.command.to_string_lossy().into_owned(),
+                args: stdio.args.clone(),
+                env: stdio
+                    .env
+                    .iter()
+                    .map(|variable| (variable.name.clone(), variable.value.clone()))
+                    .collect(),
+            },
+        )),
+        McpServer::Http(http) => Some((
+            http.name.clone(),
+            crate::config::McpServerConfig::Http {
+                url: http.url.clone(),
+            },
+        )),
+        _ => None,
+    }
+}
+
+/// Registers and connects the client-forwarded MCP servers for a
+/// session. Failures surface as pool statuses; a session is never
+/// failed by a forwarded server.
+async fn connect_forwarded_servers(
+    state: &TackleState,
+    servers: &[agent_client_protocol::schema::v1::McpServer],
+) {
+    let forwarded: Vec<_> = servers.iter().filter_map(forwarded_mcp_server).collect();
+    if forwarded.is_empty() {
+        return;
+    }
+    state.mcp_pool.lock().await.add_forwarded(forwarded).await;
+}
+
+/// The first-turn MCP report (FR-013): a warning notice naming enabled
+/// servers that failed to connect and config servers shadowed by a
+/// client-declared server of the same name. `None` when nothing is
+/// wrong, so a clean session stays silent.
+async fn mcp_status_notice(state: &TackleState) -> Option<Notice> {
+    let pool = state.mcp_pool.lock().await;
+    let mut problems: Vec<String> = pool
+        .shadowed_servers()
+        .into_iter()
+        .map(|name| format!("{name} (shadowed by a client-declared server)"))
+        .collect();
+    for (name, (status, enabled)) in pool.statuses() {
+        if !enabled {
+            continue;
+        }
+        if let ServerStatus::Failed { reason } = status {
+            problems.push(format!("{name} ({reason})"));
+        }
+    }
+    if problems.is_empty() {
+        return None;
+    }
+    Some(
+        Notice::new(
+            NoticeSeverity::Warning,
+            format!("MCP servers unavailable: {}", problems.join(", ")),
+        )
+        .description(Some(
+            "Run /mcp status for the full picture, or /mcp enable <name> to retry.".to_owned(),
+        )),
+    )
 }
 
 /// Strips the wire prefix back to the bare store id.
@@ -358,7 +436,9 @@ where
                     .await
                     .map_err(|err| Error::internal_error().data(err.to_string()))?;
                 // MCP connections kick off asynchronously (T-018); session
-                // creation never blocks on them.
+                // creation never blocks on them. Client-forwarded servers
+                // (session/new's mcp_servers) register and connect after
+                // the response, below.
                 // The first-session seed: harness-authored static content
                 // documenting the loaded configuration and the command
                 // syntaxes, on its own seed turn.
@@ -422,13 +502,26 @@ where
                     }
                 }
                 let wire_id = wire_session_id(&session.id);
-                let commands = available_commands_update(&state_for_new).await;
                 let response =
                     NewSessionResponse::new(wire_id.clone()).config_options(selectors.options);
                 // Zed drops session updates that arrive before the
                 // session/new response registers the session
                 // (zed-industries/zed#60199) — advertise after.
                 responder.respond(response)?;
+                // Client-forwarded servers register and connect after the
+                // response, so session/new returns immediately while their
+                // tools are in the advertisement that follows and their
+                // status is known before the first turn.
+                connect_forwarded_servers(&state_for_new, &request.mcp_servers).await;
+                if let Some(notice) = mcp_status_notice(&state_for_new).await {
+                    if negotiation_for_new.supports(UnstableFeature::SessionNotices) {
+                        let _ = cx.send_notification(SessionNotification::new(
+                            wire_id.clone(),
+                            SessionUpdate::Notice(notice),
+                        ));
+                    }
+                }
+                let commands = available_commands_update(&state_for_new).await;
                 cx.send_notification(SessionNotification::new(wire_id, commands))
             },
             agent_client_protocol::on_receive_request!(),
@@ -1204,6 +1297,9 @@ where
         )
         .on_receive_request(
             async move |request: LoadSessionRequest, responder, cx| {
+                // A forwarded server's tools must be addressable before
+                // the re-advertisement below lists them.
+                connect_forwarded_servers(&state_for_load, &request.mcp_servers).await;
                 // Replay: full user-visible history in DAG order. Usage
                 // snapshot emission lands with T-016's model metadata.
                 let assembled = state_for_load
@@ -1270,6 +1366,7 @@ where
             async move |request: ResumeSessionRequest, responder, cx| {
                 // Resume reattaches WITHOUT replay (FR-003); config
                 // selectors ride the response like session/new.
+                connect_forwarded_servers(&state_for_resume, &request.mcp_servers).await;
                 let session = state_for_resume
                     .db
                     .get_session(&store_session_id(&request.session_id))
