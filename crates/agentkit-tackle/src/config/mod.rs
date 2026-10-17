@@ -214,7 +214,7 @@ fn reject_project_security_fields(project: &Config, path: &Path) -> Result<(), C
     Ok(())
 }
 
-// --- Schema (config.example.toml is the human-readable schema of record) ---
+// --- Schema (the types below are the source of truth for the TOML shape) ---
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct EndpointConfig {

@@ -8,7 +8,7 @@
 
 use super::{ModelProvider, ModelRequest, TurnOutcome, TurnStop};
 use crate::agent::{ChatMessage, ChatRole, ModelError};
-use crate::store::{Message, Role, SessionStore, StoreError, TurnId};
+use crate::store::{Role, SessionStore, StoreError, TurnId};
 
 #[derive(Debug, thiserror::Error)]
 pub enum TurnError {
@@ -261,14 +261,6 @@ pub async fn run_turn<P: ModelProvider>(
     }
 }
 
-/// The prompt turn's user message content, stored as the JSON block array.
-pub fn user_message_content(blocks: &serde_json::Value) -> String {
-    match blocks {
-        serde_json::Value::Array(_) => blocks.to_string(),
-        other => serde_json::json!([other]).to_string(),
-    }
-}
-
 /// The prompt text for the model: text blocks joined, with embedded
 /// resource contents inlined. A resource link — a reference the client
 /// sent without content, e.g. an oversized file or a client that did not
@@ -316,23 +308,6 @@ fn prompt_block_text(block: &serde_json::Value) -> Option<String> {
         };
     }
     None
-}
-
-/// Helper retained for the tool-call loop (T-021): the message type is
-/// constructed there with pre-generated ids.
-#[allow(dead_code)]
-fn message_for_append(id: String, turn_id: TurnId, role: Role, content: String) -> Message {
-    Message {
-        id,
-        turn_id,
-        role,
-        content,
-        tool_name: None,
-        tool_call_id: None,
-        is_error: None,
-        position: 0,
-        created_at: 0,
-    }
 }
 
 #[cfg(test)]
