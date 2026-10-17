@@ -1032,6 +1032,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dead_schema_is_not_created() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SessionStore::connect_sqlite(&dir.path().join("sessions.db"))
+            .await
+            .unwrap();
+        let Backend::Sqlite(pool) = &store.backend else {
+            panic!("expected sqlite backend");
+        };
+
+        let tables: Vec<String> =
+            sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type = 'table'")
+                .fetch_all(pool)
+                .await
+                .unwrap();
+        assert!(
+            !tables
+                .iter()
+                .any(|table| table == "definitions" || table == "turn_definitions"),
+            "{tables:?}"
+        );
+
+        let turn_columns: Vec<String> =
+            sqlx::query_scalar("SELECT name FROM pragma_table_info('turns')")
+                .fetch_all(pool)
+                .await
+                .unwrap();
+        let message_columns: Vec<String> =
+            sqlx::query_scalar("SELECT name FROM pragma_table_info('messages')")
+                .fetch_all(pool)
+                .await
+                .unwrap();
+        assert!(
+            !turn_columns.iter().any(|column| column == "metadata"),
+            "turns.metadata still present: {turn_columns:?}"
+        );
+        assert!(
+            !message_columns.iter().any(|column| column == "metadata"),
+            "messages.metadata still present: {message_columns:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn sqlite_connects_through_missing_leading_directories() {
         let dir = tempfile::tempdir().unwrap();
         // The data dir's full chain may not exist yet — the store
