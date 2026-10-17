@@ -272,6 +272,9 @@ async fn available_commands_are_advertised_after_session_new_and_load() {
                 // prompt; the stub builtin prompt is what puts it in the
                 // client's command palette at all.
                 assert!(seen[0].iter().any(|name| name == "mcp"), "{:?}", seen[0]);
+                // /editor is advertised the same way: the harness command
+                // is unreachable unless a registered prompt carries it.
+                assert!(seen[0].iter().any(|name| name == "editor"), "{:?}", seen[0]);
             }
 
             connection
@@ -430,6 +433,86 @@ async fn direct_invocation_runs_an_mcp_tool_and_reports_the_result() {
                 assert!(
                     output.contains("hello"),
                     "the tool ran for {command}: {output}"
+                );
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+/// `/editor <kind> <bool>` toggles the runtime client-tool categories and
+/// reports the change, without ever becoming a model turn.
+#[tokio::test(flavor = "multi_thread")]
+async fn editor_command_toggles_and_reports() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = spawn_agent(dir.path());
+
+    let replies: StdArc<StdMutex<Vec<String>>> = StdArc::default();
+    let replies_handler = replies.clone();
+
+    Client
+        .builder()
+        .on_receive_notification(
+            async move |notification: SessionNotification, _cx| {
+                if let SessionUpdate::AgentMessageChunk(chunk) = &notification.update {
+                    if let agentkit_tackle::agent_client_protocol::schema::v1::ContentBlock::Text(
+                        text,
+                    ) = &chunk.content
+                    {
+                        replies_handler.lock().unwrap().push(text.text.clone());
+                    }
+                }
+                Ok(())
+            },
+            agentkit_tackle::agent_client_protocol::on_receive_notification!(),
+        )
+        .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
+            connection
+                .send_request(
+                    InitializeRequest::new(ProtocolVersion::V1)
+                        .client_capabilities(ClientCapabilities::new().terminal(true)),
+                )
+                .block_task()
+                .await?;
+            let created = connection
+                .send_request(NewSessionRequest::new(std::path::PathBuf::from("/work")))
+                .block_task()
+                .await?;
+
+            for (command, expected) in [
+                ("/editor terminal false", "Editor terminal tools: disabled"),
+                ("/editor fs true", "Editor fs tools: enabled"),
+                (
+                    "/editor bogus true",
+                    "Usage: /editor <fs|terminal> <true|false>",
+                ),
+            ] {
+                replies.lock().unwrap().clear();
+                let response = connection
+                    .send_request(
+                        agentkit_tackle::agent_client_protocol::schema::v1::PromptRequest::new(
+                            created.session_id.clone(),
+                            vec![
+                                agentkit_tackle::agent_client_protocol::schema::v1::ContentBlock::Text(
+                                    agentkit_tackle::agent_client_protocol::schema::v1::TextContent::new(
+                                        command,
+                                    ),
+                                ),
+                            ],
+                        ),
+                    )
+                    .block_task()
+                    .await?;
+                assert_eq!(
+                    response.stop_reason,
+                    agentkit_tackle::agent_client_protocol::schema::v1::StopReason::EndTurn,
+                    "{command}"
+                );
+                let seen = replies.lock().unwrap().clone();
+                assert!(
+                    seen.iter().any(|reply| reply.contains(expected)),
+                    "{command} answered {expected:?}: {seen:?}"
                 );
             }
             Ok(())
