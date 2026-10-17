@@ -248,6 +248,15 @@ pub async fn run_http(
         }
     });
 
+    // Ctrl-C/SIGTERM: drop every live connection so axum's graceful
+    // shutdown does not wait on long-lived SSE streams, then stop
+    // accepting new work.
+    let shutdown_state = server_state.clone();
+    tokio::spawn(async move {
+        crate::cli::wait_for_shutdown().await;
+        shutdown_state.connections.lock().unwrap().clear();
+    });
+
     let app = axum::Router::new()
         .route("/rpc", post(handle_rpc))
         .route("/events", get(handle_events))
@@ -257,6 +266,7 @@ pub async fn run_http(
         .await
         .map_err(|err| agent_client_protocol::Error::internal_error().data(err.to_string()))?;
     axum::serve(listener, app)
+        .with_graceful_shutdown(crate::cli::wait_for_shutdown())
         .await
         .map_err(|err| agent_client_protocol::Error::internal_error().data(err.to_string()))
 }
