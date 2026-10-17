@@ -95,13 +95,13 @@ pub fn fire_session_forked(
     source_session_id: &SessionId,
     fork_point_turn_id: Option<&crate::store::TurnId>,
 ) {
-    let user_dir = state.config.user_layer.as_deref().and_then(Path::parent);
-    let project_dir = state.config.project_layer.as_deref().and_then(Path::parent);
-    let sources =
-        resolve_session_forked_scripts(&state.config.config.scripts, user_dir, project_dir);
+    let config = state.config();
+    let user_dir = config.user_layer.as_deref().and_then(Path::parent);
+    let project_dir = config.project_layer.as_deref().and_then(Path::parent);
+    let sources = resolve_session_forked_scripts(&config.config.scripts, user_dir, project_dir);
 
     let known_actors: std::collections::BTreeSet<String> =
-        state.definitions.actors.keys().cloned().collect();
+        state.definitions().actors.keys().cloned().collect();
     for (name, source) in sources {
         let host = BehaviourHost::new(
             std::sync::Arc::clone(&access),

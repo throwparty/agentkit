@@ -50,10 +50,11 @@ pub fn fire_title_trigger(
     access: Arc<dyn SessionAccess>,
     session_id: &SessionId,
 ) {
-    let user_dir = state.config.user_layer.as_deref().and_then(Path::parent);
-    let project_dir = state.config.project_layer.as_deref().and_then(Path::parent);
+    let config = state.config();
+    let user_dir = config.user_layer.as_deref().and_then(Path::parent);
+    let project_dir = config.project_layer.as_deref().and_then(Path::parent);
     let known_actors: std::collections::BTreeSet<String> =
-        state.definitions.actors.keys().cloned().collect();
+        state.definitions().actors.keys().cloned().collect();
 
     for (name, source) in titling_sources(state, user_dir, project_dir) {
         let host = BehaviourHost::new(
@@ -99,7 +100,7 @@ fn titling_sources(
     project_dir: Option<&Path>,
 ) -> Vec<(String, String)> {
     let mut sources = Vec::new();
-    for (name, config) in &state.config.config.scripts {
+    for (name, config) in &state.config().config.scripts {
         if !config.enabled || !config.events.iter().any(|event| event == "title_trigger") {
             continue;
         }
@@ -230,12 +231,11 @@ mod tests {
                 enabled: true,
             },
         );
-        Arc::new(TackleState {
-            db: Arc::clone(db),
+        Arc::new(TackleState::new(
+            Arc::clone(db),
             config,
-            definitions: crate::loader::Definitions::default().with_builtins(),
-            grants: tokio::sync::Mutex::new(crate::permissions::GrantStore::default()),
-        })
+            crate::loader::Definitions::default().with_builtins(),
+        ))
     }
 
     #[test]
@@ -294,12 +294,11 @@ mod tests {
         .unwrap();
         config.user_layer = Some(temp.path().join("config.toml"));
 
-        let state = Arc::new(TackleState {
-            db: Arc::clone(&db),
+        let state = Arc::new(TackleState::new(
+            Arc::clone(&db),
             config,
-            definitions: crate::loader::Definitions::default().with_builtins(),
-            grants: tokio::sync::Mutex::new(crate::permissions::GrantStore::default()),
-        });
+            crate::loader::Definitions::default().with_builtins(),
+        ));
         let access: Arc<dyn SessionAccess> = Arc::new(StoreAccess::new(
             Arc::clone(&db),
             Arc::new(LoopPendingDispatcher),
@@ -366,12 +365,11 @@ mod tests {
                 enabled: false,
             },
         );
-        let state = Arc::new(TackleState {
-            db: Arc::clone(&db),
+        let state = Arc::new(TackleState::new(
+            Arc::clone(&db),
             config,
-            definitions: crate::loader::Definitions::default().with_builtins(),
-            grants: tokio::sync::Mutex::new(crate::permissions::GrantStore::default()),
-        });
+            crate::loader::Definitions::default().with_builtins(),
+        ));
         let access: Arc<dyn SessionAccess> = Arc::new(StoreAccess::new(
             Arc::clone(&db),
             Arc::new(LoopPendingDispatcher),
