@@ -244,12 +244,12 @@ pub async fn apply_model_switch(
     // The switch is validated against the new model's window.
     let window = context_window(model_reference).unwrap_or(0);
     if window > 0 {
-        let used = access
+        // context_usage reports tokens, the same unit as the window.
+        let used_tokens = access
             .context_usage(session_id)
             .map_err(|err| err.to_string())?
             .used;
-        let used_tokens = used / 4;
-        if used_tokens * 4 >= window {
+        if used_tokens >= window {
             // Auto-compaction: the compaction scripts run, announced,
             // with a context note. The switch still applies, effective
             // the following turn.

@@ -32,12 +32,6 @@ pub fn wrap_summary(summary: &str) -> String {
     format!("{SUMMARY_DELIMITER_OPEN}{summary}{SUMMARY_DELIMITER_CLOSE}")
 }
 
-/// A rough token estimate for the announcement counts: about four bytes
-/// of context per token.
-fn estimate_tokens(used_bytes: u64) -> u64 {
-    used_bytes / 4
-}
-
 /// Whether the user-typed first token resolves to a compaction-tagged
 /// prompt: those are intercepted instead of becoming model turns.
 pub fn is_compaction_command(definitions: &crate::loader::Definitions, first_token: &str) -> bool {
@@ -158,7 +152,7 @@ pub fn fire_post_turn(
         let event = serde_json::json!({
             "turn_id": turn_id,
             "usage": {
-                "used": estimate_tokens(used),
+                "used": used,
                 "size": window_size,
                 "cost_usd": cost_usd,
             },
@@ -319,7 +313,7 @@ pub async fn run_compaction(
         session_id,
         turn_id,
         actor,
-        estimate_tokens(before),
+        before,
         window_size,
         access.attributed_cost(session_id).unwrap_or(0.0),
     );
@@ -327,7 +321,7 @@ pub async fn run_compaction(
         .context_usage(session_id)
         .map(|usage| usage.used)
         .unwrap_or(0);
-    (estimate_tokens(before), estimate_tokens(after))
+    (before, after)
 }
 
 pub struct LoopPendingDispatcher;

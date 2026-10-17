@@ -65,11 +65,20 @@ pub struct Completion {
     pub output_tokens: u64,
 }
 
-/// Current context utilisation for a session.
+/// Current context utilisation for a session: `used` and `size` are both
+/// in tokens.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ContextUsage {
     pub used: u64,
     pub size: u64,
+}
+
+/// A rough token estimate from raw context bytes: about four bytes per
+/// token. The single conversion point for every bytes-vs-tokens seam
+/// (usage snapshots, the model-switch auto-compaction trigger, script
+/// context usage) so they never disagree.
+pub fn estimate_tokens(bytes: u64) -> u64 {
+    bytes / 4
 }
 
 /// Drives a user prompt through the session's normal agent loop —
@@ -375,12 +384,12 @@ impl SessionAccess for StoreAccess {
 
     fn context_usage(&self, session: &SessionId) -> Result<ContextUsage, HostError> {
         let assembled = block_on(self.store.assemble_context(session))?;
-        let used: usize = assembled
+        let used_bytes: usize = assembled
             .iter()
             .map(|item| item.message.content.len())
             .sum();
         Ok(ContextUsage {
-            used: used as u64,
+            used: estimate_tokens(used_bytes as u64),
             size: self.window_size,
         })
     }
@@ -1037,6 +1046,15 @@ mod tests {
             .history_search(&fixture.origin, "missing")
             .unwrap();
         assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn tokens_are_estimated_at_four_bytes_each() {
+        assert_eq!(estimate_tokens(0), 0);
+        assert_eq!(estimate_tokens(3), 0);
+        assert_eq!(estimate_tokens(4), 1);
+        assert_eq!(estimate_tokens(7), 1);
+        assert_eq!(estimate_tokens(400), 100);
     }
 
     #[test]
