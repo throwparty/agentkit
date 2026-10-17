@@ -14,7 +14,7 @@
 
 use crate::acp::TackleState;
 pub use crate::scripts::host::StoreAccess;
-use crate::scripts::host::{BehaviourHost, SessionAccess};
+use crate::scripts::host::{BehaviourHost, SessionAccess, block_on};
 use crate::scripts::{behaviour_engine, host::register_host_api};
 use crate::store::{SessionId, TurnId, TurnKind};
 use std::path::Path;
@@ -68,7 +68,7 @@ pub fn fire_compaction_requested(
     let known_actors: std::collections::BTreeSet<String> =
         state.definitions.actors.keys().cloned().collect();
 
-    for (name, source) in compaction_sources(state, user_dir, project_dir) {
+    for (name, source) in event_sources(state, user_dir, project_dir, "compaction_requested") {
         let host = BehaviourHost::new(
             Arc::clone(&access),
             known_actors.clone(),
@@ -98,21 +98,112 @@ pub fn fire_compaction_requested(
     }
 }
 
-/// Resolves the compaction scripts: user layer only — project-layer
-/// scripts wait for the trust gate (wired with the first-run flow).
-fn compaction_sources(
+/// Fires the `post_turn` event on every registered script: automatic
+/// compaction once utilisation crosses the script's threshold. A script
+/// error degrades gracefully: logged, never propagated.
+///
+/// The payload carries `recent_turn_ids` oldest-first — the session's
+/// live context turns — so the keep-recent logic elides the right
+/// prefix. The threshold needs a known window: an unknown size (0)
+/// skips the event rather than dividing by zero.
+pub fn fire_post_turn(
+    state: &TackleState,
+    access: Arc<dyn SessionAccess>,
+    session_id: &SessionId,
+    turn_id: &TurnId,
+    actor: &str,
+    window_size: u64,
+) {
+    if window_size == 0 {
+        return;
+    }
+    let user_dir = state.config.user_layer.as_deref().and_then(Path::parent);
+    let project_dir = state.config.project_layer.as_deref().and_then(Path::parent);
+    let known_actors: std::collections::BTreeSet<String> =
+        state.definitions.actors.keys().cloned().collect();
+
+    let ephemeral = matches!(
+        block_on(state.db.get_session(session_id)),
+        Ok(Some(session)) if session.kind == crate::store::SessionKind::Ephemeral
+    );
+    // session_walk is newest-first; the script indexes from the oldest
+    // end, so reverse it.
+    let recent_turn_ids: Vec<TurnId> = block_on(state.db.session_walk(session_id))
+        .map(|walk| walk.into_iter().rev().map(|(id, _)| id).collect())
+        .unwrap_or_default();
+    let used = access
+        .context_usage(session_id)
+        .map(|usage| usage.used)
+        .unwrap_or(0);
+    let cost_usd = access.attributed_cost(session_id).unwrap_or(0.0);
+
+    for (name, source) in event_sources(state, user_dir, project_dir, "post_turn") {
+        let host = BehaviourHost::new(
+            Arc::clone(&access),
+            known_actors.clone(),
+            session_id.clone(),
+            name.clone(),
+        );
+        let compiled = match behaviour_engine(&source, &|engine| {
+            register_host_api(engine, Arc::clone(&host))
+        }) {
+            Ok(compiled) => compiled,
+            Err(err) => {
+                tracing::warn!(script = %name, "post_turn script failed to compile: {err}");
+                continue;
+            }
+        };
+
+        let event = serde_json::json!({
+            "turn_id": turn_id,
+            "usage": {
+                "used": estimate_tokens(used),
+                "size": window_size,
+                "cost_usd": cost_usd,
+            },
+            "session": { "id": session_id, "ephemeral": ephemeral },
+            "actor": actor,
+            "recent_turn_ids": recent_turn_ids,
+        });
+
+        if let Err(err) = compiled.call("post_turn", &event) {
+            tracing::warn!(script = %name, "post_turn script failed: {err}");
+        }
+    }
+}
+
+/// Detached post-turn hook: automatic compaction past the utilisation
+/// threshold, never blocking the response.
+pub fn fire_post_turn_detached(
+    state: Arc<TackleState>,
+    session_id: SessionId,
+    turn_id: TurnId,
+    actor: String,
+    window_size: u64,
+) {
+    tokio::spawn(async move {
+        let access: Arc<dyn SessionAccess> = Arc::new(StoreAccess::new(
+            Arc::clone(&state.db),
+            Arc::new(LoopPendingDispatcher),
+            Arc::new(LoopPendingCompletions),
+            window_size,
+        ));
+        fire_post_turn(&state, access, &session_id, &turn_id, &actor, window_size);
+    });
+}
+
+/// Resolves the scripts registered for `event`: user layer only —
+/// project-layer scripts wait for the trust gate (wired with the
+/// first-run flow).
+fn event_sources(
     state: &TackleState,
     user_dir: Option<&Path>,
     project_dir: Option<&Path>,
+    event: &str,
 ) -> Vec<(String, String)> {
     let mut sources = Vec::new();
     for (name, config) in &state.config.config.scripts {
-        if !config.enabled
-            || !config
-                .events
-                .iter()
-                .any(|event| event == "compaction_requested")
-        {
+        if !config.enabled || !config.events.iter().any(|registered| registered == event) {
             continue;
         }
         if let Some(project_dir) = project_dir {
@@ -133,7 +224,7 @@ fn compaction_sources(
         match std::fs::read_to_string(user_dir.join("scripts").join(&config.file)) {
             Ok(source) => sources.push((name.clone(), source)),
             Err(err) => {
-                tracing::warn!(script = %name, "compaction_requested script unreadable: {err}")
+                tracing::warn!(script = %name, "{event} script unreadable: {err}")
             }
         }
     }
@@ -407,6 +498,128 @@ mod tests {
             "{missing}"
         );
         assert!(missing.contains("[scripts.compaction]"), "{missing}");
+    }
+
+    #[test]
+    fn post_turn_fires_with_recent_turn_ids_oldest_first() {
+        let store = Arc::new(SessionStore::in_memory());
+        let session =
+            block_on(store.create_session(SessionKind::Interactive, "/work", None, None, "{}"))
+                .unwrap();
+        let mut turn_ids = Vec::new();
+        for i in 0..4 {
+            let parent = turn_ids.last().map(|t: &crate::store::Turn| t.id.clone());
+            let turn = block_on(store.append_turn(
+                &session.id,
+                parent.as_ref(),
+                TurnKind::Interaction,
+                None,
+                Default::default(),
+            ))
+            .unwrap();
+            block_on(store.append_message(
+                &turn.id,
+                Role::User,
+                &serde_json::json!([{ "type": "text", "text": format!("turn {i}") }]).to_string(),
+                None,
+                None,
+                None,
+                None,
+            ))
+            .unwrap();
+            turn_ids.push(turn);
+        }
+
+        // A user-layer post_turn script that keeps the context from the
+        // second-oldest turn: only correct if recent_turn_ids is
+        // oldest-first.
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("scripts")).unwrap();
+        std::fs::write(
+            temp.path().join("scripts").join("post.rhai"),
+            r#"fn post_turn(event) { record_compaction("post summary", event.recent_turn_ids[1]); }"#,
+        )
+        .unwrap();
+        let mut config = crate::config::Loaded::default();
+        config.config.scripts.insert(
+            "post".to_owned(),
+            crate::config::ScriptConfig {
+                events: vec!["post_turn".to_owned()],
+                file: "post.rhai".to_owned(),
+                enabled: true,
+            },
+        );
+        config.user_layer = Some(temp.path().join("config.toml"));
+
+        let state = Arc::new(TackleState {
+            db: Arc::clone(&store),
+            config,
+            definitions: crate::loader::Definitions::default(),
+            mcp_pool: tokio::sync::Mutex::new(crate::mcp::McpPool::new()),
+            grants: tokio::sync::Mutex::new(crate::permissions::GrantStore::default()),
+        });
+        let access: Arc<dyn SessionAccess> = Arc::new(StoreAccess::new(
+            Arc::clone(&store),
+            Arc::new(LoopPendingDispatcher),
+            Arc::new(LoopPendingCompletions),
+            100_000,
+        ));
+
+        fire_post_turn(
+            &state,
+            access,
+            &session.id,
+            &turn_ids[3].id,
+            "default",
+            100_000,
+        );
+
+        let assembled = block_on(store.assemble_context(&session.id)).unwrap();
+        let texts: Vec<String> = assembled
+            .iter()
+            .map(|item| crate::acp::prompt_text_of(&item.message.content))
+            .collect();
+        assert!(
+            texts.iter().any(|text| text.contains("post summary")),
+            "{texts:?}"
+        );
+        assert!(
+            !texts.iter().any(|text| text.contains("turn 0")),
+            "elided: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|text| text.contains("turn 1")),
+            "{texts:?}"
+        );
+        assert!(
+            texts.iter().any(|text| text.contains("turn 3")),
+            "{texts:?}"
+        );
+    }
+
+    #[test]
+    fn post_turn_skips_an_unknown_window() {
+        // An unknown window (0) must not divide by zero; nothing fires.
+        let store = Arc::new(SessionStore::in_memory());
+        let session =
+            block_on(store.create_session(SessionKind::Interactive, "/work", None, None, "{}"))
+                .unwrap();
+        let state = Arc::new(TackleState {
+            db: Arc::clone(&store),
+            config: crate::config::Loaded::default(),
+            definitions: crate::loader::Definitions::default(),
+            mcp_pool: tokio::sync::Mutex::new(crate::mcp::McpPool::new()),
+            grants: tokio::sync::Mutex::new(crate::permissions::GrantStore::default()),
+        });
+        let access: Arc<dyn SessionAccess> = Arc::new(StoreAccess::new(
+            Arc::clone(&store),
+            Arc::new(LoopPendingDispatcher),
+            Arc::new(LoopPendingCompletions),
+            0,
+        ));
+        fire_post_turn(&state, access, &session.id, &"t".to_owned(), "default", 0);
+        let walk = block_on(store.session_walk(&session.id)).unwrap();
+        assert!(walk.is_empty(), "{walk:?}");
     }
 
     #[test]

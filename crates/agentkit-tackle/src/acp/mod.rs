@@ -1465,6 +1465,17 @@ where
                     SessionUpdate::SessionInfoUpdate(updated),
                 ));
 
+                // Automatic compaction: the post_turn event fires after
+                // every model turn, detached so a slow summarisation
+                // never blocks the response.
+                compaction::fire_post_turn_detached(
+                    state_for_prompt.clone(),
+                    session_id.clone(),
+                    turn.id.clone(),
+                    actor_name.clone(),
+                    size,
+                );
+
                 // Titling: detached, silent, only for untitled sessions.
                 titling::fire_title_trigger_detached(
                     state_for_prompt.clone(),
