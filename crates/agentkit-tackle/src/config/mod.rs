@@ -227,12 +227,14 @@ pub struct EndpointConfig {
     pub models: Vec<String>,
 }
 
+/// The endpoint's wire format. v1 implements the OpenAI
+/// chat-completions shape only; other formats are not advertised until
+/// they are implemented, so a configuration cannot select one that
+/// cannot serve a request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum WireFormat {
     OpenaiChatCompletions,
-    OpenaiResponses,
-    AnthropicMessages,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -423,6 +425,19 @@ mod tests {
             }
             other => panic!("unexpected server config: {other:?}"),
         }
+    }
+
+    #[test]
+    fn unimplemented_wire_formats_are_rejected_at_parse() {
+        // v1 implements openai-chat-completions only; a config naming an
+        // unimplemented format fails at load rather than at first prompt.
+        let dir = tempfile::tempdir().unwrap();
+        write_layer(
+            &dir.path().join("user"),
+            "[endpoints.anthropic]\nbase_url = \"https://api.anthropic.com\"\nwire_format = \"anthropic-messages\"\nauth = \"helper\"\n",
+        );
+        let err = load_layered(&dir.path().join("user"), None, None).unwrap_err();
+        assert!(err.to_string().contains("wire_format"), "{err}");
     }
 
     #[test]

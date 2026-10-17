@@ -135,11 +135,6 @@ pub struct ModelResponse {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ModelError {
-    #[error("unsupported wire format for endpoint `{endpoint}`: {format:?}")]
-    UnsupportedWireFormat {
-        endpoint: String,
-        format: crate::config::WireFormat,
-    },
     #[error("model `{model}` is not configured")]
     UnknownModel { model: String },
     #[error("credential resolution failed for `{identity}`")]
