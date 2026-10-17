@@ -22,6 +22,10 @@ pub struct Config {
     pub scripts: BTreeMap<String, ScriptConfig>,
     pub turns: TurnsConfig,
     pub sessions: SessionsConfig,
+    /// The ACP client's file-system and terminal tools. User
+    /// configuration only: a cloned repository must not be able to hand
+    /// the model its editor's shell or filesystem.
+    pub client_tools: Option<ClientToolsConfig>,
 }
 
 impl Config {
@@ -44,6 +48,9 @@ impl Config {
             .sessions
             .include_ephemeral
             .or(self.sessions.include_ephemeral);
+        // Project layers are rejected outright (above), so this only ever
+        // carries the user layer's section through the builtin seed.
+        self.client_tools = project.client_tools.or(self.client_tools);
         self
     }
 }
@@ -198,6 +205,12 @@ fn reject_project_security_fields(project: &Config, path: &Path) -> Result<(), C
             key: "credential_helper",
         });
     }
+    if project.client_tools.is_some() {
+        return Err(ConfigError::ProjectForbidden {
+            path: path.to_path_buf(),
+            key: "client_tools",
+        });
+    }
     Ok(())
 }
 
@@ -273,6 +286,27 @@ pub struct SessionsConfig {
     pub include_ephemeral: Option<bool>,
 }
 
+/// The `[client_tools]` section: which categories of the ACP client's
+/// advertised surface are reflected to the model. Both default on when
+/// the client advertises the capability; a category the client does not
+/// advertise is never exposed regardless.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct ClientToolsConfig {
+    #[serde(default = "default_true")]
+    pub fs_enabled: bool,
+    #[serde(default = "default_true")]
+    pub terminal_enabled: bool,
+}
+
+impl Default for ClientToolsConfig {
+    fn default() -> Self {
+        Self {
+            fs_enabled: true,
+            terminal_enabled: true,
+        }
+    }
+}
+
 // The Config tree deserialises from the TOML schema via an intermediate
 // raw shape: the same types, but with `Deserialize` applied directly and
 // `Config::default()` semantics for absent layers.
@@ -297,6 +331,8 @@ impl<'de> Deserialize<'de> for Config {
             turns: Option<TurnsConfig>,
             #[serde(default)]
             sessions: Option<SessionsConfig>,
+            #[serde(default)]
+            client_tools: Option<ClientToolsConfig>,
         }
 
         let raw = Raw::deserialize(deserializer)?;
@@ -308,6 +344,7 @@ impl<'de> Deserialize<'de> for Config {
             scripts: raw.scripts,
             turns: raw.turns.unwrap_or_default(),
             sessions: raw.sessions.unwrap_or_default(),
+            client_tools: raw.client_tools,
         })
     }
 }
@@ -418,6 +455,52 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("credential_helper"), "{err}");
+    }
+
+    #[test]
+    fn project_client_tools_are_rejected_by_name() {
+        let dir = tempfile::tempdir().unwrap();
+        write_layer(
+            &dir.path().join("project"),
+            "[client_tools]\nfs_enabled = false\n",
+        );
+        let err = load_layered(
+            &dir.path().join("user"),
+            Some(&dir.path().join("project")),
+            None,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("client_tools"), "{err}");
+    }
+
+    #[test]
+    fn client_tools_default_on_and_parse_toggles() {
+        let dir = tempfile::tempdir().unwrap();
+        let absent = load_layered(
+            &dir.path().join("user"),
+            Some(&dir.path().join("project")),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            absent.config.client_tools.as_ref(),
+            None,
+            "an absent section leaves both categories at their defaults"
+        );
+
+        write_layer(
+            &dir.path().join("user"),
+            "[client_tools]\nterminal_enabled = false\n",
+        );
+        let parsed = load_layered(
+            &dir.path().join("user"),
+            Some(&dir.path().join("project")),
+            None,
+        )
+        .unwrap();
+        let section = parsed.config.client_tools.expect("section parses");
+        assert!(section.fs_enabled);
+        assert!(!section.terminal_enabled);
     }
 
     #[test]

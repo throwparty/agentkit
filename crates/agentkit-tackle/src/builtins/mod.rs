@@ -41,6 +41,11 @@ pub const COMPACT_PROMPT: &str = include_str!("compact-prompt.md");
 /// client, and a command no client offers is one no user finds.
 pub const MCP_PROMPT: &str = include_str!("mcp-prompt.md");
 
+/// The shipped /editor prompt: the discoverability stub for the harness
+/// command that toggles the editor's file-system and terminal tools. Like
+/// /mcp, the body is never expanded — the harness intercepts the command.
+pub const EDITOR_PROMPT: &str = include_str!("editor-prompt.md");
+
 /// Resolves a built-in script file reference (`builtin:<name>.rhai`) to
 /// the shipped source.
 pub fn script_source(file: &str) -> Option<&'static str> {
@@ -60,6 +65,7 @@ pub fn defaults() -> impl Iterator<Item = (&'static str, &'static str, &'static 
         ("prompt", "fork", FORK_PROMPT),
         ("prompt", "compact", COMPACT_PROMPT),
         ("prompt", "mcp", MCP_PROMPT),
+        ("prompt", "editor", EDITOR_PROMPT),
     ]
     .into_iter()
 }

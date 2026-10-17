@@ -33,6 +33,19 @@ wire_format = "openai-chat-completions"
 auth = "none"
 models = ["llama3:8b", "qwen2.5-coder:32b"]   # optional static list when /models discovery is unavailable
 
+# --- Client-capability tools — USER CONFIGURATION ONLY -----------------------
+# Reflect the ACP client's advertised file-system and terminal surface to the
+# model as `client.*` tools. Like [endpoints], this section is rejected with a
+# named error in project configuration: a cloned repository must not be able
+# to hand the model the user's editor shell or filesystem.
+#
+# A tool is exposed only when the client advertised the capability AND the
+# category is enabled here. Both default on; toggle at runtime with
+# `/editor fs <true|false>` and `/editor terminal <true|false>`.
+[client_tools]
+fs_enabled = true                             # read/write files through the editor
+terminal_enabled = true                       # create/output/wait/kill/release terminal commands
+
 # --- Defaults ----------------------------------------------------------------
 [defaults]
 actor = "adrian"                              # used when the client does not select one

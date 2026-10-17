@@ -93,7 +93,9 @@ fn spawn_connection(server: &HttpServerState, id: String) -> Arc<Connection> {
     let incoming_stream =
         tokio_stream::wrappers::ReceiverStream::new(incoming_rx).map(Ok::<_, std::io::Error>);
 
-    let negotiation = Arc::new(ConnectionNegotiation::default());
+    let negotiation = Arc::new(ConnectionNegotiation::new(
+        crate::acp::client_tools::EditorToggles::from_config(&server.state.config.config),
+    ));
     let sink = agent_out_tx.sink_map_err(send_error_to_io);
     let transport = agent_client_protocol::Lines::new(sink, incoming_stream);
     let state_for_connection = Arc::clone(&server.state);

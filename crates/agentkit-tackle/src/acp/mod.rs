@@ -11,6 +11,7 @@ use crate::loader::Definitions;
 use crate::mcp::{McpPool, ServerStatus};
 use crate::store::SessionStore;
 
+pub mod client_tools;
 pub mod compaction;
 pub mod config_options;
 pub mod first_run;
@@ -29,7 +30,7 @@ use agent_client_protocol::schema::v1::{
 };
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{Agent, Error, Stdio};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
 /// RFD-shaped features the client advertised support for. Unstable
@@ -69,17 +70,38 @@ impl UnstableFeature {
     }
 }
 
-/// Per-connection negotiation state, captured at initialize and consulted
-/// by every update sender.
-#[derive(Default)]
+/// Per-connection negotiation and client-surface state, captured or
+/// seeded when the connection opens and consulted by every update sender.
 pub struct ConnectionNegotiation {
     supported: Mutex<BTreeSet<UnstableFeature>>,
+    /// The client's advertised ACP capabilities (fs/terminal surface),
+    /// the source of truth for which `client.*` tools exist.
+    caps: Mutex<client_tools::ClientCaps>,
+    /// The `/editor` toggles for the client-capability categories,
+    /// seeded from `[client_tools]` and overridable at runtime.
+    editor: Mutex<client_tools::EditorToggles>,
+    /// Terminal ids the harness created for this connection, by session,
+    /// for release at session close. Connection-scoped and ephemeral.
+    terminals: Mutex<BTreeMap<String, BTreeSet<String>>>,
 }
 
 impl ConnectionNegotiation {
-    fn capture(&self, client_meta: &Option<agent_client_protocol::schema::v1::Meta>) {
+    /// A fresh connection's state, with the editor toggles seeded from
+    /// configuration.
+    pub fn new(editor: client_tools::EditorToggles) -> Self {
+        Self {
+            supported: Mutex::new(BTreeSet::new()),
+            caps: Mutex::new(client_tools::ClientCaps::default()),
+            editor: Mutex::new(editor),
+            terminals: Mutex::new(BTreeMap::new()),
+        }
+    }
+
+    fn capture(&self, capabilities: &agent_client_protocol::schema::v1::ClientCapabilities) {
         *self.supported.lock().expect("negotiation poisoned") =
-            UnstableFeature::advertised_in(client_meta);
+            UnstableFeature::advertised_in(&capabilities.meta);
+        *self.caps.lock().expect("negotiation poisoned") =
+            client_tools::ClientCaps::from_capabilities(capabilities);
     }
 
     /// Whether the client advertised support for `feature`.
@@ -89,21 +111,36 @@ impl ConnectionNegotiation {
             .expect("negotiation poisoned")
             .contains(&feature)
     }
+
+    /// The client's advertised capability surface.
+    pub fn client_caps(&self) -> client_tools::ClientCaps {
+        *self.caps.lock().expect("negotiation poisoned")
+    }
+
+    /// The editor toggles currently in effect for this connection.
+    fn editor_toggles(&self) -> client_tools::EditorToggles {
+        *self.editor.lock().expect("negotiation poisoned")
+    }
 }
 
-/// State shared across one connection's handlers.
+/// State shared across the process's handlers: the session store, loaded
+/// configuration and definitions, and the mutable pools. Per-connection
+/// state (negotiation, the client surface, its terminals) lives in
+/// `ConnectionNegotiation` so HTTP connections never bleed into one
+/// another.
 pub struct TackleState {
     pub db: std::sync::Arc<SessionStore>,
     pub config: Loaded,
     pub definitions: Definitions,
-    /// The MCP pool, shared across every session on this connection and
+    /// The MCP pool, shared across every session on this process and
     /// mutable: `/mcp` toggles server availability at runtime, so a turn
     /// changes what later turns can call. The default sink is
     /// fail-closed, so an elicitation no client surface answers is
     /// declined rather than blocking a turn.
     pub mcp_pool: tokio::sync::Mutex<McpPool>,
-    /// The in-memory permission grant store, per connection (FR-014):
-    /// gone on close, process exit, and resume after restart.
+    /// The in-memory permission grant store (FR-014): keyed by session
+    /// and invokable, gone on close, process exit, and resume after
+    /// restart.
     pub grants: tokio::sync::Mutex<crate::permissions::GrantStore>,
 }
 
@@ -332,9 +369,41 @@ async fn mcp_command(state: &TackleState, first_text: &str) -> Option<String> {
     }
 }
 
+/// Handles `/editor <fs|terminal> <true|false>`: the runtime toggle for
+/// the client-capability categories. The effective surface also requires
+/// the client to have advertised the capability; a toggle takes effect
+/// the following turn (the registry re-reads it per turn). Anything not
+/// matching the shape yields usage, never a silent no-op.
+fn editor_command(negotiation: &ConnectionNegotiation, first_text: &str) -> Option<String> {
+    const USAGE: &str = "Usage: /editor <fs|terminal> <true|false>";
+    let mut parts = first_text.split_whitespace();
+    parts.next(); // the `/editor` command itself
+    let (kind, value) = match (parts.next(), parts.next()) {
+        (Some(kind), Some(value)) => (kind, value),
+        _ => return Some(USAGE.to_owned()),
+    };
+    let enabled = match value {
+        "true" => true,
+        "false" => false,
+        _ => return Some(USAGE.to_owned()),
+    };
+    let mut toggles = negotiation.editor.lock().expect("negotiation poisoned");
+    match kind {
+        "fs" => toggles.fs = enabled,
+        "terminal" => toggles.terminal = enabled,
+        _ => return Some(USAGE.to_owned()),
+    }
+    Some(format!(
+        "Editor {kind} tools: {}",
+        if enabled { "enabled" } else { "disabled" }
+    ))
+}
+
 /// Runs the ACP agent over stdio until the transport closes.
 pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result<()> {
-    let negotiation = Arc::new(ConnectionNegotiation::default());
+    let negotiation = Arc::new(ConnectionNegotiation::new(
+        client_tools::EditorToggles::from_config(&state.config.config),
+    ));
     run_agent_over(state, negotiation, Stdio::new()).await
 }
 
@@ -367,6 +436,8 @@ where
     let negotiation_for_resume = negotiation.clone();
     let negotiation_for_fork = negotiation.clone();
     let negotiation_for_compaction = negotiation.clone();
+    let negotiation_for_prompt = negotiation.clone();
+    let negotiation_for_close = negotiation.clone();
     // The connection's lease-owner id: turns acquire it for their
     // lifetime; released when the turn responds.
     let owner = Arc::new(format!("stdio-{}", uuid::Uuid::new_v4()));
@@ -381,7 +452,7 @@ where
                 // Protocol version negotiation: tackle implements v1, so it
                 // responds with v1 regardless of the client's latest; a
                 // v1-only client proceeds, a v2-only client disconnects.
-                negotiation_for_init.capture(&request.client_capabilities.meta);
+                negotiation_for_init.capture(&request.client_capabilities);
                 // Missing provider credentials surface as authMethods:
                 // the client drives the ACP authenticate method.
                 let mut response = InitializeResponse::new(ProtocolVersion::V1)
@@ -574,12 +645,32 @@ where
         .on_receive_request(
             async move |request: agent_client_protocol::schema::v1::CloseSessionRequest,
                         responder,
-                        _cx| {
+                        cx| {
                 state_for_close
                     .db
                     .close_session(&store_session_id(&request.session_id))
                     .await
                     .map_err(|err| Error::internal_error().data(err.to_string()))?;
+                // Release the terminals the harness created for this
+                // session (Q8 lifecycle): connection-scoped and
+                // ephemeral, so best-effort and silent on failure.
+                let terminals: Vec<String> = {
+                    let mut map = negotiation_for_close
+                        .terminals
+                        .lock()
+                        .expect("negotiation poisoned");
+                    map.remove(&request.session_id.to_string())
+                        .unwrap_or_default()
+                        .into_iter()
+                        .collect()
+                };
+                for terminal_id in terminals {
+                    let release = agent_client_protocol::schema::v1::ReleaseTerminalRequest::new(
+                        request.session_id.clone(),
+                        agent_client_protocol::schema::v1::TerminalId::new(terminal_id),
+                    );
+                    let _ = cx.send_request(release).block_task().await;
+                }
                 responder.respond(CloseSessionResponse::new())
             },
             agent_client_protocol::on_receive_request!(),
@@ -843,12 +934,21 @@ where
                     return responder.respond(PromptResponse::new(StopReason::EndTurn));
                 }
 
-                // Runtime MCP server availability: `/mcp` is handled
-                // before any model request. An unrecognised
+                // Runtime availability commands: `/mcp` and `/editor`
+                // are handled before any model request. An unrecognised
                 // subcommand yields no reply and falls through to
                 // normal processing.
-                if first_text == "/mcp" || first_text.starts_with("/mcp ") {
-                    if let Some(reply) = mcp_command(&state_for_prompt, &first_text).await {
+                if first_text == "/mcp"
+                    || first_text.starts_with("/mcp ")
+                    || first_text == "/editor"
+                    || first_text.starts_with("/editor ")
+                {
+                    let reply = if first_text.starts_with("/editor") {
+                        editor_command(&negotiation_for_prompt, &first_text)
+                    } else {
+                        mcp_command(&state_for_prompt, &first_text).await
+                    };
+                    if let Some(reply) = reply {
                         let message = state_for_prompt
                             .db
                             .append_message(
@@ -1017,6 +1117,7 @@ where
                 let cx = cx.clone();
                 let state_for_prompt = state_for_prompt.clone();
                 let owner_for_prompt = owner_for_prompt.clone();
+                let negotiation_for_turn = negotiation_for_prompt.clone();
                 let spawn_cx = cx.clone();
                 spawn_cx.spawn(async move {
                 let actor = state_for_prompt.definitions.actors.get(&actor_name);
@@ -1030,9 +1131,17 @@ where
                     let pool = state_for_prompt.mcp_pool.lock().await;
                     pool.list_tools().await
                 };
-                let registry = crate::invokables::Registry::build(
+                // The client-capability tools the connection advertised
+                // and the categories currently enabled (config seeded,
+                // `/editor` overridable).
+                let client_tools = crate::acp::client_tools::catalog(
+                    negotiation_for_turn.client_caps(),
+                    negotiation_for_turn.editor_toggles(),
+                );
+                let registry = crate::invokables::Registry::build_with_client_tools(
                     &state_for_prompt.definitions,
                     &mcp_tokens,
+                    &client_tools,
                 )
                 .unwrap_or_default();
                 let tools = registry.model_tools();
@@ -1201,10 +1310,12 @@ where
                     {
                         let registry = registry.clone();
                         let state = state_for_prompt.clone();
+                        let negotiation = negotiation_for_turn.clone();
                         let cx = cx.clone();
                         let session = request.session_id.clone();
                         let actor = actor_name.clone();
                         let sources = policy_script_sources(&state_for_prompt);
+                        let client_tools = client_tools.clone();
                         move |call: crate::agent::ModelToolCall| -> std::pin::Pin<
                             Box<
                                 dyn std::future::Future<
@@ -1214,13 +1325,25 @@ where
                         > {
                             let registry = registry.clone();
                             let state = state.clone();
+                            let negotiation = negotiation.clone();
                             let cx = cx.clone();
                             let session = session.clone();
                             let actor = actor.clone();
                             let sources = sources.clone();
+                            let client_tools = client_tools.clone();
                             Box::pin(async move {
                                 run_model_tool_call(
-                                    &registry, &state, &cx, &session, &actor, &sources, call,
+                                    ToolCallContext {
+                                        registry: &registry,
+                                        state: &state,
+                                        negotiation: &negotiation,
+                                        cx: &cx,
+                                        session_id: &session,
+                                        actor: &actor,
+                                        policy_sources: &sources,
+                                        client_tools: &client_tools,
+                                    },
+                                    call,
                                 )
                                 .await
                             })
@@ -1682,25 +1805,47 @@ fn policy_script_sources(state: &TackleState) -> Vec<String> {
         .collect()
 }
 
+/// The per-call context for a model tool call: the registry, shared
+/// state, live connection, session, actor, policy sources, the
+/// client-capability tools currently available, and the connection whose
+/// terminals the call may create or finish.
+struct ToolCallContext<'a> {
+    registry: &'a crate::invokables::Registry,
+    state: &'a Arc<TackleState>,
+    negotiation: &'a ConnectionNegotiation,
+    cx: &'a agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
+    session_id: &'a SessionId,
+    actor: &'a str,
+    policy_sources: &'a [String],
+    client_tools: &'a [crate::acp::client_tools::ClientTool],
+}
+
 /// Runs one model tool call: announce it, run the permission pipeline,
 /// execute on allow, report the terminal status, and return the result
 /// for the next model request (FR-009/014).
 async fn run_model_tool_call(
-    registry: &crate::invokables::Registry,
-    state: &Arc<TackleState>,
-    cx: &agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
-    session_id: &SessionId,
-    actor: &str,
-    policy_sources: &[String],
+    ctx: ToolCallContext<'_>,
     call: crate::agent::ModelToolCall,
 ) -> crate::agent::ToolCallOutcome {
     use agent_client_protocol::schema::v1 as v1;
+    let ToolCallContext {
+        registry,
+        state,
+        negotiation,
+        cx,
+        session_id,
+        actor,
+        policy_sources,
+        client_tools,
+    } = ctx;
     let arguments: serde_json::Value =
         serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
     let kind = if call.name.starts_with("mcp.") {
         "mcp"
     } else if call.name.starts_with("prompt.") {
         "prompt"
+    } else if call.name.starts_with("client.") {
+        "client"
     } else {
         "agent"
     };
@@ -1736,10 +1881,43 @@ async fn run_model_tool_call(
 
     let (content, is_error) = match verdict {
         crate::permissions::Verdict::Allow => {
-            let pool = state.mcp_pool.lock().await;
-            match registry.execute_model(&pool, &call.name, &arguments).await {
-                Ok(text) => (text, false),
-                Err(err) => (err, true),
+            if call.name.starts_with("client.") {
+                if !client_tools.iter().any(|tool| tool.name == call.name) {
+                    (
+                        format!(
+                            "client tool `{}` is not available on this connection",
+                            call.name
+                        ),
+                        true,
+                    )
+                } else {
+                    match crate::acp::client_tools::execute(cx, session_id, &call.name, &arguments)
+                        .await
+                    {
+                        Ok(executed) => {
+                            let key = session_id.to_string();
+                            let mut terminals =
+                                negotiation.terminals.lock().expect("negotiation poisoned");
+                            if let Some(id) = executed.created {
+                                terminals.entry(key.clone()).or_default().insert(id);
+                            }
+                            if let Some(id) = executed.finished {
+                                if let Some(set) = terminals.get_mut(&key) {
+                                    set.remove(&id);
+                                }
+                            }
+                            drop(terminals);
+                            (executed.content, false)
+                        }
+                        Err(err) => (err, true),
+                    }
+                }
+            } else {
+                let pool = state.mcp_pool.lock().await;
+                match registry.execute_model(&pool, &call.name, &arguments).await {
+                    Ok(text) => (text, false),
+                    Err(err) => (err, true),
+                }
             }
         }
         crate::permissions::Verdict::Deny { reason } => {
@@ -1909,5 +2087,22 @@ mod tests {
     fn absent_meta_advertises_nothing() {
         assert!(UnstableFeature::advertised_in(&None).is_empty());
         assert!(UnstableFeature::advertised_in(&client_meta(&[])).is_empty());
+    }
+
+    #[test]
+    fn editor_toggles_are_per_connection() {
+        let on = client_tools::EditorToggles {
+            fs: true,
+            terminal: true,
+        };
+        let a = ConnectionNegotiation::new(on);
+        let b = ConnectionNegotiation::new(on);
+
+        assert_eq!(
+            editor_command(&a, "/editor terminal false").as_deref(),
+            Some("Editor terminal tools: disabled")
+        );
+        assert!(!a.editor_toggles().terminal, "a toggled off");
+        assert!(b.editor_toggles().terminal, "b is untouched");
     }
 }
