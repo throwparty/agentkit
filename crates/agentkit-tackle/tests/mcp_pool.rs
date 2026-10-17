@@ -375,15 +375,17 @@ mod direct_invocation {
         let mut pool = McpPool::new();
         pool.connect("echo", &echo_server_config()).await;
 
-        // A prompt is not an MCP tool — /! supports MCP tools only.
+        // A prompt cannot be invoked directly — /! supports MCP and
+        // client-capability tools only.
         let input = agentkit_tackle::invokables::DirectInvocation {
             invokable: "prompt.deploy".into(),
             arguments: String::new(),
         };
         let err = registry.execute_direct(&pool, &input).await.unwrap_err();
         assert!(
-            err.to_string()
-                .contains("not an MCP tool — direct invocation supports MCP tools only"),
+            err.to_string().contains(
+                "cannot be invoked directly — direct invocation supports MCP and client-capability tools"
+            ),
             "{err}"
         );
 
