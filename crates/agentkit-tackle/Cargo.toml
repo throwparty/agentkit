@@ -16,11 +16,9 @@ agent-client-protocol = { version = "2.2.0", features = [
   "unstable_session_notices",
 ] }
 clap = { version = "4", features = ["derive"] }
-daggy = "0.8"
 futures = "0.3"
 git2 = "0.21"
 jiff = { version = "0.2", features = ["serde"] }
-petgraph = "0.8"
 rig-core = "0.42.0"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 axum = "0.8"
@@ -55,11 +53,12 @@ toml = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4"] }
-wiremock = "0.6.5"
 yaml_serde = "0.10"
 
 [dev-dependencies]
 tempfile = "3"
+daggy = "0.8"
+wiremock = "0.6.5"
 
 [[bin]]
 name = "tackle-mcp-echo"
