@@ -10,6 +10,7 @@
 //! residual same-layer collision is a configuration error, never a
 //! silent shadow.
 
+use crate::acp::client_tools::ClientTool;
 use crate::loader::Definitions;
 use crate::mcp::{ElicitationSink, McpPool, NamespacedTool};
 use agent_client_protocol::schema::v1::{
@@ -58,6 +59,14 @@ pub enum Invokable {
     /// An actor invokable: model-invokable only — nested agent loops
     /// spawn from model tool calls, never user slash commands.
     Agent { name: String, description: String },
+    /// A client-capability tool (`client.<surface>.<method>`):
+    /// model-invokable only, executed on the connection against the ACP
+    /// client rather than the MCP pool.
+    Client {
+        name: String,
+        description: String,
+        schema: serde_json::Value,
+    },
 }
 
 impl Invokable {
@@ -66,7 +75,8 @@ impl Invokable {
         match self {
             Invokable::Mcp { name, .. }
             | Invokable::Prompt { name, .. }
-            | Invokable::Agent { name, .. } => name,
+            | Invokable::Agent { name, .. }
+            | Invokable::Client { name, .. } => name,
         }
     }
 
@@ -75,6 +85,7 @@ impl Invokable {
             Invokable::Mcp { .. } => true,
             Invokable::Prompt { user_invokable, .. } => *user_invokable,
             Invokable::Agent { .. } => false,
+            Invokable::Client { .. } => false,
         }
     }
 
@@ -85,6 +96,7 @@ impl Invokable {
                 model_invokable, ..
             } => *model_invokable,
             Invokable::Agent { .. } => true,
+            Invokable::Client { .. } => true,
         }
     }
 
@@ -93,7 +105,8 @@ impl Invokable {
         match self {
             Invokable::Mcp { description, .. }
             | Invokable::Prompt { description, .. }
-            | Invokable::Agent { description, .. } => description,
+            | Invokable::Agent { description, .. }
+            | Invokable::Client { description, .. } => description,
         }
     }
 }
@@ -296,10 +309,20 @@ pub struct Registry {
 
 impl Registry {
     /// Builds the registry from loaded definitions and the MCP pool's
-    /// namespaced tool list.
+    /// namespaced tool list, with no client-capability tools.
     pub fn build(
         definitions: &Definitions,
         mcp_tools: &[NamespacedTool],
+    ) -> Result<Self, RegistryError> {
+        Self::build_with_client_tools(definitions, mcp_tools, &[])
+    }
+
+    /// Builds the registry including the client-capability tools the
+    /// connection advertised and enabled.
+    pub fn build_with_client_tools(
+        definitions: &Definitions,
+        mcp_tools: &[NamespacedTool],
+        client_tools: &[ClientTool],
     ) -> Result<Self, RegistryError> {
         let mut registry = Self::default();
 
@@ -346,6 +369,18 @@ impl Registry {
                 Invokable::Agent {
                     name: agent_name(name),
                     description: def.frontmatter.persona.clone(),
+                },
+            )?;
+        }
+
+        for tool in client_tools {
+            registry.insert(
+                "client",
+                tool.name.clone(),
+                Invokable::Client {
+                    name: tool.name.clone(),
+                    description: tool.description.clone(),
+                    schema: tool.schema.clone(),
                 },
             )?;
         }
@@ -397,6 +432,7 @@ impl Registry {
                     Invokable::Agent { .. } => {
                         serde_json::json!({ "type": "object", "properties": {} })
                     }
+                    Invokable::Client { schema, .. } => schema.clone(),
                 };
                 crate::agent::ToolDefinition {
                     name: invokable.name().to_owned(),
@@ -482,6 +518,7 @@ impl Registry {
                     );
                 }
                 Invokable::Agent { .. } => {}
+                Invokable::Client { .. } => {}
             }
         }
         commands
@@ -546,6 +583,9 @@ impl Registry {
                 .map_err(|err| err.to_string()),
             Invokable::Agent { .. } => Err(format!(
                 "agent invokables are not executable here: `{name}`"
+            )),
+            Invokable::Client { .. } => Err(format!(
+                "client tools execute on the connection, not here: `{name}`"
             )),
         }
     }
