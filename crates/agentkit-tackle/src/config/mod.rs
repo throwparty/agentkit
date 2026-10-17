@@ -10,7 +10,7 @@
 pub mod trust;
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -31,7 +31,7 @@ pub struct Config {
 impl Config {
     /// Merges a project layer over this (user) layer with field-level
     /// precedence: project values win where present.
-    fn merge(mut self, project: Config) -> Config {
+    pub(crate) fn merge(mut self, project: Config) -> Config {
         if project.credential_helper.is_some() {
             self.credential_helper = project.credential_helper;
         }
@@ -121,6 +121,41 @@ pub fn load_layered(
     })
 }
 
+/// Loads the built-in registrations and the user layer, returning the raw
+/// project layer separately. The project layer is *not* merged: its
+/// executable entries are trust-gated, and consent is resolved at the
+/// first session (there is no ACP connection at startup), so the caller
+/// holds it until then.
+pub fn load_layered_deferred(
+    user_dir: &Path,
+    project_dir: Option<&Path>,
+) -> Result<(Loaded, Option<Config>), ConfigError> {
+    let user_path = user_dir.join("config.toml");
+    let user = load_file(&user_path)?;
+
+    let project_path = project_dir.map(|d| d.join("config.toml"));
+    let project_layer = project_path.filter(|p| p.is_file());
+    let project = match &project_layer {
+        Some(path) => {
+            let project = load_file(path)?.unwrap_or_default();
+            // Endpoint/credential rejection is not trust-gated: it holds
+            // regardless of consent, so it fails at load.
+            reject_project_security_fields(&project, path)?;
+            Some(project)
+        }
+        None => None,
+    };
+
+    Ok((
+        Loaded {
+            config: builtin_registrations().merge(user.unwrap_or_default()),
+            user_layer: user_path.is_file().then_some(user_path),
+            project_layer,
+        },
+        project,
+    ))
+}
+
 /// The shipped script registrations: compaction (automatic past the
 /// utilisation threshold and the manual /compact summary) and titling.
 /// Sources are built-in (`builtin:` references); user configuration
@@ -146,10 +181,10 @@ fn builtin_registrations() -> Config {
     config
 }
 
-/// Trust-gates the executable entries of a project layer (`mcp_servers`
-/// and `scripts`); unapproved entries are dropped before the merge. The
-/// hash covers the serialised entry, so any field change re-prompts.
-fn gate_project_entries(gate: &mut trust::Gate<'_>, project: Config) -> Config {
+/// The trust entries for a project config's executable sections
+/// (`mcp_servers` and `scripts`): relative path and SHA-256 of the
+/// serialised entry.
+pub fn project_trust_entries(project: &Config) -> BTreeMap<String, String> {
     let mut entries = BTreeMap::new();
     for (name, server) in &project.mcp_servers {
         let serialised = toml::to_string(server).unwrap_or_default();
@@ -159,11 +194,12 @@ fn gate_project_entries(gate: &mut trust::Gate<'_>, project: Config) -> Config {
         let serialised = toml::to_string(script).unwrap_or_default();
         entries.insert(format!("scripts/{name}"), trust::hash(&serialised));
     }
-    if entries.is_empty() {
-        return project;
-    }
-    let approved = gate.gate(&entries);
-    let mut project = project;
+    entries
+}
+
+/// Drops the executable project config entries whose trust entries were
+/// refused.
+pub fn retain_project_entries(mut project: Config, approved: &BTreeSet<String>) -> Config {
     project
         .mcp_servers
         .retain(|name, _| approved.contains(&format!("mcp_servers/{name}")));
@@ -171,6 +207,18 @@ fn gate_project_entries(gate: &mut trust::Gate<'_>, project: Config) -> Config {
         .scripts
         .retain(|name, _| approved.contains(&format!("scripts/{name}")));
     project
+}
+
+/// Trust-gates the executable entries of a project layer (`mcp_servers`
+/// and `scripts`); unapproved entries are dropped before the merge. The
+/// hash covers the serialised entry, so any field change re-prompts.
+fn gate_project_entries(gate: &mut trust::Gate<'_>, project: Config) -> Config {
+    let entries = project_trust_entries(&project);
+    if entries.is_empty() {
+        return project;
+    }
+    let approved = gate.gate(&entries);
+    retain_project_entries(project, &approved)
 }
 
 fn load_file(path: &Path) -> Result<Option<Config>, ConfigError> {

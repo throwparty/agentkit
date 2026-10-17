@@ -103,7 +103,7 @@ fn spawn_connection(server: &HttpServerState, id: String) -> Arc<Connection> {
         let pool = crate::acp::connect_config_servers(&state_for_connection).await;
         let negotiation = Arc::new(ConnectionNegotiation::new(
             crate::acp::client_tools::EditorToggles::from_config(
-                &state_for_connection.config.config,
+                &state_for_connection.config().config,
             ),
             pool,
         ));

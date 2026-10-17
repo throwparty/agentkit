@@ -9,16 +9,16 @@ use crate::acp::TackleState;
 /// the loaded configuration layers with counts, the overridden built-ins,
 /// and the command syntaxes.
 pub fn first_run_seed(state: &TackleState) -> String {
-    let config = &state.config.config;
-    let definitions = &state.definitions;
+    let config = &state.config().config;
+    let definitions = &state.definitions();
     let user_layer = state
-        .config
+        .config()
         .user_layer
         .as_ref()
         .map(|path| path.display().to_string())
         .unwrap_or_else(|| "none (built-in defaults)".to_owned());
     let project_layer = state
-        .config
+        .config()
         .project_layer
         .as_ref()
         .map(|path| path.display().to_string())
@@ -62,8 +62,8 @@ pub fn first_run_seed(state: &TackleState) -> String {
 /// `authenticate` method instead of failing at first prompt.
 pub fn missing_credentials(state: &TackleState) -> bool {
     use crate::config::Auth;
-    let helper = crate::agent::provider::credential_helper_name(&state.config.config);
-    for (name, endpoint) in &state.config.config.endpoints {
+    let helper = crate::agent::provider::credential_helper_name(&state.config().config);
+    for (name, endpoint) in &state.config().config.endpoints {
         if endpoint.auth != Auth::Helper {
             continue;
         }

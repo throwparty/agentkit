@@ -10,7 +10,7 @@ Tackle configuration is sourced from two layers, merged in order:
 2. **User layer** — `config.toml` in the user config directory (`~/.config/agentkit/tackle` on Linux, `~/Library/Application Support/AgentKit/tackle` on macOS). Overridable with `--config-dir`.
 3. **Project layer** — `.agentkit/tackle/config.toml` in the session's working directory.
 
-The project layer may not set `endpoints` or `credential_helper` — a project trying to change where model traffic goes is rejected outright. Project `mcp_servers` and `scripts` are trust-gated: the first session in a project prompts for consent, keyed on a hash of each entry, so any change re-prompts.
+The project layer may not set `endpoints` or `credential_helper` — a project trying to change where model traffic goes is rejected outright. Project `mcp_servers`, `scripts`, and definitions (personas, actors, prompts) are trust-gated: the first session in a project prompts for consent, keyed on a hash of each entry, so any change re-prompts.
 
 Maps merge per key: a project entry with the same name replaces one wholesale, so a disabling entry needs no file. Scalars merge per field.
 
