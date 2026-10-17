@@ -679,6 +679,13 @@ where
                     .close_session(&store_session_id(&request.session_id))
                     .await
                     .map_err(|err| Error::internal_error().data(err.to_string()))?;
+                // The session's active life is over: its permission
+                // grants go with it (they never outlive their session).
+                state_for_close
+                    .grants
+                    .lock()
+                    .await
+                    .clear_session(&request.session_id.to_string());
                 // Release the terminals the harness created for this
                 // session (Q8 lifecycle): connection-scoped and
                 // ephemeral, so best-effort and silent on failure.
@@ -1513,6 +1520,11 @@ where
                     .delete_session(&store_session_id(&request.session_id))
                     .await
                     .map_err(|err| Error::internal_error().data(err.to_string()))?;
+                state_for_delete
+                    .grants
+                    .lock()
+                    .await
+                    .clear_session(&request.session_id.to_string());
                 responder.respond(DeleteSessionResponse::new())
             },
             agent_client_protocol::on_receive_request!(),

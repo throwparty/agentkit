@@ -99,10 +99,12 @@ pub fn ask_options() -> [(&'static str, PermissionChoice); 4] {
     ]
 }
 
-/// The in-memory grant store, keyed by actor and invokable.
+/// The in-memory grant store, keyed by session, actor, and invokable:
+/// an "allow for this session" grant must not outlive its session or
+/// leak into another one in the same process.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct GrantStore {
-    grants: BTreeMap<(String, String), GrantRecord>,
+    grants: BTreeMap<(String, String, String), GrantRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -118,9 +120,9 @@ enum GrantKind {
 }
 
 impl GrantStore {
-    pub fn allow_always(&mut self, actor: &str, invokable: &str) {
+    pub fn allow_always(&mut self, session: &str, actor: &str, invokable: &str) {
         self.grants.insert(
-            (actor.to_owned(), invokable.to_owned()),
+            (session.to_owned(), actor.to_owned(), invokable.to_owned()),
             GrantRecord {
                 kind: GrantKind::Allow,
                 reason: None,
@@ -128,9 +130,15 @@ impl GrantStore {
         );
     }
 
-    pub fn deny_always(&mut self, actor: &str, invokable: &str, reason: Option<String>) {
+    pub fn deny_always(
+        &mut self,
+        session: &str,
+        actor: &str,
+        invokable: &str,
+        reason: Option<String>,
+    ) {
         self.grants.insert(
-            (actor.to_owned(), invokable.to_owned()),
+            (session.to_owned(), actor.to_owned(), invokable.to_owned()),
             GrantRecord {
                 kind: GrantKind::Deny,
                 reason,
@@ -138,8 +146,9 @@ impl GrantStore {
         );
     }
 
-    fn held(&self, actor: &str, invokable: &str) -> Option<&GrantRecord> {
-        self.grants.get(&(actor.to_owned(), invokable.to_owned()))
+    fn held(&self, session: &str, actor: &str, invokable: &str) -> Option<&GrantRecord> {
+        self.grants
+            .get(&(session.to_owned(), actor.to_owned(), invokable.to_owned()))
     }
 
     /// Whether no grant records exist — elicitation responses and other
@@ -148,7 +157,13 @@ impl GrantStore {
         self.grants.is_empty()
     }
 
-    /// The session's active life is over: close, process exit, and
+    /// Drops every grant belonging to `session`: its active life is over.
+    /// Other sessions in the same process are untouched.
+    pub fn clear_session(&mut self, session: &str) {
+        self.grants.retain(|(grant_session, _, _), _| grant_session != session);
+    }
+
+    /// The store's active life is over: close, process exit, and
     /// resume after restart all start from an empty store.
     pub fn clear(&mut self) {
         self.grants.clear();
@@ -193,7 +208,10 @@ impl<'a, P: PermissionRequester> PermissionPipeline<'a, P> {
 
     pub async fn assess(&mut self, input: &Assessment) -> Verdict {
         // 1. Grant deny records are authoritative and short-circuit.
-        if let Some(record) = self.grants.held(&input.actor, &input.invokable) {
+        if let Some(record) = self
+            .grants
+            .held(&input.session_id, &input.actor, &input.invokable)
+        {
             if record.kind == GrantKind::Deny {
                 return Verdict::Deny {
                     reason: record
@@ -205,7 +223,8 @@ impl<'a, P: PermissionRequester> PermissionPipeline<'a, P> {
         }
 
         let previously_granted = matches!(
-            self.grants.held(&input.actor, &input.invokable),
+            self.grants
+                .held(&input.session_id, &input.actor, &input.invokable),
             Some(record) if record.kind == GrantKind::Allow
         );
 
@@ -250,13 +269,18 @@ impl<'a, P: PermissionRequester> PermissionPipeline<'a, P> {
             .await
         {
             PermissionChoice::AllowAlways => {
-                self.grants.allow_always(&input.actor, &input.invokable);
+                self.grants
+                    .allow_always(&input.session_id, &input.actor, &input.invokable);
                 Verdict::Allow
             }
             PermissionChoice::AllowOnce => Verdict::Allow,
             PermissionChoice::RejectAlways => {
-                self.grants
-                    .deny_always(&input.actor, &input.invokable, None);
+                self.grants.deny_always(
+                    &input.session_id,
+                    &input.actor,
+                    &input.invokable,
+                    None,
+                );
                 Verdict::Deny {
                     reason: "rejected for this session".to_owned(),
                 }
@@ -394,7 +418,7 @@ mod tests {
     #[tokio::test]
     async fn deny_records_short_circuit_everything() {
         let mut grants = GrantStore::default();
-        grants.deny_always("default", "mcp.litterbox.exec", Some("no shell".into()));
+        grants.deny_always("s1", "default", "mcp.litterbox.exec", Some("no shell".into()));
         let policy = RecorderPolicy::verdict(Decision::Allow);
         let requester = StubRequester::choice(PermissionChoice::AllowAlways);
 
@@ -431,7 +455,7 @@ mod tests {
         assert_eq!(verdict, Verdict::Allow);
         assert_eq!(requester.calls.load(Ordering::SeqCst), 0);
         // A script allow writes nothing to the grant store.
-        assert!(grants.held("default", "mcp.litterbox.exec").is_none());
+        assert!(grants.held("s1", "default", "mcp.litterbox.exec").is_none());
     }
 
     #[tokio::test]
@@ -440,7 +464,7 @@ mod tests {
 
         // With an allow record: ask falls through and the record
         // answers — the client is never asked.
-        grants.allow_always("default", "mcp.litterbox.exec");
+        grants.allow_always("s1", "default", "mcp.litterbox.exec");
         let policy = RecorderPolicy::verdict(Decision::Ask);
         let requester = StubRequester::choice(PermissionChoice::RejectOnce);
         let verdict = assess_with(&mut grants, &policy, &requester).await;
@@ -471,7 +495,7 @@ mod tests {
     #[tokio::test]
     async fn previously_granted_reaches_the_script() {
         let mut grants = GrantStore::default();
-        grants.allow_always("default", "mcp.litterbox.exec");
+        grants.allow_always("s1", "default", "mcp.litterbox.exec");
         let policy = RecorderPolicy::verdict(Decision::Ask);
         let requester = StubRequester::choice(PermissionChoice::AllowOnce);
 
@@ -491,7 +515,7 @@ mod tests {
         let verdict = assess_with(&mut grants, &policy, &requester).await;
 
         assert!(matches!(verdict, Verdict::Deny { .. }));
-        assert!(grants.held("default", "mcp.litterbox.exec").is_none());
+        assert!(grants.held("s1", "default", "mcp.litterbox.exec").is_none());
 
         // Reject-once may ask again.
         let requester = StubRequester::choice(PermissionChoice::AllowOnce);
@@ -543,12 +567,35 @@ mod tests {
 
         // Close.
         grants.clear();
-        assert!(grants.held("default", "mcp.litterbox.exec").is_none());
+        assert!(grants.held("s1", "default", "mcp.litterbox.exec").is_none());
 
         // Process exit and resume-after-restart: a fresh store is
         // empty — grants are in-memory only.
         let fresh = GrantStore::default();
-        assert!(fresh.held("default", "mcp.litterbox.exec").is_none());
+        assert!(fresh.held("s1", "default", "mcp.litterbox.exec").is_none());
+    }
+
+    #[tokio::test]
+    async fn closing_a_session_clears_only_its_grants() {
+        let mut grants = GrantStore::default();
+        let policy = RecorderPolicy::verdict(Decision::Ask);
+
+        let requester = StubRequester::choice(PermissionChoice::AllowAlways);
+        assess_with(&mut grants, &policy, &requester).await;
+
+        let mut other = assessment();
+        other.session_id = "s2".to_owned();
+        let requester = StubRequester::choice(PermissionChoice::AllowAlways);
+        PermissionPipeline::new(&mut grants, &policy, &requester)
+            .assess(&other)
+            .await;
+
+        grants.clear_session("s1");
+        assert!(grants.held("s1", "default", "mcp.litterbox.exec").is_none());
+        assert!(
+            grants.held("s2", "default", "mcp.litterbox.exec").is_some(),
+            "another session's grant survives"
+        );
     }
 
     #[tokio::test]
