@@ -215,6 +215,33 @@ fn registering_defaults_to_enabled_and_preserves_an_existing_disable() {
     assert!(!pool.is_enabled("echo"));
 }
 
+/// FR-013: a client-forwarded server of the same name wins over the
+/// config-declared one, which is recorded as shadowed for the first-turn
+/// report. A non-colliding forwarded server is added alongside it.
+#[tokio::test]
+async fn forwarded_servers_win_over_config_of_the_same_name() {
+    let mut pool = McpPool::new();
+    pool.register("echo", echo_server_config());
+    pool.connect("echo", &echo_server_config()).await;
+    assert!(pool.is_connected("echo"));
+
+    pool.add_forwarded(vec![
+        ("echo".to_owned(), broken_server_config()),
+        ("extra".to_owned(), echo_server_config()),
+    ])
+    .await;
+
+    assert_eq!(pool.shadowed_servers(), vec!["echo"]);
+    // The forwarded (broken) config replaced the working one, proving the
+    // client-declared server won.
+    assert!(matches!(
+        pool.statuses().get("echo"),
+        Some(&(ServerStatus::Failed { .. }, _))
+    ));
+    assert!(!pool.is_connected("echo"));
+    assert!(pool.is_connected("extra"));
+}
+
 struct RecordingSink {
     received: Arc<Mutex<Vec<Elicitation>>>,
     response: ElicitationResponse,

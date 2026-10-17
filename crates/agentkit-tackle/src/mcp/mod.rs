@@ -22,7 +22,7 @@ use rmcp::model::{
 };
 use rmcp::service::{RequestContext, RoleClient, RunningService};
 use rmcp::ClientHandler;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
@@ -395,6 +395,10 @@ pub struct McpPool<S: ElicitationSink = AutoDecline> {
     /// re-enabling a server can reconnect it without the caller
     /// re-supplying the config.
     configs: BTreeMap<String, McpServerConfig>,
+    /// Config-declared servers shadowed by a client-forwarded server of
+    /// the same name (FR-013: the client-declared server wins). Reported
+    /// at the first turn.
+    shadowed: BTreeSet<String>,
     sink: Arc<S>,
     /// The helper that resolves `{cred:IDENTITY}` env markers at spawn.
     credential_helper: String,
@@ -425,6 +429,7 @@ impl<S: ElicitationSink> McpPool<S> {
             statuses: BTreeMap::new(),
             enabled: BTreeMap::new(),
             configs: BTreeMap::new(),
+            shadowed: BTreeSet::new(),
             sink: Arc::new(sink),
             credential_helper: crate::agent::provider::DEFAULT_CREDENTIAL_HELPER.to_owned(),
         }
@@ -546,6 +551,33 @@ impl<S: ElicitationSink> McpPool<S> {
                     .insert(name.to_owned(), ServerStatus::Failed { reason });
             }
         }
+    }
+
+    /// Registers and connects servers forwarded by the ACP client on
+    /// `session/new`, `session/load`, or `session/resume`. The
+    /// client-declared server wins: a config-declared server of the same
+    /// name is shadowed (and recorded for the first-turn report), its
+    /// registration and connection replaced. A connection failure is a
+    /// status, never an error, so a broken forwarded server cannot fail
+    /// session setup.
+    pub async fn add_forwarded(&mut self, servers: Vec<(String, McpServerConfig)>) {
+        for (name, config) in servers {
+            if self.configs.contains_key(&name) {
+                self.shadowed.insert(name.clone());
+            }
+            self.register(&name, config.clone());
+            // The client-declared server replaces any existing
+            // registration, including a live config connection of the
+            // same name.
+            self.connections.remove(&name);
+            self.connect(&name, &config).await;
+        }
+    }
+
+    /// Config-declared servers shadowed by a client-forwarded server of
+    /// the same name, for the first-turn report.
+    pub fn shadowed_servers(&self) -> Vec<String> {
+        self.shadowed.iter().cloned().collect()
     }
 
     /// Whether a server is connected (its tools are callable).

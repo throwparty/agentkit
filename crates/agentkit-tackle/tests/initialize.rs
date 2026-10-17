@@ -4,8 +4,9 @@
 //! shape the golden transcripts replay.
 
 use agentkit_tackle::agent_client_protocol::schema::v1::{
-    InitializeRequest, ListSessionsRequest, LoadSessionRequest, NewSessionRequest,
-    SessionCapabilities, SessionNotification, SessionUpdate,
+    ClientCapabilities, InitializeRequest, ListSessionsRequest, LoadSessionRequest, McpServer,
+    McpServerStdio, Meta, NewSessionRequest, SessionCapabilities, SessionNotification,
+    SessionUpdate,
 };
 use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
@@ -427,6 +428,187 @@ async fn direct_invocation_runs_an_mcp_tool_and_reports_the_result() {
                     "the tool ran for {command}: {output}"
                 );
             }
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+/// A client-forwarded MCP server (`session/new`'s `mcp_servers`) reaches
+/// the session exactly like a configured one — the same path Zed uses to
+/// hand the agent its own MCP servers.
+#[tokio::test(flavor = "multi_thread")]
+async fn forwarded_mcp_servers_reach_the_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = spawn_agent(dir.path());
+
+    let calls: StdArc<StdMutex<Vec<(String, String)>>> = StdArc::default();
+    let calls_handler = calls.clone();
+    let advertised: StdArc<StdMutex<Vec<String>>> = StdArc::default();
+    let advertised_handler = advertised.clone();
+
+    Client
+        .builder()
+        .on_receive_notification(
+            async move |notification: SessionNotification, _cx| {
+                match &notification.update {
+                    SessionUpdate::ToolCall(call) => {
+                        calls_handler
+                            .lock()
+                            .unwrap()
+                            .push(("call".to_owned(), call.title.clone()));
+                    }
+                    SessionUpdate::ToolCallUpdate(update) => {
+                        let status = update.fields.status.map(|s| format!("{s:?}"));
+                        let text = update
+                            .fields
+                            .content
+                            .as_ref()
+                            .map(|content| serde_json::to_string(content).unwrap_or_default())
+                            .unwrap_or_default();
+                        calls_handler
+                            .lock()
+                            .unwrap()
+                            .push((status.unwrap_or_default(), text));
+                    }
+                    SessionUpdate::AvailableCommandsUpdate(update) => {
+                        advertised_handler.lock().unwrap().extend(
+                            update
+                                .available_commands
+                                .iter()
+                                .map(|command| command.name.clone()),
+                        );
+                    }
+                    _ => {}
+                }
+                Ok(())
+            },
+            agentkit_tackle::agent_client_protocol::on_receive_notification!(),
+        )
+        .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
+            connection
+                .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            let forwarded = McpServer::Stdio(McpServerStdio::new(
+                "echo",
+                env!("CARGO_BIN_EXE_tackle-mcp-echo"),
+            ));
+            let created = connection
+                .send_request(
+                    NewSessionRequest::new(std::path::PathBuf::from("/work"))
+                        .mcp_servers(vec![forwarded]),
+                )
+                .block_task()
+                .await?;
+
+            // The advertisement follows the session/new response (the Zed
+            // ordering workaround), so wait for it to land.
+            let advertised_deadline =
+                std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while !advertised.lock().unwrap().iter().any(|n| n == "!mcp.echo.echo")
+                && std::time::Instant::now() < advertised_deadline
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            assert!(
+                advertised.lock().unwrap().iter().any(|n| n == "!mcp.echo.echo"),
+                "the forwarded server's tool is advertised: {:?}",
+                advertised.lock().unwrap()
+            );
+
+            let response = connection
+                .send_request(
+                    agentkit_tackle::agent_client_protocol::schema::v1::PromptRequest::new(
+                        created.session_id.clone(),
+                        vec![
+                            agentkit_tackle::agent_client_protocol::schema::v1::ContentBlock::Text(
+                                agentkit_tackle::agent_client_protocol::schema::v1::TextContent::new(
+                                    r#"/!mcp.echo.echo {"text":"forwarded"}"#.to_owned(),
+                                ),
+                            ),
+                        ],
+                    ),
+                )
+                .block_task()
+                .await?;
+            assert_eq!(
+                response.stop_reason,
+                agentkit_tackle::agent_client_protocol::schema::v1::StopReason::EndTurn,
+            );
+
+            let seen = calls.lock().unwrap().clone();
+            let (_, output) = seen
+                .iter()
+                .find(|(kind, _)| kind.contains("Completed"))
+                .unwrap_or_else(|| panic!("the forwarded tool ran: {seen:?}"));
+            assert!(output.contains("forwarded"), "the tool ran: {output}");
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+/// FR-013: a client-forwarded server that cannot connect is reported at
+/// the first turn as a warning notice (to clients advertising session
+/// notices), and does not fail session setup.
+#[tokio::test(flavor = "multi_thread")]
+async fn forwarded_failures_are_reported_at_the_first_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = spawn_agent(dir.path());
+
+    let notices: StdArc<StdMutex<Vec<(String, String)>>> = StdArc::default();
+    let notices_handler = notices.clone();
+
+    let mut meta = Meta::new();
+    meta.insert("unstable_session_notices".to_owned(), serde_json::json!({}));
+    let initialize = InitializeRequest::new(ProtocolVersion::V1)
+        .client_capabilities(ClientCapabilities::new().meta(Meta::from(meta)));
+
+    Client
+        .builder()
+        .on_receive_notification(
+            async move |notification: SessionNotification, _cx| {
+                if let SessionUpdate::Notice(notice) = &notification.update {
+                    notices_handler
+                        .lock()
+                        .unwrap()
+                        .push((format!("{:?}", notice.severity), notice.title.clone()));
+                }
+                Ok(())
+            },
+            agentkit_tackle::agent_client_protocol::on_receive_notification!(),
+        )
+        .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
+            connection.send_request(initialize).block_task().await?;
+            let forwarded = McpServer::Stdio(McpServerStdio::new(
+                "broken",
+                "/nonexistent/tackle-mcp-nothing",
+            ));
+            connection
+                .send_request(
+                    NewSessionRequest::new(std::path::PathBuf::from("/work"))
+                        .mcp_servers(vec![forwarded]),
+                )
+                .block_task()
+                .await?;
+
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while !notices
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|(_, title)| title.contains("broken"))
+                && std::time::Instant::now() < deadline
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            let seen = notices.lock().unwrap().clone();
+            assert!(
+                seen.iter()
+                    .any(|(severity, title)| severity.contains("Warning") && title.contains("broken")),
+                "the failed forwarded server is reported: {seen:?}"
+            );
             Ok(())
         })
         .await
