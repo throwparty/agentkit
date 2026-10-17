@@ -104,7 +104,7 @@ Tackle owns retries with exponential backoff honouring retry-after for transient
 
 ### FR-009: Invokable Registry
 
-All operations are invokables namespaced by mechanism: mcp.<server>.<tool>, prompt.<name>, and agent.<actor>, each with user_invokable and model_invokable flags; the model sees namespaced names so cross-server tool collisions cannot occur; collisions within a namespace resolve by layer precedence (project over user) while same-layer collisions are configuration errors; model_invokable prompts are exposed to the model as tools whose invocation loads the expanded body into context
+All operations are invokables namespaced by mechanism: mcp.<server>.<tool>, prompt.<name>, agent.<actor>, and client.<surface>.<method> (client-capability tools), each with user_invokable and model_invokable flags; the model sees namespaced names so cross-server tool collisions cannot occur; collisions within a namespace resolve by layer precedence (project over user) while same-layer collisions are configuration errors; model_invokable prompts are exposed to the model as tools whose invocation loads the expanded body into context
 
 **Slug:** `invokable-registry`
 
@@ -116,7 +116,7 @@ Prompts are markdown files with frontmatter carrying description, declared param
 
 ### FR-011: Direct Invocation
 
-A user may execute an invokable directly by typing /!name arguments, which runs the MCP tool with no model request, reports tool_call and tool_call_update notifications, responds end_turn, and stores the result in the turn for later model context; direct invocation bypasses the permission pipeline because the user is the authority; a command named ! is advertised via available_commands_update so clients autocomplete the prefix, and the /! prefix is recognised only on user-typed input, never in model output, seed messages, script payloads, or script-sent prompts; oversized outputs are truncated at a fixed internal limit (16 KiB) with an explicit marker recording the original size, full content retained in storage; /! on a non-MCP invokable fails with a precise error — direct invocation supports MCP tools only
+A user may execute an invokable directly by typing /!name arguments, which runs the MCP or client-capability tool with no model request, reports tool_call and tool_call_update notifications, responds end_turn, and stores the result in the turn for later model context; direct invocation bypasses the permission pipeline because the user is the authority; a command named ! is advertised via available_commands_update so clients autocomplete the prefix, and each MCP and client-capability tool is also advertised under its own !-prefixed namespaced name; the /! prefix is recognised only on user-typed input, never in model output, seed messages, script payloads, or script-sent prompts; direct invocation runs on a spawned task so a client-capability tool's request back to the client never blocks the dispatch loop awaiting its response; oversized outputs are truncated at a fixed internal limit (16 KiB) with an explicit marker recording the original size, full content retained in storage; /! on a prompt or agent invokable fails with a precise error — direct invocation supports MCP and client-capability tools only
 
 **Slug:** `direct-invocation`
 
@@ -215,6 +215,12 @@ Invoking agent.<actor> spawns a new agent instance of that actor running a neste
 Tackle exposes ACP configOptions: a model selector populated from per-endpoint model discovery with static config lists as fallback and degraded discovery reported as a notice, and an actor selector; mid-session model switches are validated against the new model's context window with auto-compaction announcement and a context note, taking effect the following turn
 
 **Slug:** `session-config-options`
+
+### FR-028: Client Capability Tools
+
+Tackle reflects the ACP client's advertised capabilities — file-system read and write and the terminal surface — to the model as client.<surface>.<method> invokables (client.fs.read_text_file, client.fs.write_text_file, client.terminal.create, client.terminal.output, client.terminal.wait_for_exit, client.terminal.kill, client.terminal.release), one tool per RPC with parameters fixed by the wire types and no shipped schemas; a tool exists only when the client advertised the capability at initialize and its category is enabled — [client_tools] fs_enabled and terminal_enabled (user configuration only, rejected by name in project configuration) seed the toggles, and /editor \<fs|terminal> \<true|false> toggles them at runtime, advertised like /mcp and taking effect the following turn; client tools are model-invokable and also user-invokable through direct invocation (/!) like MCP tools; model calls pass through the permission pipeline with kind client, while direct invocation bypasses it as the user is the authority; terminals are connection-scoped and ephemeral: the harness tracks the terminal ids it creates per session and best-effort releases them on kill and at session/close, a stale or unknown id fails the call precisely rather than silently, and no terminal state is persisted or reconciled across restarts; direct invocation (/!) reaches client-capability tools as well as MCP tools
+
+**Slug:** `client-capability-tools`
 
 ## Non-functional Requirements
 
