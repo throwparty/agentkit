@@ -120,6 +120,26 @@ impl ConnectionNegotiation {
     fn editor_toggles(&self) -> client_tools::EditorToggles {
         *self.editor.lock().expect("negotiation poisoned")
     }
+
+    /// Records a terminal created for `session`, or drops one that has
+    /// finished, so session close can release whatever remains.
+    fn track_terminals(&self, session_id: &str, created: Option<String>, finished: Option<String>) {
+        if created.is_none() && finished.is_none() {
+            return;
+        }
+        let mut terminals = self.terminals.lock().expect("negotiation poisoned");
+        if let Some(id) = created {
+            terminals
+                .entry(session_id.to_owned())
+                .or_default()
+                .insert(id);
+        }
+        if let Some(id) = finished {
+            if let Some(set) = terminals.get_mut(session_id) {
+                set.remove(&id);
+            }
+        }
+    }
 }
 
 /// State shared across the process's handlers: the session store, loaded
@@ -193,12 +213,21 @@ fn wire_session_id(id: &crate::store::SessionId) -> SessionId {
 /// The tool listing is per-connection state, not configuration, so it is
 /// read live: a server disabled by `/mcp disable` drops out of the
 /// listing for the rest of the connection.
-async fn available_commands_update(state: &TackleState) -> SessionUpdate {
+async fn available_commands_update(
+    state: &TackleState,
+    negotiation: &ConnectionNegotiation,
+) -> SessionUpdate {
     let pool = state.mcp_pool.lock().await;
     let mcp_tools = pool.list_tools().await;
     drop(pool);
 
-    let registry = match crate::invokables::Registry::build(&state.definitions, &mcp_tools) {
+    let client_tools =
+        client_tools::catalog(negotiation.client_caps(), negotiation.editor_toggles());
+    let registry = match crate::invokables::Registry::build_with_client_tools(
+        &state.definitions,
+        &mcp_tools,
+        &client_tools,
+    ) {
         Ok(registry) => registry,
         Err(err) => {
             // Namespaced keys over BTreeMap definitions cannot collide;
@@ -592,7 +621,7 @@ where
                         ));
                     }
                 }
-                let commands = available_commands_update(&state_for_new).await;
+                let commands = available_commands_update(&state_for_new, &negotiation_for_new).await;
                 cx.send_notification(SessionNotification::new(wire_id, commands))
             },
             agent_client_protocol::on_receive_request!(),
@@ -835,7 +864,8 @@ where
                     return responder.respond(PromptResponse::new(StopReason::EndTurn));
                 }
 
-                // `/!mcp.<server>.<tool> {json}`: the user calls an MCP
+                // `/!mcp.<server>.<tool> {json}` or
+                // `/!client.<surface>.<method> {json}`: the user calls a
                 // tool directly. No model request, and no permission
                 // prompt — the call is the user's own keystroke, so the
                 // pipeline has nothing to ask. The result is reported as
@@ -853,84 +883,142 @@ where
                         agent_client_protocol::schema::v1::SessionUpdate::ToolCall(announce),
                     ));
 
-                    let pool = state_for_prompt.mcp_pool.lock().await;
-                    let tools = pool.list_tools().await;
-                    let executed = match crate::invokables::Registry::build(
-                        &state_for_prompt.definitions,
-                        &tools,
-                    ) {
-                        Ok(registry) => registry
-                            .execute_direct(&pool, &input)
-                            .await
-                            .map_err(|err| err.to_string()),
-                        Err(err) => Err(err.to_string()),
-                    };
-                    drop(pool);
-
-                    let (text, is_error) = match executed {
-                        Ok(result) => (result.content_json, result.is_error),
-                        Err(err) => (err, true),
-                    };
-                    let status = if is_error {
-                        agent_client_protocol::schema::v1::ToolCallStatus::Failed
-                    } else {
-                        agent_client_protocol::schema::v1::ToolCallStatus::Completed
-                    };
-                    let _ = cx.send_notification(SessionNotification::new(
-                        request.session_id.clone(),
-                        SessionUpdate::ToolCallUpdate(
-                            agent_client_protocol::schema::v1::ToolCallUpdate::new(
-                                agent_client_protocol::schema::v1::ToolCallId::new(call_id),
-                                agent_client_protocol::schema::v1::ToolCallUpdateFields::new()
-                                    .status(status)
-                                    .content(vec![
-                                        agent_client_protocol::schema::v1::ToolCallContent::from(
-                                            ContentBlock::Text(
-                                                agent_client_protocol::schema::v1::TextContent::new(
-                                                    text.clone(),
+                    // Direct invocation may issue a request back to the
+                    // client (a client-capability tool), and awaiting it
+                    // inside the dispatch callback would deadlock the
+                    // dispatch loop on its own response. Run the whole
+                    // effect on a spawned task, like a model turn, and
+                    // respond when it completes.
+                    let cx = cx.clone();
+                    let state = state_for_prompt.clone();
+                    let negotiation = negotiation_for_prompt.clone();
+                    let wire_id = request.session_id.clone();
+                    let turn_id = turn.id.clone();
+                    let owner = owner_for_prompt.clone();
+                    let spawn_cx = cx.clone();
+                    spawn_cx.spawn(async move {
+                        let (text, is_error) = if input.invokable.starts_with("client.") {
+                            // Client-capability tools execute on the
+                            // connection, not the MCP pool.
+                            let available = crate::acp::client_tools::catalog(
+                                negotiation.client_caps(),
+                                negotiation.editor_toggles(),
+                            );
+                            match input.arguments_json() {
+                                Err(err) => (err.to_string(), true),
+                                Ok(_) if !available
+                                    .iter()
+                                    .any(|tool| tool.name == input.invokable) =>
+                                {
+                                    (
+                                        format!(
+                                            "client tool `{}` is not available on this connection",
+                                            input.invokable
+                                        ),
+                                        true,
+                                    )
+                                }
+                                Ok(arguments) => {
+                                    match crate::acp::client_tools::execute(
+                                        &cx,
+                                        &wire_id,
+                                        &input.invokable,
+                                        &arguments,
+                                    )
+                                    .await
+                                    {
+                                        Ok(executed) => {
+                                            negotiation.track_terminals(
+                                                &wire_id.to_string(),
+                                                executed.created,
+                                                executed.finished,
+                                            );
+                                            (executed.content, false)
+                                        }
+                                        Err(err) => (err, true),
+                                    }
+                                }
+                            }
+                        } else {
+                            let pool = state.mcp_pool.lock().await;
+                            let tools = pool.list_tools().await;
+                            let executed = match crate::invokables::Registry::build(
+                                &state.definitions,
+                                &tools,
+                            ) {
+                                Ok(registry) => registry
+                                    .execute_direct(&pool, &input)
+                                    .await
+                                    .map_err(|err| err.to_string()),
+                                Err(err) => Err(err.to_string()),
+                            };
+                            drop(pool);
+                            match executed {
+                                Ok(result) => (result.content_json, result.is_error),
+                                Err(err) => (err, true),
+                            }
+                        };
+                        let status = if is_error {
+                            agent_client_protocol::schema::v1::ToolCallStatus::Failed
+                        } else {
+                            agent_client_protocol::schema::v1::ToolCallStatus::Completed
+                        };
+                        let _ = cx.send_notification(SessionNotification::new(
+                            wire_id.clone(),
+                            SessionUpdate::ToolCallUpdate(
+                                agent_client_protocol::schema::v1::ToolCallUpdate::new(
+                                    agent_client_protocol::schema::v1::ToolCallId::new(call_id),
+                                    agent_client_protocol::schema::v1::ToolCallUpdateFields::new()
+                                        .status(status)
+                                        .content(vec![
+                                            agent_client_protocol::schema::v1::ToolCallContent::from(
+                                                ContentBlock::Text(
+                                                    agent_client_protocol::schema::v1::TextContent::new(
+                                                        text.clone(),
+                                                    ),
                                                 ),
                                             ),
-                                        ),
-                                    ]),
+                                        ]),
+                                ),
                             ),
-                        ),
-                    ));
-                    // Two stored messages per the schema: the call
-                    // (namespaced invokable plus arguments) and the
-                    // result that answers it.
-                    let call = state_for_prompt
-                        .db
-                        .append_message(
-                            &turn.id,
-                            crate::store::Role::ToolCall,
-                            &input.arguments,
-                            Some(&input.invokable),
-                            None,
-                            None,
-                            None,
-                        )
-                        .await
-                        .map_err(|err| Error::internal_error().data(err.to_string()))?;
-                    state_for_prompt
-                        .db
-                        .append_message(
-                            &turn.id,
-                            crate::store::Role::ToolResult,
-                            &serde_json::json!([{ "type": "text", "text": text }]).to_string(),
-                            Some(&input.invokable),
-                            Some(&call.id),
-                            Some(is_error),
-                            None,
-                        )
-                        .await
-                        .map_err(|err| Error::internal_error().data(err.to_string()))?;
-
-                    state_for_prompt
-                        .db
-                        .release_lease(&session_id, &owner_for_prompt)
-                        .await
-                        .ok();
-                    return responder.respond(PromptResponse::new(StopReason::EndTurn));
+                        ));
+                        // Two stored messages per the schema: the call
+                        // (namespaced invokable plus arguments) and the
+                        // result that answers it.
+                        let call = state
+                            .db
+                            .append_message(
+                                &turn_id,
+                                crate::store::Role::ToolCall,
+                                &input.arguments,
+                                Some(&input.invokable),
+                                None,
+                                None,
+                                None,
+                            )
+                            .await
+                            .map_err(|err| Error::internal_error().data(err.to_string()))?;
+                        state
+                            .db
+                            .append_message(
+                                &turn_id,
+                                crate::store::Role::ToolResult,
+                                &serde_json::json!([{ "type": "text", "text": text }]).to_string(),
+                                Some(&input.invokable),
+                                Some(&call.id),
+                                Some(is_error),
+                                None,
+                            )
+                            .await
+                            .map_err(|err| Error::internal_error().data(err.to_string()))?;
+                        state
+                            .db
+                            .release_lease(&session_id, &owner)
+                            .await
+                            .ok();
+                        responder.respond(PromptResponse::new(StopReason::EndTurn))
+                    })?;
+                    return Ok(());
                 }
 
                 // Runtime availability commands: `/mcp` and `/editor`
@@ -975,7 +1063,7 @@ where
                         ));
                         // The tool surface changed shape, so the command
                         // listing is republished for the session.
-                        let commands = available_commands_update(&state_for_prompt).await;
+                        let commands = available_commands_update(&state_for_prompt, &negotiation_for_prompt).await;
                         let _ = cx.send_notification(SessionNotification::new(
                             request.session_id.clone(),
                             commands,
@@ -1447,7 +1535,7 @@ where
                     .map_err(|err| Error::internal_error().data(err.to_string()))?
                     .ok_or_else(|| Error::internal_error().data("no such session".to_owned()))?;
                 let selectors = config_options::build(&state_for_load, &session).await;
-                let commands = available_commands_update(&state_for_load).await;
+                let commands = available_commands_update(&state_for_load, &negotiation_for_load).await;
                 // The usage snapshot: exactly one after replay, so a
                 // reopened client shows the session's context state
                 // (FR-005, FR-007).
@@ -1890,18 +1978,11 @@ async fn run_model_tool_call(
                         .await
                     {
                         Ok(executed) => {
-                            let key = session_id.to_string();
-                            let mut terminals =
-                                negotiation.terminals.lock().expect("negotiation poisoned");
-                            if let Some(id) = executed.created {
-                                terminals.entry(key.clone()).or_default().insert(id);
-                            }
-                            if let Some(id) = executed.finished {
-                                if let Some(set) = terminals.get_mut(&key) {
-                                    set.remove(&id);
-                                }
-                            }
-                            drop(terminals);
+                            negotiation.track_terminals(
+                                &session_id.to_string(),
+                                executed.created,
+                                executed.finished,
+                            );
                             (executed.content, false)
                         }
                         Err(err) => (err, true),
