@@ -83,18 +83,29 @@ pub struct ConnectionNegotiation {
     /// Terminal ids the harness created for this connection, by session,
     /// for release at session close. Connection-scoped and ephemeral.
     terminals: Mutex<BTreeMap<String, BTreeSet<String>>>,
+    /// The connection's MCP pool: the configured servers plus any the
+    /// client forwarded, mutable via `/mcp`. Per-connection, so an
+    /// availability toggle or a forwarded server never bleeds into
+    /// another connection in the same process.
+    mcp_pool: Arc<tokio::sync::Mutex<McpPool>>,
 }
 
 impl ConnectionNegotiation {
     /// A fresh connection's state, with the editor toggles seeded from
-    /// configuration.
-    pub fn new(editor: client_tools::EditorToggles) -> Self {
+    /// configuration and its own MCP pool.
+    pub fn new(editor: client_tools::EditorToggles, mcp_pool: McpPool) -> Self {
         Self {
             supported: Mutex::new(BTreeSet::new()),
             caps: Mutex::new(client_tools::ClientCaps::default()),
             editor: Mutex::new(editor),
             terminals: Mutex::new(BTreeMap::new()),
+            mcp_pool: Arc::new(tokio::sync::Mutex::new(mcp_pool)),
         }
+    }
+
+    /// The connection's MCP pool handle.
+    pub fn mcp_pool(&self) -> Arc<tokio::sync::Mutex<McpPool>> {
+        Arc::clone(&self.mcp_pool)
     }
 
     fn capture(&self, capabilities: &agent_client_protocol::schema::v1::ClientCapabilities) {
@@ -141,20 +152,14 @@ impl ConnectionNegotiation {
 }
 
 /// State shared across the process's handlers: the session store, loaded
-/// configuration and definitions, and the mutable pools. Per-connection
-/// state (negotiation, the client surface, its terminals) lives in
+/// configuration, and definitions. Per-connection state (negotiation, the
+/// client surface, its terminals, and its MCP pool) lives in
 /// `ConnectionNegotiation` so HTTP connections never bleed into one
 /// another.
 pub struct TackleState {
     pub db: std::sync::Arc<SessionStore>,
     pub config: Loaded,
     pub definitions: Definitions,
-    /// The MCP pool, shared across every session on this process and
-    /// mutable: `/mcp` toggles server availability at runtime, so a turn
-    /// changes what later turns can call. The default sink is
-    /// fail-closed, so an elicitation no client surface answers is
-    /// declined rather than blocking a turn.
-    pub mcp_pool: tokio::sync::Mutex<McpPool>,
     /// The in-memory permission grant store (FR-014): keyed by session
     /// and invokable, gone on close, process exit, and resume after
     /// restart.
@@ -215,7 +220,8 @@ async fn available_commands_update(
     state: &TackleState,
     negotiation: &ConnectionNegotiation,
 ) -> SessionUpdate {
-    let pool = state.mcp_pool.lock().await;
+    let pool = negotiation.mcp_pool();
+    let pool = pool.lock().await;
     let mcp_tools = pool.list_tools().await;
     drop(pool);
 
@@ -274,25 +280,63 @@ fn forwarded_mcp_server(
 }
 
 /// Registers and connects the client-forwarded MCP servers for a
-/// session. Failures surface as pool statuses; a session is never
-/// failed by a forwarded server.
+/// session, on the connection's own pool. Failures surface as pool
+/// statuses; a session is never failed by a forwarded server.
 async fn connect_forwarded_servers(
-    state: &TackleState,
+    negotiation: &ConnectionNegotiation,
     servers: &[agent_client_protocol::schema::v1::McpServer],
 ) {
     let forwarded: Vec<_> = servers.iter().filter_map(forwarded_mcp_server).collect();
     if forwarded.is_empty() {
         return;
     }
-    state.mcp_pool.lock().await.add_forwarded(forwarded).await;
+    negotiation
+        .mcp_pool()
+        .lock()
+        .await
+        .add_forwarded(forwarded)
+        .await;
+}
+
+/// Builds a connection's MCP pool: every configured server is registered
+/// and connected concurrently, so a dead server is a status rather than a
+/// startup failure.
+pub(crate) async fn connect_config_servers(state: &TackleState) -> McpPool {
+    let helper = crate::agent::provider::credential_helper_name(&state.config.config);
+    let new_pool = || McpPool::new().with_credential_helper(helper.clone());
+    let mut pool = new_pool();
+    for (server_name, server_config) in &state.config.config.mcp_servers {
+        pool.register(server_name, server_config.clone());
+    }
+    let connecting = state
+        .config
+        .config
+        .mcp_servers
+        .iter()
+        .map(|(server_name, server_config)| {
+            let server_name = server_name.clone();
+            let server_config = server_config.clone();
+            let mut one = new_pool();
+            one.register(&server_name, server_config.clone());
+            async move {
+                one.connect(&server_name, &server_config).await;
+                one
+            }
+        })
+        .collect::<Vec<_>>();
+    for connected in futures::future::join_all(connecting).await {
+        pool.absorb(connected);
+    }
+    pool
 }
 
 /// The first-turn MCP report (FR-013): a warning notice naming enabled
 /// servers that failed to connect and config servers shadowed by a
 /// client-declared server of the same name. `None` when nothing is
 /// wrong, so a clean session stays silent.
-async fn mcp_status_notice(state: &TackleState) -> Option<Notice> {
-    let pool = state.mcp_pool.lock().await;
+async fn mcp_status_notice(negotiation: &ConnectionNegotiation) -> Option<Notice> {
+    let pool = negotiation.mcp_pool();
+    let pool = pool.lock().await;
     let mut problems: Vec<String> = pool
         .shadowed_servers()
         .into_iter()
@@ -350,7 +394,7 @@ fn mcp_status_line(name: &str, status: &ServerStatus, enabled: bool) -> String {
 /// one from being back. Enabling reconnects from the config held at
 /// registration; a failure to reconnect answers with the reason rather
 /// than leaving the user guessing.
-async fn mcp_command(state: &TackleState, first_text: &str) -> Option<String> {
+async fn mcp_command(negotiation: &ConnectionNegotiation, first_text: &str) -> Option<String> {
     let mut parts = first_text.split_whitespace();
     parts.next(); // the `/mcp` command itself
     let (subcommand, argument) = match parts.next() {
@@ -358,7 +402,8 @@ async fn mcp_command(state: &TackleState, first_text: &str) -> Option<String> {
         Some(subcommand) => (subcommand, parts.next()),
     };
 
-    let mut pool = state.mcp_pool.lock().await;
+    let pool = negotiation.mcp_pool();
+    let mut pool = pool.lock().await;
     match subcommand {
         "enable" => Some(match argument {
             None => "Usage: /mcp enable <server-name>".to_owned(),
@@ -429,9 +474,9 @@ fn editor_command(negotiation: &ConnectionNegotiation, first_text: &str) -> Opti
 
 /// Runs the ACP agent over stdio until the transport closes.
 pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result<()> {
-    let negotiation = Arc::new(ConnectionNegotiation::new(
-        client_tools::EditorToggles::from_config(&state.config.config),
-    ));
+    let editor = client_tools::EditorToggles::from_config(&state.config.config);
+    let pool = connect_config_servers(&state).await;
+    let negotiation = Arc::new(ConnectionNegotiation::new(editor, pool));
     // Ctrl-C/SIGTERM ends the transport cleanly: the connection is
     // dropped and the caller reports a normal shutdown.
     tokio::select! {
@@ -617,8 +662,8 @@ where
                 // response, so session/new returns immediately while their
                 // tools are in the advertisement that follows and their
                 // status is known before the first turn.
-                connect_forwarded_servers(&state_for_new, &request.mcp_servers).await;
-                if let Some(notice) = mcp_status_notice(&state_for_new).await {
+                connect_forwarded_servers(&negotiation_for_new, &request.mcp_servers).await;
+                if let Some(notice) = mcp_status_notice(&negotiation_for_new).await {
                     if negotiation_for_new.supports(UnstableFeature::SessionNotices) {
                         let _ = cx.send_notification(SessionNotification::new(
                             wire_id.clone(),
@@ -952,7 +997,8 @@ where
                                 }
                             }
                         } else {
-                            let pool = state.mcp_pool.lock().await;
+                            let pool = negotiation.mcp_pool();
+                            let pool = pool.lock().await;
                             let tools = pool.list_tools().await;
                             let executed = match crate::invokables::Registry::build(
                                 &state.definitions,
@@ -1045,7 +1091,7 @@ where
                     let reply = if first_text.starts_with("/editor") {
                         editor_command(&negotiation_for_prompt, &first_text)
                     } else {
-                        mcp_command(&state_for_prompt, &first_text).await
+                        mcp_command(&negotiation_for_prompt, &first_text).await
                     };
                     if let Some(reply) = reply {
                         let message = state_for_prompt
@@ -1227,7 +1273,8 @@ where
                         .get(&a.frontmatter.persona)
                 });
                 let mcp_tokens = {
-                    let pool = state_for_prompt.mcp_pool.lock().await;
+                    let pool = negotiation_for_turn.mcp_pool();
+                    let pool = pool.lock().await;
                     pool.list_tools().await
                 };
                 // The client-capability tools the connection advertised
@@ -1538,7 +1585,7 @@ where
             async move |request: LoadSessionRequest, responder, cx| {
                 // A forwarded server's tools must be addressable before
                 // the re-advertisement below lists them.
-                connect_forwarded_servers(&state_for_load, &request.mcp_servers).await;
+                connect_forwarded_servers(&negotiation_for_load, &request.mcp_servers).await;
                 // Replay: full user-visible history in DAG order. Usage
                 // snapshot emission lands with T-016's model metadata.
                 let assembled = state_for_load
@@ -1605,7 +1652,7 @@ where
             async move |request: ResumeSessionRequest, responder, cx| {
                 // Resume reattaches WITHOUT replay (FR-003); config
                 // selectors ride the response like session/new.
-                connect_forwarded_servers(&state_for_resume, &request.mcp_servers).await;
+                connect_forwarded_servers(&negotiation_for_resume, &request.mcp_servers).await;
                 let session = state_for_resume
                     .db
                     .get_session(&store_session_id(&request.session_id))
@@ -2028,7 +2075,8 @@ async fn run_model_tool_call(
                     Err(err) => (err, true),
                 }
             } else {
-                let pool = state.mcp_pool.lock().await;
+                let pool = negotiation.mcp_pool();
+                let pool = pool.lock().await;
                 match registry.execute_model(&pool, &call.name, &arguments).await {
                     Ok(text) => (text, false),
                     Err(err) => (err, true),
@@ -2271,8 +2319,8 @@ mod tests {
             fs: true,
             terminal: true,
         };
-        let a = ConnectionNegotiation::new(on);
-        let b = ConnectionNegotiation::new(on);
+        let a = ConnectionNegotiation::new(on, McpPool::new());
+        let b = ConnectionNegotiation::new(on, McpPool::new());
 
         assert_eq!(
             editor_command(&a, "/editor terminal false").as_deref(),
@@ -2280,5 +2328,28 @@ mod tests {
         );
         assert!(!a.editor_toggles().terminal, "a toggled off");
         assert!(b.editor_toggles().terminal, "b is untouched");
+    }
+
+    #[tokio::test]
+    async fn mcp_pools_are_per_connection() {
+        let on = client_tools::EditorToggles {
+            fs: true,
+            terminal: true,
+        };
+        let a = ConnectionNegotiation::new(on, McpPool::new());
+        let b = ConnectionNegotiation::new(on, McpPool::new());
+
+        a.mcp_pool().lock().await.register(
+            "only-a",
+            crate::config::McpServerConfig::Http {
+                url: "http://example.invalid".to_owned(),
+            },
+        );
+
+        assert_eq!(a.mcp_pool().lock().await.server_names(), vec!["only-a"]);
+        assert!(
+            b.mcp_pool().lock().await.server_names().is_empty(),
+            "a connection's servers never appear on another"
+        );
     }
 }
