@@ -73,6 +73,18 @@ GITHUB_PERSONAL_ACCESS_TOKEN = "{cred:github}"
 
 The marker must be the entire value; any other value passes through literally. Resolution happens at spawn, never at config load, so secrets never enter the configuration — a failed lookup fails that server's connection (reported in the first-turn status) instead. Store the secret with `tackle auth add github <token>`; see [Setting up your tools](../setting-up-your-tools).
 
+## `client_tools`
+
+The ACP client advertises file-system and terminal capabilities; tackle reflects them to the model as `client.*` tools. This section toggles the two categories, and is user-layer only — a project layer may not set it:
+
+```toml
+[client_tools]
+fs_enabled = true        # client.fs.read_text_file / client.fs.write_text_file
+terminal_enabled = true  # the client.terminal.* family
+```
+
+Both default on. A category the client did not advertise is never exposed regardless of the toggle. `/editor <fs|terminal> <true|false>` overrides a category for the connection at runtime.
+
 ## `scripts`
 
 Behaviour scripts, registered per event:

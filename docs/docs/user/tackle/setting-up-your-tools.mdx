@@ -84,6 +84,23 @@ The model sees each connected tool as an invokable named `mcp.<server>.<tool>` a
 
 Oversized results are truncated at a fixed limit with the original size recorded; the full content is what the server sent and is kept in the session store.
 
+## Client-capability tools
+
+When the client advertises them, the editor's own file-system and terminal surface is reflected to the model as `client.*` tools — `client.fs.read_text_file`, `client.fs.write_text_file`, and the `client.terminal.*` family (`create`, `output`, `wait_for_exit`, `kill`, `release`). They execute against the connected client rather than an MCP server, and take the same permission pipeline as any other tool.
+
+Toggle the categories for the connection with `/editor`:
+
+```
+/editor fs false
+/editor terminal true
+```
+
+`[client_tools]` in user configuration seeds the toggles at startup; a category the client did not advertise is never exposed regardless. As with MCP tools, you can invoke a client tool directly:
+
+```
+/!client.fs.read_text_file { "path": "/abs/path/file.rs" }
+```
+
 ## Checking it works
 
 Start a session and read the first-turn report; `/mcp status` lists the same state. `remote: connected` (or a named failure reason) tells you the server was reached. A tool that fails a credential lookup shows up as `failed` with the helper's error.

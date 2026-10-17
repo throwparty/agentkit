@@ -48,7 +48,10 @@ pub fn first_run_seed(state: &TackleState) -> String {
     lines.push(
         "Commands: /name [arguments] runs a prompt (the last parameter takes the \
          remainder); /!mcp.<server>.<tool> {json arguments} runs an MCP tool \
-         directly with no model request and no permission ask."
+         directly with no model request and no permission ask; \
+         /!client.<surface>.<method> {json arguments} runs a client-capability tool; \
+         /editor <fs|terminal> <true|false> toggles the editor's file-system and \
+         terminal tools for this connection."
             .to_owned(),
     );
     lines.join("\n")
