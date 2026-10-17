@@ -59,12 +59,6 @@ pub fn init() -> TelemetryGuard {
     }
 }
 
-/// The diagnostics writer: stderr, always. Stdout is the ACP wire on
-/// the stdio transport.
-pub fn diagnostics_writer() -> std::io::Stderr {
-    std::io::stderr()
-}
-
 /// Which exporters are on, per the switchboard-otel env contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TelemetryConfig {
