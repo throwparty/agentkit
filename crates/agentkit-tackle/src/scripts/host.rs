@@ -95,6 +95,36 @@ pub trait CompletionSink: Send + Sync {
     fn take(&self, session: &SessionId) -> Option<Completion>;
 }
 
+/// The agent-loop-pending dispatcher: the agent loop integration drives
+/// script-issued model turns and the user message is already stored, so
+/// there is nothing left to do here. The single shared stub for the
+/// paths where the real loop is not reachable (compaction, titling, and
+/// fork scripts).
+pub struct LoopPendingDispatcher;
+
+impl PromptDispatcher for LoopPendingDispatcher {
+    fn dispatch(&self, _session: &SessionId, _text: &str) -> Result<(), HostError> {
+        Ok(())
+    }
+}
+
+/// The agent-loop-pending completion sink: scripts awaiting a completion
+/// degrade gracefully on a non-end_turn answer instead of hanging on
+/// their timeout.
+pub struct LoopPendingCompletions;
+
+impl CompletionSink for LoopPendingCompletions {
+    fn publish(&self, _session: &SessionId, _completion: Completion) {}
+    fn take(&self, _session: &SessionId) -> Option<Completion> {
+        Some(Completion {
+            stop_reason: "model-loop-pending".to_owned(),
+            final_message: String::new(),
+            input_tokens: 0,
+            output_tokens: 0,
+        })
+    }
+}
+
 /// The seam between the script host and the session engine: history
 /// search, fork, prompt, compaction recording, titling.
 pub trait SessionAccess: Send + Sync {

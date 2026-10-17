@@ -9,8 +9,8 @@
 
 use crate::acp::TackleState;
 use crate::scripts::host::{
-    block_on, BehaviourHost, Completion, CompletionSink, PromptDispatcher, SessionAccess,
-    StoreAccess,
+    block_on, BehaviourHost, Completion, CompletionSink, LoopPendingCompletions,
+    LoopPendingDispatcher, SessionAccess, StoreAccess,
 };
 use crate::scripts::{behaviour_engine, host::register_host_api};
 use crate::store::SessionId;
@@ -168,38 +168,10 @@ pub fn fire_title_trigger_detached(
     });
 }
 
-struct LoopPendingDispatcher;
-impl PromptDispatcher for LoopPendingDispatcher {
-    fn dispatch(
-        &self,
-        _session: &SessionId,
-        _text: &str,
-    ) -> Result<(), crate::scripts::host::HostError> {
-        // The agent loop integration drives these model turns; the user
-        // message is already stored, so nothing is lost.
-        Ok(())
-    }
-}
-
-struct LoopPendingCompletions;
-impl CompletionSink for LoopPendingCompletions {
-    fn publish(&self, _session: &SessionId, _completion: Completion) {}
-    fn take(&self, _session: &SessionId) -> Option<Completion> {
-        // The agent loop integration drives these model turns; scripts
-        // awaiting a completion degrade silently on a non-end_turn
-        // answer instead of hanging on their timeout.
-        Some(Completion {
-            stop_reason: "model-loop-pending".to_owned(),
-            final_message: String::new(),
-            input_tokens: 0,
-            output_tokens: 0,
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scripts::host::PromptDispatcher;
     use crate::store::{SessionKind, SessionStore};
     use std::collections::BTreeSet;
 

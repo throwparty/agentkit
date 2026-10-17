@@ -1699,8 +1699,12 @@ where
                                 let access: std::sync::Arc<dyn fork::SessionAccess> =
                                     std::sync::Arc::new(compaction::StoreAccess::new(
                                         std::sync::Arc::clone(&state_for_config.db),
-                                        std::sync::Arc::new(compaction::LoopPendingDispatcher),
-                                        std::sync::Arc::new(compaction::LoopPendingCompletions),
+                                        std::sync::Arc::new(
+                                            crate::scripts::host::LoopPendingDispatcher,
+                                        ),
+                                        std::sync::Arc::new(
+                                            crate::scripts::host::LoopPendingCompletions,
+                                        ),
                                         0,
                                     ));
                                 let mut updates: Vec<agent_client_protocol::schema::v1::Notice> =
@@ -1827,37 +1831,10 @@ where
 /// backend with the loop dispatcher pending (T-015 integration); model
 /// turns driven by scripts queue as user messages meanwhile.
 fn fork_access(state: &TackleState) -> std::sync::Arc<dyn fork::SessionAccess> {
-    struct LoopPendingDispatcher;
-    impl fork::PromptDispatcher for LoopPendingDispatcher {
-        fn dispatch(
-            &self,
-            _session: &crate::store::SessionId,
-            _text: &str,
-        ) -> Result<(), fork::HostError> {
-            // The agent loop integration drives these model turns; the
-            // user message is already stored, so nothing is lost.
-            Ok(())
-        }
-    }
-    struct LoopPendingCompletions;
-    impl fork::CompletionSink for LoopPendingCompletions {
-        fn publish(&self, _session: &crate::store::SessionId, _completion: fork::Completion) {}
-        fn take(&self, _session: &crate::store::SessionId) -> Option<fork::Completion> {
-            // The agent loop integration drives these model turns;
-            // scripts awaiting a completion degrade gracefully on a
-            // non-end_turn answer instead of hanging on their timeout.
-            Some(fork::Completion {
-                stop_reason: "model-loop-pending".to_owned(),
-                final_message: String::new(),
-                input_tokens: 0,
-                output_tokens: 0,
-            })
-        }
-    }
     std::sync::Arc::new(fork::StoreAccess::new(
         std::sync::Arc::clone(&state.db),
-        std::sync::Arc::new(LoopPendingDispatcher),
-        std::sync::Arc::new(LoopPendingCompletions),
+        std::sync::Arc::new(crate::scripts::host::LoopPendingDispatcher),
+        std::sync::Arc::new(crate::scripts::host::LoopPendingCompletions),
         0,
     ))
 }
