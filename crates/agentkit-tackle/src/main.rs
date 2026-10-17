@@ -57,19 +57,16 @@ async fn run(args: cli::Cli) -> ExitCode {
 
     let identity = config::trust::project_identity(std::path::Path::new("."));
     let trust_path = user_config_dir.join("trust.toml");
-    let mut trust_store = match config::trust::TrustStore::load(trust_path) {
+    let trust_store = match config::trust::TrustStore::load(trust_path) {
         Ok(store) => store,
         Err(err) => return fail(err),
     };
-    let prompt = config::trust::DenyPrompt;
-    let mut gate = config::trust::Gate {
-        store: &mut trust_store,
-        identity: &identity,
-        prompt: &prompt,
-    };
 
-    let loaded =
-        match config::load_layered(&user_config_dir, Some(&project_config_dir), Some(&mut gate)) {
+    // The project layer is not merged at load: its executable entries are
+    // trust-gated, and consent is resolved at the first session (there is
+    // no ACP connection at startup to prompt through).
+    let (loaded, project_config) =
+        match config::load_layered_deferred(&user_config_dir, Some(&project_config_dir)) {
             Ok(loaded) => loaded,
             Err(err) => return fail(err),
         };
@@ -86,9 +83,10 @@ async fn run(args: cli::Cli) -> ExitCode {
         Ok(definitions) => definitions,
         Err(err) => return fail(err),
     };
-    let project_entries = definitions.project_trust_entries(&project_config_dir);
-    let approved = gate.gate(&project_entries);
-    definitions.retain_project(&project_config_dir, &approved);
+    // Keep the full definitions for the pending project layer, but drop
+    // the project entries from the active set until they are trusted.
+    let full_definitions = definitions.clone();
+    definitions.retain_project(&project_config_dir, &std::collections::BTreeSet::new());
     tracing::info!(
         personas = definitions.personas.len(),
         actors = definitions.actors.len(),
@@ -104,12 +102,22 @@ async fn run(args: cli::Cli) -> ExitCode {
     // MCP pools are per-connection: each connection registers and
     // connects the configured servers itself, so `/mcp` toggles and
     // client-forwarded servers never bleed between connections.
-    let state = Arc::new(TackleState {
-        db: Arc::new(db),
-        config: loaded,
-        definitions,
-        grants: tokio::sync::Mutex::new(agentkit_tackle::permissions::GrantStore::default()),
-    });
+    let state = Arc::new(TackleState::new(Arc::new(db), loaded, definitions));
+
+    // Hold the project layer until the first session resolves trust. A
+    // project may have config, definitions, or both.
+    let project_entries = full_definitions.project_trust_entries(&project_config_dir);
+    if project_config.is_some() || !project_entries.is_empty() {
+        state
+            .set_pending_project(acp::PendingProject {
+                config: project_config.unwrap_or_default(),
+                definitions: full_definitions,
+                project_dir: project_config_dir.clone(),
+                identity,
+                trust_store,
+            })
+            .await;
+    }
 
     match bind {
         None => match acp::run_stdio(state).await {

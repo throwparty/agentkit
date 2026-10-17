@@ -58,10 +58,11 @@ pub fn fire_compaction_requested(
     size: u64,
     cost_usd: f64,
 ) {
-    let user_dir = state.config.user_layer.as_deref().and_then(Path::parent);
-    let project_dir = state.config.project_layer.as_deref().and_then(Path::parent);
+    let config = state.config();
+    let user_dir = config.user_layer.as_deref().and_then(Path::parent);
+    let project_dir = config.project_layer.as_deref().and_then(Path::parent);
     let known_actors: std::collections::BTreeSet<String> =
-        state.definitions.actors.keys().cloned().collect();
+        state.definitions().actors.keys().cloned().collect();
 
     for (name, source) in event_sources(state, user_dir, project_dir, "compaction_requested") {
         let host = BehaviourHost::new(
@@ -112,10 +113,11 @@ pub fn fire_post_turn(
     if window_size == 0 {
         return;
     }
-    let user_dir = state.config.user_layer.as_deref().and_then(Path::parent);
-    let project_dir = state.config.project_layer.as_deref().and_then(Path::parent);
+    let config = state.config();
+    let user_dir = config.user_layer.as_deref().and_then(Path::parent);
+    let project_dir = config.project_layer.as_deref().and_then(Path::parent);
     let known_actors: std::collections::BTreeSet<String> =
-        state.definitions.actors.keys().cloned().collect();
+        state.definitions().actors.keys().cloned().collect();
 
     let ephemeral = matches!(
         block_on(state.db.get_session(session_id)),
@@ -197,7 +199,7 @@ fn event_sources(
     event: &str,
 ) -> Vec<(String, String)> {
     let mut sources = Vec::new();
-    for (name, config) in &state.config.config.scripts {
+    for (name, config) in &state.config().config.scripts {
         if !config.enabled || !config.events.iter().any(|registered| registered == event) {
             continue;
         }
@@ -515,12 +517,11 @@ mod tests {
         );
         config.user_layer = Some(temp.path().join("config.toml"));
 
-        let state = Arc::new(TackleState {
-            db: Arc::clone(&store),
+        let state = Arc::new(TackleState::new(
+            Arc::clone(&store),
             config,
-            definitions: crate::loader::Definitions::default(),
-            grants: tokio::sync::Mutex::new(crate::permissions::GrantStore::default()),
-        });
+            crate::loader::Definitions::default(),
+        ));
         let access: Arc<dyn SessionAccess> = Arc::new(StoreAccess::new(
             Arc::clone(&store),
             Arc::new(LoopPendingDispatcher),
@@ -558,12 +559,11 @@ mod tests {
         let session =
             block_on(store.create_session(SessionKind::Interactive, "/work", None, None, "{}"))
                 .unwrap();
-        let state = Arc::new(TackleState {
-            db: Arc::clone(&store),
-            config: crate::config::Loaded::default(),
-            definitions: crate::loader::Definitions::default(),
-            grants: tokio::sync::Mutex::new(crate::permissions::GrantStore::default()),
-        });
+        let state = Arc::new(TackleState::new(
+            Arc::clone(&store),
+            crate::config::Loaded::default(),
+            crate::loader::Definitions::default(),
+        ));
         let access: Arc<dyn SessionAccess> = Arc::new(StoreAccess::new(
             Arc::clone(&store),
             Arc::new(LoopPendingDispatcher),

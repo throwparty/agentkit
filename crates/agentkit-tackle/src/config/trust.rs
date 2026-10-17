@@ -22,8 +22,9 @@ pub trait ConsentPrompt {
     fn consent(&self, identity: &str, entries: &BTreeSet<String>) -> bool;
 }
 
-/// Fail-closed stub: denies all consent until T-022 wires the ACP
-/// permission flow.
+/// Fail-closed stub: denies all consent. Retained for the synchronous
+/// config-load path; the production path resolves consent at the first
+/// session, where an ACP connection exists to prompt through.
 pub struct DenyPrompt;
 
 impl ConsentPrompt for DenyPrompt {
@@ -115,6 +116,51 @@ impl TrustStore {
         })
     }
 
+    /// The entries (relative paths) that need consent: unknown or changed.
+    /// The async first-session flow uses this to build the prompt content,
+    /// then [`Self::approve`] on consent.
+    pub fn consent_needed(
+        &self,
+        identity: &str,
+        entries: &BTreeMap<String, String>,
+    ) -> BTreeSet<String> {
+        entries
+            .iter()
+            .filter(|(rel_path, hash)| {
+                matches!(
+                    self.state(identity, rel_path, hash),
+                    TrustState::Unknown | TrustState::Changed
+                )
+            })
+            .map(|(rel_path, _)| rel_path.clone())
+            .collect()
+    }
+
+    /// Records every entry as trusted and persists, one batch.
+    pub fn approve(
+        &mut self,
+        identity: &str,
+        entries: &BTreeMap<String, String>,
+    ) -> Result<(), TrustError> {
+        self.record_all(identity, entries);
+        self.save()
+    }
+
+    /// The approved subset: entries recorded and unchanged.
+    pub fn approved(
+        &self,
+        identity: &str,
+        entries: &BTreeMap<String, String>,
+    ) -> BTreeSet<String> {
+        entries
+            .iter()
+            .filter(|(rel_path, hash)| {
+                matches!(self.state(identity, rel_path, hash), TrustState::Trusted)
+            })
+            .map(|(rel_path, _)| rel_path.clone())
+            .collect()
+    }
+
     /// Gates `entries` (relative paths and their current hashes) for
     /// `identity`: already-trusted, unchanged entries pass; unknown or
     /// changed entries require consent — granted in one batch, refused
@@ -125,30 +171,13 @@ impl TrustStore {
         entries: &BTreeMap<String, String>,
         prompt: &dyn ConsentPrompt,
     ) -> BTreeSet<String> {
-        let needs_consent: Vec<(&String, TrustState)> = entries
-            .iter()
-            .map(|(rel_path, hash)| (rel_path, self.state(identity, rel_path, hash)))
-            .filter(|(_, state)| matches!(state, TrustState::Unknown | TrustState::Changed))
-            .collect();
-
-        let untrusted: BTreeSet<String> = needs_consent
-            .iter()
-            .map(|(path, _)| (*path).clone())
-            .collect();
+        let untrusted = self.consent_needed(identity, entries);
         if !untrusted.is_empty() && prompt.consent(identity, &untrusted) {
-            self.record_all(identity, entries);
-            if let Err(err) = self.save() {
+            if let Err(err) = self.approve(identity, entries) {
                 tracing::error!("{err}");
             }
         }
-
-        entries
-            .iter()
-            .filter(|(rel_path, hash)| {
-                matches!(self.state(identity, rel_path, hash), TrustState::Trusted)
-            })
-            .map(|(rel_path, _)| rel_path.clone())
-            .collect()
+        self.approved(identity, entries)
     }
 }
 
@@ -296,6 +325,22 @@ mod tests {
         let prompt = StubPrompt::granted();
         let approved = store.gate("remote", &entries, &prompt);
         assert_eq!(approved.len(), 2);
+    }
+
+    #[test]
+    fn consent_needed_and_approved_split_by_trust_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = TrustStore::load(dir.path().join("trust.toml")).unwrap();
+        let entries = entries_one();
+
+        // Nothing recorded: consent is needed, nothing approved.
+        assert_eq!(store.consent_needed("remote", &entries).len(), 1);
+        assert!(store.approved("remote", &entries).is_empty());
+
+        // After approval: no consent needed, everything approved.
+        store.approve("remote", &entries).unwrap();
+        assert!(store.consent_needed("remote", &entries).is_empty());
+        assert_eq!(store.approved("remote", &entries).len(), 1);
     }
 
     #[test]

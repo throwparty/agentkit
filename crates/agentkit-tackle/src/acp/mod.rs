@@ -156,15 +156,148 @@ impl ConnectionNegotiation {
 /// client surface, its terminals, and its MCP pool) lives in
 /// `ConnectionNegotiation` so HTTP connections never bleed into one
 /// another.
+///
+/// Configuration and definitions are behind a lock because the project
+/// layer is applied late: trust consent is resolved at the first session
+/// (there is no ACP connection at startup to prompt through), so the
+/// ungated project layer waits in `pending_project` until then.
 pub struct TackleState {
     pub db: std::sync::Arc<SessionStore>,
-    pub config: Loaded,
-    pub definitions: Definitions,
+    config: std::sync::RwLock<std::sync::Arc<Loaded>>,
+    definitions: std::sync::RwLock<std::sync::Arc<Definitions>>,
     /// The in-memory permission grant store (FR-014): keyed by session
     /// and invokable, gone on close, process exit, and resume after
     /// restart.
     pub grants: tokio::sync::Mutex<crate::permissions::GrantStore>,
+    /// The project layer awaiting first-session consent.
+    pending_project: tokio::sync::Mutex<Option<PendingProject>>,
 }
+
+/// The ungated project layer, held until the first session resolves
+/// trust: its config, the full definitions (project entries included,
+/// pruned from the active set), the project directory, and the trust
+/// record to extend on approval.
+pub struct PendingProject {
+    pub config: crate::config::Config,
+    pub definitions: Definitions,
+    pub project_dir: std::path::PathBuf,
+    pub identity: String,
+    pub trust_store: crate::config::trust::TrustStore,
+}
+
+impl TackleState {
+    /// Builds the process state from the user layer and built-in defaults
+    /// (no project layer yet).
+    pub fn new(
+        db: std::sync::Arc<SessionStore>,
+        config: Loaded,
+        definitions: Definitions,
+    ) -> Self {
+        Self {
+            db,
+            config: std::sync::RwLock::new(std::sync::Arc::new(config)),
+            definitions: std::sync::RwLock::new(std::sync::Arc::new(definitions)),
+            grants: tokio::sync::Mutex::new(crate::permissions::GrantStore::default()),
+            pending_project: tokio::sync::Mutex::new(None),
+        }
+    }
+
+    /// The active configuration. A cheap `Arc` clone, so callers never
+    /// hold a lock guard across an await.
+    pub fn config(&self) -> std::sync::Arc<Loaded> {
+        std::sync::Arc::clone(&self.config.read().expect("config lock poisoned"))
+    }
+
+    /// The active definitions (project entries included once trusted).
+    pub fn definitions(&self) -> std::sync::Arc<Definitions> {
+        std::sync::Arc::clone(
+            &self.definitions.read().expect("definitions lock poisoned"),
+        )
+    }
+
+    /// Records the ungated project layer to resolve at the first session.
+    pub async fn set_pending_project(&self, pending: PendingProject) {
+        *self.pending_project.lock().await = Some(pending);
+    }
+
+    /// Resolves the pending project layer against this connection: prompt
+    /// for consent through `session/request_permission`, record it in
+    /// `trust.toml`, and apply the approved config, definitions, and MCP
+    /// servers. Only the first session resolves it.
+    async fn resolve_pending_project<R: crate::permissions::PermissionRequester>(
+        &self,
+        negotiation: Option<&ConnectionNegotiation>,
+        requester: &R,
+        session_id: &str,
+    ) {
+        let Some(mut pending) = self.pending_project.lock().await.take() else {
+            return;
+        };
+        let mut entries = crate::config::project_trust_entries(&pending.config);
+        entries.extend(
+            pending
+                .definitions
+                .project_trust_entries(&pending.project_dir),
+        );
+        if !entries.is_empty() {
+            let needed = pending.trust_store.consent_needed(&pending.identity, &entries);
+            if !needed.is_empty() {
+                let content = format!(
+                    "Trust project `{}` and load its configuration: {}",
+                    pending.identity,
+                    needed.iter().cloned().collect::<Vec<_>>().join(", ")
+                );
+                let choice = requester
+                    .request(crate::permissions::PermissionRequest {
+                        session_id: session_id.to_owned(),
+                        invokable: "trust".to_owned(),
+                        arguments: serde_json::Value::Null,
+                        ask_reason: Some(content),
+                    })
+                    .await;
+                if matches!(
+                    choice,
+                    crate::permissions::PermissionChoice::AllowOnce
+                        | crate::permissions::PermissionChoice::AllowAlways
+                ) {
+                    if let Err(err) = pending.trust_store.approve(&pending.identity, &entries) {
+                        tracing::error!("{err}");
+                    }
+                }
+            }
+        }
+        let approved = pending.trust_store.approved(&pending.identity, &entries);
+        let gated = crate::config::retain_project_entries(pending.config, &approved);
+        let mut definitions = pending.definitions;
+        definitions.retain_project(&pending.project_dir, &approved);
+
+        let base = self.config();
+        let merged = base.config.clone().merge(gated.clone());
+        *self.config.write().expect("config lock poisoned") = std::sync::Arc::new(Loaded {
+            config: merged,
+            user_layer: base.user_layer.clone(),
+            project_layer: base.project_layer.clone(),
+        });
+        *self.definitions.write().expect("definitions lock poisoned") =
+            std::sync::Arc::new(definitions);
+
+        // Connect the approved project servers into this connection's
+        // pool (built from the user layer when the connection opened).
+        if let Some(negotiation) = negotiation {
+            if !gated.mcp_servers.is_empty() {
+                let pool = negotiation.mcp_pool();
+                let mut pool = pool.lock().await;
+                for (name, config) in &gated.mcp_servers {
+                    pool.register(name, config.clone());
+                }
+                for (name, config) in &gated.mcp_servers {
+                    pool.connect(name, config).await;
+                }
+            }
+        }
+    }
+}
+
 
 impl TackleState {
     /// The capability map: the stable v1 surface plus the unstable
@@ -230,7 +363,7 @@ async fn available_commands_update(
         negotiation.editor_toggles(),
     );
     let registry = match crate::invokables::Registry::build_with_client_tools(
-        &state.definitions,
+        &state.definitions(),
         &mcp_tools,
         &client_tools,
     ) {
@@ -302,14 +435,14 @@ async fn connect_forwarded_servers(
 /// and connected concurrently, so a dead server is a status rather than a
 /// startup failure.
 pub(crate) async fn connect_config_servers(state: &TackleState) -> McpPool {
-    let helper = crate::agent::provider::credential_helper_name(&state.config.config);
+    let helper = crate::agent::provider::credential_helper_name(&state.config().config);
     let new_pool = || McpPool::new().with_credential_helper(helper.clone());
     let mut pool = new_pool();
-    for (server_name, server_config) in &state.config.config.mcp_servers {
+    for (server_name, server_config) in &state.config().config.mcp_servers {
         pool.register(server_name, server_config.clone());
     }
     let connecting = state
-        .config
+        .config()
         .config
         .mcp_servers
         .iter()
@@ -474,7 +607,7 @@ fn editor_command(negotiation: &ConnectionNegotiation, first_text: &str) -> Opti
 
 /// Runs the ACP agent over stdio until the transport closes.
 pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result<()> {
-    let editor = client_tools::EditorToggles::from_config(&state.config.config);
+    let editor = client_tools::EditorToggles::from_config(&state.config().config);
     let pool = connect_config_servers(&state).await;
     let negotiation = Arc::new(ConnectionNegotiation::new(editor, pool));
     // Ctrl-C/SIGTERM ends the transport cleanly: the connection is
@@ -567,7 +700,7 @@ where
                 // Default actor selection: [defaults].actor, else the
                 // built-in "default" (T-031 adds the client selector).
                 let actor = state_for_new
-                    .config
+                    .config()
                     .config
                     .defaults
                     .actor
@@ -589,6 +722,24 @@ where
                 // creation never blocks on them. Client-forwarded servers
                 // (session/new's mcp_servers) register and connect after
                 // the response, below.
+                //
+                // The project layer awaits trust: resolve consent on this
+                // connection (the first session does) before the seed and
+                // selectors read the effective configuration.
+                {
+                    let trust_session = wire_session_id(&session.id);
+                    let requester = AcpPermissionRequester {
+                        cx: cx.clone(),
+                        session_id: trust_session.clone(),
+                    };
+                    state_for_new
+                        .resolve_pending_project(
+                            Some(&negotiation_for_new),
+                            &requester,
+                            &trust_session.to_string(),
+                        )
+                        .await;
+                }
                 // The first-session seed: harness-authored static content
                 // documenting the loaded configuration and the command
                 // syntaxes, on its own seed turn.
@@ -687,7 +838,7 @@ where
                 let filter = crate::store::ListFilter {
                     cwd: cwd.as_deref(),
                     include_ephemeral: state_for_list
-                        .config
+                        .config()
                         .config
                         .sessions
                         .include_ephemeral
@@ -1001,7 +1152,7 @@ where
                             let pool = pool.lock().await;
                             let tools = pool.list_tools().await;
                             let executed = match crate::invokables::Registry::build(
-                                &state.definitions,
+                                &state.definitions(),
                                 &tools,
                             ) {
                                 Ok(registry) => registry
@@ -1148,7 +1299,7 @@ where
                     .map(|row| {
                         session_actor(
                             row,
-                            state_for_prompt.config.config.defaults.actor.as_deref(),
+                            state_for_prompt.config().config.defaults.actor.as_deref(),
                         )
                     })
                     .unwrap_or_else(|| "default".into());
@@ -1156,7 +1307,7 @@ where
                 // Compaction-tagged prompts: intercepted — the
                 // compaction_requested script event fires instead of a
                 // model turn in the main session.
-                if compaction::is_compaction_command(&state_for_prompt.definitions, &first_text) {
+                if compaction::is_compaction_command(&state_for_prompt.definitions(), &first_text) {
                     let size = session_row
                         .as_ref()
                         .and_then(|row| {
@@ -1265,13 +1416,10 @@ where
                 let negotiation_for_turn = negotiation_for_prompt.clone();
                 let spawn_cx = cx.clone();
                 spawn_cx.spawn(async move {
-                let actor = state_for_prompt.definitions.actors.get(&actor_name);
-                let persona = actor.and_then(|a| {
-                    state_for_prompt
-                        .definitions
-                        .personas
-                        .get(&a.frontmatter.persona)
-                });
+                let definitions = state_for_prompt.definitions();
+                let actor = definitions.actors.get(&actor_name);
+                let persona =
+                    actor.and_then(|a| definitions.personas.get(&a.frontmatter.persona));
                 let mcp_tokens = {
                     let pool = negotiation_for_turn.mcp_pool();
                     let pool = pool.lock().await;
@@ -1285,7 +1433,7 @@ where
                     negotiation_for_turn.editor_toggles(),
                 );
                 let registry = crate::invokables::Registry::build_with_client_tools(
-                    &state_for_prompt.definitions,
+                    &definitions,
                     &mcp_tokens,
                     &client_tools,
                 )
@@ -1348,14 +1496,14 @@ where
 
                 let provider = crate::agent::provider::provider_for(
                     &model_ref,
-                    &state_for_prompt.config.config,
+                    &state_for_prompt.config().config,
                 )
                 .map_err(|err| Error::internal_error().data(err.to_string()))?;
                 // The context-length failure note: actionable, naming
                 // the configured compaction script (or its absence).
                 let context_length_note = compaction::compaction_disabled_note(
                     state_for_prompt
-                        .config
+                        .config()
                         .config
                         .scripts
                         .iter()
@@ -1391,7 +1539,7 @@ where
                     prior,
                     tools,
                     state_for_prompt
-                        .config
+                        .config()
                         .config
                         .turns
                         .max_model_requests
@@ -1916,13 +2064,9 @@ fn notification(session_id: &SessionId, update: SessionUpdate) -> SessionNotific
 
 /// The registered `pre_tool_use` policy script sources (FR-015).
 fn policy_script_sources(state: &TackleState) -> Vec<String> {
-    let user_dir = state
-        .config
-        .user_layer
-        .as_deref()
-        .and_then(std::path::Path::parent);
-    state
-        .config
+    let config = state.config();
+    let user_dir = config.user_layer.as_deref().and_then(std::path::Path::parent);
+    config
         .config
         .scripts
         .values()
@@ -2099,13 +2243,12 @@ async fn run_agent_invocation(
 ) -> Result<String, String> {
     let target = invokable.strip_prefix("agent.").unwrap_or(invokable);
     let parent = store_session_id(parent_session);
-    let actor = state
-        .definitions
+    let definitions = state.definitions();
+    let actor = definitions
         .actors
         .get(target)
         .ok_or_else(|| format!("unknown actor `{target}`"))?;
-    let persona = state
-        .definitions
+    let persona = definitions
         .personas
         .get(&actor.frontmatter.persona)
         .map(|persona| persona.body.clone())
@@ -2132,7 +2275,7 @@ async fn run_agent_invocation(
         .clone()
         .or_else(|| config_options::resolve_model_for(state, &session, None))
         .ok_or_else(|| "no model configured for the nested agent".to_owned())?;
-    let provider = crate::agent::provider::provider_for(&model_ref, &state.config.config)
+    let provider = crate::agent::provider::provider_for(&model_ref, &state.config().config)
         .map_err(|err| err.to_string())?;
     let result = crate::agent::nested::run_nested_agent(
         &provider,
@@ -2142,7 +2285,7 @@ async fn run_agent_invocation(
         &persona,
         &model_ref,
         &prompt,
-        state.config.config.turns.max_model_requests.unwrap_or(8),
+        state.config().config.turns.max_model_requests.unwrap_or(8),
     )
     .await
     .map_err(|err| err.to_string())?;
@@ -2329,5 +2472,91 @@ mod tests {
             b.mcp_pool().lock().await.server_names().is_empty(),
             "a connection's servers never appear on another"
         );
+    }
+
+    struct ChoiceStub(crate::permissions::PermissionChoice);
+
+    impl crate::permissions::PermissionRequester for ChoiceStub {
+        async fn request(
+            &self,
+            _request: crate::permissions::PermissionRequest,
+        ) -> crate::permissions::PermissionChoice {
+            self.0
+        }
+    }
+
+    /// A state with a pending project layer: one MCP server and one
+    /// project persona, neither yet trusted.
+    async fn pending_project_state(dir: &std::path::Path) -> Arc<TackleState> {
+        let project = dir.join(".agentkit/tackle");
+        std::fs::create_dir_all(project.join("personas")).unwrap();
+        std::fs::write(
+            project.join("config.toml"),
+            "[mcp_servers.proj]\ntransport = \"http\"\nurl = \"https://example.invalid/mcp\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            project.join("personas").join("proj-persona.md"),
+            "+++\ndescription = \"project persona\"\n+++\nPROJECT BODY\n",
+        )
+        .unwrap();
+
+        let user_dir = dir.join("cfg");
+        let full = crate::loader::discover(&user_dir, Some(&project)).unwrap();
+        let mut active = full.clone();
+        active.retain_project(&project, &std::collections::BTreeSet::new());
+        let (loaded, project_config) =
+            crate::config::load_layered_deferred(&user_dir, Some(&project)).unwrap();
+
+        let db = Arc::new(crate::store::SessionStore::in_memory());
+        let state = Arc::new(TackleState::new(db, loaded, active));
+        let trust_store =
+            crate::config::trust::TrustStore::load(dir.join("trust.toml")).unwrap();
+        state
+            .set_pending_project(PendingProject {
+                config: project_config.unwrap_or_default(),
+                definitions: full,
+                project_dir: project,
+                identity: "test-remote".to_owned(),
+                trust_store,
+            })
+            .await;
+        state
+    }
+
+    #[tokio::test]
+    async fn project_layer_applies_only_after_consent() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = pending_project_state(dir.path()).await;
+        // Before consent: neither project entry is active.
+        assert!(!state.config().config.mcp_servers.contains_key("proj"));
+        assert!(!state.definitions().personas.contains_key("proj-persona"));
+
+        state
+            .resolve_pending_project(
+                None,
+                &ChoiceStub(crate::permissions::PermissionChoice::AllowOnce),
+                "sess_test",
+            )
+            .await;
+
+        assert!(state.config().config.mcp_servers.contains_key("proj"));
+        assert!(state.definitions().personas.contains_key("proj-persona"));
+    }
+
+    #[tokio::test]
+    async fn a_denied_project_layer_is_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = pending_project_state(dir.path()).await;
+        state
+            .resolve_pending_project(
+                None,
+                &ChoiceStub(crate::permissions::PermissionChoice::RejectOnce),
+                "sess_test",
+            )
+            .await;
+
+        assert!(!state.config().config.mcp_servers.contains_key("proj"));
+        assert!(!state.definitions().personas.contains_key("proj-persona"));
     }
 }

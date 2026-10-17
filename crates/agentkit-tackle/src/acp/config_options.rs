@@ -115,16 +115,16 @@ pub fn resolve_model_for(
 ) -> Option<String> {
     let session_model = crate::store::session_model_free(session);
     let actor_name =
-        crate::acp::session_actor(session, state.config.config.defaults.actor.as_deref());
+        crate::acp::session_actor(session, state.config().config.defaults.actor.as_deref());
     let actor_model = state
-        .definitions
+        .definitions()
         .actors
         .get(&actor_name)
         .and_then(|actor| actor.frontmatter.model.clone());
     resolve_model(
         session_model.as_deref(),
         actor_model.as_deref(),
-        state.config.config.defaults.model.as_deref(),
+        state.config().config.defaults.model.as_deref(),
         first_listed,
     )
 }
@@ -138,11 +138,11 @@ pub async fn build(state: &TackleState, session: &Session) -> Selectors {
     // The model selector: the endpoint-qualified models across the
     // configured endpoints.
     let mut model_options = Vec::new();
-    for (name, endpoint) in &state.config.config.endpoints {
+    for (name, endpoint) in &state.config().config.endpoints {
         let credential = match endpoint.auth {
             Auth::None => None,
             Auth::Helper => {
-                let helper = crate::agent::provider::credential_helper_name(&state.config.config);
+                let helper = crate::agent::provider::credential_helper_name(&state.config().config);
                 crate::agent::provider::resolve_credential(&helper, name).map(|secret| {
                     use secrecy::ExposeSecret as _;
                     secret.expose_secret().to_owned()
@@ -201,7 +201,7 @@ pub async fn build(state: &TackleState, session: &Session) -> Selectors {
     // The actor selector: the loaded actors.
     let current = crate::store::session_actor_value_free(session);
     let actor_options: Vec<SessionConfigSelectOption> = state
-        .definitions
+        .definitions()
         .actors
         .keys()
         .map(|name| {
@@ -298,7 +298,7 @@ pub async fn apply_actor_switch(
     session_id: &SessionId,
     actor: &str,
 ) -> Result<(), String> {
-    if !state.definitions.actors.contains_key(actor) {
+    if !state.definitions().actors.contains_key(actor) {
         return Err(format!("unknown actor `{actor}`"));
     }
     state
