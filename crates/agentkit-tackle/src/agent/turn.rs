@@ -269,14 +269,53 @@ pub fn user_message_content(blocks: &serde_json::Value) -> String {
     }
 }
 
-/// The prompt text for the model: the text blocks' texts joined. Image
-/// blocks are stored faithfully but do not reach the text seam in v1.
+/// The prompt text for the model: text blocks joined, with embedded
+/// resource contents inlined. A resource link — a reference the client
+/// sent without content, e.g. an oversized file or a client that did not
+/// negotiate `embeddedContext` — degrades to its name and URI so the
+/// reference is never silently dropped. Image and audio blocks are
+/// stored faithfully but do not reach the text seam in v1.
 pub fn prompt_text(blocks: &[serde_json::Value]) -> String {
     blocks
         .iter()
-        .filter_map(|block| block.get("text").and_then(serde_json::Value::as_str))
+        .filter_map(prompt_block_text)
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// One content block's contribution to the model prompt text.
+fn prompt_block_text(block: &serde_json::Value) -> Option<String> {
+    // Text block: its own payload. Also covers tool-result and seed
+    // messages stored as `{ "type": "text", ... }`.
+    if let Some(text) = block.get("text").and_then(serde_json::Value::as_str) {
+        return Some(text.to_owned());
+    }
+    // Embedded resource: the client inlined the referenced file's text.
+    if let Some(text) = block
+        .get("resource")
+        .and_then(|resource| resource.get("text"))
+        .and_then(serde_json::Value::as_str)
+    {
+        return Some(text.to_owned());
+    }
+    // Resource link: no content, so keep the reference itself.
+    if block.get("type").and_then(serde_json::Value::as_str) == Some("resource_link") {
+        let name = block
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .filter(|name| !name.is_empty());
+        let uri = block
+            .get("uri")
+            .and_then(serde_json::Value::as_str)
+            .filter(|uri| !uri.is_empty());
+        return match (name, uri) {
+            (Some(name), Some(uri)) => Some(format!("[@{name}]({uri})")),
+            (Some(name), None) => Some(name.to_owned()),
+            (None, Some(uri)) => Some(uri.to_owned()),
+            (None, None) => None,
+        };
+    }
+    None
 }
 
 /// Helper retained for the tool-call loop (T-021): the message type is
@@ -293,5 +332,57 @@ fn message_for_append(id: String, turn_id: TurnId, role: Role, content: String) 
         is_error: None,
         position: 0,
         created_at: 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::prompt_text;
+
+    #[test]
+    fn text_blocks_join() {
+        let blocks = vec![
+            serde_json::json!({ "type": "text", "text": "hello" }),
+            serde_json::json!({ "type": "text", "text": "world" }),
+        ];
+        assert_eq!(prompt_text(&blocks), "hello world");
+    }
+
+    #[test]
+    fn embedded_resource_contents_inline() {
+        let blocks = vec![serde_json::json!({
+            "type": "resource",
+            "resource": { "uri": "file:///a.md", "text": "# Title" }
+        })];
+        assert_eq!(prompt_text(&blocks), "# Title");
+    }
+
+    #[test]
+    fn resource_link_keeps_the_reference() {
+        let blocks = vec![serde_json::json!({
+            "type": "resource_link",
+            "name": "a.md",
+            "uri": "file:///a.md"
+        })];
+        assert_eq!(prompt_text(&blocks), "[@a.md](file:///a.md)");
+    }
+
+    #[test]
+    fn mixed_blocks_keep_order() {
+        let blocks = vec![
+            serde_json::json!({ "type": "text", "text": "see" }),
+            serde_json::json!({ "type": "resource_link", "name": "a.md", "uri": "file:///a.md" }),
+            serde_json::json!({ "type": "text", "text": "and" }),
+        ];
+        assert_eq!(prompt_text(&blocks), "see [@a.md](file:///a.md) and");
+    }
+
+    #[test]
+    fn image_blocks_contribute_nothing() {
+        let blocks = vec![
+            serde_json::json!({ "type": "text", "text": "look" }),
+            serde_json::json!({ "type": "image", "data": "AAAA", "mimeType": "image/png" }),
+        ];
+        assert_eq!(prompt_text(&blocks), "look");
     }
 }
