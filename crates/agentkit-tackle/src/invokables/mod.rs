@@ -60,8 +60,9 @@ pub enum Invokable {
     /// spawn from model tool calls, never user slash commands.
     Agent { name: String, description: String },
     /// A client-capability tool (`client.<surface>.<method>`):
-    /// model-invokable only, executed on the connection against the ACP
-    /// client rather than the MCP pool.
+    /// model-invokable, and user-invokable via `/!` like an MCP tool.
+    /// Executed on the connection against the ACP client rather than the
+    /// MCP pool.
     Client {
         name: String,
         description: String,
@@ -85,7 +86,7 @@ impl Invokable {
             Invokable::Mcp { .. } => true,
             Invokable::Prompt { user_invokable, .. } => *user_invokable,
             Invokable::Agent { .. } => false,
-            Invokable::Client { .. } => false,
+            Invokable::Client { .. } => true,
         }
     }
 
@@ -451,7 +452,7 @@ impl Registry {
             vec!["Invokables available to you (invoke them as tools):".to_owned()];
         for invokable in self.model_invokables() {
             let name = match invokable {
-                Invokable::Mcp { name, .. } => format!("!{name}"),
+                Invokable::Mcp { name, .. } | Invokable::Client { name, .. } => format!("!{name}"),
                 _ => invokable.name().to_owned(),
             };
             lines.push(format!("- {}: {}", name, invokable.description()));
@@ -468,13 +469,13 @@ impl Registry {
     /// the unstructured input hint mapped from the prompt's declared
     /// parameters.
     pub fn available_commands(&self) -> Vec<AvailableCommand> {
-        let mut commands =
-            vec![
-                AvailableCommand::new("!", "Execute an MCP tool directly with no model request")
-                    .input(AvailableCommandInput::Unstructured(
-                        UnstructuredCommandInput::new("mcp.<server>.<tool> {json arguments}"),
-                    )),
-            ];
+        let mut commands = vec![
+            AvailableCommand::new("!", "Execute a tool directly with no model request").input(
+                AvailableCommandInput::Unstructured(UnstructuredCommandInput::new(
+                    "mcp.<server>.<tool> | client.<surface>.<method> {json arguments}",
+                )),
+            ),
+        ];
 
         for invokable in self.entries.values() {
             if !invokable.user_invokable() {
@@ -521,16 +522,32 @@ impl Registry {
                     );
                 }
                 Invokable::Agent { .. } => {}
-                Invokable::Client { .. } => {}
+                Invokable::Client {
+                    name, description, ..
+                } => {
+                    // Client-capability tools are advertised like MCP
+                    // tools: each under its own `!`-prefixed name so a
+                    // client that exact-matches commands offers
+                    // `/!client.<surface>.<method>`.
+                    commands.push(
+                        AvailableCommand::new(format!("!{name}"), description.clone()).input(
+                            AvailableCommandInput::Unstructured(UnstructuredCommandInput::new(
+                                "{json arguments}",
+                            )),
+                        ),
+                    );
+                }
             }
         }
         commands
     }
 
-    /// `/!name execution of MCP tools with no model request`, bypassing
+    /// `/!name` execution of MCP tools with no model request, bypassing
     /// the permission pipeline — the user is the authority. Oversized
     /// outputs arrive truncated at the fixed internal limit with the
-    /// original size recorded; storage keeps the full content.
+    /// original size recorded; storage keeps the full content. Client
+    /// capability tools take the equivalent path in the ACP layer, which
+    /// owns the connection their requests travel over.
     pub async fn execute_direct<S: ElicitationSink>(
         &self,
         pool: &McpPool<S>,
@@ -541,21 +558,13 @@ impl Registry {
             .ok_or_else(|| DirectError::Unknown(input.invokable.clone()))?;
         let invokable_name = invokable.name().to_owned();
         let Invokable::Mcp { server, tool, .. } = invokable else {
-            // /! on a non-MCP invokable is a precise error — direct
-            // invocation supports MCP tools only.
-            return Err(DirectError::NotMcp(invokable_name));
+            // /! reaches MCP tools and client-capability tools; the
+            // latter execute on the connection (handled by the ACP
+            // layer), so here anything else is a precise error.
+            return Err(DirectError::NotDirect(invokable_name));
         };
 
-        let arguments = if input.arguments.trim().is_empty() {
-            serde_json::Value::Null
-        } else {
-            let parsed: serde_json::Value = serde_json::from_str(&input.arguments)
-                .map_err(|_| DirectError::Arguments(input.invokable.clone()))?;
-            if !parsed.is_object() {
-                return Err(DirectError::Arguments(input.invokable.clone()));
-            }
-            parsed
-        };
+        let arguments = input.arguments_json()?;
 
         // The tool-call span: arguments redacted to their size.
         let _call_guard = crate::telemetry::tool_call_span(&input.invokable, input.arguments.len());
@@ -599,18 +608,37 @@ impl Registry {
 /// messages, script payloads, or script-sent prompts.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DirectInvocation {
-    /// The namespaced MCP tool: `mcp.<server>.<tool>`.
+    /// The namespaced tool: `mcp.<server>.<tool>` or
+    /// `client.<surface>.<method>`.
     pub invokable: String,
     /// The remainder of the line: the tool's JSON object arguments.
     pub arguments: String,
+}
+
+impl DirectInvocation {
+    /// The arguments as a JSON object, or `Null` when none were given.
+    /// Malformed or non-object input is a precise usage error.
+    pub fn arguments_json(&self) -> Result<serde_json::Value, DirectError> {
+        if self.arguments.trim().is_empty() {
+            return Ok(serde_json::Value::Null);
+        }
+        let parsed: serde_json::Value = serde_json::from_str(&self.arguments)
+            .map_err(|_| DirectError::Arguments(self.invokable.clone()))?;
+        if !parsed.is_object() {
+            return Err(DirectError::Arguments(self.invokable.clone()));
+        }
+        Ok(parsed)
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum DirectError {
     #[error("unknown invokable `{0}`")]
     Unknown(String),
-    #[error("`{0}` is not an MCP tool — direct invocation supports MCP tools only")]
-    NotMcp(String),
+    #[error(
+        "`{0}` cannot be invoked directly — direct invocation supports MCP and client-capability tools"
+    )]
+    NotDirect(String),
     #[error("direct invocation arguments must be a JSON object: /!{0} {{...}}")]
     Arguments(String),
     #[error(transparent)]
@@ -1084,7 +1112,41 @@ mod tests {
             else {
                 panic!("expected an unstructured input hint");
             };
-            assert_eq!(unstructured.hint, "mcp.<server>.<tool> {json arguments}");
+            assert_eq!(
+                unstructured.hint,
+                "mcp.<server>.<tool> | client.<surface>.<method> {json arguments}"
+            );
+        }
+
+        #[test]
+        fn client_tools_are_advertised_under_the_bang_prefix() {
+            use crate::acp::client_tools::{catalog, ClientCaps, EditorToggles};
+
+            let definitions = definitions_with(Vec::new());
+            let client_tools = catalog(
+                ClientCaps {
+                    fs_read: true,
+                    fs_write: false,
+                    terminal: true,
+                },
+                EditorToggles {
+                    fs: true,
+                    terminal: true,
+                },
+            );
+            let registry =
+                Registry::build_with_client_tools(&definitions, &[], &client_tools).unwrap();
+            let commands = registry.available_commands();
+            let names: Vec<&str> = commands
+                .iter()
+                .map(|command| command.name.as_str())
+                .collect();
+            assert!(names.contains(&"!client.fs.read_text_file"), "{names:?}");
+            assert!(names.contains(&"!client.terminal.create"), "{names:?}");
+            assert!(
+                names.contains(&"!client.terminal.wait_for_exit"),
+                "{names:?}"
+            );
         }
 
         #[test]
