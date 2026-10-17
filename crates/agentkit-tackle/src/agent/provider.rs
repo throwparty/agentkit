@@ -257,28 +257,17 @@ pub fn provider_for(model_ref: &str, config: &Config) -> Result<RigProvider, Mod
             model: model_ref.to_owned(),
         })?;
 
-    match endpoint.wire_format {
-        crate::config::WireFormat::OpenaiChatCompletions => {
-            // The credential lives in a secrecy type; it is exposed only
-            // at the client construction.
-            let credential = match endpoint.auth {
-                crate::config::Auth::None => secrecy::SecretString::new(String::new().into()),
-                crate::config::Auth::Helper => {
-                    let helper = credential_helper_name(config);
-                    resolve_credential(&helper, endpoint_name).ok_or_else(|| {
-                        ModelError::Credential {
-                            identity: endpoint_name.to_owned(),
-                        }
-                    })?
-                }
-            };
-            RigProvider::openai_completions(&endpoint.base_url, credential.expose_secret(), model)
+    // v1 implements the OpenAI chat-completions wire format only.
+    let credential = match endpoint.auth {
+        crate::config::Auth::None => secrecy::SecretString::new(String::new().into()),
+        crate::config::Auth::Helper => {
+            let helper = credential_helper_name(config);
+            resolve_credential(&helper, endpoint_name).ok_or_else(|| ModelError::Credential {
+                identity: endpoint_name.to_owned(),
+            })?
         }
-        format => Err(ModelError::UnsupportedWireFormat {
-            endpoint: endpoint_name.to_owned(),
-            format,
-        }),
-    }
+    };
+    RigProvider::openai_completions(&endpoint.base_url, credential.expose_secret(), model)
 }
 
 impl ModelProvider for RigProvider {
