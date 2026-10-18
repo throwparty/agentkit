@@ -18,7 +18,6 @@ use crate::store::{
     MessageId, Role, Session, SessionId, SessionKind, SessionStore, StoreError, TurnKind,
 };
 use std::collections::BTreeMap;
-use std::path::Path;
 
 pub use crate::scripts::host::{Completion, CompletionSink, HostError, PromptDispatcher};
 pub use crate::scripts::host::{SessionAccess, StoreAccess};
@@ -47,21 +46,18 @@ pub async fn create_fork(db: &SessionStore, source_id: &SessionId) -> Result<Ses
     })
 }
 
-/// Resolves the `session_forked` scripts, each from its own layer
-/// through the shared resolver.
+/// Resolves the `session_forked` scripts from the cached bodies (FR-022:
+/// loaded once), each from its own layer through the shared resolver.
 pub fn resolve_session_forked_scripts(
     scripts: &BTreeMap<String, ScriptConfig>,
-    user_dir: Option<&Path>,
+    sources: &BTreeMap<String, String>,
 ) -> Vec<(String, String)> {
     scripts
         .iter()
         .filter(|(_, config)| {
             config.enabled && config.events.iter().any(|event| event == "session_forked")
         })
-        .filter_map(|(name, config)| {
-            crate::config::resolve_script_source(name, &config.file, user_dir)
-                .map(|source| (name.clone(), source))
-        })
+        .filter_map(|(name, _)| sources.get(name).map(|source| (name.clone(), source.clone())))
         .collect()
 }
 
@@ -75,8 +71,7 @@ pub fn fire_session_forked(
     fork_point_turn_id: Option<&crate::store::TurnId>,
 ) {
     let config = state.config();
-    let user_dir = config.user_layer.as_deref().and_then(Path::parent);
-    let sources = resolve_session_forked_scripts(&config.config.scripts, user_dir);
+    let sources = resolve_session_forked_scripts(&config.config.scripts, &state.script_sources());
 
     let known_actors: std::collections::BTreeSet<String> =
         state.definitions().actors.keys().cloned().collect();

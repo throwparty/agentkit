@@ -183,9 +183,14 @@ fn builtin_registrations() -> Config {
 }
 
 /// The trust entries for a project config's executable sections
-/// (`mcp_servers` and `scripts`): relative path and SHA-256 of the
-/// serialised entry.
-pub fn project_trust_entries(project: &Config) -> BTreeMap<String, String> {
+/// (`mcp_servers` and `scripts`): relative path and SHA-256.
+///
+/// For scripts the hash covers both the serialised registration *and* the
+/// script body it names. The body is executable and part of the trusted
+/// unit, so a changed body — not just a changed registration — must
+/// re-prompt; hashing the registration alone would let a trusted
+/// repository swap a script's contents silently.
+pub fn project_trust_entries(project: &Config, project_dir: &Path) -> BTreeMap<String, String> {
     let mut entries = BTreeMap::new();
     for (name, server) in &project.mcp_servers {
         let serialised = toml::to_string(server).unwrap_or_default();
@@ -193,9 +198,23 @@ pub fn project_trust_entries(project: &Config) -> BTreeMap<String, String> {
     }
     for (name, script) in &project.scripts {
         let serialised = toml::to_string(script).unwrap_or_default();
-        entries.insert(format!("scripts/{name}"), trust::hash(&serialised));
+        let body = project_script_source(script, project_dir).unwrap_or_default();
+        entries.insert(
+            format!("scripts/{name}"),
+            trust::hash(&format!("{serialised}\u{0}{body}")),
+        );
     }
     entries
+}
+
+/// Resolves a project script's body at trust time: a `builtin:` reference
+/// or a file under the project's `scripts/` directory. A missing or
+/// unreadable file hashes as empty, so its later appearance re-prompts.
+fn project_script_source(script: &ScriptConfig, project_dir: &Path) -> Option<String> {
+    if let Some(source) = crate::builtins::script_source(&script.file) {
+        return Some(source.to_owned());
+    }
+    std::fs::read_to_string(project_dir.join("scripts").join(&script.file)).ok()
 }
 
 /// Drops the executable project config entries whose trust entries were
@@ -252,11 +271,31 @@ pub fn resolve_script_source(name: &str, file: &str, user_dir: Option<&Path>) ->
     }
 }
 
+/// Resolves every enabled registration's script body once — built-in,
+/// user-layer file, or a pinned project file — keyed by registration
+/// name. Called when the configuration is set: process start for user and
+/// built-in scripts, trust resolution for the project layer. The result is
+/// cached and never re-read, so a changed body cannot take effect without
+/// a restart and a re-prompt (FR-022: loaded once, no hot reload).
+pub fn resolve_script_sources(config: &Loaded) -> BTreeMap<String, String> {
+    let user_dir = config.user_layer.as_deref().and_then(Path::parent);
+    config
+        .config
+        .scripts
+        .iter()
+        .filter(|(_, script)| script.enabled)
+        .filter_map(|(name, script)| {
+            resolve_script_source(name, &script.file, user_dir)
+                .map(|source| (name.clone(), source))
+        })
+        .collect()
+}
+
 /// Trust-gates the executable entries of a project layer (`mcp_servers`
 /// and `scripts`); unapproved entries are dropped before the merge. The
 /// hash covers the serialised entry, so any field change re-prompts.
 fn gate_project_entries(gate: &mut trust::Gate<'_>, project: Config, project_dir: &Path) -> Config {
-    let entries = project_trust_entries(&project);
+    let entries = project_trust_entries(&project, project_dir);
     if entries.is_empty() {
         return project;
     }
@@ -706,5 +745,26 @@ mod tests {
                 .unwrap();
         let retained = retain_project_entries(project_config, &project, &BTreeSet::new());
         assert!(retained.scripts.is_empty());
+    }
+
+    #[test]
+    fn changed_project_script_body_re_prompts() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project");
+        std::fs::create_dir_all(project.join("scripts")).unwrap();
+        std::fs::write(project.join("scripts/deny.rhai"), "fn pre_tool_use(r) { r }").unwrap();
+        let config: Config =
+            toml::from_str("[scripts.deny]\nevents = [\"pre_tool_use\"]\nfile = \"deny.rhai\"\n")
+                .unwrap();
+
+        let before = project_trust_entries(&config, &project);
+        // Same registration, changed body: the pin must move so the user
+        // re-consents before the new body runs.
+        std::fs::write(project.join("scripts/deny.rhai"), "fn pre_tool_use(r) { () }").unwrap();
+        let after = project_trust_entries(&config, &project);
+        assert_ne!(before, after, "a changed script body must re-prompt");
+
+        // An unchanged body is stable across calls.
+        assert_eq!(after, project_trust_entries(&config, &project));
     }
 }
