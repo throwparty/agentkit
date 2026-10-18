@@ -1698,10 +1698,38 @@ where
                     .ok();
 
                 match outcome {
-                    Ok(result) => responder.respond(PromptResponse::new(match result.stop {
-                        crate::agent::TurnStop::EndTurn => StopReason::EndTurn,
-                        crate::agent::TurnStop::MaxTurnRequests => StopReason::MaxTurnRequests,
-                    })),
+                    Ok(result) => {
+                        // A context overflow ends the turn with the note
+                        // streamed; refresh the usage indicator from the
+                        // local estimate so it reflects the oversized
+                        // context the failing request carried. The provider
+                        // reported no usage for that request, so without
+                        // this the indicator sits at the last successful
+                        // request's size and the growth is invisible.
+                        if result.stop == crate::agent::TurnStop::ContextLength && size > 0 {
+                            let used_bytes: u64 = state_for_prompt
+                                .db
+                                .assemble_context(&session_id)
+                                .await
+                                .map(|assembled| {
+                                    assembled
+                                        .iter()
+                                        .map(|item| item.message.content.len() as u64)
+                                        .sum()
+                                })
+                                .unwrap_or(0);
+                            let used = crate::scripts::host::estimate_tokens(used_bytes);
+                            let _ = cx.send_notification(SessionNotification::new(
+                                request.session_id.clone(),
+                                SessionUpdate::UsageUpdate(UsageUpdate::new(used, size)),
+                            ));
+                        }
+                        responder.respond(PromptResponse::new(match result.stop {
+                            crate::agent::TurnStop::EndTurn
+                            | crate::agent::TurnStop::ContextLength => StopReason::EndTurn,
+                            crate::agent::TurnStop::MaxTurnRequests => StopReason::MaxTurnRequests,
+                        }))
+                    }
                     Err(err) => responder.respond_with_error(
                         Error::internal_error()
                             .data(serde_json::json!({ "error": err.to_string() })),

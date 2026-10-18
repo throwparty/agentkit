@@ -830,7 +830,7 @@ mod tests {
         .unwrap();
 
         // The turn ENDS with an in-band actionable message; one request only.
-        assert_eq!(outcome.stop, crate::agent::TurnStop::EndTurn);
+        assert_eq!(outcome.stop, crate::agent::TurnStop::ContextLength);
         assert_eq!(server.received_requests().await.unwrap().len(), 1);
         let usage = store.session_usage(&session.id).await.unwrap();
         let _ = usage;

@@ -716,6 +716,7 @@ mod tests {
                 .await
                 .unwrap();
 
+            let mut streamed: Vec<String> = Vec::new();
             let outcome = crate::agent::turn::run_turn(
                 &Overflow,
                 &store,
@@ -731,14 +732,20 @@ mod tests {
                 200_000,
                 &compaction_disabled_note(Some("compaction")),
                 |_, _, _| {},
-                |_| {},
+                |delta: &str| streamed.push(delta.to_owned()),
                 |_, _| {},
                 crate::agent::ignore_tool_call,
             )
             .await
             .unwrap();
 
-            assert_eq!(outcome.stop, crate::agent::TurnStop::EndTurn);
+            // A distinct stop: the caller surfaces the context size from it
+            // rather than treating the overflow as a normal end of turn.
+            assert_eq!(outcome.stop, crate::agent::TurnStop::ContextLength);
+            // The note is streamed live, not merely stored — a silent bail
+            // was the bug.
+            let streamed = streamed.join("");
+            assert!(streamed.contains("context is full"), "{streamed}");
             let assembled = store.assemble_context(&session.id).await.unwrap();
             let note = assembled
                 .iter()
@@ -747,6 +754,202 @@ mod tests {
             let text = crate::acp::prompt_text_of(&note.message.content);
             assert!(text.contains("context is full"), "{text}");
             assert!(text.contains("`compaction`"), "{text}");
+        });
+    }
+
+    #[test]
+    fn a_413_stream_failure_is_a_context_overflow_not_a_silent_bail() {
+        // The provider fails mid-stream (before any delta) with an HTTP
+        // 413: the request body — the conversation — was too large. It
+        // must be classified as a context overflow and surfaced, not
+        // stored and forgotten (the observed silent-bail bug).
+        struct TooLarge;
+
+        impl crate::agent::ModelProvider for TooLarge {
+            fn complete(
+                &self,
+                _request: crate::agent::ModelRequest,
+            ) -> impl std::future::Future<
+                Output = Result<crate::agent::ModelResponse, crate::agent::ModelError>,
+            > + Send {
+                std::future::ready(Err(crate::agent::ModelError::Completion(
+                    "unused".to_owned(),
+                )))
+            }
+
+            fn stream_completion(
+                &self,
+                _request: crate::agent::ModelRequest,
+                _on_text_delta: &mut (dyn FnMut(&str) + Send),
+            ) -> impl std::future::Future<
+                Output = Result<crate::agent::ModelResponse, crate::agent::ModelError>,
+            > + Send {
+                std::future::ready(Err(crate::agent::ModelError::StreamFailed {
+                    text: String::new(),
+                    text_len: 0,
+                    error: "ProviderResponseError: status 413 Payload Too Large: Failed to \
+                            buffer the request body: length limit exceeded"
+                        .to_owned(),
+                }))
+            }
+        }
+
+        block_on(async {
+            let store = SessionStore::in_memory();
+            let session = store
+                .create_session(SessionKind::Interactive, "/work", None, None, "{}")
+                .await
+                .unwrap();
+            let turn = store
+                .append_turn(
+                    &session.id,
+                    None,
+                    TurnKind::Interaction,
+                    None,
+                    Default::default(),
+                )
+                .await
+                .unwrap();
+
+            let mut streamed: Vec<String> = Vec::new();
+            let outcome = crate::agent::turn::run_turn(
+                &TooLarge,
+                &store,
+                &session.id,
+                &turn.id,
+                "assistant-1",
+                "model",
+                "system",
+                "prompt",
+                Vec::new(),
+                Vec::new(),
+                8,
+                200_000,
+                &compaction_disabled_note(Some("compaction")),
+                |_, _, _| {},
+                |delta: &str| streamed.push(delta.to_owned()),
+                |_, _| {},
+                crate::agent::ignore_tool_call,
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(outcome.stop, crate::agent::TurnStop::ContextLength);
+            assert!(
+                streamed.join("").contains("context is full"),
+                "the overflow must be streamed, not silent: {streamed:?}"
+            );
+        });
+    }
+
+    #[test]
+    fn turn_usage_accumulates_across_the_turns_requests() {
+        // Request 1 asks for a tool; request 2 answers. Both are billed,
+        // so the stored turn usage is their sum — the overwrite bug kept
+        // only the last request's tokens, undercounting the session.
+        struct TwoRounds {
+            requests: std::sync::atomic::AtomicUsize,
+        }
+
+        impl crate::agent::ModelProvider for TwoRounds {
+            fn complete(
+                &self,
+                _request: crate::agent::ModelRequest,
+            ) -> impl std::future::Future<
+                Output = Result<crate::agent::ModelResponse, crate::agent::ModelError>,
+            > + Send {
+                std::future::ready(Err(crate::agent::ModelError::Completion(
+                    "unused".to_owned(),
+                )))
+            }
+
+            fn stream_completion(
+                &self,
+                _request: crate::agent::ModelRequest,
+                _on_text_delta: &mut (dyn FnMut(&str) + Send),
+            ) -> impl std::future::Future<
+                Output = Result<crate::agent::ModelResponse, crate::agent::ModelError>,
+            > + Send {
+                let round = self
+                    .requests
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                async move {
+                    if round == 0 {
+                        Ok(crate::agent::ModelResponse {
+                            text: String::new(),
+                            tool_calls: vec![crate::agent::ModelToolCall {
+                                id: "call_1".to_owned(),
+                                name: "mcp.echo.echo".to_owned(),
+                                arguments: "{}".to_owned(),
+                            }],
+                            usage: crate::agent::ModelUsage {
+                                input_tokens: 10,
+                                output_tokens: 1,
+                            },
+                        })
+                    } else {
+                        Ok(crate::agent::ModelResponse {
+                            text: "done".to_owned(),
+                            tool_calls: Vec::new(),
+                            usage: crate::agent::ModelUsage {
+                                input_tokens: 20,
+                                output_tokens: 2,
+                            },
+                        })
+                    }
+                }
+            }
+        }
+
+        block_on(async {
+            let store = SessionStore::in_memory();
+            let session = store
+                .create_session(SessionKind::Interactive, "/work", None, None, "{}")
+                .await
+                .unwrap();
+            let turn = store
+                .append_turn(
+                    &session.id,
+                    None,
+                    TurnKind::Interaction,
+                    None,
+                    Default::default(),
+                )
+                .await
+                .unwrap();
+
+            let mut usage_updates: Vec<u64> = Vec::new();
+            let outcome = crate::agent::turn::run_turn(
+                &TwoRounds {
+                    requests: std::sync::atomic::AtomicUsize::new(0),
+                },
+                &store,
+                &session.id,
+                &turn.id,
+                "assistant-1",
+                "model",
+                "system",
+                "prompt",
+                Vec::new(),
+                Vec::new(),
+                8,
+                200_000,
+                "note",
+                |input: u64, _output: u64, _cost: f64| usage_updates.push(input),
+                |_: &str| {},
+                |_, _| {},
+                crate::agent::ignore_tool_call,
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(outcome.stop, crate::agent::TurnStop::EndTurn);
+            // The live indicator sees each request's prompt size...
+            assert_eq!(usage_updates, vec![10, 20]);
+            // ...while the stored delta is the whole turn's sum.
+            let usage = store.session_usage(&session.id).await.unwrap();
+            assert_eq!(usage.input_tokens, 30);
+            assert_eq!(usage.output_tokens, 3);
         });
     }
 }
