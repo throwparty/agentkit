@@ -271,31 +271,6 @@ pub fn provider_for(model_ref: &str, config: &Config) -> Result<RigProvider, Mod
 }
 
 impl ModelProvider for RigProvider {
-    async fn complete(&self, request: ModelRequest) -> Result<ModelResponse, ModelError> {
-        let completion = self.completion(request);
-        let response = completion
-            .send()
-            .await
-            .map_err(|err| ModelError::Completion(err.to_string()))?;
-        let text = response
-            .choice
-            .iter()
-            .filter_map(|content| match content {
-                AssistantContent::Text(text) => Some(text.text.clone()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("");
-        Ok(ModelResponse {
-            text,
-            tool_calls: tool_calls_of(&response.choice),
-            usage: ModelUsage {
-                input_tokens: response.usage.input_tokens,
-                output_tokens: response.usage.output_tokens,
-            },
-        })
-    }
-
     async fn stream_completion(
         &self,
         request: ModelRequest,
@@ -410,6 +385,39 @@ mod tests {
         }
     }
 
+    /// A minimal OpenAI-compatible SSE body: a role chunk, one content
+    /// chunk, a terminal chunk carrying usage, and the [DONE] sentinel.
+    fn sse_body(text: &str, input: u64, output: u64) -> String {
+        let chunk = |delta: serde_json::Value| {
+            serde_json::json!({
+                "id": "c1",
+                "object": "chat.completion.chunk",
+                "created": 0,
+                "model": "m",
+                "choices": [{"index": 0, "delta": delta}],
+            })
+        };
+        let terminal = serde_json::json!({
+            "id": "c1",
+            "object": "chat.completion.chunk",
+            "created": 0,
+            "model": "m",
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": input, "completion_tokens": output, "total_tokens": input + output},
+        });
+        [
+            format!("data: {}", chunk(serde_json::json!({"role": "assistant"}))),
+            String::new(),
+            format!("data: {}", chunk(serde_json::json!({"content": text}))),
+            String::new(),
+            format!("data: {terminal}"),
+            String::new(),
+            "data: [DONE]".to_owned(),
+            String::new(),
+        ]
+        .join("\n")
+    }
+
     #[test]
     fn effective_helper_defaults_to_keychain() {
         assert_eq!(
@@ -450,52 +458,45 @@ mod tests {
     #[tokio::test]
     async fn completion_sends_model_system_and_prompt() {
         let server = wiremock::MockServer::start().await;
-        let expectation = wiremock::Mock::given(wiremock::matchers::method("POST"))
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
             .and(wiremock::matchers::path("/chat/completions"))
-            .respond_with(
-                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                    "id": "chatcmpl-1",
-                    "object": "chat.completion",
-                    "created": 0,
-                    "model": "test-model",
-                    "choices": [{
-                        "index": 0,
-                        "message": {"role": "assistant", "content": "Hello there"},
-                        "finish_reason": "stop"
-                    }],
-                    "usage": {"prompt_tokens": 10, "completion_tokens": 4, "total_tokens": 14}
-                })),
-            )
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_raw(
+                sse_body("Hello there", 10, 4).into_bytes(),
+                "text/event-stream",
+            ))
             .mount(&server)
             .await;
 
         let config = config_with_endpoint(&server.uri(), Auth::None);
         let provider = provider_for("test/test-model", &config).unwrap();
         let response = provider
-            .complete(ModelRequest {
-                // The endpoint-qualified address, as the loop passes it:
-                // the provider owns the bare wire name.
-                model: "test/test-model".into(),
-                system: "You are testing.".into(),
-                messages: vec![
-                    ChatMessage {
-                        role: ChatRole::User,
-                        text: "prior".into(),
-                        ..Default::default()
-                    },
-                    ChatMessage {
-                        role: ChatRole::Assistant,
-                        text: "prior answer".into(),
-                        ..Default::default()
-                    },
-                    ChatMessage {
-                        role: ChatRole::User,
-                        text: "say hello".into(),
-                        ..Default::default()
-                    },
-                ],
-                tools: Vec::new(),
-            })
+            .stream_completion(
+                ModelRequest {
+                    // The endpoint-qualified address, as the loop passes it:
+                    // the provider owns the bare wire name.
+                    model: "test/test-model".into(),
+                    system: "You are testing.".into(),
+                    messages: vec![
+                        ChatMessage {
+                            role: ChatRole::User,
+                            text: "prior".into(),
+                            ..Default::default()
+                        },
+                        ChatMessage {
+                            role: ChatRole::Assistant,
+                            text: "prior answer".into(),
+                            ..Default::default()
+                        },
+                        ChatMessage {
+                            role: ChatRole::User,
+                            text: "say hello".into(),
+                            ..Default::default()
+                        },
+                    ],
+                    tools: Vec::new(),
+                },
+                &mut |_: &str| {},
+            )
             .await
             .unwrap();
 
@@ -541,18 +542,13 @@ mod tests {
         write_fake_helper(dir.path(), "{\"access_token\": \"secret\"}");
 
         let server = wiremock::MockServer::start().await;
-        wiremock::Mock::given(wiremock::matchers::method("POST")).respond_with(
-            wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "id": "chatcmpl-2",
-                "object": "chat.completion",
-                "created": 0,
-                "model": "model",
-                "choices": [{"message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
-                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
-            })),
-        )
-        .mount(&server)
-        .await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .set_body_raw(sse_body("ok", 1, 1).into_bytes(), "text/event-stream"),
+            )
+            .mount(&server)
+            .await;
 
         let mut config = config_with_endpoint(&server.uri(), Auth::Helper);
         config.credential_helper = Some("test".into());
@@ -567,16 +563,19 @@ mod tests {
             provider.unwrap()
         };
         let response = provider
-            .complete(ModelRequest {
-                model: "model".into(),
-                system: String::new(),
-                messages: vec![ChatMessage {
-                    role: ChatRole::User,
-                    text: "hi".into(),
-                    ..Default::default()
-                }],
-                tools: Vec::new(),
-            })
+            .stream_completion(
+                ModelRequest {
+                    model: "model".into(),
+                    system: String::new(),
+                    messages: vec![ChatMessage {
+                        role: ChatRole::User,
+                        text: "hi".into(),
+                        ..Default::default()
+                    }],
+                    tools: Vec::new(),
+                },
+                &mut |_: &str| {},
+            )
             .await
             .unwrap();
         assert_eq!(response.text, "ok");
