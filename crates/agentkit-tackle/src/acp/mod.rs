@@ -70,6 +70,68 @@ impl UnstableFeature {
     }
 }
 
+/// The session-lease TTL: how long a lease survives without a heartbeat,
+/// so a crashed or stalled connection frees its session.
+const LEASE_TTL_SECS: i64 = 60;
+
+/// How often a live turn renews its lease. Strictly below the TTL, so the
+/// lease never lapses mid-turn.
+const LEASE_HEARTBEAT_SECS: u64 = 20;
+
+/// Renews a session lease for as long as a turn runs, so the
+/// one-turn-at-a-time invariant survives turns longer than the TTL.
+/// Dropping the guard stops renewal; releasing the lease remains the
+/// caller's job.
+struct LeaseHeartbeat {
+    handle: tokio::task::JoinHandle<()>,
+}
+
+impl LeaseHeartbeat {
+    /// Spawns renewal of `owner`'s lease on `session` every
+    /// [`LEASE_HEARTBEAT_SECS`]. The task stops on its own if the lease is
+    /// no longer held (released or stolen).
+    fn spawn(store: Arc<SessionStore>, session: crate::store::SessionId, owner: String) -> Self {
+        Self::spawn_with(
+            store,
+            session,
+            owner,
+            LEASE_TTL_SECS,
+            std::time::Duration::from_secs(LEASE_HEARTBEAT_SECS),
+        )
+    }
+
+    fn spawn_with(
+        store: Arc<SessionStore>,
+        session: crate::store::SessionId,
+        owner: String,
+        ttl_secs: i64,
+        period: std::time::Duration,
+    ) -> Self {
+        let handle = tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(period);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            // The first tick fires immediately; consume it so the first
+            // renewal lands one period after acquisition.
+            ticker.tick().await;
+            loop {
+                ticker.tick().await;
+                match store.heartbeat_lease(&session, &owner, ttl_secs).await {
+                    Ok(true) => {}
+                    Ok(false) => break,
+                    Err(err) => tracing::warn!(session = %session, "lease heartbeat failed: {err}"),
+                }
+            }
+        });
+        Self { handle }
+    }
+}
+
+impl Drop for LeaseHeartbeat {
+    fn drop(&mut self) {
+        self.handle.abort();
+    }
+}
+
 /// Per-connection negotiation and client-surface state, captured or
 /// seeded when the connection opens and consulted by every update sender.
 pub struct ConnectionNegotiation {
@@ -923,7 +985,7 @@ where
                 // against an actively-owned session fails precisely.
                 if !state_for_prompt
                     .db
-                    .acquire_lease(&session_id, &owner_for_prompt, 60)
+                    .acquire_lease(&session_id, &owner_for_prompt, LEASE_TTL_SECS)
                     .await
                     .map_err(|err| Error::internal_error().data(err.to_string()))?
                 {
@@ -941,6 +1003,14 @@ where
                         }),
                     ));
                 }
+
+                // Keep the lease live for the whole turn, however long it
+                // runs; dropping the guard on any return path stops renewal.
+                let _lease_heartbeat = LeaseHeartbeat::spawn(
+                    Arc::clone(&state_for_prompt.db),
+                    session_id.clone(),
+                    owner_for_prompt.as_ref().clone(),
+                );
 
                 // Persist the prompt turn + the user message (original
                 // content blocks, stored as the JSON block array).
@@ -2608,5 +2678,42 @@ mod tests {
 
         assert!(!state.config().config.mcp_servers.contains_key("proj"));
         assert!(!state.definitions().personas.contains_key("proj-persona"));
+    }
+
+    #[tokio::test]
+    async fn lease_heartbeat_keeps_a_long_turn_owned() {
+        let db = Arc::new(crate::store::SessionStore::in_memory());
+        let session = db
+            .create_session(
+                crate::store::SessionKind::Interactive,
+                "/work",
+                None,
+                None,
+                "{}",
+            )
+            .await
+            .unwrap();
+        // A one-second TTL would lapse within the sleep below; the
+        // heartbeat must keep the lease held by owner-a.
+        assert!(db.acquire_lease(&session.id, "owner-a", 1).await.unwrap());
+        let heartbeat = LeaseHeartbeat::spawn_with(
+            Arc::clone(&db),
+            session.id.clone(),
+            "owner-a".to_owned(),
+            1,
+            std::time::Duration::from_millis(200),
+        );
+
+        tokio::time::sleep(std::time::Duration::from_millis(1300)).await;
+
+        assert_eq!(
+            db.lease_holder(&session.id).await.unwrap(),
+            Some("owner-a".to_owned())
+        );
+        assert!(
+            !db.acquire_lease(&session.id, "owner-b", 60).await.unwrap(),
+            "a live heartbeat must keep the session owned"
+        );
+        drop(heartbeat);
     }
 }
