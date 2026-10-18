@@ -47,43 +47,22 @@ pub async fn create_fork(db: &SessionStore, source_id: &SessionId) -> Result<Ses
     })
 }
 
-/// Resolves the `session_forked` scripts: sources from the user layer's
-/// scripts directory; project-layer scripts are skipped until the trust
-/// gate wires script loading (the first-run flow) — never loaded
-/// untrusted.
+/// Resolves the `session_forked` scripts, each from its own layer
+/// through the shared resolver.
 pub fn resolve_session_forked_scripts(
     scripts: &BTreeMap<String, ScriptConfig>,
     user_dir: Option<&Path>,
-    project_dir: Option<&Path>,
 ) -> Vec<(String, String)> {
-    let mut sources = Vec::new();
-    for (name, config) in scripts {
-        if !config.enabled || !config.events.iter().any(|event| event == "session_forked") {
-            continue;
-        }
-        if let Some(project_dir) = project_dir {
-            let candidate = project_dir.join("scripts").join(&config.file);
-            if candidate.exists() {
-                tracing::warn!(
-                    script = %name,
-                    "project script skipped: script trust gating is wired with the first-run flow"
-                );
-                continue;
-            }
-        }
-        if let Some(source) = crate::builtins::script_source(&config.file) {
-            sources.push((name.clone(), source.to_owned()));
-            continue;
-        }
-        let Some(user_dir) = user_dir else {
-            continue;
-        };
-        match std::fs::read_to_string(user_dir.join("scripts").join(&config.file)) {
-            Ok(source) => sources.push((name.clone(), source)),
-            Err(err) => tracing::warn!(script = %name, "session_forked script unreadable: {err}"),
-        }
-    }
-    sources
+    scripts
+        .iter()
+        .filter(|(_, config)| {
+            config.enabled && config.events.iter().any(|event| event == "session_forked")
+        })
+        .filter_map(|(name, config)| {
+            crate::config::resolve_script_source(name, &config.file, user_dir)
+                .map(|source| (name.clone(), source))
+        })
+        .collect()
 }
 
 /// Fires the `session_forked` event on every registered script. A
@@ -97,8 +76,7 @@ pub fn fire_session_forked(
 ) {
     let config = state.config();
     let user_dir = config.user_layer.as_deref().and_then(Path::parent);
-    let project_dir = config.project_layer.as_deref().and_then(Path::parent);
-    let sources = resolve_session_forked_scripts(&config.config.scripts, user_dir, project_dir);
+    let sources = resolve_session_forked_scripts(&config.config.scripts, user_dir);
 
     let known_actors: std::collections::BTreeSet<String> =
         state.definitions().actors.keys().cloned().collect();
