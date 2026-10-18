@@ -18,7 +18,6 @@ pub use crate::scripts::host::StoreAccess;
 use crate::scripts::host::{BehaviourHost, SessionAccess, block_on};
 use crate::scripts::{behaviour_engine, host::register_host_api};
 use crate::store::{SessionId, TurnId, TurnKind};
-use std::path::Path;
 use std::sync::Arc;
 
 /// The untrusted-summary delimiters: compaction summaries are model
@@ -58,12 +57,10 @@ pub fn fire_compaction_requested(
     size: u64,
     cost_usd: f64,
 ) {
-    let config = state.config();
-    let user_dir = config.user_layer.as_deref().and_then(Path::parent);
     let known_actors: std::collections::BTreeSet<String> =
         state.definitions().actors.keys().cloned().collect();
 
-    for (name, source) in event_sources(state, user_dir, "compaction_requested") {
+    for (name, source) in event_sources(state, "compaction_requested") {
         let host = BehaviourHost::new(
             Arc::clone(&access),
             known_actors.clone(),
@@ -112,8 +109,6 @@ pub fn fire_post_turn(
     if window_size == 0 {
         return;
     }
-    let config = state.config();
-    let user_dir = config.user_layer.as_deref().and_then(Path::parent);
     let known_actors: std::collections::BTreeSet<String> =
         state.definitions().actors.keys().cloned().collect();
 
@@ -132,7 +127,7 @@ pub fn fire_post_turn(
         .unwrap_or(0);
     let cost_usd = access.attributed_cost(session_id).unwrap_or(0.0);
 
-    for (name, source) in event_sources(state, user_dir, "post_turn") {
+    for (name, source) in event_sources(state, "post_turn") {
         let host = BehaviourHost::new(
             Arc::clone(&access),
             known_actors.clone(),
@@ -184,23 +179,19 @@ pub fn fire_post_turn_detached(
 
 /// Resolves the enabled scripts registered for `event`, each from its
 /// own layer through the shared resolver.
-fn event_sources(
-    state: &TackleState,
-    user_dir: Option<&Path>,
-    event: &str,
-) -> Vec<(String, String)> {
-    state
-        .config()
+/// Resolves the enabled scripts registered for `event` from the cached
+/// bodies (FR-022: loaded once).
+fn event_sources(state: &TackleState, event: &str) -> Vec<(String, String)> {
+    let config = state.config();
+    let sources = state.script_sources();
+    config
         .config
         .scripts
         .iter()
-        .filter(|(_, config)| {
-            config.enabled && config.events.iter().any(|registered| registered == event)
+        .filter(|(_, script)| {
+            script.enabled && script.events.iter().any(|registered| registered == event)
         })
-        .filter_map(|(name, config)| {
-            crate::config::resolve_script_source(name, &config.file, user_dir)
-                .map(|source| (name.clone(), source))
-        })
+        .filter_map(|(name, _)| sources.get(name).map(|source| (name.clone(), source.clone())))
         .collect()
 }
 

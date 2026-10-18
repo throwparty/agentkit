@@ -12,7 +12,6 @@ use crate::acp::script_loop;
 use crate::scripts::host::{BehaviourHost, SessionAccess, block_on};
 use crate::scripts::{behaviour_engine, host::register_host_api};
 use crate::store::SessionId;
-use std::path::Path;
 use std::sync::Arc;
 
 /// Fires the `title_trigger` event on the registered titling scripts.
@@ -22,12 +21,10 @@ pub fn fire_title_trigger(
     access: Arc<dyn SessionAccess>,
     session_id: &SessionId,
 ) {
-    let config = state.config();
-    let user_dir = config.user_layer.as_deref().and_then(Path::parent);
     let known_actors: std::collections::BTreeSet<String> =
         state.definitions().actors.keys().cloned().collect();
 
-    for (name, source) in titling_sources(state, user_dir) {
+    for (name, source) in titling_sources(state) {
         let host = BehaviourHost::new(
             Arc::clone(&access),
             known_actors.clone(),
@@ -64,19 +61,21 @@ pub fn fire_title_trigger(
 /// `title_trigger` event (the shipped `titling` registration at the
 /// lowest precedence, replaceable wholesale by a same-name entry), each
 /// from its own layer through the shared resolver.
-fn titling_sources(state: &TackleState, user_dir: Option<&Path>) -> Vec<(String, String)> {
-    state
-        .config()
+/// Resolves the titling scripts from the cached bodies (FR-022: loaded
+/// once): the registrations declaring the `title_trigger` event (the
+/// shipped `titling` registration at the lowest precedence, replaceable
+/// wholesale by a same-name entry).
+fn titling_sources(state: &TackleState) -> Vec<(String, String)> {
+    let config = state.config();
+    let sources = state.script_sources();
+    config
         .config
         .scripts
         .iter()
-        .filter(|(_, config)| {
-            config.enabled && config.events.iter().any(|event| event == "title_trigger")
+        .filter(|(_, script)| {
+            script.enabled && script.events.iter().any(|event| event == "title_trigger")
         })
-        .filter_map(|(name, config)| {
-            crate::config::resolve_script_source(name, &config.file, user_dir)
-                .map(|source| (name.clone(), source))
-        })
+        .filter_map(|(name, _)| sources.get(name).map(|source| (name.clone(), source.clone())))
         .collect()
 }
 

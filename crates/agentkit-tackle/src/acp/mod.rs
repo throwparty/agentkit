@@ -231,6 +231,12 @@ pub struct TackleState {
     pub db: std::sync::Arc<SessionStore>,
     config: std::sync::RwLock<std::sync::Arc<Loaded>>,
     definitions: std::sync::RwLock<std::sync::Arc<Definitions>>,
+    /// Script bodies resolved once when the configuration is set (process
+    /// start for user and built-in scripts, trust resolution for the
+    /// project layer). Scripts are never re-read, so a body that changes
+    /// mid-process cannot take effect without a restart and a re-prompt
+    /// (FR-022: loaded once, no hot reload).
+    script_sources: std::sync::RwLock<std::sync::Arc<BTreeMap<String, String>>>,
     /// The in-memory permission grant store (FR-014): keyed by session
     /// and invokable, gone on close, process exit, and resume after
     /// restart.
@@ -255,10 +261,12 @@ impl TackleState {
     /// Builds the process state from the user layer and built-in defaults
     /// (no project layer yet).
     pub fn new(db: std::sync::Arc<SessionStore>, config: Loaded, definitions: Definitions) -> Self {
+        let script_sources = crate::config::resolve_script_sources(&config);
         Self {
             db,
             config: std::sync::RwLock::new(std::sync::Arc::new(config)),
             definitions: std::sync::RwLock::new(std::sync::Arc::new(definitions)),
+            script_sources: std::sync::RwLock::new(std::sync::Arc::new(script_sources)),
             grants: tokio::sync::Mutex::new(crate::permissions::GrantStore::default()),
             pending_project: tokio::sync::Mutex::new(None),
         }
@@ -268,6 +276,14 @@ impl TackleState {
     /// hold a lock guard across an await.
     pub fn config(&self) -> std::sync::Arc<Loaded> {
         std::sync::Arc::clone(&self.config.read().expect("config lock poisoned"))
+    }
+
+    /// The resolved script bodies by registration name, loaded once (see
+    /// [`Self::script_sources`]). A cheap `Arc` clone.
+    pub fn script_sources(&self) -> std::sync::Arc<BTreeMap<String, String>> {
+        std::sync::Arc::clone(
+            &self.script_sources.read().expect("script sources lock poisoned"),
+        )
     }
 
     /// The active definitions (project entries included once trusted).
@@ -293,7 +309,8 @@ impl TackleState {
         let Some(mut pending) = self.pending_project.lock().await.take() else {
             return;
         };
-        let mut entries = crate::config::project_trust_entries(&pending.config);
+        let mut entries =
+            crate::config::project_trust_entries(&pending.config, &pending.project_dir);
         entries.extend(
             pending
                 .definitions
@@ -336,11 +353,18 @@ impl TackleState {
 
         let base = self.config();
         let merged = base.config.clone().merge(gated.clone());
-        *self.config.write().expect("config lock poisoned") = std::sync::Arc::new(Loaded {
+        let loaded = Loaded {
             config: merged,
             user_layer: base.user_layer.clone(),
             project_layer: base.project_layer.clone(),
-        });
+        };
+        // Resolve the approved project scripts now, once, alongside the
+        // configuration they belong to (FR-022: loaded once, no hot
+        // reload).
+        let sources = crate::config::resolve_script_sources(&loaded);
+        *self.script_sources.write().expect("script sources lock poisoned") =
+            std::sync::Arc::new(sources);
+        *self.config.write().expect("config lock poisoned") = std::sync::Arc::new(loaded);
         *self.definitions.write().expect("definitions lock poisoned") =
             std::sync::Arc::new(definitions);
 
@@ -2234,10 +2258,7 @@ fn notification(session_id: &SessionId, update: SessionUpdate) -> SessionNotific
 /// (built-in, user, or a trusted project layer).
 fn policy_script_sources(state: &TackleState) -> Vec<String> {
     let config = state.config();
-    let user_dir = config
-        .user_layer
-        .as_deref()
-        .and_then(std::path::Path::parent);
+    let sources = state.script_sources();
     config
         .config
         .scripts
@@ -2245,9 +2266,7 @@ fn policy_script_sources(state: &TackleState) -> Vec<String> {
         .filter(|(_, script)| {
             script.enabled && script.events.iter().any(|event| event == "pre_tool_use")
         })
-        .filter_map(|(name, script)| {
-            crate::config::resolve_script_source(name, &script.file, user_dir)
-        })
+        .filter_map(|(name, _)| sources.get(name).cloned())
         .collect()
 }
 
@@ -2769,5 +2788,37 @@ mod tests {
             "a live heartbeat must keep the session owned"
         );
         drop(heartbeat);
+    }
+
+    #[test]
+    fn script_bodies_are_loaded_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let user = dir.path().join("cfg");
+        std::fs::create_dir_all(user.join("scripts")).unwrap();
+        std::fs::write(user.join("scripts/deny.rhai"), "one").unwrap();
+        std::fs::write(
+            user.join("config.toml"),
+            "[scripts.deny]\nevents = [\"pre_tool_use\"]\nfile = \"deny.rhai\"\n",
+        )
+        .unwrap();
+        let loaded = crate::config::load_layered(&user, None, None).unwrap();
+        let state = TackleState::new(
+            Arc::new(crate::store::SessionStore::in_memory()),
+            loaded,
+            crate::loader::Definitions::default().with_builtins(),
+        );
+        assert_eq!(
+            state.script_sources().get("deny").map(String::as_str),
+            Some("one")
+        );
+
+        // A mid-process change to the file is not picked up: the body was
+        // loaded once (FR-022: no hot reload).
+        std::fs::write(user.join("scripts/deny.rhai"), "two").unwrap();
+        assert_eq!(
+            state.script_sources().get("deny").map(String::as_str),
+            Some("one"),
+            "scripts are not re-read after load"
+        );
     }
 }
