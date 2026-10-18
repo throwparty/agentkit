@@ -680,6 +680,445 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
 /// Runs one agent connection over `transport`: the handler chain is
 /// built per connection (shared state rides `Arc<TackleState>`), so
 /// HTTP serves multiple connections in one process (T-036).
+/// One model turn of a prompt: resolve the actor, model, tools, and
+/// context, run the turn loop (streaming to the client, dispatching tool
+/// calls through the permission pipeline), then report usage, compaction,
+/// titling, and release the lease. Returns the response the caller sends.
+#[allow(clippy::too_many_arguments)] // the turn's resolved inputs, all needed
+async fn run_prompt_turn(
+    state: Arc<TackleState>,
+    negotiation: Arc<ConnectionNegotiation>,
+    cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
+    wire_session_id: SessionId,
+    session_id: crate::store::SessionId,
+    turn: crate::store::Turn,
+    actor_name: String,
+    session_row: Option<crate::store::Session>,
+    first_text: String,
+    blocks_json: String,
+    owner: Arc<String>,
+) -> Result<agent_client_protocol::schema::v1::PromptResponse, Error> {
+    use agent_client_protocol::schema::v1::{
+        ContentBlock, PromptResponse, StopReason, UsageUpdate,
+    };
+    let state_for_prompt = state;
+    let negotiation_for_turn = negotiation;
+    let owner_for_prompt = owner;
+    let request_session_id = wire_session_id;
+    let definitions = state_for_prompt.definitions();
+    let actor = definitions.actors.get(&actor_name);
+    let persona = actor.and_then(|a| definitions.personas.get(&a.frontmatter.persona));
+    let mcp_tokens = {
+        let pool = negotiation_for_turn.mcp_pool();
+        let pool = pool.lock().await;
+        pool.list_tools().await
+    };
+    // The client-capability tools the connection advertised
+    // and the categories currently enabled (config seeded,
+    // `/editor` overridable).
+    let client_tools = crate::acp::client_tools::catalog(
+        negotiation_for_turn.client_caps(),
+        negotiation_for_turn.editor_toggles(),
+    );
+    let registry = crate::invokables::Registry::build_with_client_tools(
+        &definitions,
+        &mcp_tokens,
+        &client_tools,
+    )
+    .unwrap_or_default();
+    let tools = registry.model_tools();
+    // FR-012: the invokable listing rides the system prompt.
+    let mut system = persona.map(|p| p.body.clone()).unwrap_or_default();
+    if !tools.is_empty() {
+        system.push_str("\n\n");
+        system.push_str(&registry.manifest());
+    }
+    // The model: the shared resolution chain — metadata,
+    // actor frontmatter, [defaults].model, then the first
+    // listed selector option. Nothing left is a clear
+    // configuration error, never a `default/model` sentinel.
+    let session_for_model = session_row
+        .as_ref()
+        .ok_or_else(|| Error::internal_error().data("no such session".to_owned()))?;
+    let model_ref = {
+        if let Some(model_ref) =
+            config_options::resolve_model_for(&state_for_prompt, session_for_model, None)
+        {
+            model_ref
+        } else {
+            let listed = config_options::build(&state_for_prompt, session_for_model).await;
+            listed.first_model.ok_or_else(|| {
+                Error::internal_error()
+                    .data("no model configured; set [defaults].model or select a model".to_owned())
+            })?
+        }
+    };
+    let size = context_window(&model_ref).unwrap_or(0);
+
+    // Assemble the prior context (the prompt turn included —
+    // its user message is the prompt; the loop re-sends it as
+    // the final message).
+    let assembled = state_for_prompt
+        .db
+        .assemble_context(&session_id)
+        .await
+        .map_err(|err| Error::internal_error().data(err.to_string()))?;
+    let prior: Vec<crate::agent::ChatMessage> = compaction::prior_messages(&assembled, &turn.id);
+    // FR-010: a user-typed `/name` prompt expands into the
+    // model prompt (the stored message stays literal).
+    let prompt_text = match first_text.strip_prefix('/') {
+        Some(rest) => {
+            let mut parts = rest.splitn(2, char::is_whitespace);
+            let name = parts.next().unwrap_or("");
+            let args = parts.next().unwrap_or("").trim();
+            registry
+                .expand_user(name, args)
+                .unwrap_or_else(|_| prompt_text_of(&blocks_json))
+        }
+        None => prompt_text_of(&blocks_json),
+    };
+
+    let provider =
+        crate::agent::provider::provider_for(&model_ref, &state_for_prompt.config().config)
+            .map_err(|err| Error::internal_error().data(err.to_string()))?;
+    // The context-length failure note: actionable, naming
+    // the configured compaction script (or its absence).
+    let context_length_note = compaction::compaction_disabled_note(
+        state_for_prompt
+            .config()
+            .config
+            .scripts
+            .iter()
+            .find(|(_, script)| {
+                script.enabled
+                    && script
+                        .events
+                        .iter()
+                        .any(|event| event == "compaction_requested")
+            })
+            .map(|(name, _)| name.as_str()),
+    );
+    let assistant_id = uuid::Uuid::new_v4().to_string();
+    // The turn span: parent of the tool-call and usage
+    // spans the loop's paths create.
+    let turn_span = crate::telemetry::turn_span(&session_id, &actor_name, &model_ref);
+    let _turn_guard = turn_span.enter();
+    let session_for_chunks = request_session_id.clone();
+    let cx_for_chunks = cx.clone();
+    let cx_for_retry = cx.clone();
+    let session_for_retry = request_session_id.clone();
+
+    let outcome = crate::agent::turn::run_turn(
+        &provider,
+        &state_for_prompt.db,
+        &session_id,
+        &turn.id,
+        &assistant_id.to_string(),
+        &model_ref,
+        &system,
+        &prompt_text,
+        prior,
+        tools,
+        state_for_prompt
+            .config()
+            .config
+            .turns
+            .max_model_requests
+            .unwrap_or(8),
+        size,
+        &context_length_note,
+        // usage cadence: a usage_update per model request,
+        // skipped when the window is unknown (RFD guidance).
+        {
+            let cx = cx_for_chunks.clone();
+            let session_for_usage = session_for_chunks.clone();
+            move |input: u64, _output: u64, _cost: f64| {
+                if size == 0 {
+                    return;
+                }
+                let _ = cx.send_notification(SessionNotification::new(
+                    session_for_usage.clone(),
+                    SessionUpdate::UsageUpdate(UsageUpdate::new(input, size)),
+                ));
+            }
+        },
+        move |delta: &str| {
+            let chunk = agent_client_protocol::schema::v1::ContentChunk::new(ContentBlock::Text(
+                agent_client_protocol::schema::v1::TextContent::new(delta.to_owned()),
+            ))
+            .message_id(agent_client_protocol::schema::v1::MessageId::new(
+                assistant_id.clone(),
+            ));
+            let _ = cx_for_chunks.send_notification(SessionNotification::new(
+                session_for_chunks.clone(),
+                agent_client_protocol::schema::v1::SessionUpdate::AgentMessageChunk(chunk),
+            ));
+        },
+        // retry attempts surface as tool-call status cards
+        // (the stable ACP surface's only card mechanism).
+        {
+            let cx = cx_for_retry;
+            move |attempt: u32, message: &str| {
+                let card = agent_client_protocol::schema::v1::ToolCall::new(
+                    agent_client_protocol::schema::v1::ToolCallId::new(format!(
+                        "retry-{attempt}-{}",
+                        uuid::Uuid::new_v4()
+                    )),
+                    format!("Retrying model request (attempt {attempt}): {message}"),
+                )
+                .status(agent_client_protocol::schema::v1::ToolCallStatus::InProgress);
+                let _ = cx.send_notification(SessionNotification::new(
+                    session_for_retry.clone(),
+                    agent_client_protocol::schema::v1::SessionUpdate::ToolCall(card),
+                ));
+            }
+        },
+        // Model tool calls: announce, run the permission
+        // pipeline, execute via the registry, report the result
+        // back into the loop.
+        {
+            let registry = registry.clone();
+            let state = state_for_prompt.clone();
+            let negotiation = negotiation_for_turn.clone();
+            let cx = cx.clone();
+            let session = request_session_id.clone();
+            let actor = actor_name.clone();
+            let sources = policy_script_sources(&state_for_prompt);
+            let client_tools = client_tools.clone();
+            move |call: crate::agent::ModelToolCall| -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = crate::agent::ToolCallOutcome> + Send>,
+            > {
+                let registry = registry.clone();
+                let state = state.clone();
+                let negotiation = negotiation.clone();
+                let cx = cx.clone();
+                let session = session.clone();
+                let actor = actor.clone();
+                let sources = sources.clone();
+                let client_tools = client_tools.clone();
+                Box::pin(async move {
+                    run_model_tool_call(
+                        ToolCallContext {
+                            registry: &registry,
+                            state: &state,
+                            negotiation: &negotiation,
+                            cx: &cx,
+                            session_id: &session,
+                            actor: &actor,
+                            policy_sources: &sources,
+                            client_tools: &client_tools,
+                        },
+                        call,
+                    )
+                    .await
+                })
+            }
+        },
+    )
+    .await;
+
+    if let Ok(result) = &outcome {
+        let _usage = crate::telemetry::usage_span(
+            &session_id,
+            result.usage.input_tokens,
+            result.usage.output_tokens,
+        );
+    }
+
+    // updatedAt each turn: the client-visible last-activity
+    // stamp, before the response.
+    let updated = agent_client_protocol::schema::v1::SessionInfoUpdate::new().updated_at(
+        state_for_prompt
+            .db
+            .get_session(&session_id)
+            .await
+            .ok()
+            .flatten()
+            .map(|session| timestamp(session.updated_at))
+            .unwrap_or_default(),
+    );
+    let _ = cx.send_notification(SessionNotification::new(
+        request_session_id.clone(),
+        SessionUpdate::SessionInfoUpdate(updated),
+    ));
+
+    // Automatic compaction: the post_turn event fires after
+    // every model turn, detached so a slow summarisation
+    // never blocks the response.
+    compaction::fire_post_turn_detached(
+        state_for_prompt.clone(),
+        session_id.clone(),
+        turn.id.clone(),
+        actor_name.clone(),
+        size,
+    );
+
+    // Titling: detached, silent, only for untitled sessions.
+    titling::fire_title_trigger_detached(state_for_prompt.clone(), session_id.clone(), size);
+
+    state_for_prompt
+        .db
+        .release_lease(&session_id, &owner_for_prompt)
+        .await
+        .ok();
+
+    match outcome {
+        Ok(result) => {
+            // A context overflow ends the turn with the note
+            // streamed; refresh the usage indicator from the
+            // local estimate so it reflects the oversized
+            // context the failing request carried. The provider
+            // reported no usage for that request, so without
+            // this the indicator sits at the last successful
+            // request's size and the growth is invisible.
+            if result.stop == crate::agent::TurnStop::ContextLength && size > 0 {
+                let used_bytes: u64 = state_for_prompt
+                    .db
+                    .assemble_context(&session_id)
+                    .await
+                    .map(|assembled| {
+                        assembled
+                            .iter()
+                            .map(|item| item.message.content.len() as u64)
+                            .sum()
+                    })
+                    .unwrap_or(0);
+                let used = crate::scripts::host::estimate_tokens(used_bytes);
+                let _ = cx.send_notification(SessionNotification::new(
+                    request_session_id.clone(),
+                    SessionUpdate::UsageUpdate(UsageUpdate::new(used, size)),
+                ));
+            }
+            Ok(PromptResponse::new(match result.stop {
+                crate::agent::TurnStop::EndTurn | crate::agent::TurnStop::ContextLength => {
+                    StopReason::EndTurn
+                }
+                crate::agent::TurnStop::MaxTurnRequests => StopReason::MaxTurnRequests,
+            }))
+        }
+        Err(err) => {
+            Err(Error::internal_error().data(serde_json::json!({ "error": err.to_string() })))
+        }
+    }
+}
+
+/// Runs a user-typed `/!<tool> {json}` direct invocation: a client-capability
+/// tool executes on the connection, an MCP tool against the pool; the result
+/// is announced as a tool call and stored in the turn. Returns the response
+/// the caller sends.
+#[allow(clippy::too_many_arguments)] // the invocation's resolved inputs
+async fn run_direct_invocation(
+    state: Arc<TackleState>,
+    negotiation: Arc<ConnectionNegotiation>,
+    cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
+    wire_id: SessionId,
+    turn_id: crate::store::TurnId,
+    session_id: crate::store::SessionId,
+    owner: Arc<String>,
+    call_id: String,
+    input: crate::invokables::DirectInvocation,
+) -> Result<agent_client_protocol::schema::v1::PromptResponse, Error> {
+    use agent_client_protocol::schema::v1::{ContentBlock, PromptResponse, StopReason};
+    let (text, is_error) = if input.invokable.starts_with("client.") {
+        // Client-capability tools execute on the
+        // connection, not the MCP pool.
+        let available = crate::acp::client_tools::catalog(
+            negotiation.client_caps(),
+            negotiation.editor_toggles(),
+        );
+        match input.arguments_json() {
+            Err(err) => (err.to_string(), true),
+            Ok(_) if !available.iter().any(|tool| tool.name == input.invokable) => (
+                format!(
+                    "client tool `{}` is not available on this connection",
+                    input.invokable
+                ),
+                true,
+            ),
+            Ok(arguments) => {
+                match crate::acp::client_tools::execute(&cx, &wire_id, &input.invokable, &arguments)
+                    .await
+                {
+                    Ok(executed) => {
+                        negotiation.track_terminals(
+                            &wire_id.to_string(),
+                            executed.created,
+                            executed.finished,
+                        );
+                        (executed.content, false)
+                    }
+                    Err(err) => (err, true),
+                }
+            }
+        }
+    } else {
+        let pool = negotiation.mcp_pool();
+        let pool = pool.lock().await;
+        let tools = pool.list_tools().await;
+        let executed = match crate::invokables::Registry::build(&state.definitions(), &tools) {
+            Ok(registry) => registry
+                .execute_direct(&pool, &input)
+                .await
+                .map_err(|err| err.to_string()),
+            Err(err) => Err(err.to_string()),
+        };
+        drop(pool);
+        match executed {
+            Ok(result) => (result.content_json, result.is_error),
+            Err(err) => (err, true),
+        }
+    };
+    let status = if is_error {
+        agent_client_protocol::schema::v1::ToolCallStatus::Failed
+    } else {
+        agent_client_protocol::schema::v1::ToolCallStatus::Completed
+    };
+    let _ = cx.send_notification(SessionNotification::new(
+        wire_id.clone(),
+        SessionUpdate::ToolCallUpdate(agent_client_protocol::schema::v1::ToolCallUpdate::new(
+            agent_client_protocol::schema::v1::ToolCallId::new(call_id),
+            agent_client_protocol::schema::v1::ToolCallUpdateFields::new()
+                .status(status)
+                .content(vec![
+                    agent_client_protocol::schema::v1::ToolCallContent::from(ContentBlock::Text(
+                        agent_client_protocol::schema::v1::TextContent::new(text.clone()),
+                    )),
+                ]),
+        )),
+    ));
+    // Two stored messages per the schema: the call
+    // (namespaced invokable plus arguments) and the
+    // result that answers it.
+    let call = state
+        .db
+        .append_message(
+            &turn_id,
+            crate::store::Role::ToolCall,
+            &input.arguments,
+            Some(&input.invokable),
+            None,
+            None,
+            None,
+        )
+        .await
+        .map_err(|err| Error::internal_error().data(err.to_string()))?;
+    state
+        .db
+        .append_message(
+            &turn_id,
+            crate::store::Role::ToolResult,
+            &serde_json::json!([{ "type": "text", "text": text }]).to_string(),
+            Some(&input.invokable),
+            Some(&call.id),
+            Some(is_error),
+            None,
+        )
+        .await
+        .map_err(|err| Error::internal_error().data(err.to_string()))?;
+    state.db.release_lease(&session_id, &owner).await.ok();
+    Ok(PromptResponse::new(StopReason::EndTurn))
+}
+
 pub(crate) async fn run_agent_over<T>(
     state: Arc<TackleState>,
     negotiation: Arc<ConnectionNegotiation>,
@@ -1177,127 +1616,22 @@ where
                     let owner = owner_for_prompt.clone();
                     let spawn_cx = cx.clone();
                     spawn_cx.spawn(async move {
-                        let (text, is_error) = if input.invokable.starts_with("client.") {
-                            // Client-capability tools execute on the
-                            // connection, not the MCP pool.
-                            let available = crate::acp::client_tools::catalog(
-                                negotiation.client_caps(),
-                                negotiation.editor_toggles(),
-                            );
-                            match input.arguments_json() {
-                                Err(err) => (err.to_string(), true),
-                                Ok(_) if !available
-                                    .iter()
-                                    .any(|tool| tool.name == input.invokable) =>
-                                {
-                                    (
-                                        format!(
-                                            "client tool `{}` is not available on this connection",
-                                            input.invokable
-                                        ),
-                                        true,
-                                    )
-                                }
-                                Ok(arguments) => {
-                                    match crate::acp::client_tools::execute(
-                                        &cx,
-                                        &wire_id,
-                                        &input.invokable,
-                                        &arguments,
-                                    )
-                                    .await
-                                    {
-                                        Ok(executed) => {
-                                            negotiation.track_terminals(
-                                                &wire_id.to_string(),
-                                                executed.created,
-                                                executed.finished,
-                                            );
-                                            (executed.content, false)
-                                        }
-                                        Err(err) => (err, true),
-                                    }
-                                }
-                            }
-                        } else {
-                            let pool = negotiation.mcp_pool();
-                            let pool = pool.lock().await;
-                            let tools = pool.list_tools().await;
-                            let executed = match crate::invokables::Registry::build(
-                                &state.definitions(),
-                                &tools,
-                            ) {
-                                Ok(registry) => registry
-                                    .execute_direct(&pool, &input)
-                                    .await
-                                    .map_err(|err| err.to_string()),
-                                Err(err) => Err(err.to_string()),
-                            };
-                            drop(pool);
-                            match executed {
-                                Ok(result) => (result.content_json, result.is_error),
-                                Err(err) => (err, true),
-                            }
-                        };
-                        let status = if is_error {
-                            agent_client_protocol::schema::v1::ToolCallStatus::Failed
-                        } else {
-                            agent_client_protocol::schema::v1::ToolCallStatus::Completed
-                        };
-                        let _ = cx.send_notification(SessionNotification::new(
-                            wire_id.clone(),
-                            SessionUpdate::ToolCallUpdate(
-                                agent_client_protocol::schema::v1::ToolCallUpdate::new(
-                                    agent_client_protocol::schema::v1::ToolCallId::new(call_id),
-                                    agent_client_protocol::schema::v1::ToolCallUpdateFields::new()
-                                        .status(status)
-                                        .content(vec![
-                                            agent_client_protocol::schema::v1::ToolCallContent::from(
-                                                ContentBlock::Text(
-                                                    agent_client_protocol::schema::v1::TextContent::new(
-                                                        text.clone(),
-                                                    ),
-                                                ),
-                                            ),
-                                        ]),
-                                ),
-                            ),
-                        ));
-                        // Two stored messages per the schema: the call
-                        // (namespaced invokable plus arguments) and the
-                        // result that answers it.
-                        let call = state
-                            .db
-                            .append_message(
-                                &turn_id,
-                                crate::store::Role::ToolCall,
-                                &input.arguments,
-                                Some(&input.invokable),
-                                None,
-                                None,
-                                None,
-                            )
-                            .await
-                            .map_err(|err| Error::internal_error().data(err.to_string()))?;
-                        state
-                            .db
-                            .append_message(
-                                &turn_id,
-                                crate::store::Role::ToolResult,
-                                &serde_json::json!([{ "type": "text", "text": text }]).to_string(),
-                                Some(&input.invokable),
-                                Some(&call.id),
-                                Some(is_error),
-                                None,
-                            )
-                            .await
-                            .map_err(|err| Error::internal_error().data(err.to_string()))?;
-                        state
-                            .db
-                            .release_lease(&session_id, &owner)
-                            .await
-                            .ok();
-                        responder.respond(PromptResponse::new(StopReason::EndTurn))
+                        match run_direct_invocation(
+                            state,
+                            negotiation,
+                            cx,
+                            wire_id,
+                            turn_id,
+                            session_id.clone(),
+                            owner,
+                            call_id,
+                            input,
+                        )
+                        .await
+                        {
+                            Ok(response) => responder.respond(response),
+                            Err(err) => responder.respond_with_error(err),
+                        }
                     })?;
                     return Ok(());
                 }
@@ -1488,324 +1822,24 @@ where
                 let negotiation_for_turn = negotiation_for_prompt.clone();
                 let spawn_cx = cx.clone();
                 spawn_cx.spawn(async move {
-                let definitions = state_for_prompt.definitions();
-                let actor = definitions.actors.get(&actor_name);
-                let persona =
-                    actor.and_then(|a| definitions.personas.get(&a.frontmatter.persona));
-                let mcp_tokens = {
-                    let pool = negotiation_for_turn.mcp_pool();
-                    let pool = pool.lock().await;
-                    pool.list_tools().await
-                };
-                // The client-capability tools the connection advertised
-                // and the categories currently enabled (config seeded,
-                // `/editor` overridable).
-                let client_tools = crate::acp::client_tools::catalog(
-                    negotiation_for_turn.client_caps(),
-                    negotiation_for_turn.editor_toggles(),
-                );
-                let registry = crate::invokables::Registry::build_with_client_tools(
-                    &definitions,
-                    &mcp_tokens,
-                    &client_tools,
-                )
-                .unwrap_or_default();
-                let tools = registry.model_tools();
-                // FR-012: the invokable listing rides the system prompt.
-                let mut system = persona.map(|p| p.body.clone()).unwrap_or_default();
-                if !tools.is_empty() {
-                    system.push_str("\n\n");
-                    system.push_str(&registry.manifest());
-                }
-                // The model: the shared resolution chain — metadata,
-                // actor frontmatter, [defaults].model, then the first
-                // listed selector option. Nothing left is a clear
-                // configuration error, never a `default/model` sentinel.
-                let session_for_model = session_row.as_ref().ok_or_else(|| {
-                    Error::internal_error().data("no such session".to_owned())
-                })?;
-                let model_ref = {
-                    if let Some(model_ref) =
-                        config_options::resolve_model_for(&state_for_prompt, session_for_model, None)
-                    {
-                        model_ref
-                    } else {
-                        let listed =
-                            config_options::build(&state_for_prompt, session_for_model).await;
-                        listed.first_model.ok_or_else(|| {
-                            Error::internal_error().data(
-                                "no model configured; set [defaults].model or select a model"
-                                    .to_owned(),
-                            )
-                        })?
-                    }
-                };
-                let size = context_window(&model_ref).unwrap_or(0);
-
-                // Assemble the prior context (the prompt turn included —
-                // its user message is the prompt; the loop re-sends it as
-                // the final message).
-                let assembled = state_for_prompt
-                    .db
-                    .assemble_context(&session_id)
+                    match run_prompt_turn(
+                        state_for_prompt,
+                        negotiation_for_turn,
+                        cx,
+                        request.session_id.clone(),
+                        session_id,
+                        turn,
+                        actor_name,
+                        session_row,
+                        first_text,
+                        blocks_json,
+                        owner_for_prompt,
+                    )
                     .await
-                    .map_err(|err| Error::internal_error().data(err.to_string()))?;
-                let prior: Vec<crate::agent::ChatMessage> =
-                    compaction::prior_messages(&assembled, &turn.id);
-                // FR-010: a user-typed `/name` prompt expands into the
-                // model prompt (the stored message stays literal).
-                let prompt_text = match first_text.strip_prefix('/') {
-                    Some(rest) => {
-                        let mut parts = rest.splitn(2, char::is_whitespace);
-                        let name = parts.next().unwrap_or("");
-                        let args = parts.next().unwrap_or("").trim();
-                        registry
-                            .expand_user(name, args)
-                            .unwrap_or_else(|_| prompt_text_of(&blocks_json))
+                    {
+                        Ok(response) => responder.respond(response),
+                        Err(err) => responder.respond_with_error(err),
                     }
-                    None => prompt_text_of(&blocks_json),
-                };
-
-                let provider = crate::agent::provider::provider_for(
-                    &model_ref,
-                    &state_for_prompt.config().config,
-                )
-                .map_err(|err| Error::internal_error().data(err.to_string()))?;
-                // The context-length failure note: actionable, naming
-                // the configured compaction script (or its absence).
-                let context_length_note = compaction::compaction_disabled_note(
-                    state_for_prompt
-                        .config()
-                        .config
-                        .scripts
-                        .iter()
-                        .find(|(_, script)| {
-                            script.enabled
-                                && script
-                                    .events
-                                    .iter()
-                                    .any(|event| event == "compaction_requested")
-                        })
-                        .map(|(name, _)| name.as_str()),
-                );
-                let assistant_id = uuid::Uuid::new_v4().to_string();
-                // The turn span: parent of the tool-call and usage
-                // spans the loop's paths create.
-                let turn_span =
-                    crate::telemetry::turn_span(&session_id, &actor_name, &model_ref);
-                let _turn_guard = turn_span.enter();
-                let session_for_chunks = request.session_id.clone();
-                let cx_for_chunks = cx.clone();
-                let cx_for_retry = cx.clone();
-                let session_for_retry = request.session_id.clone();
-
-                let outcome = crate::agent::turn::run_turn(
-                    &provider,
-                    &state_for_prompt.db,
-                    &session_id,
-                    &turn.id,
-                    &assistant_id.to_string(),
-                    &model_ref,
-                    &system,
-                    &prompt_text,
-                    prior,
-                    tools,
-                    state_for_prompt
-                        .config()
-                        .config
-                        .turns
-                        .max_model_requests
-                        .unwrap_or(8),
-                    size,
-                    &context_length_note,
-                    // usage cadence: a usage_update per model request,
-                    // skipped when the window is unknown (RFD guidance).
-                    {
-                        let cx = cx_for_chunks.clone();
-                        let session_for_usage = session_for_chunks.clone();
-                        move |input: u64, _output: u64, _cost: f64| {
-                            if size == 0 {
-                                return;
-                            }
-                            let _ = cx.send_notification(SessionNotification::new(
-                                session_for_usage.clone(),
-                                SessionUpdate::UsageUpdate(UsageUpdate::new(input, size)),
-                            ));
-                        }
-                    },
-                    move |delta: &str| {
-                        let chunk = agent_client_protocol::schema::v1::ContentChunk::new(
-                            ContentBlock::Text(
-                                agent_client_protocol::schema::v1::TextContent::new(
-                                    delta.to_owned(),
-                                ),
-                            ),
-                        )
-                        .message_id(
-                            agent_client_protocol::schema::v1::MessageId::new(assistant_id.clone()),
-                        );
-                        let _ = cx_for_chunks.send_notification(SessionNotification::new(
-                            session_for_chunks.clone(),
-                            agent_client_protocol::schema::v1::SessionUpdate::AgentMessageChunk(
-                                chunk,
-                            ),
-                        ));
-                    },
-                    // retry attempts surface as tool-call status cards
-                    // (the stable ACP surface's only card mechanism).
-                    {
-                        let cx = cx_for_retry;
-                        move |attempt: u32, message: &str| {
-                            let card = agent_client_protocol::schema::v1::ToolCall::new(
-                                agent_client_protocol::schema::v1::ToolCallId::new(format!(
-                                    "retry-{attempt}-{}",
-                                    uuid::Uuid::new_v4()
-                                )),
-                                format!("Retrying model request (attempt {attempt}): {message}"),
-                            )
-                            .status(agent_client_protocol::schema::v1::ToolCallStatus::InProgress);
-                            let _ = cx.send_notification(SessionNotification::new(
-                                session_for_retry.clone(),
-                                agent_client_protocol::schema::v1::SessionUpdate::ToolCall(card),
-                            ));
-                        }
-                    },
-                    // Model tool calls: announce, run the permission
-                    // pipeline, execute via the registry, report the result
-                    // back into the loop.
-                    {
-                        let registry = registry.clone();
-                        let state = state_for_prompt.clone();
-                        let negotiation = negotiation_for_turn.clone();
-                        let cx = cx.clone();
-                        let session = request.session_id.clone();
-                        let actor = actor_name.clone();
-                        let sources = policy_script_sources(&state_for_prompt);
-                        let client_tools = client_tools.clone();
-                        move |call: crate::agent::ModelToolCall| -> std::pin::Pin<
-                            Box<
-                                dyn std::future::Future<
-                                        Output = crate::agent::ToolCallOutcome,
-                                    > + Send,
-                            >,
-                        > {
-                            let registry = registry.clone();
-                            let state = state.clone();
-                            let negotiation = negotiation.clone();
-                            let cx = cx.clone();
-                            let session = session.clone();
-                            let actor = actor.clone();
-                            let sources = sources.clone();
-                            let client_tools = client_tools.clone();
-                            Box::pin(async move {
-                                run_model_tool_call(
-                                    ToolCallContext {
-                                        registry: &registry,
-                                        state: &state,
-                                        negotiation: &negotiation,
-                                        cx: &cx,
-                                        session_id: &session,
-                                        actor: &actor,
-                                        policy_sources: &sources,
-                                        client_tools: &client_tools,
-                                    },
-                                    call,
-                                )
-                                .await
-                            })
-                        }
-                    },
-                )
-                .await;
-
-                if let Ok(result) = &outcome {
-                    let _usage = crate::telemetry::usage_span(
-                        &session_id,
-                        result.usage.input_tokens,
-                        result.usage.output_tokens,
-                    );
-                }
-
-                // updatedAt each turn: the client-visible last-activity
-                // stamp, before the response.
-                let updated = agent_client_protocol::schema::v1::SessionInfoUpdate::new()
-                    .updated_at(
-                        state_for_prompt
-                            .db
-                            .get_session(&session_id)
-                            .await
-                            .ok()
-                            .flatten()
-                            .map(|session| timestamp(session.updated_at))
-                            .unwrap_or_default(),
-                    );
-                let _ = cx.send_notification(SessionNotification::new(
-                    request.session_id.clone(),
-                    SessionUpdate::SessionInfoUpdate(updated),
-                ));
-
-                // Automatic compaction: the post_turn event fires after
-                // every model turn, detached so a slow summarisation
-                // never blocks the response.
-                compaction::fire_post_turn_detached(
-                    state_for_prompt.clone(),
-                    session_id.clone(),
-                    turn.id.clone(),
-                    actor_name.clone(),
-                    size,
-                );
-
-                // Titling: detached, silent, only for untitled sessions.
-                titling::fire_title_trigger_detached(
-                    state_for_prompt.clone(),
-                    session_id.clone(),
-                    size,
-                );
-
-                state_for_prompt
-                    .db
-                    .release_lease(&session_id, &owner_for_prompt)
-                    .await
-                    .ok();
-
-                match outcome {
-                    Ok(result) => {
-                        // A context overflow ends the turn with the note
-                        // streamed; refresh the usage indicator from the
-                        // local estimate so it reflects the oversized
-                        // context the failing request carried. The provider
-                        // reported no usage for that request, so without
-                        // this the indicator sits at the last successful
-                        // request's size and the growth is invisible.
-                        if result.stop == crate::agent::TurnStop::ContextLength && size > 0 {
-                            let used_bytes: u64 = state_for_prompt
-                                .db
-                                .assemble_context(&session_id)
-                                .await
-                                .map(|assembled| {
-                                    assembled
-                                        .iter()
-                                        .map(|item| item.message.content.len() as u64)
-                                        .sum()
-                                })
-                                .unwrap_or(0);
-                            let used = crate::scripts::host::estimate_tokens(used_bytes);
-                            let _ = cx.send_notification(SessionNotification::new(
-                                request.session_id.clone(),
-                                SessionUpdate::UsageUpdate(UsageUpdate::new(used, size)),
-                            ));
-                        }
-                        responder.respond(PromptResponse::new(match result.stop {
-                            crate::agent::TurnStop::EndTurn
-                            | crate::agent::TurnStop::ContextLength => StopReason::EndTurn,
-                            crate::agent::TurnStop::MaxTurnRequests => StopReason::MaxTurnRequests,
-                        }))
-                    }
-                    Err(err) => responder.respond_with_error(
-                        Error::internal_error()
-                            .data(serde_json::json!({ "error": err.to_string() })),
-                    ),
-                }
                 })?;
                 Ok(())
             },
