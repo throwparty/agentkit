@@ -66,7 +66,6 @@
               cosign
               dbus
               goreleaser
-              mdformat
               nixfmt
               openssl
               otel-desktop-viewer
@@ -80,6 +79,10 @@
               yq-go
               zig
               ;
+            # mdformat with the frontmatter plugin: without it mdformat
+            # rewrites `---` YAML frontmatter into a heading, corrupting
+            # definition files (personas, actors, prompts).
+            mdformat = pkgs.mdformat.withPlugins (ps: [ ps.mdformat-frontmatter ]);
             rustup-wrapped = pkgs.writeShellScriptBin "rustup" "
               case \"\${1}_\${2}_\" in
                 target_add_|target_install_) exit 0 ;;
