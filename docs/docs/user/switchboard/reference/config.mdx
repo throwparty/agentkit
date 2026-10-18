@@ -85,7 +85,7 @@ The wire protocol format. One of:
 - `"openai-responses"` — OpenAI Responses.
 - `"anthropic-messages"` — Anthropic Messages.
 
-A provider entry is pinned to a single surface; multi-surface gateways are configured as multiple entries sharing a `base_url` (see [OpenCode](../setting-up-your-providers/opencode)).
+A provider entry is pinned to a single surface; multi-surface gateways are configured as multiple entries sharing a `base_url` (see [OpenCode](../providers/opencode)).
 
 ### `base_url`
 
@@ -141,7 +141,7 @@ What scripts can and cannot do:
 
 Scripts are compiled once at startup. A missing file, a parse error, or a script without `fn mutate` aborts startup with the provider identity and the script path. Compilation is shared: two providers listing the same path compile it once.
 
-See [Setting up your providers](../setting-up-your-providers) for worked examples.
+See [providers](../providers) for worked examples.
 
 ### `auth.oauth`
 
