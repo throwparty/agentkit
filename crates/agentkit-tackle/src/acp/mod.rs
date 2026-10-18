@@ -266,7 +266,8 @@ impl TackleState {
             }
         }
         let approved = pending.trust_store.approved(&pending.identity, &entries);
-        let gated = crate::config::retain_project_entries(pending.config, &approved);
+        let gated =
+            crate::config::retain_project_entries(pending.config, &pending.project_dir, &approved);
         let mut definitions = pending.definitions;
         definitions.retain_project(&pending.project_dir, &approved);
 
@@ -2098,7 +2099,9 @@ fn notification(session_id: &SessionId, update: SessionUpdate) -> SessionNotific
     SessionNotification::new(session_id.clone(), update)
 }
 
-/// The registered `pre_tool_use` policy script sources (FR-015).
+/// The registered `pre_tool_use` policy script sources (FR-015): every
+/// enabled registration declaring the event, resolved from its layer
+/// (built-in, user, or a trusted project layer).
 fn policy_script_sources(state: &TackleState) -> Vec<String> {
     let config = state.config();
     let user_dir = config
@@ -2108,18 +2111,12 @@ fn policy_script_sources(state: &TackleState) -> Vec<String> {
     config
         .config
         .scripts
-        .values()
-        .filter(|script| {
+        .iter()
+        .filter(|(_, script)| {
             script.enabled && script.events.iter().any(|event| event == "pre_tool_use")
         })
-        .filter_map(|script| {
-            crate::builtins::script_source(&script.file)
-                .map(str::to_owned)
-                .or_else(|| {
-                    user_dir.and_then(|dir| {
-                        std::fs::read_to_string(dir.join("scripts").join(&script.file)).ok()
-                    })
-                })
+        .filter_map(|(name, script)| {
+            crate::config::resolve_script_source(name, &script.file, user_dir)
         })
         .collect()
 }
