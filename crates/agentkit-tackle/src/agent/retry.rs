@@ -26,6 +26,14 @@ pub fn classify(error_text: &str) -> FailureClass {
         || lower.contains("too many tokens")
         || lower.contains("maximum context")
         || lower.contains("prompt is too long")
+        // HTTP 413: the request body (the conversation) exceeded the
+        // server's buffer — for a chat request that is the context, and
+        // retrying it verbatim can never succeed.
+        || lower.contains("413")
+        || lower.contains("payload too large")
+        || lower.contains("request entity too large")
+        || lower.contains("request too large")
+        || lower.contains("content too large")
     {
         FailureClass::ContextLength
     } else if lower.contains("429")
@@ -85,6 +93,15 @@ mod tests {
         );
         assert_eq!(
             classify("context_length_exceeded"),
+            FailureClass::ContextLength
+        );
+        // An HTTP 413 on the chat request is an oversized conversation, not
+        // a transient: it must be actionable, never retried.
+        assert_eq!(
+            classify(
+                "ProviderResponseError: status 413 Payload Too Large: Failed to buffer the \
+                 request body: length limit exceeded"
+            ),
             FailureClass::ContextLength
         );
     }

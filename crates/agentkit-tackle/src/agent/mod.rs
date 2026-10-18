@@ -178,6 +178,10 @@ pub enum TurnStop {
     EndTurn,
     /// The model-request cap was hit mid-work; the user may continue.
     MaxTurnRequests,
+    /// The conversation no longer fits the model's window: the turn ended
+    /// with the actionable overflow note instead of a model answer. The
+    /// caller surfaces the context size and may auto-compact.
+    ContextLength,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -57,6 +57,10 @@ pub async fn run_turn<P: ModelProvider>(
     let mut request_count = 0u32;
     let mut history = prior;
     history.push(ChatMessage::user(prompt_text.to_owned()));
+    // The running usage delta across the turn's requests. A turn issues one
+    // request per tool-call round, and each is billed, so the stored delta
+    // is their sum — not the last request's alone.
+    let mut turn_usage = crate::store::TurnUsage::default();
 
     loop {
         request_count += 1;
@@ -94,6 +98,29 @@ pub async fn run_turn<P: ModelProvider>(
         let response = provider.stream_completion(request, &mut on_delta).await;
         let response = match response {
             Ok(response) => response,
+            // Context-length overflow: actionable, never retried, and
+            // streamed in-band so the client is never left guessing. This
+            // covers a plain completion error and a stream that failed
+            // before any delta — an HTTP 413 "payload too large" arrives
+            // the latter way.
+            Err(err) if is_context_overflow(&err) => {
+                on_delta(context_length_note);
+                db.append_message(
+                    turn_id,
+                    Role::Assistant,
+                    &serde_json::json!([{ "type": "text", "text": context_length_note }])
+                        .to_string(),
+                    None,
+                    None,
+                    None,
+                    Some(&message_id),
+                )
+                .await?;
+                return Ok(TurnOutcome {
+                    stop: TurnStop::ContextLength,
+                    usage: db.session_usage(session_id).await?,
+                });
+            }
             // A stream error with NO text: the failure happened before any
             // delta reached the client — retry like a plain transient.
             Err(ModelError::StreamFailed {
@@ -111,8 +138,9 @@ pub async fn run_turn<P: ModelProvider>(
                 continue;
             }
             // Mid-stream failure: the client already saw the deltas —
-            // persist the partial text and answer with an in-band failure
-            // notice (retrying would duplicate the streamed prefix).
+            // persist the partial text and stream the failure notice so the
+            // turn never ends silently (retrying would duplicate the
+            // streamed prefix).
             Err(ModelError::StreamFailed {
                 text: partial,
                 error,
@@ -121,6 +149,7 @@ pub async fn run_turn<P: ModelProvider>(
                 let note = format!(
                     "The model connection failed mid-response; the text above is partial. ({error})"
                 );
+                on_delta(&note);
                 db.append_message(
                     turn_id,
                     Role::Assistant,
@@ -129,28 +158,6 @@ pub async fn run_turn<P: ModelProvider>(
                         { "type": "text", "text": note }
                     ])
                     .to_string(),
-                    None,
-                    None,
-                    None,
-                    Some(&message_id),
-                )
-                .await?;
-                return Ok(TurnOutcome {
-                    stop: TurnStop::EndTurn,
-                    usage: db.session_usage(session_id).await?,
-                });
-            }
-            // Context-length: actionable, never retried (EC-003).
-            Err(ModelError::Completion(text))
-                if super::retry::classify(&text) == super::retry::FailureClass::ContextLength =>
-            {
-                // Actionable, never retried (EC-003): the caller's note
-                // names the compaction script (or its absence).
-                db.append_message(
-                    turn_id,
-                    Role::Assistant,
-                    &serde_json::json!([{ "type": "text", "text": context_length_note }])
-                        .to_string(),
                     None,
                     None,
                     None,
@@ -185,7 +192,7 @@ pub async fn run_turn<P: ModelProvider>(
         };
 
         // Persist the assistant text when present (tool-call rounds carry
-        // no text), and the usage delta the request incurred.
+        // no text), and the running usage delta the turn has incurred.
         if !response.text.is_empty() {
             db.append_message(
                 turn_id,
@@ -198,15 +205,14 @@ pub async fn run_turn<P: ModelProvider>(
             )
             .await?;
         }
-        db.set_turn_usage(
-            turn_id,
-            crate::store::TurnUsage {
-                input_tokens: response.usage.input_tokens,
-                output_tokens: response.usage.output_tokens,
-                cost_usd: 0.0,
-            },
-        )
-        .await?;
+        // Accumulate: the stored delta is the whole turn's cost, not just
+        // the last request's (a multi-request turn otherwise undercounts by
+        // every request but the last).
+        turn_usage.input_tokens += response.usage.input_tokens;
+        turn_usage.output_tokens += response.usage.output_tokens;
+        db.set_turn_usage(turn_id, turn_usage).await?;
+        // The live usage indicator tracks the latest request's prompt size
+        // (the current context), not the running total.
         on_usage(
             response.usage.input_tokens,
             response.usage.output_tokens,
@@ -258,6 +264,24 @@ pub async fn run_turn<P: ModelProvider>(
                 outcome.content,
             ));
         }
+    }
+}
+
+/// Whether an error is a context-window overflow: a plain completion
+/// error classified as context-length, or a stream that failed before any
+/// delta with such an error (an HTTP 413 "payload too large" surfaces this
+/// way). A mid-stream failure that already delivered text is not — the
+/// partial output stands and the caller reports it separately.
+fn is_context_overflow(err: &ModelError) -> bool {
+    match err {
+        ModelError::Completion(text) => {
+            super::retry::classify(text) == super::retry::FailureClass::ContextLength
+        }
+        ModelError::StreamFailed { error, text, .. } => {
+            text.is_empty()
+                && super::retry::classify(error) == super::retry::FailureClass::ContextLength
+        }
+        _ => false,
     }
 }
 
