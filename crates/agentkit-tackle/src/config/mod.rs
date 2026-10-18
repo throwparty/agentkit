@@ -101,7 +101,8 @@ pub fn load_layered(
             let project = load_file(path)?.unwrap_or_default();
             reject_project_security_fields(&project, path)?;
             if let Some(gate) = gate {
-                gate_project_entries(gate, project)
+                let project_dir = path.parent().unwrap_or_else(|| Path::new("."));
+                gate_project_entries(gate, project, project_dir)
             } else {
                 project
             }
@@ -198,27 +199,69 @@ pub fn project_trust_entries(project: &Config) -> BTreeMap<String, String> {
 }
 
 /// Drops the executable project config entries whose trust entries were
-/// refused.
-pub fn retain_project_entries(mut project: Config, approved: &BTreeSet<String>) -> Config {
+/// refused, and pins each retained project script to its project-layer
+/// file. The pin records the script's origin explicitly: resolution reads
+/// the approved file directly, so a user-layer file of the same name
+/// cannot shadow it, and a trusted project script is no longer dropped.
+pub fn retain_project_entries(
+    mut project: Config,
+    project_dir: &Path,
+    approved: &BTreeSet<String>,
+) -> Config {
     project
         .mcp_servers
         .retain(|name, _| approved.contains(&format!("mcp_servers/{name}")));
     project
         .scripts
         .retain(|name, _| approved.contains(&format!("scripts/{name}")));
+    for script in project.scripts.values_mut() {
+        // A `builtin:` reference is not a project file: leave it to the
+        // built-in resolver.
+        if !script.file.starts_with("builtin:") {
+            script.file = project_dir
+                .join("scripts")
+                .join(&script.file)
+                .to_string_lossy()
+                .into_owned();
+        }
+    }
     project
+}
+
+/// Resolves a registered script's source.
+///
+/// The reference decides the layer: a `builtin:<name>.rhai` reference is
+/// the embedded source, an absolute path is a project-layer script pinned
+/// at trust resolution, and anything else is a filename under the user
+/// layer's `scripts/` directory. An unreadable file is logged and skipped.
+pub fn resolve_script_source(name: &str, file: &str, user_dir: Option<&Path>) -> Option<String> {
+    if let Some(source) = crate::builtins::script_source(file) {
+        return Some(source.to_owned());
+    }
+    let resolved = if Path::new(file).is_absolute() {
+        PathBuf::from(file)
+    } else {
+        user_dir?.join("scripts").join(file)
+    };
+    match std::fs::read_to_string(&resolved) {
+        Ok(source) => Some(source),
+        Err(err) => {
+            tracing::warn!(script = %name, path = %resolved.display(), "script unreadable: {err}");
+            None
+        }
+    }
 }
 
 /// Trust-gates the executable entries of a project layer (`mcp_servers`
 /// and `scripts`); unapproved entries are dropped before the merge. The
 /// hash covers the serialised entry, so any field change re-prompts.
-fn gate_project_entries(gate: &mut trust::Gate<'_>, project: Config) -> Config {
+fn gate_project_entries(gate: &mut trust::Gate<'_>, project: Config, project_dir: &Path) -> Config {
     let entries = project_trust_entries(&project);
     if entries.is_empty() {
         return project;
     }
     let approved = gate.gate(&entries);
-    retain_project_entries(project, &approved)
+    retain_project_entries(project, project_dir, &approved)
 }
 
 fn load_file(path: &Path) -> Result<Option<Config>, ConfigError> {
@@ -625,5 +668,43 @@ mod tests {
         let script = loaded.config.scripts.get("deny-secrets").unwrap();
         assert!(script.enabled);
         assert_eq!(script.events, &["pre_tool_use"]);
+    }
+
+    #[test]
+    fn approved_project_script_resolves_to_its_project_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project");
+        std::fs::create_dir_all(project.join("scripts")).unwrap();
+        std::fs::write(
+            project.join("scripts/deny.rhai"),
+            "fn pre_tool_use(r) { r }",
+        )
+        .unwrap();
+        // A user-layer file of the same name must not shadow the project
+        // script: the pin selects the approved project file.
+        let user = dir.path().join("user");
+        std::fs::create_dir_all(user.join("scripts")).unwrap();
+        std::fs::write(user.join("scripts/deny.rhai"), "user shadow").unwrap();
+
+        let project_config: Config =
+            toml::from_str("[scripts.deny]\nevents = [\"pre_tool_use\"]\nfile = \"deny.rhai\"\n")
+                .unwrap();
+        let approved = BTreeSet::from(["scripts/deny".to_owned()]);
+        let retained = retain_project_entries(project_config, &project, &approved);
+        let script = retained.scripts.get("deny").unwrap();
+
+        let source = resolve_script_source("deny", &script.file, Some(&user)).unwrap();
+        assert_eq!(source, "fn pre_tool_use(r) { r }");
+    }
+
+    #[test]
+    fn refused_project_script_is_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project");
+        let project_config: Config =
+            toml::from_str("[scripts.deny]\nevents = [\"pre_tool_use\"]\nfile = \"deny.rhai\"\n")
+                .unwrap();
+        let retained = retain_project_entries(project_config, &project, &BTreeSet::new());
+        assert!(retained.scripts.is_empty());
     }
 }
