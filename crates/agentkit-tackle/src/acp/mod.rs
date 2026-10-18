@@ -807,12 +807,17 @@ async fn run_prompt_turn(
             .map(|(name, _)| name.as_str()),
     );
     let assistant_id = uuid::Uuid::new_v4().to_string();
+    // Thought chunks are their own logical message, distinct from the
+    // answer: one stable id per turn groups the reasoning stream.
+    let thought_id = format!("{assistant_id}-thought");
     // The turn span: parent of the tool-call and usage
     // spans the loop's paths create.
     let turn_span = crate::telemetry::turn_span(&session_id, &actor_name, &model_ref);
     let _turn_guard = turn_span.enter();
     let session_for_chunks = request_session_id.clone();
+    let session_for_thoughts = request_session_id.clone();
     let cx_for_chunks = cx.clone();
+    let cx_for_thoughts = cx.clone();
     let cx_for_retry = cx.clone();
     let session_for_retry = request_session_id.clone();
 
@@ -860,6 +865,27 @@ async fn run_prompt_turn(
                 session_for_chunks.clone(),
                 agent_client_protocol::schema::v1::SessionUpdate::AgentMessageChunk(chunk),
             ));
+        },
+        // Reasoning streams as thought chunks, a separate logical message
+        // from the answer (its own messageId); thoughts are advisory and
+        // are never stored.
+        {
+            let cx = cx_for_thoughts.clone();
+            let session = session_for_thoughts.clone();
+            move |delta: &str| {
+                let chunk = agent_client_protocol::schema::v1::ContentChunk::new(
+                    ContentBlock::Text(agent_client_protocol::schema::v1::TextContent::new(
+                        delta.to_owned(),
+                    )),
+                )
+                .message_id(agent_client_protocol::schema::v1::MessageId::new(
+                    thought_id.clone(),
+                ));
+                let _ = cx.send_notification(SessionNotification::new(
+                    session.clone(),
+                    SessionUpdate::AgentThoughtChunk(chunk),
+                ));
+            }
         },
         // retry attempts surface as tool-call status cards
         // (the stable ACP surface's only card mechanism).

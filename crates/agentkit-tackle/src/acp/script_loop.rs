@@ -130,6 +130,7 @@ async fn run_script_turn(
                 tools: Vec::new(),
             },
             &mut |_delta: &str| {},
+            &mut |_delta: &str| {},
         )
         .await
         .map_err(|err| HostError::Model(err.to_string()))?;

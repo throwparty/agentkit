@@ -45,6 +45,7 @@ pub async fn run_turn<P: ModelProvider>(
     context_length_note: &str,
     mut on_usage: impl FnMut(u64, u64, f64) + Send,
     mut on_delta: impl FnMut(&str) + Send,
+    mut on_thought: impl FnMut(&str) + Send,
     mut on_retry: impl FnMut(u32, &str) + Send,
     mut on_tool_call: impl FnMut(
         crate::agent::ModelToolCall,
@@ -93,7 +94,9 @@ pub async fn run_turn<P: ModelProvider>(
             text.push_str(delta);
             on_delta(delta);
         };
-        let response = provider.stream_completion(request, &mut on_delta).await;
+        let response = provider
+            .stream_completion(request, &mut on_delta, &mut on_thought)
+            .await;
         let response = match response {
             Ok(response) => response,
             // Context-length overflow: actionable, never retried, and
