@@ -26,8 +26,7 @@ CREATE TABLE turns (
     created_at             INTEGER NOT NULL,
     input_tokens           INTEGER NOT NULL DEFAULT 0,
     output_tokens          INTEGER NOT NULL DEFAULT 0,
-    cost_usd               REAL NOT NULL DEFAULT 0,
-    metadata               TEXT NOT NULL DEFAULT '{}'
+    cost_usd               REAL NOT NULL DEFAULT 0
 );
 
 CREATE TABLE messages (
@@ -39,23 +38,7 @@ CREATE TABLE messages (
     tool_call_id           TEXT REFERENCES messages(id),
     is_error               INTEGER,
     position               INTEGER NOT NULL,
-    created_at             INTEGER NOT NULL,
-    metadata               TEXT NOT NULL DEFAULT '{}'
-);
-
-CREATE TABLE definitions (
-    hash          TEXT PRIMARY KEY,
-    kind          TEXT NOT NULL,
-    name          TEXT NOT NULL,
-    version       TEXT,
-    content       TEXT NOT NULL,
-    recorded_at   INTEGER NOT NULL
-);
-
-CREATE TABLE turn_definitions (
-    turn_id         TEXT NOT NULL REFERENCES turns(id),
-    definition_hash TEXT NOT NULL REFERENCES definitions(hash),
-    PRIMARY KEY (turn_id, definition_hash)
+    created_at             INTEGER NOT NULL
 );
 
 CREATE INDEX idx_turns_parent         ON turns(parent_id);
@@ -64,4 +47,3 @@ CREATE INDEX idx_messages_turn        ON messages(turn_id, position);
 CREATE INDEX idx_sessions_forked_from ON sessions(forked_from_session_id);
 CREATE INDEX idx_sessions_fork_point  ON sessions(fork_point_turn_id);
 CREATE INDEX idx_sessions_updated     ON sessions(updated_at DESC);
-CREATE INDEX idx_turn_definitions_hash ON turn_definitions(definition_hash);
