@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-/// The consent interface, satisfied by the ACP permission flow in T-022.
+/// The consent interface, satisfied by the ACP permission flow.
 /// The stub implementation denies: fail-closed until real consent exists.
 pub trait ConsentPrompt {
     /// Asks the user to trust `entries` (relative paths) for the project

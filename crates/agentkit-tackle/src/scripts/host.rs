@@ -1,5 +1,5 @@
 //! `SessionAccess` and the behaviour host functions — the acting API
-//! behaviour scripts get and policy engines physically lack (T-026).
+//! behaviour scripts get and policy engines physically lack.
 //!
 //! Every host function goes through [`SessionAccess`], the seam between
 //! the script host and the session engine. The fixed internal budgets —
@@ -85,13 +85,13 @@ pub fn estimate_tokens(bytes: u64) -> u64 {
 
 /// Drives a user prompt through the session's normal agent loop —
 /// model-mediated and pipeline-gated. The turn loop implements this
-/// (T-015 wiring); scripts never invoke tools directly.
+/// scripts never invoke tools directly.
 pub trait PromptDispatcher: Send + Sync {
     fn dispatch(&self, session: &SessionId, text: &str) -> Result<(), HostError>;
 }
 
 /// Publishes turn completions; await_completion polls it. The turn
-/// loop publishes (T-015 wiring).
+/// loop publishes.
 pub trait CompletionSink: Send + Sync {
     fn publish(&self, session: &SessionId, completion: Completion);
     fn take(&self, session: &SessionId) -> Option<Completion>;

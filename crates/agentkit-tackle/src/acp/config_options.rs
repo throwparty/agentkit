@@ -1,15 +1,15 @@
-//! Session configuration options (T-031, FR-027): the model selector
+//! Session configuration options (FR-027): the model selector
 //! and the actor selector.
 //!
 //! The model selector discovers models per endpoint (GET /models, both
 //! wire formats' list shapes agree on `data[].id`); discovery is
-//! primary, queried at session setup, cached per process, and
-//! non-fatal — on failure or an empty result the endpoint's static
-//! model list is the fallback and the degraded state surfaces as a
-//! notice. The actor selector lists the loaded actors. A mid-session
-//! model switch is validated against the new model's context window:
-//! an over-window session auto-compacts, announced, with a context
-//! note; the switch is effective the following turn.
+//! primary, queried at session setup, and non-fatal — on failure or an
+//! empty result the endpoint's static model list is the fallback and the
+//! degraded state surfaces as a notice. The actor selector lists the
+//! loaded actors. A mid-session model switch is validated against the new
+//! model's context window: an over-window session auto-compacts,
+//! announced, with a context note; the switch is effective the following
+//! turn.
 
 use crate::acp::TackleState;
 use crate::config::Auth;
@@ -19,20 +19,11 @@ use agent_client_protocol::schema::v1::{
     SessionConfigId, SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
     SessionConfigSelect, SessionConfigSelectOption, SessionConfigValueId,
 };
-use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
 
 /// The model selector's config id.
 pub const MODEL_SELECTOR_ID: &str = "model";
 /// The actor selector's config id.
 pub const ACTOR_SELECTOR_ID: &str = "actor";
-
-/// The process-local discovery cache: endpoint name -> discovered model
-/// ids.
-fn discovery_cache() -> &'static Mutex<HashMap<String, Vec<String>>> {
-    static CACHE: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
-}
 
 /// Discover a model id with a context window for window validation.
 pub fn context_window(model_ref: &str) -> Option<u64> {
@@ -40,21 +31,11 @@ pub fn context_window(model_ref: &str) -> Option<u64> {
 }
 
 /// Per-endpoint model discovery: the OpenAI list shape's `data[].id`.
-/// Results cache per process; failures return nothing and surface as
+/// Discovery is queried fresh at each session setup — no process-global
+/// cache, so a model added to a running endpoint appears immediately and
+/// two endpoints never collide. Failures return nothing and surface as
 /// degraded discovery.
-async fn discover_models(
-    endpoint_name: &str,
-    base_url: &str,
-    credential: Option<String>,
-) -> Option<Vec<String>> {
-    if let Some(cached) = discovery_cache()
-        .lock()
-        .unwrap()
-        .get(endpoint_name)
-        .cloned()
-    {
-        return Some(cached);
-    }
+async fn discover_models(base_url: &str, credential: Option<String>) -> Option<Vec<String>> {
     // The OpenAI list shape: `data[].id` under `/models`.
     let url = format!("{base_url}/models");
     let request = reqwest::Client::new().get(url);
@@ -72,10 +53,6 @@ async fn discover_models(
     if ids.is_empty() {
         return None;
     }
-    discovery_cache()
-        .lock()
-        .unwrap()
-        .insert(endpoint_name.to_owned(), ids.clone());
     Some(ids)
 }
 
@@ -150,7 +127,7 @@ pub async fn build(state: &TackleState, session: &Session) -> Selectors {
             }
         };
         let qualified = |model: &str| format!("{name}/{model}");
-        let discovered = discover_models(name, &endpoint.base_url, credential).await;
+        let discovered = discover_models(&endpoint.base_url, credential).await;
         let models = match discovered {
             Some(models) => models,
             None => {

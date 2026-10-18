@@ -1,4 +1,4 @@
-//! First-run experience (T-030): session/new always succeeds with empty
+//! First-run experience: session/new always succeeds with empty
 //! configuration — the built-in defaults carry it — and the first
 //! message of every new session documents the loaded configuration and
 //! the `/` and `/!` syntaxes. Built-in overrides surface there.

@@ -1,4 +1,4 @@
-//! Compaction (T-028): the `/compact` turn definition and the
+//! Compaction: the `/compact` turn definition and the
 //! compaction-tagged prompt interception.
 //!
 //! Compaction-tagged prompts never reach a model turn in the main
@@ -689,7 +689,6 @@ mod tests {
                 Vec::new(),
                 Vec::new(),
                 8,
-                200_000,
                 &compaction_disabled_note(Some("compaction")),
                 |_, _, _| {},
                 |delta: &str| streamed.push(delta.to_owned()),
@@ -773,7 +772,6 @@ mod tests {
                 Vec::new(),
                 Vec::new(),
                 8,
-                200_000,
                 &compaction_disabled_note(Some("compaction")),
                 |_, _, _| {},
                 |delta: &str| streamed.push(delta.to_owned()),
@@ -871,7 +869,6 @@ mod tests {
                 Vec::new(),
                 Vec::new(),
                 8,
-                200_000,
                 "note",
                 |input: u64, _output: u64, _cost: f64| usage_updates.push(input),
                 |_: &str| {},

@@ -1,4 +1,4 @@
-//! The ACP HTTP transport (T-036): JSON-RPC over HTTP POSTs with
+//! The ACP HTTP transport: JSON-RPC over HTTP POSTs with
 //! Server-Sent Events for agent-initiated notifications, served by
 //! axum. Multiple client connections live in one process — each
 //! `initialize`-carrying POST without a connection header opens one.

@@ -4,7 +4,7 @@
 //! with the tackle schema extensions: turn kind, first_retained_turn_id,
 //! per-turn usage deltas, attribution metadata.
 //!
-//! Ownership leases (T-008) and context assembly (T-007) build on this.
+//! Ownership leases and context assembly build on this.
 
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
 use std::path::Path;
@@ -398,8 +398,8 @@ impl SessionStore {
         }
     }
 
-    /// Closes a session: cancels ongoing work and releases the lease. The
-    /// session stays active and listable.
+    /// Closes a session: releases its lease. The session stays active and
+    /// listable, and its turns are untouched.
     pub async fn close_session(&self, id: &SessionId) -> Result<(), StoreError> {
         match &self.backend {
             Backend::Sqlite(pool) => {
@@ -1217,7 +1217,7 @@ mod tests {
         assert_eq!(listed.len(), 1);
     }
 
-    // --- Context assembly (T-007) ---
+    // --- Context assembly ---
 
     /// Appends one interaction turn with a single user message whose
     /// content identifies the turn.
@@ -1582,7 +1582,7 @@ mod tests {
         }
     }
 
-    // --- Ownership leases (T-008) ---
+    // --- Ownership leases ---
 
     async fn lease_round_trip(store: &SessionStore) -> Result<(), StoreError> {
         let session = store
