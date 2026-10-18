@@ -3,7 +3,7 @@
 //! request cap trips.
 //!
 //! v1 runs a single request per turn — the loop shape exists so
-//! tool-call iterations (T-021: execute via the registry + pipeline,
+//! tool-call iterations (execute via the registry + pipeline,
 //! append tool results, request again) slot in without reshaping.
 
 use super::{ModelProvider, ModelRequest, TurnOutcome, TurnStop};
@@ -28,7 +28,7 @@ pub enum TurnError {
 /// failure surfaces in-band — the caller builds it naming the
 /// configured compaction script (or its absence).
 /// Arguments stay explicit (provider, store, ids, prompts, cap, callback):
-/// the tool-call loop in T-021 extends the body, not the signature.
+/// the tool-call loop extends the body, not the signature.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_turn<P: ModelProvider>(
     provider: &P,
@@ -42,8 +42,6 @@ pub async fn run_turn<P: ModelProvider>(
     prior: Vec<ChatMessage>,
     tools: Vec<crate::agent::ToolDefinition>,
     max_requests: u32,
-    #[allow(unused_variables)] // the usage callback owns the size decision (T-016 sends it)
-    size: u64,
     context_length_note: &str,
     mut on_usage: impl FnMut(u64, u64, f64) + Send,
     mut on_delta: impl FnMut(&str) + Send,

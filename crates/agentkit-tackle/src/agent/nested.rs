@@ -1,4 +1,4 @@
-//! Agent invocation (T-035, FR-026): `agent.<actor>` invokables spawn a
+//! Agent invocation (FR-026): `agent.<actor>` invokables spawn a
 //! new agent instance of that actor running a nested turn loop within
 //! the current turn.
 //!

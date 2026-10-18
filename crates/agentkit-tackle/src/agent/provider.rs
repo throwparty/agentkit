@@ -293,7 +293,7 @@ impl ModelProvider for RigProvider {
                     on_text_delta(&delta.text);
                     text.push_str(&delta.text);
                 }
-                Ok(_) => {} // tool calls land with the registry (T-021)
+                Ok(_) => {} // tool calls land with the registry
                 Err(err) => {
                     // A failure after deltas flowed: the partial text rides
                     // the error (retrying would duplicate what the client
@@ -340,7 +340,6 @@ impl ModelProvider for RigProvider {
 #[cfg(test)]
 pub(crate) static PATH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-#[allow(unused)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -705,7 +704,6 @@ mod tests {
             Vec::new(),
             Vec::new(),
             8,
-            200_000,
             "This model's context is full. Run /compact (the `compaction` script), or start a fresh session.",
             |input: u64, _output: u64, _cost: f64| usage_updates.push(input),
             |delta: &str| deltas.push(delta.to_owned()),
@@ -762,10 +760,6 @@ mod tests {
         let outcome = retry_completion(&provider, "test/model", &mut retries)
             .await
             .unwrap();
-        eprintln!(
-            "DEBUG retry: outcome={outcome:?} retries={retries:?} requests={}",
-            server.received_requests().await.unwrap().len()
-        );
         assert_eq!(outcome.stop, crate::agent::TurnStop::EndTurn);
         assert_eq!(retries, [1], "one retry card for the failed attempt");
         assert_eq!(server.received_requests().await.unwrap().len(), 2);
@@ -818,7 +812,6 @@ mod tests {
             Vec::new(),
             Vec::new(),
             8,
-            200_000,
             "This model's context is full. Run /compact (the `compaction` script), or start a fresh session.",
             |_: u64, _: u64, _: f64| {},
             |_: &str| {},
@@ -888,7 +881,6 @@ data: {not json}
             Vec::new(),
             Vec::new(),
             8,
-            200_000,
             "This model's context is full. Run /compact (the `compaction` script), or start a fresh session.",
             |_: u64, _: u64, _: f64| {},
             |_: &str| {},
@@ -934,7 +926,6 @@ data: {not json}
             Vec::new(),
             Vec::new(),
             8,
-            200_000,
             "This model's context is full. Run /compact (the `compaction` script), or start a fresh session.",
             |_: u64, _: u64, _: f64| {},
             |_: &str| {},

@@ -21,7 +21,7 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The policy-script decision source: implemented by the Rhai policy
-/// host (T-025). The pipeline treats an absent function, malformed
+/// host. The pipeline treats an absent function, malformed
 /// return, or script error — any `None` — as fail-closed to ask.
 pub trait PolicyScript: Send + Sync {
     fn pre_tool_use(&self, request: &PolicyRequest) -> Option<PolicyVerdict>;
@@ -291,7 +291,7 @@ impl<'a, P: PermissionRequester> PermissionPipeline<'a, P> {
     }
 }
 
-/// Bridges the TOFU consent flow (T-005) onto `session/request_permission`:
+/// Bridges the TOFU consent flow onto `session/request_permission`:
 /// trust consent is a permission request of its own, with the project
 /// identity and entries named in the prompt content. Consent responses
 /// never write the grant store — trust lives in trust.toml, a different

@@ -3,8 +3,7 @@
 //! Shipped as embedded definitions registered at the lowest precedence
 //! through the same discovery path as user definitions: any discovered
 //! definition with the same name replaces the built-in. The shipped
-//! scripts double as the customization examples (see T-030 for the full
-//! inventory).
+//! scripts double as the customization examples.
 
 /// The built-in default persona, used by the default actor.
 pub const DEFAULT_PERSONA: &str = include_str!("default-persona.md");

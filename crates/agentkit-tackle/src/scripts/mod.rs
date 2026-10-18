@@ -3,7 +3,7 @@
 //! **Policy engines** run `pre_tool_use` scripts and receive decision
 //! inputs only — they physically lack the acting host functions. **Behaviour
 //! engines** run every other event with the full host API (registered by
-//! the session host in T-026 via the registrar passed to
+//! the session host via the registrar passed to
 //! [`behaviour_engine`]).
 //!
 //! The Rhai machinery itself lives in `agentkit-script`; this module only
@@ -57,7 +57,7 @@ pub fn policy_engine(script: &str) -> Result<Compiled, ScriptError> {
 
 /// Builds a fresh behaviour engine with the full host API. The registrar
 /// receives the hardened engine and registers the acting host functions
-/// (T-026); a panicking host function is contained by the engine and surfaces
+/// a panicking host function is contained by the engine and surfaces
 /// as [`ScriptError::Panicked`].
 pub fn behaviour_engine(
     script: &str,

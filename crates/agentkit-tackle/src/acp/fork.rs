@@ -1,4 +1,4 @@
-//! Session forking (T-027): the shared fork operation behind the RFD
+//! Session forking: the shared fork operation behind the RFD
 //! path and the v1 `/fork` fallback.
 //!
 //! Forks copy lineage (the source session and its head as the fork

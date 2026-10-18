@@ -4,7 +4,7 @@
 //! state rides in `Arc<TackleState>` captured by each callback, and
 //! per-connection negotiation state in `Arc<ConnectionNegotiation>`. The
 //! stdio transport is the normal launch mode (one process per client
-//! connection); HTTP arrives with T-036.
+//! connection); HTTP serves many connections per process.
 
 use crate::config::Loaded;
 use crate::loader::Definitions;
@@ -680,7 +680,7 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
 
 /// Runs one agent connection over `transport`: the handler chain is
 /// built per connection (shared state rides `Arc<TackleState>`), so
-/// HTTP serves multiple connections in one process (T-036).
+/// HTTP serves multiple connections in one process.
 /// One model turn of a prompt: resolve the actor, model, tools, and
 /// context, run the turn loop (streaming to the client, dispatching tool
 /// calls through the permission pipeline), then report usage, compaction,
@@ -826,7 +826,6 @@ async fn run_prompt_turn(
             .turns
             .max_model_requests
             .unwrap_or(8),
-        size,
         &context_length_note,
         // usage cadence: a usage_update per model request,
         // skipped when the window is unknown (RFD guidance).
@@ -1132,7 +1131,6 @@ where
     let state_for_init = state.clone();
 
     let state_for_new = state.clone();
-    let state_for_auth = state.clone();
     let state_for_list = state.clone();
     let negotiation_for_new = negotiation.clone();
     let negotiation_for_config = negotiation.clone();
@@ -1149,8 +1147,9 @@ where
     let negotiation_for_prompt = negotiation.clone();
     let negotiation_for_close = negotiation.clone();
     // The connection's lease-owner id: turns acquire it for their
-    // lifetime; released when the turn responds.
-    let owner = Arc::new(format!("stdio-{}", uuid::Uuid::new_v4()));
+    // lifetime; released when the turn responds. Transport-neutral —
+    // stdio and HTTP connections both use this handler.
+    let owner = Arc::new(format!("conn-{}", uuid::Uuid::new_v4()));
     let owner_for_prompt = owner.clone();
     let state_for_prompt = state.clone();
 
@@ -1187,9 +1186,10 @@ where
             async move |_request: agent_client_protocol::schema::v1::AuthenticateRequest,
                         responder,
                         _cx| {
-                // Re-attempt the credential resolution; the next prompt
-                // uses whatever resolved.
-                let _ = first_run::missing_credentials(&state_for_auth);
+                // Credentials resolve out-of-band (the `tackle auth`
+                // subcommand), so this method only acknowledges the
+                // client's login attempt; the next prompt re-resolves and
+                // surfaces any remaining failure.
                 responder.respond(agent_client_protocol::schema::v1::AuthenticateResponse::new())
             },
             agent_client_protocol::on_receive_request!(),
@@ -1197,7 +1197,7 @@ where
         .on_receive_request(
             async move |request: NewSessionRequest, responder, cx| {
                 // Default actor selection: [defaults].actor, else the
-                // built-in "default" (T-031 adds the client selector).
+                // built-in "default".
                 let actor = state_for_new
                     .config()
                     .config
@@ -1217,7 +1217,7 @@ where
                     )
                     .await
                     .map_err(|err| Error::internal_error().data(err.to_string()))?;
-                // MCP connections kick off asynchronously (T-018); session
+                // MCP connections kick off asynchronously; session
                 // creation never blocks on them. Client-forwarded servers
                 // (session/new's mcp_servers) register and connect after
                 // the response, below.
@@ -1870,7 +1870,7 @@ where
                 // the re-advertisement below lists them.
                 connect_forwarded_servers(&negotiation_for_load, &request.mcp_servers).await;
                 // Replay: full user-visible history in DAG order. Usage
-                // snapshot emission lands with T-016's model metadata.
+                // snapshot emission lands with the model metadata.
                 let assembled = state_for_load
                     .db
                     .assemble_context(&store_session_id(&request.session_id))

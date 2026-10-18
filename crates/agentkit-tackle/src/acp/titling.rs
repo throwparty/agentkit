@@ -1,4 +1,4 @@
-//! Session titling (T-029): the default `title_trigger` behaviour.
+//! Session titling: the default `title_trigger` behaviour.
 //!
 //! The shipped titling script (builtins::TITLING_SCRIPT) forks an
 //! ephemeral summariser, has it summarise the conversation into a
@@ -55,7 +55,7 @@ pub fn fire_title_trigger(
         });
 
         if let Err(err) = compiled.call("title_trigger", &event) {
-            eprintln!("tackle-debug: title_trigger failed: {err}");
+            tracing::debug!(script = %name, "title_trigger failed: {err}");
         }
     }
 }
