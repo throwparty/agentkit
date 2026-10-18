@@ -216,6 +216,7 @@ pub async fn apply_model_switch(
     session_id: &SessionId,
     model_reference: &str,
     notify: &mut (dyn FnMut(SessionUpdateForOptions) + Send),
+    notices: std::sync::Arc<dyn crate::scripts::host::NoticeSink>,
 ) -> Result<(), String> {
     // The switch is validated against the new model's window.
     let window = context_window(model_reference).unwrap_or(0);
@@ -250,8 +251,15 @@ pub async fn apply_model_switch(
                 )
                 .await
                 .map_err(|err| err.to_string())?;
-            crate::acp::compaction::run_compaction(state, session_id, &turn.id, "default", window)
-                .await;
+            crate::acp::compaction::run_compaction(
+                state,
+                session_id,
+                &turn.id,
+                "default",
+                window,
+                notices,
+            )
+            .await;
         }
     }
     state
