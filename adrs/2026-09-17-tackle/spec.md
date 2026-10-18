@@ -6,7 +6,7 @@ Tackle is the real agentic coding harness for which earlier ADRs selected the bu
 
 Tackle assembles these into a thin, ACP-native harness: an ACP v1 server for client interaction, an MCP client for all external capability, a turn-DAG session store, a unified invokable registry, an in-core fail-closed permission pipeline, and a Rhai script host for policy and workflow extension. The harness owns permission assessment and enforcement, deliberately isolated from any sandboxed development environment so the agent cannot rewrite its own access control. Sandboxing itself remains Litterbox's role, reached only via MCP.
 
-Prior-art reviews of Pi, Codex CLI, OpenCode, and Goose recipes, a terminology survey, and security/UX reviews of this design are in research/ (harness-review.md, terminology.md, scout-findings.md, quest-findings.md). Terminology is normative in the workspace-root CONTEXT.md.
+Prior-art reviews of Pi, Codex CLI, OpenCode, and Goose recipes and a terminology survey are in research/ (harness-review.md, terminology.md). Terminology is normative in the workspace-root CONTEXT.md.
 
 ```mermaid
 flowchart TB
