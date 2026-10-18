@@ -61,11 +61,10 @@ pub fn fire_compaction_requested(
 ) {
     let config = state.config();
     let user_dir = config.user_layer.as_deref().and_then(Path::parent);
-    let project_dir = config.project_layer.as_deref().and_then(Path::parent);
     let known_actors: std::collections::BTreeSet<String> =
         state.definitions().actors.keys().cloned().collect();
 
-    for (name, source) in event_sources(state, user_dir, project_dir, "compaction_requested") {
+    for (name, source) in event_sources(state, user_dir, "compaction_requested") {
         let host = BehaviourHost::new(
             Arc::clone(&access),
             known_actors.clone(),
@@ -116,7 +115,6 @@ pub fn fire_post_turn(
     }
     let config = state.config();
     let user_dir = config.user_layer.as_deref().and_then(Path::parent);
-    let project_dir = config.project_layer.as_deref().and_then(Path::parent);
     let known_actors: std::collections::BTreeSet<String> =
         state.definitions().actors.keys().cloned().collect();
 
@@ -135,7 +133,7 @@ pub fn fire_post_turn(
         .unwrap_or(0);
     let cost_usd = access.attributed_cost(session_id).unwrap_or(0.0);
 
-    for (name, source) in event_sources(state, user_dir, project_dir, "post_turn") {
+    for (name, source) in event_sources(state, user_dir, "post_turn") {
         let host = BehaviourHost::new(
             Arc::clone(&access),
             known_actors.clone(),
@@ -190,43 +188,26 @@ pub fn fire_post_turn_detached(
     });
 }
 
-/// Resolves the scripts registered for `event`: user layer only —
-/// project-layer scripts wait for the trust gate (wired with the
-/// first-run flow).
+/// Resolves the enabled scripts registered for `event`, each from its
+/// own layer through the shared resolver.
 fn event_sources(
     state: &TackleState,
     user_dir: Option<&Path>,
-    project_dir: Option<&Path>,
     event: &str,
 ) -> Vec<(String, String)> {
-    let mut sources = Vec::new();
-    for (name, config) in &state.config().config.scripts {
-        if !config.enabled || !config.events.iter().any(|registered| registered == event) {
-            continue;
-        }
-        if let Some(project_dir) = project_dir {
-            let candidate = project_dir.join("scripts").join(&config.file);
-            if candidate.exists() {
-                tracing::warn!(
-                    script = %name,
-                    "project script skipped: script trust gating is wired with the first-run flow"
-                );
-                continue;
-            }
-        }
-        if let Some(source) = crate::builtins::script_source(&config.file) {
-            sources.push((name.clone(), source.to_owned()));
-            continue;
-        }
-        let Some(user_dir) = user_dir else { continue };
-        match std::fs::read_to_string(user_dir.join("scripts").join(&config.file)) {
-            Ok(source) => sources.push((name.clone(), source)),
-            Err(err) => {
-                tracing::warn!(script = %name, "{event} script unreadable: {err}")
-            }
-        }
-    }
-    sources
+    state
+        .config()
+        .config
+        .scripts
+        .iter()
+        .filter(|(_, config)| {
+            config.enabled && config.events.iter().any(|registered| registered == event)
+        })
+        .filter_map(|(name, config)| {
+            crate::config::resolve_script_source(name, &config.file, user_dir)
+                .map(|source| (name.clone(), source))
+        })
+        .collect()
 }
 
 /// The in-band announcement: trigger and before/after counts, plus the

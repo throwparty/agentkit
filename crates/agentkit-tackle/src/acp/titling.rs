@@ -52,11 +52,10 @@ pub fn fire_title_trigger(
 ) {
     let config = state.config();
     let user_dir = config.user_layer.as_deref().and_then(Path::parent);
-    let project_dir = config.project_layer.as_deref().and_then(Path::parent);
     let known_actors: std::collections::BTreeSet<String> =
         state.definitions().actors.keys().cloned().collect();
 
-    for (name, source) in titling_sources(state, user_dir, project_dir) {
+    for (name, source) in titling_sources(state, user_dir) {
         let host = BehaviourHost::new(
             Arc::clone(&access),
             known_actors.clone(),
@@ -91,40 +90,22 @@ pub fn fire_title_trigger(
 
 /// Resolves the titling scripts: the registrations declaring the
 /// `title_trigger` event (the shipped `titling` registration at the
-/// lowest precedence, replaceable wholesale by a same-name entry).
-/// Project-layer scripts wait for the trust gate (wired with the
-/// first-run flow).
-fn titling_sources(
-    state: &TackleState,
-    user_dir: Option<&Path>,
-    project_dir: Option<&Path>,
-) -> Vec<(String, String)> {
-    let mut sources = Vec::new();
-    for (name, config) in &state.config().config.scripts {
-        if !config.enabled || !config.events.iter().any(|event| event == "title_trigger") {
-            continue;
-        }
-        if let Some(project_dir) = project_dir {
-            let candidate = project_dir.join("scripts").join(&config.file);
-            if candidate.exists() {
-                tracing::warn!(
-                    script = %name,
-                    "project script skipped: script trust gating is wired with the first-run flow"
-                );
-                continue;
-            }
-        }
-        if let Some(source) = crate::builtins::script_source(&config.file) {
-            sources.push((name.clone(), source.to_owned()));
-            continue;
-        }
-        let Some(user_dir) = user_dir else { continue };
-        match std::fs::read_to_string(user_dir.join("scripts").join(&config.file)) {
-            Ok(source) => sources.push((name.clone(), source)),
-            Err(err) => tracing::debug!(script = %name, "title_trigger script unreadable: {err}"),
-        }
-    }
-    sources
+/// lowest precedence, replaceable wholesale by a same-name entry), each
+/// from its own layer through the shared resolver.
+fn titling_sources(state: &TackleState, user_dir: Option<&Path>) -> Vec<(String, String)> {
+    state
+        .config()
+        .config
+        .scripts
+        .iter()
+        .filter(|(_, config)| {
+            config.enabled && config.events.iter().any(|event| event == "title_trigger")
+        })
+        .filter_map(|(name, config)| {
+            crate::config::resolve_script_source(name, &config.file, user_dir)
+                .map(|source| (name.clone(), source))
+        })
+        .collect()
 }
 
 /// Detached titling at turn end: only untitled sessions, failures
