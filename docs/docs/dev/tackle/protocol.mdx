@@ -1,0 +1,60 @@
+---
+sidebar_position: 3
+---
+
+# ACP protocol surface
+
+Tackle is an ACP server. This page is the account of what crosses the wire in each direction, and which parts are capability-gated.
+
+## Negotiation
+
+Everything optional is settled at `initialize`, and both sides treat an omitted capability as unsupported.
+
+- **Client capabilities** — `fs.read_text_file`, `fs.write_text_file`, `terminal`. These decide which `client.*` tools exist at all.
+- **Agent capabilities** — `loadSession`, the session lifecycle (`list`, `close`, `resume`, `delete`), prompt image content, and HTTP MCP.
+- **Unstable features** — advertised by the client in the capability `_meta` under keys such as `unstable_session_fork`, `unstable_session_compaction`, and `unstable_session_notices`. Tackle sends RFD-shaped updates only to clients that advertise them, and always has a stable-variant fallback.
+
+`_meta` is the protocol's extension point: implementations must not assume anything about values at those keys, which is what makes feature-gated additions safe.
+
+## Forwarded client RPC tools
+
+When the client advertises its file-system and terminal surface, tackle reflects it to the model as `client.*` tools:
+
+| Tool | Underlying RPC |
+|---|---|
+| `client.fs.read_text_file` | `fs/read_text_file` |
+| `client.fs.write_text_file` | `fs/write_text_file` |
+| `client.terminal.create` | `terminal/create` |
+| `client.terminal.output` | `terminal/output` |
+| `client.terminal.wait_for_exit` | `terminal/wait_for_exit` |
+| `client.terminal.kill` | `terminal/kill` |
+| `client.terminal.release` | `terminal/release` |
+
+Nothing is authored: the RPC fixes the parameters, so the harness ships no schemas beyond the wire types. A tool exists only when **both** hold — the client advertised the capability, and the category is enabled (`[client_tools]`, seeded at startup, toggled at runtime with `/editor`).
+
+Terminals are connection-scoped and ephemeral. The harness tracks the ids it created for a session and best-effort releases them at `session/close`. A stale id — reaped by the editor, or lost across a restart — fails the call precisely rather than silently. No terminal state is persisted or reconciled across restarts.
+
+Model calls to these tools pass through the normal [permission pipeline](../../user/tackle/permissions); direct invocation with `/!` does not, as the user is the authority.
+
+## Forwarded MCP servers
+
+A client such as Zed forwards its own configured MCP servers in the session request. Those servers join tackle's own `mcp_servers` for the connection, and the client's entry wins on a name collision — the shadowed config server is reported in the first-turn status. Tools from both are namespaced `mcp.<server>.<tool>`.
+
+## Requests to the client
+
+- **`session/request_permission`** — the ask fallback, and MCP elicitation forwarding. Elicitations carry explicit origin attribution and never write the grant store. No timeout is imposed; cancellation is the only non-selection outcome.
+- **Client-capability RPCs** — the `client.*` tool calls above.
+- **`fs/*` and `terminal/*`** — only ever as a consequence of a model tool call or a direct invocation.
+
+## Notifications to the client
+
+Streamed during a turn: user and agent message chunks, thought chunks, `tool_call` and `tool_call_update`, and `usage_update` after each model request. Around a turn: `session_info_update` for `updatedAt`, and `available_commands_update` for the command list.
+
+Capability-gated: `notice` updates (unstable), and RFD-shaped compaction updates (unstable). Both degrade to stable equivalents — an agent message and a usage update — for clients that do not advertise them.
+
+The turn's terminal state rides the `session/prompt` response as an ACP `stopReason`: `end_turn`, `max_turn_requests`, or `cancelled`.
+
+## Transports
+
+- **stdio** — the default, one connection per process.
+- **HTTP** — an axum-based transport sharing the same handler chain.

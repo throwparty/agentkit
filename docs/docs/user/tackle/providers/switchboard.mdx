@@ -1,0 +1,17 @@
+# 🔀 Switchboard
+
+You can use models proxied via [Switchboard](../../switchboard) as follows:
+
+```toml
+[endpoints.switchboard-openai-chat-completions]
+base_url = "http://localhost:3812/openai/v1"
+wire_format = "openai-chat-completions"
+auth = "none"
+models = []
+```
+
+:::warning
+
+Only support for the OpenAI chat completions API surface is implemented in Tackle at the moment. Support for other API surfaces is on [the roadmap](../roadmap).
+
+:::

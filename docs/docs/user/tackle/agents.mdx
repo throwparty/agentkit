@@ -1,0 +1,70 @@
+---
+sidebar_position: 3
+---
+
+# 🤖 Agents
+
+An **agent** is a persona executing inside a session. Two definition files produce one:
+
+- **Personas** are markdown documents that contain the behavioural prompt. Tackle appends its own sections (the invokable manifest and environment context) at runtime.
+- **Actors** combine a persona reference and a model.
+
+Every session runs as an actor. The default configuration ships one, so a session always starts even with no files of your own.
+
+## Where definitions live
+
+Personas are stored in the `personas` subdirectory of [the configuration directory](reference/config). A project definition with the same name replaces the user definition wholesale, which replaces the built-in. The definition name is the filename without the extension: `actors/reviewer.md` is `reviewer`.
+
+Definitions are markdown with frontmatter. `---` fences parse as YAML and `+++` fences as TOML — pick either, per file.
+
+## Personas
+
+```markdown
+---
+description: Terse reviewer. Flags problems, does not fix them.
+---
+
+You are a code reviewer. Read the diff, then report findings.
+Do not edit files. Do not run commands.
+```
+
+The only frontmatter key is `description`, used in listings. The body is the prompt.
+
+## Actors
+
+```toml
++++
+persona = "reviewer"
+model = "switchboard/claude-sonnet-4-5"
++++
+```
+
+| Key | Required | Meaning |
+|---|---|---|
+| `persona` | yes | The persona this actor runs as |
+| `model` | no | Endpoint-qualified model override |
+
+An actor's body is unused — actors are configuration.
+
+## Which model runs
+
+The model is resolved in order, first match winning:
+
+1. the session's stored model selection;
+2. the actor's `model` frontmatter;
+3. `[defaults].model` in configuration;
+4. the first model the endpoint discovery offers.
+
+If Tackle falls through each of these in trying to locate the model a configuration error is reported.
+
+## Selecting an actor
+
+The actor selector is an ACP config option, so it appears in your harness alongside the model selector. A session that does not choose runs `[defaults].actor`.
+
+## Trust
+
+Project-defined personas and actors are executable configuration: the first session in a project prompts for consent. A change to a file re-prompts, and a refused definition is dropped before it can be selected. See [Security model](./security).
+
+## Built-ins
+
+The shipped defaults — the default persona, the default actor, and the `summariser` actor used by the compaction and titling scripts — are described in [Defaults](./defaults).

@@ -4,11 +4,14 @@ sidebar_position: 2
 
 # 🎛️ Configuration
 
-Tackle configuration is sourced from two layers, merged in order:
+Tackle configuration is sourced from three layers, merged in order of precedence:
 
-1. **Built-in registrations** — the built-in scripts (compaction, titling) at the lowest precedence.
-2. **User layer** — `config.toml` in the user config directory (`~/.config/agentkit/tackle` on Linux, `~/Library/Application Support/AgentKit/tackle` on macOS). Overridable with `--config-dir`.
-3. **Project layer** — `.agentkit/tackle/config.toml` in the session's working directory.
+1. **Defaults**, the built-in scripts (compaction, titling).
+2. **User configuration**, `config.toml` in the user config directory. Its default location differs by platform, and can be overridden with `--config-dir`:
+  a. On Linux: `~/.config/agentkit/tackle`.
+  b. On macOS: `~/Library/Application Support/AgentKit/tackle`.
+  c. On Windows: `~/AppData/LocalLow/AgentKit/tackle`.
+3. **Project configuration** located at `.agentkit/tackle/config.toml` in the session's working directory.
 
 The project layer may not set `endpoints` or `credential_helper` — a project trying to change where model traffic goes is rejected outright. Project `mcp_servers`, `scripts`, and definitions (personas, actors, prompts) are trust-gated: the first session in a project prompts for consent, keyed on a hash of each entry, so any change re-prompts.
 
@@ -43,7 +46,7 @@ actor = "builtins/actuator"              # persona/actor override
 
 ## `mcp_servers`
 
-Tool providers, namespaced by server name; a session's tools are addressed as `mcp.<server>.<tool>`. Both layers may declare servers, with project entries trust-gated (see [Setting up your tools](../setting-up-your-tools)):
+Tool providers, namespaced by server name; a session's tools are addressed as `mcp.<server>.<tool>`. Both layers may declare servers, with project entries trust-gated (see [tools](../tools)):
 
 ```toml
 [mcp_servers.litterbox]
@@ -71,7 +74,7 @@ An `env` value that is exactly `{cred:IDENTITY}` resolves through `credential_he
 GITHUB_PERSONAL_ACCESS_TOKEN = "{cred:github}"
 ```
 
-The marker must be the entire value; any other value passes through literally. Resolution happens at spawn, never at config load, so secrets never enter the configuration — a failed lookup fails that server's connection (reported in the first-turn status) instead. Store the secret with `tackle auth add github <token>`; see [Setting up your tools](../setting-up-your-tools).
+The marker must be the entire value; any other value passes through literally. Resolution happens at spawn, never at config load, so secrets never enter the configuration — a failed lookup fails that server's connection (reported in the first-turn status) instead. Store the secret with `tackle auth add github <token>`; see [tools](../tools).
 
 ## `client_tools`
 

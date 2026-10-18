@@ -1,0 +1,55 @@
+---
+sidebar_position: 4
+---
+
+# 📦 Defaults
+
+Tackle ships a small set of definitions embedded in the binary, so a session works with no configuration at all. They are registered at the **lowest precedence**: any user- or project- specified definition with the same name replaces it.
+
+## Personas
+
+**`default`** is the built-in persona. A pragmatic software-engineering agent: concise, preferring small verifiable changes, asking focused questions when requirements are unclear, and adapting rather than retrying when a tool call is denied.
+
+## Actors
+
+| Actor | Persona | Model | Used for |
+|---|---|---|---|
+| `default` | `default` | `[defaults].model` | Ordinary sessions |
+| `summariser` | `default` | `[defaults].model` | Background work: compaction summaries and session titling |
+
+`summariser` exists so the harness has an actor for its own ephemeral forks without assuming anything about yours. Neither actor pins a model, so both follow the normal [resolution chain](./agents#which-model-runs).
+
+## Prompts
+
+| Command | Flags | Does |
+|---|---|---|
+| `/compact` | compaction-tagged | Summarises older turns behind a summary, in an ephemeral fork, announced in-band |
+| `/fork` | user-invokable | Forks the session; the new session id is reported in this turn |
+| `/mcp` | user-invokable, 2 parameters | `enable <server>`, `disable <server>`, `status [server]` for MCP servers |
+| `/editor` | user-invokable, 2 parameters | Toggles the editor's file-system and terminal tool categories |
+
+`/compact`, `/fork`, `/mcp` and `/editor` are all **intercepted by the harness** — they never become a model turn. Each is a prompt file like any other, which is why they autocomplete and why you can replace them. See [Prompts](./prompts).
+
+## Scripts
+
+Two Rhai scripts ship as behaviour scripts.
+
+**`compaction`** — registered on two events:
+
+- `post_turn` — automatic compaction. When context utilisation crosses **85%**, it summarises the conversation in an ephemeral fork and records a compaction turn keeping the **4 most recent turns** verbatim.
+- `compaction_requested` — manual `/compact`. Summarises everything so far and elides it all behind the summary.
+
+Both degrade gracefully: a failed summarisation logs and leaves context untouched, retried on the next turn. The script guards against re-entering its own ephemeral forks.
+
+**`titling`** — registered on `title_trigger`. After a completed turn, while the session has no title, it asks the summariser fork for a title of at most six words and sets it. Titling failures are silent and never block the turn.
+
+## Overriding
+
+Define a persona, actor, prompt or script with the same name in your user or project layer and it replaces the built-in wholesale — there is no partial merge. A disabling entry needs no file, so turning a built-in off is one line of configuration:
+
+```toml
+[scripts.compaction]
+enabled = false
+```
+
+The shipped scripts double as worked examples of the [script API](./scripts); the `compaction` script in particular is a complete, non-trivial behaviour script.

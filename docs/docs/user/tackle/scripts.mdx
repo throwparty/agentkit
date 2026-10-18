@@ -1,0 +1,77 @@
+---
+sidebar_position: 3
+---
+
+# 🪝 Scripts
+
+Scripts are [Rhai](https://rhai.rs) files that run in response to events. They are how you extend tackle without forking it: everything from a policy that denies a class of tool call to a workflow that provisions a sandbox on fork is a script.
+
+There are two kinds, distinguished by the event they register against:
+
+- **Policy scripts** decide. They return a verdict — `allow`, `deny`, or `ask` — and cannot act.
+- **Behaviour scripts** act. They call host functions and do not gate anything.
+
+A script that mixes a decision event with a workflow event is a configuration error.
+
+## Registering
+
+```toml
+[scripts.deny-secrets]
+events = ["pre_tool_use"]
+file = "deny-secrets.rhai"
+enabled = true
+```
+
+| Key | Meaning |
+|---|---|
+| `events` | The events this script serves (one or more) |
+| `file` | A path, resolved from `./.agentkit/tackle/scripts/` then `~/.config/agentkit/tackle/scripts/`, or `builtin:<name>` |
+| `enabled` | Set `false` to disable, including a built-in |
+
+One file may serve several events: the engine calls the function named after each event, and an absent function is a no-op.
+
+## Events
+
+| Event | Kind | Fires |
+|---|---|---|
+| `pre_tool_use` | policy | Before any model-initiated tool call |
+| `post_turn` | behaviour | After a turn completes |
+| `session_forked` | behaviour | In the new session, after a fork |
+| `compaction_requested` | behaviour | When a compaction-tagged prompt is intercepted |
+| `title_trigger` | behaviour | After a completed turn, while the session is untitled |
+
+Every payload carries the session and actor. `pre_tool_use` receives the namespaced invokable, its structured arguments, whether the session is user-attended, and whether the grant store already holds an allow record. `post_turn` receives the turn id, stop reason, request count, recent turn ids, and context usage.
+
+## The host API
+
+All scripts get `history_search(query)`, `context_usage()`, and `log(message)`.
+
+Behaviour scripts additionally get `fork_session`, `send_prompt`, `await_completion`, `insert_seed`, `record_compaction`, and `set_session_title`.
+
+Two things are deliberately **never** exposed: tool invocation and the grant store. A script cannot call a tool — it drives the model with `send_prompt` instead, and the resulting tool calls pass through the normal [permission pipeline](./permissions) like any other. A script cannot read or write grants.
+
+## A policy script
+
+```rhai
+fn pre_tool_use(request) {
+    if request.arguments.contains("path") {
+        let path = request.arguments.path;
+        if path.contains(".npmrc") || path.contains(".netrc") {
+            return #{ decision: "deny", reason: `${path} holds credentials` };
+        }
+    }
+    #{ decision: "ask" }
+}
+```
+
+`allow` and `deny` are final. `ask` falls through to the fixed ask fallback, which is not configurable.
+
+## Limits and failure
+
+Engines enforce operation, call-depth, expression-depth, collection-size, and time limits (~1s policy, ~10s behaviour), cap script size, forbid module imports, and start fresh per invocation. The time limit bounds script evaluation only — a host call such as `await_completion` is governed by its own timeout.
+
+A policy script that errors or times out **fails closed to `ask`** with the error surfaced. A behaviour script that errors degrades gracefully: it is logged and the harness continues.
+
+## Trust
+
+Project scripts are trust-gated: the first session in a project prompts for consent, keyed on a hash of each file, and any change re-prompts. A refused script is dropped before it loads. See [Security model](./security).
