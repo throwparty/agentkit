@@ -10,7 +10,8 @@ use crate::acp::TackleState;
 use crate::acp::config_options;
 use crate::agent::ModelProvider;
 use crate::scripts::host::{
-    Completion, CompletionSink, HostError, PromptDispatcher, SessionAccess, StoreAccess, block_on,
+    Completion, CompletionSink, HostError, NoticeSink, PromptDispatcher, SessionAccess,
+    StoreAccess, block_on,
 };
 use crate::store::SessionId;
 use std::collections::HashMap;
@@ -41,15 +42,18 @@ impl CompletionSink for SharedCompletions {
     }
 }
 
-/// The dispatcher that runs script-issued prompts through the model loop
-/// and publishes the real completion into the shared sink.
+/// The dispatcher that runs script-issued prompts through the model loop,
+/// publishes the real completion into the shared sink, and surfaces the
+/// call to the client through the notice sink (FR-016).
 pub struct ModelLoopDispatcher {
     state: Arc<TackleState>,
     sink: Arc<SharedCompletions>,
+    notices: Arc<dyn NoticeSink>,
 }
 
 impl PromptDispatcher for ModelLoopDispatcher {
     fn dispatch(&self, session: &SessionId, text: &str) -> Result<(), HostError> {
+        self.notices.script_model_call(session);
         let completion = block_on(run_script_turn(&self.state, session, text))?;
         self.sink.publish(session, completion);
         Ok(())
@@ -57,12 +61,18 @@ impl PromptDispatcher for ModelLoopDispatcher {
 }
 
 /// Builds a [`SessionAccess`] whose script-issued prompts run real model
-/// turns and whose completions the script can await.
-pub fn access(state: &Arc<TackleState>, window_size: u64) -> Arc<dyn SessionAccess> {
+/// turns, whose completions the script can await, and whose model calls
+/// are surfaced through `notices` (FR-016).
+pub fn access(
+    state: &Arc<TackleState>,
+    window_size: u64,
+    notices: Arc<dyn NoticeSink>,
+) -> Arc<dyn SessionAccess> {
     let sink = Arc::new(SharedCompletions::new());
     let dispatcher = Arc::new(ModelLoopDispatcher {
         state: Arc::clone(state),
         sink: Arc::clone(&sink),
+        notices,
     });
     Arc::new(StoreAccess::new(
         Arc::clone(&state.db),
@@ -274,5 +284,42 @@ mod tests {
         let usage = state.db.session_usage(&fork.id).await.unwrap();
         assert_eq!(usage.input_tokens, 7);
         assert_eq!(usage.output_tokens, 3);
+    }
+
+    /// A notice sink that records every script-driven model call.
+    struct Recording(Mutex<Vec<SessionId>>);
+
+    impl NoticeSink for Recording {
+        fn script_model_call(&self, session: &SessionId) {
+            self.0.lock().unwrap().push(session.clone());
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn script_model_calls_are_surfaced_to_the_notice_sink() {
+        // No reachable endpoint: the model call fails, but the notice
+        // fires before it (FR-016).
+        let state = state_with_endpoint("http://127.0.0.1:1");
+        let session = state
+            .db
+            .create_session(
+                SessionKind::Interactive,
+                "/work",
+                None,
+                None,
+                r#"{"actor": "default"}"#,
+            )
+            .await
+            .unwrap();
+
+        let recording = Arc::new(Recording(Mutex::new(Vec::new())));
+        let access = access(&state, 0, recording.clone());
+        let _ = access.send_prompt(&session.id, "summarise this");
+
+        assert_eq!(
+            recording.0.lock().unwrap().as_slice(),
+            std::slice::from_ref(&session.id),
+            "a script-issued prompt surfaces one model-call notice"
+        );
     }
 }

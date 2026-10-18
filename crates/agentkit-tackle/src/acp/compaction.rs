@@ -170,15 +170,14 @@ pub fn fire_post_turn_detached(
     turn_id: TurnId,
     actor: String,
     window_size: u64,
+    notices: Arc<dyn crate::scripts::host::NoticeSink>,
 ) {
     tokio::spawn(async move {
-        let access = script_loop::access(&state, window_size);
+        let access = script_loop::access(&state, window_size, notices);
         fire_post_turn(&state, access, &session_id, &turn_id, &actor, window_size);
     });
 }
 
-/// Resolves the enabled scripts registered for `event`, each from its
-/// own layer through the shared resolver.
 /// Resolves the enabled scripts registered for `event` from the cached
 /// bodies (FR-022: loaded once).
 fn event_sources(state: &TackleState, event: &str) -> Vec<(String, String)> {
@@ -265,8 +264,9 @@ pub async fn run_compaction(
     turn_id: &TurnId,
     actor: &str,
     window_size: u64,
+    notices: Arc<dyn crate::scripts::host::NoticeSink>,
 ) -> (u64, u64) {
-    let access = script_loop::access(state, window_size);
+    let access = script_loop::access(state, window_size, notices);
     let before = access
         .context_usage(session_id)
         .map(|usage| usage.used)

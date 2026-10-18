@@ -85,6 +85,7 @@ pub fn fire_title_trigger_detached(
     state: Arc<TackleState>,
     session_id: SessionId,
     window_size: u64,
+    notices: Arc<dyn crate::scripts::host::NoticeSink>,
 ) {
     tokio::spawn(async move {
         // Only untitled sessions: the title_trigger summarisation runs
@@ -99,7 +100,7 @@ pub fn fire_title_trigger_detached(
         if title.is_some_and(|title| !title.is_empty()) {
             return;
         }
-        let access = script_loop::access(&state, window_size);
+        let access = script_loop::access(&state, window_size, notices);
         fire_title_trigger(&state, access, &session_id);
     });
 }

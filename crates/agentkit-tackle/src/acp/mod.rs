@@ -1008,10 +1008,16 @@ async fn run_prompt_turn(
         turn.id.clone(),
         actor_name.clone(),
         size,
+        connection_notices(&cx, &negotiation_for_turn, "compaction"),
     );
 
     // Titling: detached, silent, only for untitled sessions.
-    titling::fire_title_trigger_detached(state_for_prompt.clone(), session_id.clone(), size);
+    titling::fire_title_trigger_detached(
+        state_for_prompt.clone(),
+        session_id.clone(),
+        size,
+        connection_notices(&cx, &negotiation_for_turn, "titling"),
+    );
 
     state_for_prompt
         .db
@@ -1565,7 +1571,8 @@ where
                     })
                     .unwrap_or_default();
                 if first_text.split_whitespace().next() == Some("/fork") {
-                    let access = fork_access(&state_for_prompt);
+                    let access =
+                        fork_access(&state_for_prompt, connection_notices(&cx, &negotiation_for_prompt, "fork"));
                     let fork_result = fork::run_fork(
                         &state_for_prompt,
                         std::sync::Arc::clone(&access),
@@ -1792,6 +1799,7 @@ where
                         &turn.id,
                         &actor_name,
                         size,
+                        connection_notices(&cx, &negotiation_for_compaction, "compaction"),
                     )
                     .await;
 
@@ -2043,7 +2051,16 @@ where
                         let value = value.to_string();
                         match request.config_id.0.as_ref() {
                             config_options::MODEL_SELECTOR_ID => {
-                                let access = script_loop::access(&state_for_config, 0);
+                                let notices = connection_notices(
+                                    &cx,
+                                    &negotiation_for_config,
+                                    "model switch",
+                                );
+                                let access = script_loop::access(
+                                    &state_for_config,
+                                    0,
+                                    std::sync::Arc::clone(&notices),
+                                );
                                 let mut updates: Vec<agent_client_protocol::schema::v1::Notice> =
                                     Vec::new();
                                 let mut notify =
@@ -2062,6 +2079,7 @@ where
                                     &session_id,
                                     &value,
                                     &mut notify,
+                                    notices,
                                 )
                                 .await;
                                 for notice in updates {
@@ -2128,7 +2146,8 @@ where
                 // No session updates flow here — the client attaches
                 // (session/load) and updates follow.
                 let source = store_session_id(&request.session_id);
-                let access = fork_access(&state_for_fork);
+                let access =
+                    fork_access(&state_for_fork, connection_notices(&cx, &negotiation_for_fork, "fork"));
                 let fork = fork::create_fork(&state_for_fork.db, &source)
                     .await
                     .map_err(|err| Error::internal_error().data(err.to_string()))?;
@@ -2164,11 +2183,55 @@ where
     builder.connect_to(transport).await
 }
 
+/// The notice sink for a live connection: a script-driven model call
+/// becomes a session notice when the client advertised the notices
+/// capability (FR-016). A narrow seam — one-way notification only, never
+/// the connection, so the script loop cannot issue client requests.
+struct ConnectionNotices {
+    cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
+    enabled: bool,
+    source: &'static str,
+}
+
+impl crate::scripts::host::NoticeSink for ConnectionNotices {
+    fn script_model_call(&self, session: &crate::store::SessionId) {
+        if !self.enabled {
+            return;
+        }
+        let notice = Notice::new(
+            NoticeSeverity::Info,
+            format!("Running a background model call ({})", self.source),
+        );
+        let _ = self.cx.send_notification(SessionNotification::new(
+            wire_session_id(session),
+            SessionUpdate::Notice(notice),
+        ));
+    }
+}
+
+/// Builds the notice sink for `cx`, gated on the client's advertised
+/// notices capability and labelled with the calling path (FR-016).
+fn connection_notices(
+    cx: &agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
+    negotiation: &ConnectionNegotiation,
+    source: &'static str,
+) -> std::sync::Arc<dyn crate::scripts::host::NoticeSink> {
+    std::sync::Arc::new(ConnectionNotices {
+        cx: cx.clone(),
+        enabled: negotiation.supports(UnstableFeature::SessionNotices),
+        source,
+    })
+}
+
 /// The session access the fork scripts act through: the shared store
 /// backend with the real model-loop dispatcher, so a `session_forked`
-/// script that prompts a fork gets a real completion.
-fn fork_access(state: &Arc<TackleState>) -> std::sync::Arc<dyn fork::SessionAccess> {
-    script_loop::access(state, 0)
+/// script that prompts a fork gets a real completion and its model calls
+/// are surfaced through `notices`.
+fn fork_access(
+    state: &Arc<TackleState>,
+    notices: std::sync::Arc<dyn crate::scripts::host::NoticeSink>,
+) -> std::sync::Arc<dyn fork::SessionAccess> {
+    script_loop::access(state, 0, notices)
 }
 
 /// Maps stored messages to replay notifications: user/assistant messages
