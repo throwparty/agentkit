@@ -726,6 +726,7 @@ where
                     let requester = AcpPermissionRequester {
                         cx: cx.clone(),
                         session_id: trust_session.clone(),
+                        tool_call_id: None,
                     };
                     state_for_new
                         .resolve_pending_project(
@@ -2141,6 +2142,7 @@ async fn run_model_tool_call(
     let requester = AcpPermissionRequester {
         cx: cx.clone(),
         session_id: session_id.clone(),
+        tool_call_id: Some(call.id.clone()),
     };
     let verdict = {
         let mut grants = state.grants.lock().await;
@@ -2285,9 +2287,16 @@ async fn run_agent_invocation(
 }
 
 /// The ACP `session/request_permission` bridge (FR-014).
+///
+/// `tool_call_id` correlates the ask with the in-flight tool call it
+/// authorises, so clients (Zed upserts tool calls by id) attach the
+/// permission prompt to the existing card rather than inventing a new
+/// one. `None` for asks with no tool call behind them (project trust
+/// consent), which fall back to a synthetic, per-invokable id.
 struct AcpPermissionRequester {
     cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
     session_id: SessionId,
+    tool_call_id: Option<String>,
 }
 
 fn permission_option_id(choice: crate::permissions::PermissionChoice) -> &'static str {
@@ -2340,10 +2349,14 @@ impl crate::permissions::PermissionRequester for AcpPermissionRequester {
                 v1::TextContent::new(reason.clone()),
             ))]);
         }
-        let tool_call = v1::ToolCallUpdate::new(
-            v1::ToolCallId::new(format!("ask-{}", request.invokable)),
-            fields,
-        );
+        // The real call id when one exists, so the client updates the
+        // tool-call card it already announced; otherwise a synthetic id
+        // (trust consent has no model tool call).
+        let tool_call_id = self
+            .tool_call_id
+            .clone()
+            .unwrap_or_else(|| format!("ask-{}", request.invokable));
+        let tool_call = v1::ToolCallUpdate::new(v1::ToolCallId::new(tool_call_id), fields);
         let acp_request =
             v1::RequestPermissionRequest::new(self.session_id.clone(), tool_call, options);
         let cx = self.cx.clone();

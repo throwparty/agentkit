@@ -229,12 +229,16 @@ struct PermissionRecord {
     labels: Vec<String>,
     name: Option<String>,
     title: String,
+    /// The tool-call id the ask is correlated with (A2b).
+    tool_call_id: String,
 }
 
 #[derive(Debug, Default)]
 struct Recorded {
     /// (session, name, title) for `session/update` tool-call announcements.
     calls: Vec<(String, Option<String>, String)>,
+    /// (session, tool-call-id) for `session/update` tool-call announcements.
+    call_ids: Vec<(String, String)>,
     /// (session, status, content-json) for tool-call updates.
     updates: Vec<(String, String, String)>,
     permissions: Vec<PermissionRecord>,
@@ -384,6 +388,8 @@ async fn scenario_over(
                 let mut seen = seen_notifications.lock().unwrap();
                 match &notification.update {
                     SessionUpdate::ToolCall(call) => {
+                        seen.call_ids
+                            .push((session.clone(), call.tool_call_id.0.to_string()));
                         seen.calls
                             .push((session, call.name.clone(), call.title.clone()))
                     }
@@ -428,6 +434,7 @@ async fn scenario_over(
                         labels: labels.clone(),
                         name: request.tool_call.fields.name.clone(),
                         title: request.tool_call.fields.title.clone().unwrap_or_default(),
+                        tool_call_id: request.tool_call.tool_call_id.0.to_string(),
                     });
                     first
                 };
@@ -530,6 +537,26 @@ async fn scenario_over(
                             "A2: permission tool_call does not name {TOOL}: name={:?} title={:?}",
                             perm.name,
                             perm.title
+                        );
+                    }
+                    // A2b: the ask is correlated with the announced call,
+                    // so clients update that card instead of inventing a
+                    // phantom one. A synthetic `ask-…` id is the bug.
+                    let announced = seen
+                        .call_ids
+                        .iter()
+                        .any(|(session, id)| session == &key && id == &perm.tool_call_id);
+                    if !announced {
+                        fail!(
+                            fails,
+                            "A2b: permission tool_call id {:?} does not match an announced \
+                             tool-call id; announced ids: {:?}",
+                            perm.tool_call_id,
+                            seen.call_ids
+                                .iter()
+                                .filter(|(session, _)| session == &key)
+                                .map(|(_, id)| id)
+                                .collect::<Vec<_>>()
                         );
                     }
                 }
