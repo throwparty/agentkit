@@ -275,6 +275,7 @@ impl ModelProvider for RigProvider {
         &self,
         request: ModelRequest,
         on_text_delta: &mut (dyn FnMut(&str) + Send),
+        on_thought_delta: &mut (dyn FnMut(&str) + Send),
     ) -> Result<ModelResponse, ModelError> {
         use futures::StreamExt as _;
         use rig_core::streaming::StreamedAssistantContent;
@@ -286,12 +287,36 @@ impl ModelProvider for RigProvider {
             .map_err(|err| ModelError::Completion(err.to_string()))?;
         let mut text = String::new();
         let mut usage = ModelUsage::default();
+        // Providers stream reasoning either as incremental deltas or as one
+        // complete block that supersedes them; track whether deltas flowed
+        // so a trailing complete block is not replayed on top of them.
+        let mut thoughts_flowed = false;
 
         while let Some(part) = stream.next().await {
             match part {
                 Ok(StreamedAssistantContent::Text(delta)) => {
                     on_text_delta(&delta.text);
                     text.push_str(&delta.text);
+                }
+                Ok(StreamedAssistantContent::ReasoningDelta { reasoning, .. }) => {
+                    if !reasoning.is_empty() {
+                        thoughts_flowed = true;
+                        on_thought_delta(&reasoning);
+                    }
+                }
+                Ok(StreamedAssistantContent::Reasoning { reasoning, .. }) => {
+                    if !thoughts_flowed {
+                        for block in &reasoning.content {
+                            if let rig_core::completion::message::ReasoningContent::Text {
+                                text: thought,
+                                ..
+                            } = block
+                            {
+                                on_thought_delta(thought);
+                            }
+                        }
+                        thoughts_flowed = true;
+                    }
                 }
                 Ok(_) => {} // tool calls land with the registry
                 Err(err) => {
@@ -495,6 +520,7 @@ mod tests {
                     tools: Vec::new(),
                 },
                 &mut |_: &str| {},
+                &mut |_: &str| {},
             )
             .await
             .unwrap();
@@ -574,6 +600,7 @@ mod tests {
                     tools: Vec::new(),
                 },
                 &mut |_: &str| {},
+                &mut |_: &str| {},
             )
             .await
             .unwrap();
@@ -631,6 +658,7 @@ mod tests {
                     tools: Vec::new(),
                 },
                 &mut |delta: &str| deltas.push(delta.to_owned()),
+                &mut |_: &str| {},
             )
             .await
             .unwrap();
@@ -639,6 +667,66 @@ mod tests {
         assert_eq!(response.text, "Hello", "the aggregated text matches");
         assert_eq!(response.usage.input_tokens, 5);
         assert_eq!(response.usage.output_tokens, 2);
+    }
+
+    #[tokio::test]
+    async fn reasoning_deltas_stream_as_thoughts_and_stay_out_of_the_answer() {
+        let server = wiremock::MockServer::start().await;
+        // A reasoning model streams `reasoning_content` deltas alongside
+        // the answer (the DeepSeek/Qwen shape rig normalizes).
+        let sse = [
+            "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"created\":0,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}",
+            "",
+            "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"created\":0,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"think \"}}]}",
+            "",
+            "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"created\":0,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"more\"}}]}",
+            "",
+            "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"created\":0,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Answer\"}}]}",
+            "",
+            "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"created\":0,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2,\"total_tokens\":7}}",
+            "",
+            "data: [DONE]",
+            "",
+        ]
+        .join("\n");
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .set_body_raw(sse.into_bytes(), "text/event-stream"),
+            )
+            .mount(&server)
+            .await;
+
+        let config = config_with_endpoint(&server.uri(), Auth::None);
+        let provider = provider_for("test/streaming-model", &config).unwrap();
+
+        let mut thoughts = Vec::new();
+        let mut deltas = Vec::new();
+        let response = provider
+            .stream_completion(
+                ModelRequest {
+                    model: "streaming-model".into(),
+                    system: String::new(),
+                    messages: vec![ChatMessage {
+                        role: ChatRole::User,
+                        text: "think".into(),
+                        ..Default::default()
+                    }],
+                    tools: Vec::new(),
+                },
+                &mut |delta: &str| deltas.push(delta.to_owned()),
+                &mut |delta: &str| thoughts.push(delta.to_owned()),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            thoughts.join(""),
+            "think more",
+            "reasoning streams as thoughts"
+        );
+        assert_eq!(deltas.join(""), "Answer", "only answer text is a message delta");
+        assert_eq!(response.text, "Answer", "thoughts never enter the answer");
     }
 
     #[tokio::test]
@@ -707,6 +795,7 @@ mod tests {
             "This model's context is full. Run /compact (the `compaction` script), or start a fresh session.",
             |input: u64, _output: u64, _cost: f64| usage_updates.push(input),
             |delta: &str| deltas.push(delta.to_owned()),
+            |_: &str| {},
             |_attempt: u32, _message: &str| {}, // no retry assertions here
             crate::agent::ignore_tool_call,
         )
@@ -815,6 +904,7 @@ mod tests {
             "This model's context is full. Run /compact (the `compaction` script), or start a fresh session.",
             |_: u64, _: u64, _: f64| {},
             |_: &str| {},
+            |_: &str| {},
             |_: u32, _: &str| {},
             crate::agent::ignore_tool_call,
         )
@@ -884,6 +974,7 @@ data: {not json}
             "This model's context is full. Run /compact (the `compaction` script), or start a fresh session.",
             |_: u64, _: u64, _: f64| {},
             |_: &str| {},
+            |_: &str| {},
             |_: u32, _: &str| {},
             crate::agent::ignore_tool_call,
         )
@@ -928,6 +1019,7 @@ data: {not json}
             8,
             "This model's context is full. Run /compact (the `compaction` script), or start a fresh session.",
             |_: u64, _: u64, _: f64| {},
+            |_: &str| {},
             |_: &str| {},
             |attempt: u32, _: &str| retries.push(attempt),
             crate::agent::ignore_tool_call,

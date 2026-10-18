@@ -650,6 +650,7 @@ mod tests {
                 &self,
                 _request: crate::agent::ModelRequest,
                 _on_text_delta: &mut (dyn FnMut(&str) + Send),
+                _on_thought_delta: &mut (dyn FnMut(&str) + Send),
             ) -> impl std::future::Future<
                 Output = Result<crate::agent::ModelResponse, crate::agent::ModelError>,
             > + Send {
@@ -692,6 +693,7 @@ mod tests {
                 &compaction_disabled_note(Some("compaction")),
                 |_, _, _| {},
                 |delta: &str| streamed.push(delta.to_owned()),
+                |_: &str| {},
                 |_, _| {},
                 crate::agent::ignore_tool_call,
             )
@@ -729,6 +731,7 @@ mod tests {
                 &self,
                 _request: crate::agent::ModelRequest,
                 _on_text_delta: &mut (dyn FnMut(&str) + Send),
+                _on_thought_delta: &mut (dyn FnMut(&str) + Send),
             ) -> impl std::future::Future<
                 Output = Result<crate::agent::ModelResponse, crate::agent::ModelError>,
             > + Send {
@@ -775,6 +778,7 @@ mod tests {
                 &compaction_disabled_note(Some("compaction")),
                 |_, _, _| {},
                 |delta: &str| streamed.push(delta.to_owned()),
+                |_: &str| {},
                 |_, _| {},
                 crate::agent::ignore_tool_call,
             )
@@ -803,6 +807,7 @@ mod tests {
                 &self,
                 _request: crate::agent::ModelRequest,
                 _on_text_delta: &mut (dyn FnMut(&str) + Send),
+                _on_thought_delta: &mut (dyn FnMut(&str) + Send),
             ) -> impl std::future::Future<
                 Output = Result<crate::agent::ModelResponse, crate::agent::ModelError>,
             > + Send {
@@ -871,6 +876,7 @@ mod tests {
                 8,
                 "note",
                 |input: u64, _output: u64, _cost: f64| usage_updates.push(input),
+                |_: &str| {},
                 |_: &str| {},
                 |_, _| {},
                 crate::agent::ignore_tool_call,

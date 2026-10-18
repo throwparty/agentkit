@@ -156,13 +156,16 @@ pub enum ModelError {
 
 /// The model seam: tackle owns this trait; rig-core hides behind it.
 pub trait ModelProvider: Send + Sync {
-    /// Streaming completion: `on_text_delta` fires per text delta as it
-    /// arrives (the caller relays chunks to the client live); the
-    /// aggregated response (full text + usage) returns at the end.
+    /// Streaming completion: `on_text_delta` fires per text delta and
+    /// `on_thought_delta` per reasoning/thought delta as they arrive (the
+    /// caller relays chunks to the client live); the aggregated response
+    /// (full text + usage) returns at the end. Thought deltas are advisory
+    /// and never enter the persisted assistant message.
     fn stream_completion(
         &self,
         request: ModelRequest,
         on_text_delta: &mut (dyn FnMut(&str) + Send),
+        on_thought_delta: &mut (dyn FnMut(&str) + Send),
     ) -> impl Future<Output = Result<ModelResponse, ModelError>> + Send;
 }
 

@@ -135,7 +135,7 @@ pub async fn run_nested_agent<P: ModelProvider>(
         tools: Vec::new(),
     };
     let response = provider
-        .stream_completion(request, &mut |_delta: &str| {})
+        .stream_completion(request, &mut |_delta: &str| {}, &mut |_delta: &str| {})
         .await
         .map_err(|err| NestedError::Model(err.to_string()))?;
 
@@ -184,6 +184,7 @@ mod tests {
             &self,
             _request: ModelRequest,
             _on_text_delta: &mut (dyn FnMut(&str) + Send),
+            _on_thought_delta: &mut (dyn FnMut(&str) + Send),
         ) -> impl Future<Output = Result<crate::agent::ModelResponse, crate::agent::ModelError>> + Send
         {
             std::future::ready(Ok(crate::agent::ModelResponse {
