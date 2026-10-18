@@ -234,7 +234,7 @@ pub async fn build(state: &TackleState, session: &Session) -> Selectors {
 /// window — an over-window session auto-compacts (announced, with a
 /// context note) — effective the following turn.
 pub async fn apply_model_switch(
-    state: &TackleState,
+    state: &std::sync::Arc<TackleState>,
     access: &dyn crate::scripts::host::SessionAccess,
     session_id: &SessionId,
     model_reference: &str,
