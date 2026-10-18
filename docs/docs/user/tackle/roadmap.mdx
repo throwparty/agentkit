@@ -1,5 +1,17 @@
 ---
-sidebar_position: 900
+sidebar_position: 100
 ---
 
 # 💭 Roadmap
+
+## Support for other provider API surfaces
+
+We currently offer support only for OpenAI's chat completions API surface. We should at least aim for parity with Switchboard.
+
+## MCP servers disabled by default
+
+All configured MCP servers are enabled by default, but we ought to support having them start disabled.
+
+## User-controlled hot reload of project configuration
+
+Project configuration that is subject to user consent is not currently hot reloaded. We should attempt to provide a `/reload-project` command that clears the cached copies of the project's configuration to force re-reading configuration from the disk, and re-prompting if it has changed since the last approval.

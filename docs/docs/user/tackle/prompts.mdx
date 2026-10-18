@@ -1,0 +1,87 @@
+---
+sidebar_position: 2
+---
+
+# 📝 Prompts
+
+Prompts are markdown files containing reusable prompts that you can invoke by name or make discoverable to the model. They're Tackle's only reusable-content primitive, they combine _commands_ (e.g. `/review`) and _skills_ (model-loadable, discovered base on frontmatter) you'll be familiar with from other tools.
+
+Who can invoke a prompt is determined by the frontmatter fields `user_invokable` and `model_invokable`.
+
+## Where prompts live
+
+Prompts are stored in the `prompts` subdirectory of [the configuration directory](reference/config). The filename without the extension is the prompt's name, and therefore the command. `prompts/review.md` is `/review`. Frontmatter fences may be `---` (YAML) or `+++` (TOML).
+
+## Authoring
+
+```markdown
+---
+description: Review a file for correctness and style
+parameters: [path]
+user_invokable: true
+model_invokable: false
+---
+
+Review `{{ path }}`. Report findings; do not edit.
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `description` | — | Shown in listings and to the model |
+| `parameters` | `[]` | Declared arguments, substituted into `{{ name }}` |
+| `user_invokable` | `true` | Available to you as a slash command |
+| `model_invokable` | `false` | Exposed to the model as a tool |
+| `compaction` | `false` | Routes the invocation to the compaction script |
+
+A prompt with both flags set is reachable from either side. A prompt with neither is inert.
+
+## Parameters
+
+Parameters are positional, split on whitespace, and the last one absorbs the remainder, so the prompt:
+
+```markdown
+---
+description: Deploy a service to an environment
+parameters: [service, env]
+---
+Deploy `{{ service }}` to `{{ env }}`.
+```
+
+and invocation:
+
+```text
+/deploy api staging — tonight, after the release cut
+```
+
+yields `service = "api"` and `env = "staging — tonight, after the release cut"`. All declared parameters are required: too few arguments, or an unknown command, fails with a precise error naming the usage string and stores nothing.
+
+## Delivery mode: commands
+
+With `user_invokable`, the prompt becomes a slash command advertised to your harness, so it autocompletes. Typing `/review src/lib.rs` expands the body — with parameters filled — into the model prompt for that turn. The stored message keeps what you typed; the expansion is what the model sees.
+
+Only an exact first-token match on input you typed is intercepted. Text pasted into the conversation that happens to begin with `/` is never hijacked, and the model emitting `/name` as reply text is stored as plain content and never executed.
+
+## Delivery mode: skills
+
+With `model_invokable`, the model sees the prompt as a tool, described by `description`. Calling it loads the expanded body into context — the on-demand loading that other harnesses call a skill. Every `model_invokable` prompt is listed by name and description in the model's system prompt, so it knows what is available.
+
+## Interception
+
+A prompt with `compaction: true` is intercepted by the harness: instead of starting a model turn it fires the `compaction_requested` event, which the shipped compaction script handles. `/compact` is one of these.
+
+## Built-ins
+
+Four prompts ship with tackle:
+
+| Command | Does |
+|---|---|
+| `/compact` | Summarises older turns behind a summary (compaction-tagged) |
+| `/fork` | Forks the session, reporting the new session id in this turn |
+| `/mcp` | `enable` / `disable` / `status` for MCP servers |
+| `/editor` | Toggles the editor's file-system and terminal tools |
+
+They are described in full in [Defaults](./defaults). Define a prompt with the same name to replace one wholesale.
+
+## Trust
+
+Project-layer prompts are trust-gated exactly like personas and actors: consent on first use, keyed on a hash, re-prompted on any change. See [Security model](./security).

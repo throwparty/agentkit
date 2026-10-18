@@ -6,20 +6,9 @@ sidebar_position: 1
 
 ![The Tackle logo depicts a cat in a mechanical exoskeleton.](./logo.jpg)
 
-Tackle is an [Agent Client Protocol](https://agentclientprotocol.com) (ACP) server for coding agents. It hosts agent sessions end to end: it talks to any compatible model endpoint, connects to MCP servers for tools, and persists every session — prompts, model turns, tool calls, and usage — in a local session database you can fork, compact, and resume.
+Tackle is an agentic harness for coding agents built on [Agent Client Protocol](https://agentclientprotocol.com) (ACP) you can use from a client such as your text editor. It provides the agent sessions end to end: it talks to any compatible model endpoint, connects to MCP servers for tools, and persists every session — prompts, model turns, tool calls, and usage — in a local session database you can fork, compact, and resume.
 
-## What it does
-
-- **ACP sessions over stdio and HTTP** — wire up any ACP-compatible harness, such as Zed, or drive sessions over an HTTP transport.
-- **Persistent sessions** — every turn is stored before and after model requests, so work survives restarts and mid-stream failures.
-- **MCP tool pools** — namespaced tools from multiple MCP servers, with spawn hygiene, timeout handling, and elicitation forwarding.
-- **Session ergonomics** — fork sessions down a new path, compact long histories with in-band announcements, and let the model pick its own title.
-- **Direct invocation** — call MCP tools explicitly with `/!tool-name`, bypassing the model.
-- **Runtime MCP availability** — `/mcp disable <server>` takes a server offline for the connection, closing its connection and dropping its tools; `/mcp enable <server>` reconnects it; `/mcp status [server]` reports both the toggle state and the connection state.
-- **Behaviour scripting** — respond to events like `post_turn` and `compaction_requested` with Rhai scripts and persona/actor overrides.
-- **Observability** — OpenTelemetry spans for turns, tool calls, and token usage, with type-level redaction of sensitive payloads.
-
-## Workflow
+## How it works
 
 ```mermaid
 flowchart TD
@@ -34,12 +23,11 @@ flowchart TD
 3. Tool calls are dispatched to MCP servers from the project configuration.
 4. Everything is persisted in the session database, ready to fork or resume.
 
-## Getting started
+## Key features
 
-Run the binary from the repository:
-
-```bash
-cargo run -p agentkit-tackle
-```
-
-It speaks ACP on stdin/stdout by default; see [Reference](./reference/cli.mdx) for flags and configuration.
+- **ACP sessions over stdio and HTTP**: wire up any ACP-compatible client, such as Zed. RPCs exposed by the ACP client are automatically made available as tools, allowing filesystem and terminal access via your editor without any additional tools.
+- **Highly scriptable design** allows customisation of post-turn actions such as compaction and session titling, tool permisison policies; not just prompts and personas.
+- **Persistent sessions**, where sessions are stored as a DAG of messages, allowing for forking of sessions at any point.
+- **MCP tools**, which can be toggled on and off at any point during a session using `/mcp`, with support for interactive workflows via elicitation forwarding.
+- **Direct tool invocation** via `/!tool`, bypassing the model and permissions.
+- **Observability** via OpenTelemetry spans for turns, tool calls, and token usage, with type-level redaction of sensitive payloads.

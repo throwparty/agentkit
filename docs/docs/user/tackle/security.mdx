@@ -1,0 +1,65 @@
+---
+sidebar_position: 4
+---
+
+# 🛡️ Security model
+
+Tackle's security posture is to **fail-closed**:
+
+- Allowing a tool invocation is never a default.
+- Every extension point is bounded.
+
+:::info
+
+We believe that the harness is responsible for mediating the admission of data into the model's context window and the model's requests for access to resources. The harness and its configuration should not be configured by the model without the user's expess consent, and it therefore belongs outside of any compute sandbox.
+
+:::
+
+## Projects are untrusted
+
+A cloned repository is untrusted input. Some configuration is denied at project-scope:
+
+- `endpoints` for model providers, since projects must not be able to exfiltrate traffic to endpoints without consent.
+- `credential_helper` used for credential resolution could allow exfiltration of credentials.
+- `client_tools` a project must not be able to hand the model your editor's shell or filesystem.
+
+Everything else a project may declare is subject to **consent**.
+
+## Consent
+
+Project-defined `mcp_servers`, `scripts`, `personas`, `actors`, and `prompts` are executable configuration, so they require consent before they load:
+
+- the first session in a project prompts for approval, keyed on a **hash of each entry**;
+- any change to an entry re-prompts;
+- an unapproved entry is dropped before it can take effect;
+- consent is recorded against the repository remote, so a moved checkout keeps it.
+
+Definitions are loaded once at process start and without hot reload, so a change is only picked up on the next run.
+
+## Spawn hygiene
+
+stdio MCP servers are started with an explicit argv or shell, with only the named environment variables accessible. Tackle's own environment, `PATH` included, is **never** forwarded.
+
+## Credentials
+
+Secrets never enter configuration and never enter model context. An environment value that is exactly `{cred:<identity>}` is resolved through the credential helper **at spawn**, not at load, so the secret exists only in the spawned process's environment. A marker that is not the whole value passes through literally; a failed lookup fails that server's connection rather than the session.
+
+Logs redact credentials and tool arguments, and telemetry redacts sensitive payloads at the type level.
+
+## Grants
+
+The permission grant store is in-memory only. A grant never touches disk, does not survive process exit, and does not survive a resume after restart. See [Permissions](./permissions).
+
+## Scripts are bounded
+
+Script engines enforce operation, call-depth, expression-depth, collection-size, and time limits, cap script size, forbid module imports, and start fresh per invocation. Scripts cannot invoke tools and cannot read or write the grant store. A policy script that fails fails closed to ask.
+
+## Permission assessment is in-core
+
+The permission pipeline (including grants, policy scripts, and the fixed ask fallback) lives in the harness, deliberately **outside** any sandboxed development environment. An agent with shell access inside a sandbox cannot rewrite the access control that governs it.
+
+Sandboxing itself is not tackle's job. Where you need real containment, run the agent inside a sandbox and reach tackle's tools from there — that is [Litterbox](https://github.com/throwparty/agentkit)'s role, and tackle reaches it only over MCP.
+
+## Bounded inputs
+
+Tool results are truncated at a fixed limit (16 KiB) with the original size recorded, bounding what a single server response can put in front of the model. The full content remains in the session store.
