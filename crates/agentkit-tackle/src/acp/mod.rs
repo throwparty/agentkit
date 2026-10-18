@@ -2226,15 +2226,7 @@ async fn run_model_tool_call(
     } = ctx;
     let arguments: serde_json::Value =
         serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
-    let kind = if call.name.starts_with("mcp.") {
-        "mcp"
-    } else if call.name.starts_with("prompt.") {
-        "prompt"
-    } else if call.name.starts_with("client.") {
-        "client"
-    } else {
-        "agent"
-    };
+    let kind = crate::invokables::kind_of(&call.name);
 
     let _ = cx.send_notification(SessionNotification::new(
         session_id.clone(),
@@ -2272,8 +2264,8 @@ async fn run_model_tool_call(
     };
 
     let (content, is_error) = match verdict {
-        crate::permissions::Verdict::Allow => {
-            if call.name.starts_with("client.") {
+        crate::permissions::Verdict::Allow => match kind {
+            "client" => {
                 if !client_tools.iter().any(|tool| tool.name == call.name) {
                     (
                         format!(
@@ -2297,14 +2289,16 @@ async fn run_model_tool_call(
                         Err(err) => (err, true),
                     }
                 }
-            } else if call.name.starts_with("agent.") {
+            }
+            "agent" => {
                 // FR-026: spawn a nested agent instance of the target
                 // actor and return its final message as the tool result.
                 match run_agent_invocation(state, session_id, &call.name, &arguments).await {
                     Ok(text) => (text, false),
                     Err(err) => (err, true),
                 }
-            } else {
+            }
+            _ => {
                 let pool = negotiation.mcp_pool();
                 let pool = pool.lock().await;
                 match registry.execute_model(&pool, &call.name, &arguments).await {
@@ -2312,7 +2306,7 @@ async fn run_model_tool_call(
                     Err(err) => (err, true),
                 }
             }
-        }
+        },
         crate::permissions::Verdict::Deny { reason } => {
             (format!("Permission denied: {reason}"), true)
         }

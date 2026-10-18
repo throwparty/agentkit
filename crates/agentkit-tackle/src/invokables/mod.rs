@@ -33,6 +33,23 @@ pub fn agent_name(name: &str) -> String {
     format!("agent.{name}")
 }
 
+/// The invokable category implied by a namespaced name — the one place
+/// the prefix convention is decoded. The categories are `mcp`, `prompt`,
+/// `client`, and `agent`; `agent` is the fallback (actor invokables are
+/// `agent.<actor>`). The permission pipeline and the ACP dispatch both
+/// classify through this, so the two never disagree.
+pub fn kind_of(name: &str) -> &'static str {
+    if name.starts_with("mcp.") {
+        "mcp"
+    } else if name.starts_with("prompt.") {
+        "prompt"
+    } else if name.starts_with("client.") {
+        "client"
+    } else {
+        "agent"
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Invokable {
     /// An MCP tool: user-invokable (direct invocation) and
@@ -583,6 +600,10 @@ impl Registry {
 
     /// Executes a model-initiated invokable call: MCP tools run against
     /// the pool; model-invokable prompts expand their body into context.
+    /// The ACP layer dispatches `agent` and `client` invokables itself
+    /// (nested loops and the connection's client tools), so anything else
+    /// reaching here is a caller error, reported without naming a
+    /// category this layer cannot execute.
     pub async fn execute_model<S: ElicitationSink>(
         &self,
         pool: &McpPool<S>,
@@ -601,11 +622,9 @@ impl Registry {
             Invokable::Prompt { .. } => self
                 .expand_model(name, arguments)
                 .map_err(|err| err.to_string()),
-            Invokable::Agent { .. } => Err(format!(
-                "agent invokables are not executable here: `{name}`"
-            )),
-            Invokable::Client { .. } => Err(format!(
-                "client tools execute on the connection, not here: `{name}`"
+            other => Err(format!(
+                "`{}` is not executable through the registry",
+                other.name()
             )),
         }
     }
@@ -682,6 +701,16 @@ mod tests {
     use crate::loader::{ActorMeta, Definition, PersonaMeta, PromptMeta};
     use std::collections::BTreeSet;
     use std::path::PathBuf;
+
+    #[test]
+    fn kind_of_decodes_every_namespace() {
+        assert_eq!(kind_of("mcp.litterbox.exec"), "mcp");
+        assert_eq!(kind_of("prompt.compact"), "prompt");
+        assert_eq!(kind_of("client.fs.read_text_file"), "client");
+        assert_eq!(kind_of("agent.reviewer"), "agent");
+        // The fallback is agent: actor invokables are `agent.<actor>`.
+        assert_eq!(kind_of("unprefixed"), "agent");
+    }
 
     fn prompt_def(name: &str, meta: PromptMeta, body: &str) -> (String, Definition<PromptMeta>) {
         (
