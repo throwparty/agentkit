@@ -156,11 +156,6 @@ pub enum ModelError {
 
 /// The model seam: tackle owns this trait; rig-core hides behind it.
 pub trait ModelProvider: Send + Sync {
-    fn complete(
-        &self,
-        request: ModelRequest,
-    ) -> impl Future<Output = Result<ModelResponse, ModelError>> + Send;
-
     /// Streaming completion: `on_text_delta` fires per text delta as it
     /// arrives (the caller relays chunks to the client live); the
     /// aggregated response (full text + usage) returns at the end.

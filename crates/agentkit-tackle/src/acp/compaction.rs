@@ -656,17 +656,6 @@ mod tests {
         struct Overflow;
 
         impl crate::agent::ModelProvider for Overflow {
-            fn complete(
-                &self,
-                _request: crate::agent::ModelRequest,
-            ) -> impl std::future::Future<
-                Output = Result<crate::agent::ModelResponse, crate::agent::ModelError>,
-            > + Send {
-                std::future::ready(Err(crate::agent::ModelError::Completion(
-                    "prompt is too long: 300000 tokens > 200000 maximum".to_owned(),
-                )))
-            }
-
             fn stream_completion(
                 &self,
                 _request: crate::agent::ModelRequest,
@@ -747,17 +736,6 @@ mod tests {
         struct TooLarge;
 
         impl crate::agent::ModelProvider for TooLarge {
-            fn complete(
-                &self,
-                _request: crate::agent::ModelRequest,
-            ) -> impl std::future::Future<
-                Output = Result<crate::agent::ModelResponse, crate::agent::ModelError>,
-            > + Send {
-                std::future::ready(Err(crate::agent::ModelError::Completion(
-                    "unused".to_owned(),
-                )))
-            }
-
             fn stream_completion(
                 &self,
                 _request: crate::agent::ModelRequest,
@@ -833,17 +811,6 @@ mod tests {
         }
 
         impl crate::agent::ModelProvider for TwoRounds {
-            fn complete(
-                &self,
-                _request: crate::agent::ModelRequest,
-            ) -> impl std::future::Future<
-                Output = Result<crate::agent::ModelResponse, crate::agent::ModelError>,
-            > + Send {
-                std::future::ready(Err(crate::agent::ModelError::Completion(
-                    "unused".to_owned(),
-                )))
-            }
-
             fn stream_completion(
                 &self,
                 _request: crate::agent::ModelRequest,

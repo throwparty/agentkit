@@ -180,21 +180,6 @@ mod tests {
     struct Stub;
 
     impl ModelProvider for Stub {
-        fn complete(
-            &self,
-            _request: ModelRequest,
-        ) -> impl Future<Output = Result<crate::agent::ModelResponse, crate::agent::ModelError>> + Send
-        {
-            std::future::ready(Ok(crate::agent::ModelResponse {
-                text: "nested answer".to_owned(),
-                tool_calls: Vec::new(),
-                usage: crate::agent::ModelUsage {
-                    input_tokens: 7,
-                    output_tokens: 3,
-                },
-            }))
-        }
-
         fn stream_completion(
             &self,
             _request: ModelRequest,
