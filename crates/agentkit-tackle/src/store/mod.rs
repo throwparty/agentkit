@@ -8,6 +8,7 @@
 
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
 use std::path::Path;
+#[cfg(test)]
 use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
@@ -34,6 +35,7 @@ pub enum StoreError {
 
 #[cfg(test)]
 mod graph;
+#[cfg(test)]
 mod memory;
 
 #[cfg(test)]
@@ -51,6 +53,7 @@ pub struct AssembledMessage {
 /// Orders a parent-chain walk (newest first) for assembly: compaction
 /// summaries first — they replace the elided prefix — then the retained
 /// turns oldest to newest.
+#[cfg(test)]
 pub(crate) fn assembly_order(walk: Vec<(TurnId, TurnKind)>) -> Vec<TurnId> {
     let mut summaries = Vec::new();
     let mut retained = Vec::new();
@@ -180,6 +183,7 @@ pub struct TurnUsage {
 }
 
 impl TurnUsage {
+    #[cfg(test)]
     fn add(self, other: Self) -> Self {
         Self {
             input_tokens: self.input_tokens + other.input_tokens,
@@ -257,12 +261,14 @@ pub struct SessionStore {
 
 enum Backend {
     Sqlite(SqlitePool),
+    #[cfg(test)]
     Memory(Mutex<memory::MemoryData>),
 }
 
 impl SessionStore {
     /// Locks the in-memory backend, recovering from poisoning (a panicked
     /// script must not take the store down).
+    #[cfg(test)]
     fn lock_memory(&self) -> MutexGuard<'_, memory::MemoryData> {
         match &self.backend {
             Backend::Memory(data) => match data.lock() {
@@ -300,6 +306,7 @@ impl SessionStore {
     }
 
     /// An empty in-memory store: the test backend.
+    #[cfg(test)]
     pub fn in_memory() -> Self {
         Self {
             backend: Backend::Memory(Mutex::new(memory::MemoryData::default())),
@@ -348,6 +355,7 @@ impl SessionStore {
                 .execute(pool)
                 .await?;
             }
+            #[cfg(test)]
             Backend::Memory(_) => self.lock_memory().create_session(session.clone()),
         }
         Ok(session)
@@ -362,6 +370,7 @@ impl SessionStore {
                     .await?;
                 Ok(row.map(SqliteSession::into_domain))
             }
+            #[cfg(test)]
             Backend::Memory(_) => Ok(self.lock_memory().get_session(id)),
         }
     }
@@ -384,6 +393,7 @@ impl SessionStore {
                 .await?;
                 Ok(rows.into_iter().map(SqliteSession::into_domain).collect())
             }
+            #[cfg(test)]
             Backend::Memory(_) => Ok(self.lock_memory().list_sessions(filter)),
         }
     }
@@ -399,6 +409,7 @@ impl SessionStore {
                     .execute(pool)
                     .await?;
             }
+            #[cfg(test)]
             Backend::Memory(_) => self.lock_memory().close_session(id),
         }
         Ok(())
@@ -428,6 +439,7 @@ impl SessionStore {
                 .await?;
                 Ok(result.rows_affected() == 1)
             }
+            #[cfg(test)]
             Backend::Memory(_) => {
                 Ok(self
                     .lock_memory()
@@ -457,6 +469,7 @@ impl SessionStore {
                 .await?;
                 Ok(result.rows_affected() == 1)
             }
+            #[cfg(test)]
             Backend::Memory(_) => {
                 Ok(self
                     .lock_memory()
@@ -481,6 +494,7 @@ impl SessionStore {
                 .flatten();
                 Ok(owner)
             }
+            #[cfg(test)]
             Backend::Memory(_) => Ok(self.lock_memory().lease_holder(session_id, now)),
         }
     }
@@ -512,6 +526,7 @@ impl SessionStore {
                     // idempotent success.
                 }
             }
+            #[cfg(test)]
             Backend::Memory(_) => self.lock_memory().delete_session(id, now)?,
         }
         Ok(())
@@ -534,6 +549,7 @@ impl SessionStore {
                 .execute(pool)
                 .await?;
             }
+            #[cfg(test)]
             Backend::Memory(_) => self.lock_memory().release_lease(session_id, owner),
         }
         Ok(())
@@ -585,6 +601,7 @@ impl SessionStore {
                     .await?;
                 tx.commit().await?;
             }
+            #[cfg(test)]
             Backend::Memory(_) => self.lock_memory().append_turn(turn.clone()),
         }
         Ok(turn)
@@ -644,6 +661,7 @@ impl SessionStore {
                 message.position = position;
                 Ok(message)
             }
+            #[cfg(test)]
             Backend::Memory(_) => Ok(self.lock_memory().append_message(message)),
         }
     }
@@ -666,6 +684,7 @@ impl SessionStore {
                     cost_usd: row.2,
                 })
             }
+            #[cfg(test)]
             Backend::Memory(_) => Ok(self.lock_memory().session_usage(session_id)),
         }
     }
@@ -688,6 +707,7 @@ impl SessionStore {
                 .execute(pool)
                 .await?;
             }
+            #[cfg(test)]
             Backend::Memory(_) => self.lock_memory().set_turn_usage(turn_id, usage),
         }
         Ok(())
@@ -731,6 +751,7 @@ impl SessionStore {
                     .execute(pool)
                     .await?;
             }
+            #[cfg(test)]
             Backend::Memory(_) => self
                 .lock_memory()
                 .set_metadata(session_id, &metadata.to_string()),
@@ -750,6 +771,7 @@ impl SessionStore {
                     .execute(pool)
                     .await?;
             }
+            #[cfg(test)]
             Backend::Memory(_) => self.lock_memory().set_title(session_id, title),
         }
         Ok(())
@@ -784,6 +806,7 @@ impl SessionStore {
                     .map(|(id, kind)| (id, TurnKind::from_str(&kind)))
                     .collect())
             }
+            #[cfg(test)]
             Backend::Memory(_) => Ok(self.lock_memory().session_walk(session_id)),
         }
     }
@@ -837,6 +860,7 @@ impl SessionStore {
                     },
                 ))
             }
+            #[cfg(test)]
             Backend::Memory(_) => Ok(self.lock_memory().get_turn(turn_id)),
         }
     }
@@ -876,6 +900,7 @@ impl SessionStore {
                 .await?;
                 tx.commit().await?;
             }
+            #[cfg(test)]
             Backend::Memory(_) => self.lock_memory().delete_turn(turn_id),
         }
         Ok(())
@@ -921,6 +946,7 @@ impl SessionStore {
                     .map(SqliteAssembledRow::into_domain)
                     .collect())
             }
+            #[cfg(test)]
             Backend::Memory(_) => Ok(self.lock_memory().assemble_context(session_id)),
         }
     }
