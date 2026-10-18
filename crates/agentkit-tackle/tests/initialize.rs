@@ -329,10 +329,10 @@ async fn direct_invocation_runs_an_mcp_tool_and_reports_the_result() {
             async move |notification: SessionNotification, _cx| {
                 match &notification.update {
                     SessionUpdate::ToolCall(call) => {
-                        calls_handler
-                            .lock()
-                            .unwrap()
-                            .push(("call".to_owned(), call.title.clone()));
+                        calls_handler.lock().unwrap().push((
+                            "call".to_owned(),
+                            call.name.clone().unwrap_or_else(|| call.title.clone()),
+                        ));
                     }
                     SessionUpdate::ToolCallUpdate(update) => {
                         let status = update.fields.status.map(|s| format!("{s:?}"));
@@ -540,10 +540,10 @@ async fn forwarded_mcp_servers_reach_the_session() {
             async move |notification: SessionNotification, _cx| {
                 match &notification.update {
                     SessionUpdate::ToolCall(call) => {
-                        calls_handler
-                            .lock()
-                            .unwrap()
-                            .push(("call".to_owned(), call.title.clone()));
+                        calls_handler.lock().unwrap().push((
+                            "call".to_owned(),
+                            call.name.clone().unwrap_or_else(|| call.title.clone()),
+                        ));
                     }
                     SessionUpdate::ToolCallUpdate(update) => {
                         let status = update.fields.status.map(|s| format!("{s:?}"));

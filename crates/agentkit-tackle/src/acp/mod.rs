@@ -17,6 +17,7 @@ pub mod config_options;
 pub mod first_run;
 pub mod fork;
 pub mod http;
+pub mod titles;
 pub mod titling;
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
@@ -1076,12 +1077,16 @@ where
                 // a tool call and stored in the turn.
                 if let Some(input) = crate::invokables::parse_direct(&first_text) {
                     let call_id = format!("direct-{}", uuid::Uuid::new_v4());
+                    let arguments: serde_json::Value =
+                        serde_json::from_str(&input.arguments).unwrap_or(serde_json::Value::Null);
                     let announce = agent_client_protocol::schema::v1::ToolCall::new(
                         agent_client_protocol::schema::v1::ToolCallId::new(call_id.clone()),
-                        input.invokable.clone(),
+                        titles::tool_call_title(&input.invokable, &arguments),
                     )
+                    .name(input.invokable.clone())
+                    .kind(titles::tool_kind(&input.invokable))
                     .status(agent_client_protocol::schema::v1::ToolCallStatus::InProgress)
-                    .raw_input(serde_json::from_str(&input.arguments).ok());
+                    .raw_input(Some(arguments.clone()));
                     let _ = cx.send_notification(SessionNotification::new(
                         request.session_id.clone(),
                         agent_client_protocol::schema::v1::SessionUpdate::ToolCall(announce),
@@ -2005,14 +2010,21 @@ fn replay_updates(
         // blocks, so handle them before the block parser.
         match message.role {
             crate::store::Role::ToolCall => {
-                // The pair collapses: one completed tool-call update.
+                // The pair collapses: one completed tool-call update. The
+                // title is derived from the stored arguments, matching the
+                // live announcement.
+                let name = message.tool_name.clone().unwrap_or_default();
+                let arguments: serde_json::Value =
+                    serde_json::from_str(&message.content).unwrap_or(serde_json::Value::Null);
                 updates.push(notification(
                     session_id,
                     SessionUpdate::ToolCall(
                         ToolCall::new(
                             message.id.clone(),
-                            message.tool_name.clone().unwrap_or_default(),
+                            titles::tool_call_title(&name, &arguments),
                         )
+                        .name(name.clone())
+                        .kind(titles::tool_kind(&name))
                         .status(ToolCallStatus::Completed),
                     ),
                 ));
@@ -2132,9 +2144,14 @@ async fn run_model_tool_call(
     let _ = cx.send_notification(SessionNotification::new(
         session_id.clone(),
         SessionUpdate::ToolCall(
-            v1::ToolCall::new(v1::ToolCallId::new(call.id.clone()), call.name.clone())
-                .status(v1::ToolCallStatus::InProgress)
-                .raw_input(Some(arguments.clone())),
+            v1::ToolCall::new(
+                v1::ToolCallId::new(call.id.clone()),
+                titles::tool_call_title(&call.name, &arguments),
+            )
+            .name(call.name.clone())
+            .kind(titles::tool_kind(&call.name))
+            .status(v1::ToolCallStatus::InProgress)
+            .raw_input(Some(arguments.clone())),
         ),
     ));
 
@@ -2343,7 +2360,11 @@ impl crate::permissions::PermissionRequester for AcpPermissionRequester {
             .collect();
         let mut fields = v1::ToolCallUpdateFields::new()
             .name(request.invokable.clone())
-            .title(request.invokable.clone());
+            .title(titles::tool_call_title(
+                &request.invokable,
+                &request.arguments,
+            ))
+            .kind(titles::tool_kind(&request.invokable));
         if let Some(reason) = &request.ask_reason {
             fields = fields.content(vec![v1::ToolCallContent::from(v1::ContentBlock::Text(
                 v1::TextContent::new(reason.clone()),
