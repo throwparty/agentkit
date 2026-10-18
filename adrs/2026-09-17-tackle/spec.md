@@ -1,12 +1,13 @@
 # Tackle: ACP-Native Agentic Coding Harness
 
-**Status:** draft **Created:** 2026-09-17 **Author:** adrian
+**Status:** draft  **Created:** 2026-09-17  **Author:** adrian
 
 Tackle is the real agentic coding harness for which earlier ADRs selected the building blocks: the ACP server harness (adrs/2026-04-28-acp-server) validated the protocol and chose the ACP Rust SDK; the MCP client SDK decision (adrs/2026-09-13-mcp-client-sdk) chose rmcp; the session storage ADR (adrs/2026-06-13-acp-server-session-storage) designed the turn DAG; the model provider SDK ADR (adrs/2026-06-14-model-provider-sdk) selected rig-core; switchboard (adrs/2026-06-14-switchboard) provides optional cost-aware routing; agentkit-credentials and agentkit-models provide credential sourcing and model metadata.
 
 Tackle assembles these into a thin, ACP-native harness: an ACP v1 server for client interaction, an MCP client for all external capability, a turn-DAG session store, a unified invokable registry, an in-core fail-closed permission pipeline, and a Rhai script host for policy and workflow extension. The harness owns permission assessment and enforcement, deliberately isolated from any sandboxed development environment so the agent cannot rewrite its own access control. Sandboxing itself remains Litterbox's role, reached only via MCP.
 
 Prior-art reviews of Pi, Codex CLI, OpenCode, and Goose recipes and a terminology survey are in research/ (harness-review.md, terminology.md). Terminology is normative in the workspace-root CONTEXT.md.
+
 
 ```mermaid
 flowchart TB
@@ -26,6 +27,7 @@ flowchart TB
     Config["Config\n.agentkit/tackle/ (project)\n~/.config/agentkit/tackle/ (user)"] --> Tackle
 
 ```
+
 
 ## Problem
 
@@ -52,6 +54,7 @@ The workspace has chosen libraries for ACP, MCP, model interaction, and session 
 - Session import and export as an interchange format (interesting future work: package the turn DAG, definition snapshots, and provenance for replay and investigation; no standard exists today — ACP replay streams and OTel GenAI content capture are the nearest neighbours)
 - Ancestor message editing (clients re-submit revised content as new turns, branching the DAG; no copy-on-write editing exists in v1)
 
+
 ## Functional Requirements
 
 ### FR-001: ACP v1 Server
@@ -62,7 +65,7 @@ Tackle implements ACP v1 over stdio and HTTP transports with protocol version ne
 
 ### FR-002: Capability Advertisement
 
-Tackle advertises loadSession, sessionCapabilities for list, close, resume, and delete, promptCapabilities for image content, and mcpCapabilities for HTTP; RFD-shaped features (fork, compaction updates, notices) are advertised via unstable capabilities and \_meta and are sent only when the client advertises support, with stable-variant fallbacks always available
+Tackle advertises loadSession, sessionCapabilities for list, close, resume, and delete, promptCapabilities for image content, and mcpCapabilities for HTTP; RFD-shaped features (fork, compaction updates, notices) are advertised via unstable capabilities and _meta and are sent only when the client advertises support, with stable-variant fallbacks always available
 
 **Slug:** `capability-advertisement`
 
@@ -152,7 +155,7 @@ Behaviour scripts are Rhai scripts registered at session_forked, post_turn (with
 
 ### FR-017: Ephemeral Sessions
 
-Forks created by behaviour scripts are marked kind ephemeral, share the parent DAG without copying, are never revert points, are excluded from session/list by default with a configuration option to include them marked via \_meta, attribute usage and cost to the parent session, and are never replayed by session/load
+Forks created by behaviour scripts are marked kind ephemeral, share the parent DAG without copying, are never revert points, are excluded from session/list by default with a configuration option to include them marked via _meta, attribute usage and cost to the parent session, and are never replayed by session/load
 
 **Slug:** `ephemeral-sessions`
 
@@ -218,7 +221,7 @@ Tackle exposes ACP configOptions: a model selector populated from per-endpoint m
 
 ### FR-028: Client Capability Tools
 
-Tackle reflects the ACP client's advertised capabilities — file-system read and write and the terminal surface — to the model as client.<surface>.<method> invokables (client.fs.read_text_file, client.fs.write_text_file, client.terminal.create, client.terminal.output, client.terminal.wait_for_exit, client.terminal.kill, client.terminal.release), one tool per RPC with parameters fixed by the wire types and no shipped schemas; a tool exists only when the client advertised the capability at initialize and its category is enabled — [client_tools] fs_enabled and terminal_enabled (user configuration only, rejected by name in project configuration) seed the toggles, and /editor \<fs|terminal> \<true|false> toggles them at runtime, advertised like /mcp and taking effect the following turn; client tools are model-invokable and also user-invokable through direct invocation (/!) like MCP tools; model calls pass through the permission pipeline with kind client, while direct invocation bypasses it as the user is the authority; terminals are connection-scoped and ephemeral: the harness tracks the terminal ids it creates per session and best-effort releases them on kill and at session/close, a stale or unknown id fails the call precisely rather than silently, and no terminal state is persisted or reconciled across restarts; direct invocation (/!) reaches client-capability tools as well as MCP tools
+Tackle reflects the ACP client's advertised capabilities — file-system read and write and the terminal surface — to the model as client.<surface>.<method> invokables (client.fs.read_text_file, client.fs.write_text_file, client.terminal.create, client.terminal.output, client.terminal.wait_for_exit, client.terminal.kill, client.terminal.release), one tool per RPC with parameters fixed by the wire types and no shipped schemas; a tool exists only when the client advertised the capability at initialize and its category is enabled — [client_tools] fs_enabled and terminal_enabled (user configuration only, rejected by name in project configuration) seed the toggles, and /editor <fs|terminal> <true|false> toggles them at runtime, advertised like /mcp and taking effect the following turn; client tools are model-invokable and also user-invokable through direct invocation (/!) like MCP tools; model calls pass through the permission pipeline with kind client, while direct invocation bypasses it as the user is the authority; terminals are connection-scoped and ephemeral: the harness tracks the terminal ids it creates per session and best-effort releases them on kill and at session/close, a stale or unknown id fails the call precisely rather than silently, and no terminal state is persisted or reconciled across restarts; direct invocation (/!) reaches client-capability tools as well as MCP tools
 
 **Slug:** `client-capability-tools`
 
@@ -329,63 +332,54 @@ Project scripts from an untrusted repository require explicit consent before loa
 A client advertising no unstable capabilities receives only stable-variant updates; compaction and fork richness degrade to agent messages and usage updates without breaking the stream
 
 **Slug:** `client-lacks-capabilities`
-
 ### EC-002: MCP Server Failure
 
 A configured MCP server hangs or fails at session creation; the session opens without it and the failure is reported at the first turn
 
 **Slug:** `mcp-server-failure`
-
 ### EC-003: Context Overflow With Compaction Disabled
 
 Provider context-length errors surface as actionable messages noting that the default compaction script is disabled or absent and naming it; no retry loop
 
 **Slug:** `context-overflow-compaction-disabled`
-
 ### EC-004: Script Failure
 
 A policy script error or timeout fails closed to ask with the error surfaced; a behaviour script failure degrades gracefully, skipping titling or marking compaction failed without blocking the session
 
 **Slug:** `script-failure`
-
 ### EC-005: Concurrent Prompt
 
 A prompt against a session actively owned by another connection returns a precise ownership error rather than corrupting the turn DAG
 
 **Slug:** `concurrent-prompt`
-
 ### EC-006: Elicitation Grant Separation
 
 An MCP server elicitation answered with allow_always never grants tool permissions; elicitation prompts are visually and semantically distinct from tool permission prompts
 
 **Slug:** `elicitation-grant-separation`
-
 ### EC-007: Pasted Command Text
 
 Conversation text pasted with a leading / or /! is never hijacked as a command; only exact first-token matches on user-typed input are intercepted
 
 **Slug:** `pasted-command-text`
-
 ### EC-008: Model Emits Command Syntax
 
 The model emitting /name or /!name as reply text is stored as plain message content and never executed
 
 **Slug:** `model-emits-command-syntax`
-
 ### EC-009: Fork Script Failure
 
 A failing session_forked script never fails the fork; the user sees a notice when the client supports them, otherwise an agent message in the parent turn, and the fork continues without the seed, working without environment replication if the model never provisions it
 
 **Slug:** `fork-action-failure`
-
 ### EC-010: Permission Cancelled
 
 A client cancelling a permission request is treated as reject-once and the turn ends cancelled without error noise
 
 **Slug:** `permission-cancelled`
-
 ### EC-011: Script Budget Exhaustion
 
 A behaviour script exceeding its prompt or fork budget is refused for the remainder of the trigger while the session continues normally
 
 **Slug:** `hook-budget-exhaustion`
+
