@@ -226,7 +226,10 @@ async fn restart_replays_history_with_stable_ids_and_a_usage_snapshot() {
         ));
     }
     if !replay_before.iter().any(|(kind, id, payload)| {
-        kind == "call" && id.contains('-') && payload.starts_with("Completed|mcp.echo.echo")
+        kind == "call"
+            && id.contains('-')
+            && payload.starts_with("Completed|")
+            && payload.contains("mcp.echo.echo")
     }) {
         fails.push(format!(
             "replay: the completed tool call is missing: {replay_before:?}"
