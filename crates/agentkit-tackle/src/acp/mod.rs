@@ -706,6 +706,13 @@ async fn run_prompt_turn(
     let negotiation_for_turn = negotiation;
     let owner_for_prompt = owner;
     let request_session_id = wire_session_id;
+    // The caller acquired the lease, but the turn runs in this task, so
+    // the heartbeat must live here for the turn's whole duration.
+    let _lease_heartbeat = LeaseHeartbeat::spawn(
+        Arc::clone(&state_for_prompt.db),
+        session_id.clone(),
+        owner_for_prompt.as_ref().clone(),
+    );
     let definitions = state_for_prompt.definitions();
     let actor = definitions.actors.get(&actor_name);
     let persona = actor.and_then(|a| definitions.personas.get(&a.frontmatter.persona));
@@ -1019,6 +1026,13 @@ async fn run_direct_invocation(
     input: crate::invokables::DirectInvocation,
 ) -> Result<agent_client_protocol::schema::v1::PromptResponse, Error> {
     use agent_client_protocol::schema::v1::{ContentBlock, PromptResponse, StopReason};
+    // The caller acquired the lease, but the invocation runs in this task,
+    // so the heartbeat must live here for its whole duration.
+    let _lease_heartbeat = LeaseHeartbeat::spawn(
+        Arc::clone(&state.db),
+        session_id.clone(),
+        owner.as_ref().clone(),
+    );
     let (text, is_error) = if input.invokable.starts_with("client.") {
         // Client-capability tools execute on the
         // connection, not the MCP pool.
