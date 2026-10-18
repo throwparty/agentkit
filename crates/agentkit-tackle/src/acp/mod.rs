@@ -17,6 +17,7 @@ pub mod config_options;
 pub mod first_run;
 pub mod fork;
 pub mod http;
+pub mod script_loop;
 pub mod titles;
 pub mod titling;
 use agent_client_protocol::schema::ProtocolVersion;
@@ -1978,17 +1979,7 @@ where
                         let value = value.to_string();
                         match request.config_id.0.as_ref() {
                             config_options::MODEL_SELECTOR_ID => {
-                                let access: std::sync::Arc<dyn fork::SessionAccess> =
-                                    std::sync::Arc::new(compaction::StoreAccess::new(
-                                        std::sync::Arc::clone(&state_for_config.db),
-                                        std::sync::Arc::new(
-                                            crate::scripts::host::LoopPendingDispatcher,
-                                        ),
-                                        std::sync::Arc::new(
-                                            crate::scripts::host::LoopPendingCompletions,
-                                        ),
-                                        0,
-                                    ));
+                                let access = script_loop::access(&state_for_config, 0);
                                 let mut updates: Vec<agent_client_protocol::schema::v1::Notice> =
                                     Vec::new();
                                 let mut notify =
@@ -2110,15 +2101,10 @@ where
 }
 
 /// The session access the fork scripts act through: the shared store
-/// backend with the loop dispatcher pending (T-015 integration); model
-/// turns driven by scripts queue as user messages meanwhile.
-fn fork_access(state: &TackleState) -> std::sync::Arc<dyn fork::SessionAccess> {
-    std::sync::Arc::new(fork::StoreAccess::new(
-        std::sync::Arc::clone(&state.db),
-        std::sync::Arc::new(crate::scripts::host::LoopPendingDispatcher),
-        std::sync::Arc::new(crate::scripts::host::LoopPendingCompletions),
-        0,
-    ))
+/// backend with the real model-loop dispatcher, so a `session_forked`
+/// script that prompts a fork gets a real completion.
+fn fork_access(state: &Arc<TackleState>) -> std::sync::Arc<dyn fork::SessionAccess> {
+    script_loop::access(state, 0)
 }
 
 /// Maps stored messages to replay notifications: user/assistant messages

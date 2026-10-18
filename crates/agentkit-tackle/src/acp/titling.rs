@@ -8,40 +8,12 @@
 //! only logs. Only untitled sessions trigger titling.
 
 use crate::acp::TackleState;
-use crate::scripts::host::{
-    BehaviourHost, Completion, CompletionSink, LoopPendingCompletions, LoopPendingDispatcher,
-    SessionAccess, StoreAccess, block_on,
-};
+use crate::acp::script_loop;
+use crate::scripts::host::{BehaviourHost, SessionAccess, block_on};
 use crate::scripts::{behaviour_engine, host::register_host_api};
 use crate::store::SessionId;
-use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
-
-/// A shared completion registry: the sink the access awaits from and
-/// the dispatcher publishes into.
-#[derive(Default)]
-pub struct SharedCompletions {
-    map: Mutex<HashMap<SessionId, Completion>>,
-}
-
-impl SharedCompletions {
-    pub fn new() -> Self {
-        Self {
-            map: Mutex::new(HashMap::new()),
-        }
-    }
-}
-
-impl CompletionSink for SharedCompletions {
-    fn publish(&self, session: &SessionId, completion: Completion) {
-        self.map.lock().unwrap().insert(session.clone(), completion);
-    }
-
-    fn take(&self, session: &SessionId) -> Option<Completion> {
-        self.map.lock().unwrap().remove(session)
-    }
-}
+use std::sync::Arc;
 
 /// Fires the `title_trigger` event on the registered titling scripts.
 /// Failures are silent: logged, never propagated, never blocking.
@@ -128,12 +100,7 @@ pub fn fire_title_trigger_detached(
         if title.is_some_and(|title| !title.is_empty()) {
             return;
         }
-        let access: Arc<dyn SessionAccess> = Arc::new(StoreAccess::new(
-            Arc::clone(&state.db),
-            Arc::new(LoopPendingDispatcher),
-            Arc::new(LoopPendingCompletions),
-            window_size,
-        ));
+        let access = script_loop::access(&state, window_size);
         fire_title_trigger(&state, access, &session_id);
     });
 }
@@ -141,9 +108,14 @@ pub fn fire_title_trigger_detached(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::acp::script_loop::SharedCompletions;
     use crate::scripts::host::PromptDispatcher;
+    use crate::scripts::host::{
+        Completion, CompletionSink, LoopPendingCompletions, LoopPendingDispatcher, StoreAccess,
+    };
     use crate::store::{SessionKind, SessionStore};
     use std::collections::BTreeSet;
+    use std::sync::Mutex;
 
     /// The summariser model, stubbed: every dispatched prompt completes
     /// instantly with the fixture title.

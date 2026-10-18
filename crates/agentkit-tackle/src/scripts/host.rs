@@ -43,6 +43,8 @@ pub enum HostError {
     DepthExceeded,
     #[error("await timed out after {0}s")]
     Timeout(i64),
+    #[error("model error: {0}")]
+    Model(String),
     #[error("invalid argument: {0}")]
     Invalid(&'static str),
 }
@@ -95,24 +97,26 @@ pub trait CompletionSink: Send + Sync {
     fn take(&self, session: &SessionId) -> Option<Completion>;
 }
 
-/// The agent-loop-pending dispatcher: the agent loop integration drives
-/// script-issued model turns and the user message is already stored, so
-/// there is nothing left to do here. The single shared stub for the
-/// paths where the real loop is not reachable (compaction, titling, and
-/// fork scripts).
+/// A test-only dispatcher for scripts that prompt without a real model
+/// loop wired: the user message is already stored, so there is nothing
+/// left to do. Production wires [`crate::acp::script_loop`] instead.
+#[cfg(test)]
 pub struct LoopPendingDispatcher;
 
+#[cfg(test)]
 impl PromptDispatcher for LoopPendingDispatcher {
     fn dispatch(&self, _session: &SessionId, _text: &str) -> Result<(), HostError> {
         Ok(())
     }
 }
 
-/// The agent-loop-pending completion sink: scripts awaiting a completion
-/// degrade gracefully on a non-end_turn answer instead of hanging on
-/// their timeout.
+/// A test-only completion sink for scripts that await a completion
+/// without a real loop: a non-end_turn answer, so the script degrades
+/// gracefully instead of hanging on its timeout.
+#[cfg(test)]
 pub struct LoopPendingCompletions;
 
+#[cfg(test)]
 impl CompletionSink for LoopPendingCompletions {
     fn publish(&self, _session: &SessionId, _completion: Completion) {}
     fn take(&self, _session: &SessionId) -> Option<Completion> {
@@ -271,9 +275,12 @@ impl SessionAccess for StoreAccess {
             self.store
                 .append_message(&turn.id, Role::User, &content, None, None, None, None)
                 .await?;
-            // ...then the dispatcher drives it through the agent loop.
-            self.dispatcher.dispatch(session, text)
-        })
+            Ok::<(), HostError>(())
+        })?;
+        // The dispatcher drives the turn through the agent loop. It runs
+        // its own runtime entry (a fresh `block_on`, not a nested one),
+        // so the message is persisted first.
+        self.dispatcher.dispatch(session, text)
     }
 
     fn await_completion(

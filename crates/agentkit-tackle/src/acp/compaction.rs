@@ -13,10 +13,9 @@
 //! elide them.
 
 use crate::acp::TackleState;
+use crate::acp::script_loop;
 pub use crate::scripts::host::StoreAccess;
-use crate::scripts::host::{
-    BehaviourHost, LoopPendingCompletions, LoopPendingDispatcher, SessionAccess, block_on,
-};
+use crate::scripts::host::{BehaviourHost, SessionAccess, block_on};
 use crate::scripts::{behaviour_engine, host::register_host_api};
 use crate::store::{SessionId, TurnId, TurnKind};
 use std::path::Path;
@@ -178,12 +177,7 @@ pub fn fire_post_turn_detached(
     window_size: u64,
 ) {
     tokio::spawn(async move {
-        let access: Arc<dyn SessionAccess> = Arc::new(StoreAccess::new(
-            Arc::clone(&state.db),
-            Arc::new(LoopPendingDispatcher),
-            Arc::new(LoopPendingCompletions),
-            window_size,
-        ));
+        let access = script_loop::access(&state, window_size);
         fire_post_turn(&state, access, &session_id, &turn_id, &actor, window_size);
     });
 }
@@ -275,18 +269,13 @@ pub fn compaction_disabled_note(script_name: Option<&str>) -> String {
 /// Runs one compaction turn: the before counts, the script event, the
 /// after counts. Returns (before_tokens, after_tokens).
 pub async fn run_compaction(
-    state: &TackleState,
+    state: &Arc<TackleState>,
     session_id: &SessionId,
     turn_id: &TurnId,
     actor: &str,
     window_size: u64,
 ) -> (u64, u64) {
-    let access: Arc<dyn SessionAccess> = Arc::new(StoreAccess::new(
-        Arc::clone(&state.db),
-        Arc::new(LoopPendingDispatcher),
-        Arc::new(LoopPendingCompletions),
-        window_size,
-    ));
+    let access = script_loop::access(state, window_size);
     let before = access
         .context_usage(session_id)
         .map(|usage| usage.used)
@@ -313,6 +302,7 @@ mod tests {
     use super::*;
     use crate::loader::{Definition, PromptMeta};
     use crate::scripts::host::block_on;
+    use crate::scripts::host::{LoopPendingCompletions, LoopPendingDispatcher};
     use crate::store::{Role, SessionKind, SessionStore};
     use std::path::PathBuf;
 
