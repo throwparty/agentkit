@@ -1,5 +1,6 @@
 //! Session replay: mapping stored messages to the notification sequence `session/load` sends, and the wire timestamp rendering.
 
+use super::wire_kind;
 use agent_client_protocol::schema::v1::{SessionId, SessionNotification, SessionUpdate};
 
 /// Maps stored messages to replay notifications: user/assistant messages
@@ -38,7 +39,7 @@ pub(super) fn replay_updates(
                             crate::invokables::titles::tool_call_title(&name, &arguments),
                         )
                         .name(name.clone())
-                        .kind(crate::invokables::titles::tool_kind(&name))
+                        .kind(wire_kind(crate::invokables::titles::tool_kind(&name)))
                         .status(ToolCallStatus::Completed),
                     ),
                 ));

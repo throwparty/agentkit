@@ -13,6 +13,7 @@ mod commands;
 mod notices;
 mod permission;
 mod server;
+mod sink;
 mod replay;
 mod negotiation;
 pub mod client_tools;
@@ -29,6 +30,7 @@ pub use negotiation::ConnectionNegotiation;
 pub(crate) use commands::connect_config_servers;
 use notices::connection_notices;
 pub(crate) use server::run_agent_over;
+pub(crate) use sink::{ConnectionTurnSink, wire_kind};
 pub use server::run_stdio;
 use permission::AcpPermissionRequester;
 use replay::timestamp;
@@ -60,6 +62,7 @@ pub(super) async fn run_prompt_turn(
     state: Arc<TackleState>,
     negotiation: Arc<ConnectionNegotiation>,
     cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
+    sink: Arc<dyn crate::agent::sink::TurnSink>,
     wire_session_id: SessionId,
     session_id: crate::store::SessionId,
     turn: crate::store::Turn,
@@ -70,7 +73,7 @@ pub(super) async fn run_prompt_turn(
     owner: Arc<String>,
 ) -> Result<agent_client_protocol::schema::v1::PromptResponse, Error> {
     use agent_client_protocol::schema::v1::{
-        ContentBlock, PromptResponse, StopReason, UsageUpdate,
+        PromptResponse, StopReason,
     };
     let state_for_prompt = state;
     let negotiation_for_turn = negotiation;
@@ -184,12 +187,11 @@ pub(super) async fn run_prompt_turn(
     // spans the loop's paths create.
     let turn_span = crate::telemetry::turn_span(&session_id, &actor_name, &model_ref);
     let _turn_guard = turn_span.enter();
-    let session_for_chunks = request_session_id.clone();
-    let session_for_thoughts = request_session_id.clone();
-    let cx_for_chunks = cx.clone();
-    let cx_for_thoughts = cx.clone();
-    let cx_for_retry = cx.clone();
-    let session_for_retry = request_session_id.clone();
+    let sink_for_usage = sink.clone();
+    let sink_for_text = sink.clone();
+    let sink_for_thoughts = sink.clone();
+    let sink_for_retry = sink.clone();
+    let sink_session = session_id.clone();
 
     let outcome = crate::agent::turn::run_turn(
         &provider,
@@ -212,69 +214,35 @@ pub(super) async fn run_prompt_turn(
         // usage cadence: a usage_update per model request,
         // skipped when the window is unknown (RFD guidance).
         {
-            let cx = cx_for_chunks.clone();
-            let session_for_usage = session_for_chunks.clone();
+            let sink = sink_for_usage;
+            let session = sink_session.clone();
             move |input: u64, _output: u64, _cost: f64| {
                 if size == 0 {
                     return;
                 }
-                let _ = cx.send_notification(SessionNotification::new(
-                    session_for_usage.clone(),
-                    SessionUpdate::UsageUpdate(UsageUpdate::new(input, size)),
-                ));
+                sink.usage(&session, input, size);
             }
         },
-        move |delta: &str| {
-            let chunk = agent_client_protocol::schema::v1::ContentChunk::new(ContentBlock::Text(
-                agent_client_protocol::schema::v1::TextContent::new(delta.to_owned()),
-            ))
-            .message_id(agent_client_protocol::schema::v1::MessageId::new(
-                assistant_id.clone(),
-            ));
-            let _ = cx_for_chunks.send_notification(SessionNotification::new(
-                session_for_chunks.clone(),
-                agent_client_protocol::schema::v1::SessionUpdate::AgentMessageChunk(chunk),
-            ));
+        {
+            let sink = sink_for_text;
+            let session = sink_session.clone();
+            let message_id = assistant_id.clone();
+            move |delta: &str| sink.text_delta(&session, &message_id, delta)
         },
         // Reasoning streams as thought chunks, a separate logical message
         // from the answer (its own messageId); thoughts are advisory and
         // are never stored.
         {
-            let cx = cx_for_thoughts.clone();
-            let session = session_for_thoughts.clone();
-            move |delta: &str| {
-                let chunk = agent_client_protocol::schema::v1::ContentChunk::new(
-                    ContentBlock::Text(agent_client_protocol::schema::v1::TextContent::new(
-                        delta.to_owned(),
-                    )),
-                )
-                .message_id(agent_client_protocol::schema::v1::MessageId::new(
-                    thought_id.clone(),
-                ));
-                let _ = cx.send_notification(SessionNotification::new(
-                    session.clone(),
-                    SessionUpdate::AgentThoughtChunk(chunk),
-                ));
-            }
+            let sink = sink_for_thoughts;
+            let session = sink_session.clone();
+            let message_id = thought_id.clone();
+            move |delta: &str| sink.thought_delta(&session, &message_id, delta)
         },
-        // retry attempts surface as tool-call status cards
-        // (the stable ACP surface's only card mechanism).
+        // retry attempts surface as status cards.
         {
-            let cx = cx_for_retry;
-            move |attempt: u32, message: &str| {
-                let card = agent_client_protocol::schema::v1::ToolCall::new(
-                    agent_client_protocol::schema::v1::ToolCallId::new(format!(
-                        "retry-{attempt}-{}",
-                        uuid::Uuid::new_v4()
-                    )),
-                    format!("Retrying model request (attempt {attempt}): {message}"),
-                )
-                .status(agent_client_protocol::schema::v1::ToolCallStatus::InProgress);
-                let _ = cx.send_notification(SessionNotification::new(
-                    session_for_retry.clone(),
-                    agent_client_protocol::schema::v1::SessionUpdate::ToolCall(card),
-                ));
-            }
+            let sink = sink_for_retry;
+            let session = sink_session.clone();
+            move |attempt: u32, message: &str| sink.retry(&session, attempt, message)
         },
         // Model tool calls: announce, run the permission
         // pipeline, execute via the registry, report the result
@@ -330,20 +298,15 @@ pub(super) async fn run_prompt_turn(
 
     // updatedAt each turn: the client-visible last-activity
     // stamp, before the response.
-    let updated = agent_client_protocol::schema::v1::SessionInfoUpdate::new().updated_at(
-        state_for_prompt
-            .db
-            .get_session(&session_id)
-            .await
-            .ok()
-            .flatten()
-            .map(|session| timestamp(session.updated_at))
-            .unwrap_or_default(),
-    );
-    let _ = cx.send_notification(SessionNotification::new(
-        request_session_id.clone(),
-        SessionUpdate::SessionInfoUpdate(updated),
-    ));
+    let updated = state_for_prompt
+        .db
+        .get_session(&session_id)
+        .await
+        .ok()
+        .flatten()
+        .map(|session| timestamp(session.updated_at))
+        .unwrap_or_default();
+    sink.session_info(&session_id, &updated);
 
     // Automatic compaction: the post_turn event fires after
     // every model turn, detached so a slow summarisation
@@ -393,10 +356,7 @@ pub(super) async fn run_prompt_turn(
                     })
                     .unwrap_or(0);
                 let used = crate::scripts::host::estimate_tokens(used_bytes);
-                let _ = cx.send_notification(SessionNotification::new(
-                    request_session_id.clone(),
-                    SessionUpdate::UsageUpdate(UsageUpdate::new(used, size)),
-                ));
+                sink.usage(&session_id, used, size);
             }
             Ok(PromptResponse::new(match result.stop {
                 crate::agent::TurnStop::EndTurn | crate::agent::TurnStop::ContextLength => {
@@ -610,7 +570,7 @@ async fn run_model_tool_call(
                 crate::invokables::titles::tool_call_title(&call.name, &arguments),
             )
             .name(call.name.clone())
-            .kind(crate::invokables::titles::tool_kind(&call.name))
+            .kind(wire_kind(crate::invokables::titles::tool_kind(&call.name)))
             .status(v1::ToolCallStatus::InProgress)
             .raw_input(Some(arguments.clone())),
         ),

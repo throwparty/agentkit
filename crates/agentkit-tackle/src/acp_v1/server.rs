@@ -516,7 +516,7 @@ where
                         crate::invokables::titles::tool_call_title(&input.invokable, &arguments),
                     )
                     .name(input.invokable.clone())
-                    .kind(crate::invokables::titles::tool_kind(&input.invokable))
+                    .kind(super::wire_kind(crate::invokables::titles::tool_kind(&input.invokable)))
                     .status(agent_client_protocol::schema::v1::ToolCallStatus::InProgress)
                     .raw_input(Some(arguments.clone()));
                     let _ = cx.send_notification(SessionNotification::new(
@@ -744,11 +744,14 @@ where
                 let owner_for_prompt = owner_for_prompt.clone();
                 let negotiation_for_turn = negotiation_for_prompt.clone();
                 let spawn_cx = cx.clone();
+                let sink: std::sync::Arc<dyn crate::agent::sink::TurnSink> =
+                    std::sync::Arc::new(super::ConnectionTurnSink::new(cx.clone()));
                 spawn_cx.spawn(async move {
                     match run_prompt_turn(
                         state_for_prompt,
                         negotiation_for_turn,
                         cx,
+                        sink,
                         request.session_id.clone(),
                         session_id,
                         turn,
