@@ -4,7 +4,8 @@
 //! rebuildable from rows at any time, and property tests pin the SQL
 //! walks to daggy's traversals as an independent oracle.
 
-use super::{Turn, TurnId, TurnKind, assembly_order};
+use super::assembly::assembly_order;
+use super::model::{Turn, TurnId, TurnKind};
 use daggy::{Dag, NodeIndex};
 use std::collections::HashMap;
 
