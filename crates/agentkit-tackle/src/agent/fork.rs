@@ -164,3 +164,13 @@ pub async fn run_fork(
     );
     Ok(fork)
 }
+/// The session access the fork scripts act through: the shared store
+/// backend with the real model-loop dispatcher, so a `session_forked`
+/// script that prompts a fork gets a real completion and its model calls
+/// are surfaced through `notices`.
+pub(crate) fn fork_access(
+    state: &std::sync::Arc<crate::state::TackleState>,
+    notices: std::sync::Arc<dyn crate::scripts::host::NoticeSink>,
+) -> std::sync::Arc<dyn crate::agent::fork::SessionAccess> {
+    crate::agent::script_loop::access(state, 0, notices)
+}

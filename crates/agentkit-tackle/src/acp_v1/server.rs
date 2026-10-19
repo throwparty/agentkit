@@ -9,7 +9,7 @@ use super::commands::{
 use crate::agent::config_options;
 use crate::agent::config_options::context_window;
 use crate::agent::fork;
-use super::fork_access;
+use crate::agent::fork::fork_access;
 use super::negotiation::ConnectionNegotiation;
 use super::notices::connection_notices;
 use super::permission::AcpPermissionRequester;
