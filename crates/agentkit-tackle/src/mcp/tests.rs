@@ -193,6 +193,34 @@ async fn stderr_relay_is_rate_capped_within_a_window() {
     assert!(lines.iter().all(|line| line.starts_with("mcp[echo] ")));
 }
 
+#[tokio::test]
+async fn stderr_relay_truncates_an_overlong_line_and_keeps_going() {
+    let limit = super::stderr::STDERR_RELAY_MAX_LINE_BYTES;
+    let (mut client, server) = tokio::io::duplex(64 * 1024);
+    let mut data = vec![b'x'; limit + 512];
+    data.extend_from_slice(b"\ntail\n");
+    client.write_all(&data).await.unwrap();
+    drop(client);
+
+    let mut out = Vec::new();
+    let mut cap = StderrRateCap::new(STDERR_RELAY_MAX_LINES, STDERR_RELAY_WINDOW);
+    relay_stderr("echo", server, &mut out, &mut cap)
+        .await
+        .unwrap();
+
+    let text = String::from_utf8(out).unwrap();
+    let mut lines = text.lines();
+    let first = lines.next().unwrap();
+    assert!(first.starts_with("mcp[echo] xxx"), "{first:?}");
+    assert!(first.ends_with(" [truncated]"), "{first:?}");
+    assert_eq!(
+        first.len(),
+        "mcp[echo] ".len() + limit + " [truncated]".len()
+    );
+    assert_eq!(lines.next(), Some("mcp[echo] tail"));
+    assert_eq!(lines.next(), None);
+}
+
 #[test]
 fn rate_cap_reports_dropped_lines_on_window_reset() {
     let start = std::time::Instant::now();
