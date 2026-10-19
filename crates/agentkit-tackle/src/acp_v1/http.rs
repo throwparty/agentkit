@@ -10,7 +10,7 @@
 //! `x-acp-connection` header; subsequent POSTs pass
 //! `?connection=<id>`.
 
-use crate::acp::{ConnectionNegotiation, TackleState, run_agent_over};
+use crate::acp_v1::{ConnectionNegotiation, TackleState, run_agent_over};
 use axum::extract::{Query, State as AxumState};
 use axum::http::HeaderMap;
 use axum::response::sse::{Event as SseEvent, Sse};
@@ -100,9 +100,9 @@ fn spawn_connection(server: &HttpServerState, id: String) -> Arc<Connection> {
         // The connection's own MCP pool: config servers plus anything the
         // client forwards, so toggles and forwarded servers stay scoped
         // to this connection.
-        let pool = crate::acp::connect_config_servers(&state_for_connection).await;
+        let pool = crate::acp_v1::connect_config_servers(&state_for_connection).await;
         let negotiation = Arc::new(ConnectionNegotiation::new(
-            crate::acp::client_tools::EditorToggles::from_config(
+            crate::acp_v1::client_tools::EditorToggles::from_config(
                 &state_for_connection.config().config,
             ),
             pool,

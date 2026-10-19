@@ -747,7 +747,7 @@ async fn run_prompt_turn(
     // The client-capability tools the connection advertised
     // and the categories currently enabled (config seeded,
     // `/editor` overridable).
-    let client_tools = crate::acp::client_tools::catalog(
+    let client_tools = crate::acp_v1::client_tools::catalog(
         negotiation_for_turn.client_caps(),
         negotiation_for_turn.editor_toggles(),
     );
@@ -1091,7 +1091,7 @@ async fn run_direct_invocation(
     let (text, is_error) = if input.invokable.starts_with("client.") {
         // Client-capability tools execute on the
         // connection, not the MCP pool.
-        let available = crate::acp::client_tools::catalog(
+        let available = crate::acp_v1::client_tools::catalog(
             negotiation.client_caps(),
             negotiation.editor_toggles(),
         );
@@ -1105,7 +1105,7 @@ async fn run_direct_invocation(
                 true,
             ),
             Ok(arguments) => {
-                match crate::acp::client_tools::execute(&cx, &wire_id, &input.invokable, &arguments)
+                match crate::acp_v1::client_tools::execute(&cx, &wire_id, &input.invokable, &arguments)
                     .await
                 {
                     Ok(executed) => {
@@ -2415,7 +2415,7 @@ async fn run_model_tool_call(
                         true,
                     )
                 } else {
-                    match crate::acp::client_tools::execute(cx, session_id, &call.name, &arguments)
+                    match crate::acp_v1::client_tools::execute(cx, session_id, &call.name, &arguments)
                         .await
                     {
                         Ok(executed) => {

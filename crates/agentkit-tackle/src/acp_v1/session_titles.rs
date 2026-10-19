@@ -7,8 +7,8 @@
 //! block: the firing runs detached from the turn and every script error
 //! only logs. Only untitled sessions trigger titling.
 
-use crate::acp::TackleState;
-use crate::acp::script_loop;
+use crate::acp_v1::TackleState;
+use crate::acp_v1::script_loop;
 use crate::scripts::host::{BehaviourHost, SessionAccess, block_on};
 use crate::scripts::{behaviour_engine, host::register_host_api};
 use crate::store::SessionId;
@@ -108,7 +108,7 @@ pub fn fire_title_trigger_detached(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::acp::script_loop::SharedCompletions;
+    use crate::acp_v1::script_loop::SharedCompletions;
     use crate::scripts::host::PromptDispatcher;
     use crate::scripts::host::{
         Completion, CompletionSink, LoopPendingCompletions, LoopPendingDispatcher, StoreAccess,

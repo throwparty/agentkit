@@ -6,8 +6,8 @@
 //! the model loop and the [`CompletionSink`] the awaiting script polls,
 //! so the completion a script receives is the model's real answer.
 
-use crate::acp::TackleState;
-use crate::acp::config_options;
+use crate::acp_v1::TackleState;
+use crate::acp_v1::config_options;
 use crate::providers::ModelProvider;
 use crate::scripts::host::{
     Completion, CompletionSink, HostError, NoticeSink, PromptDispatcher, SessionAccess,
@@ -124,7 +124,7 @@ async fn run_script_turn(
         .clone()
         .ok_or(HostError::Invalid("script turn has no head"))?;
     let assembled = state.db.assemble_context(session).await?;
-    let mut messages = crate::acp::compaction::prior_messages(&assembled, &turn_id);
+    let mut messages = crate::acp_v1::compaction::prior_messages(&assembled, &turn_id);
     messages.push(crate::providers::ChatMessage {
         role: crate::providers::ChatRole::User,
         text: prompt.to_owned(),
