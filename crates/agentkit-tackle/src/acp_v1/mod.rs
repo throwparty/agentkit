@@ -12,6 +12,7 @@
 
 mod capabilities;
 mod commands;
+mod config_options;
 mod negotiation;
 mod notices;
 mod permission;
@@ -31,4 +32,5 @@ pub use server::run_stdio;
 pub use crate::state::{PendingProject, TackleState};
 pub(crate) use commands::connect_config_servers;
 pub(crate) use server::run_agent_over;
+pub(crate) use config_options::{wire_notice, wire_option, wire_options};
 pub(crate) use sink::{ConnectionTurnSink, wire_kind};
