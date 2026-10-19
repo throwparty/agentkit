@@ -216,7 +216,7 @@ pub fn prior_messages(
         .iter()
         .filter(|a| a.message.turn_id != *current_turn)
         .filter_map(|a| {
-            let text = crate::acp_v1::prompt_text_of(&a.message.content);
+            let text = crate::content::prompt_text_of(&a.message.content);
             if text.is_empty() {
                 return None;
             }
@@ -506,7 +506,7 @@ mod tests {
         let assembled = block_on(store.assemble_context(&session.id)).unwrap();
         let texts: Vec<String> = assembled
             .iter()
-            .map(|item| crate::acp_v1::prompt_text_of(&item.message.content))
+            .map(|item| crate::content::prompt_text_of(&item.message.content))
             .collect();
         assert!(
             texts.iter().any(|text| text.contains("post summary")),
@@ -597,7 +597,7 @@ mod tests {
         let assembled = block_on(store.assemble_context(&session.id)).unwrap();
         let texts: Vec<String> = assembled
             .iter()
-            .map(|item| crate::acp_v1::prompt_text_of(&item.message.content))
+            .map(|item| crate::content::prompt_text_of(&item.message.content))
             .collect();
         assert!(
             texts
@@ -624,7 +624,7 @@ mod tests {
         let assembled = block_on(store.assemble_context(&session.id)).unwrap();
         let texts: Vec<String> = assembled
             .iter()
-            .map(|item| crate::acp_v1::prompt_text_of(&item.message.content))
+            .map(|item| crate::content::prompt_text_of(&item.message.content))
             .collect();
         assert_eq!(texts.len(), 4);
         assert!(texts[0].contains("turn 0"), "{texts:?}");
@@ -703,7 +703,7 @@ mod tests {
                 .iter()
                 .find(|item| item.message.role == Role::Assistant)
                 .unwrap();
-            let text = crate::acp_v1::prompt_text_of(&note.message.content);
+            let text = crate::content::prompt_text_of(&note.message.content);
             assert!(text.contains("context is full"), "{text}");
             assert!(text.contains("`compaction`"), "{text}");
         });

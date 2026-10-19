@@ -54,7 +54,7 @@ async fn first_run_with_empty_config_seeds_the_session() {
                 .iter()
                 .find(|item| item.turn_kind == TurnKind::Seed)
                 .expect("first-session seed");
-            let text = agentkit_tackle::acp_v1::prompt_text_of(&seed.message.content);
+            let text = agentkit_tackle::content::prompt_text_of(&seed.message.content);
             assert!(text.contains("built-in defaults"), "{text}");
             assert!(text.contains("persona(s)"), "{text}");
             assert!(text.contains("/!mcp.<server>.<tool>"), "{text}");
@@ -112,7 +112,7 @@ async fn builtin_overrides_surface_in_the_seed() {
                 .iter()
                 .find(|item| item.turn_kind == TurnKind::Seed)
                 .expect("seed");
-            let text = agentkit_tackle::acp_v1::prompt_text_of(&seed.message.content);
+            let text = agentkit_tackle::content::prompt_text_of(&seed.message.content);
             assert!(
                 text.contains("actor:default"),
                 "the override surfaces: {text}"

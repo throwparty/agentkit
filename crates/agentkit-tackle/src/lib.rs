@@ -5,6 +5,7 @@ pub mod agent;
 pub mod builtins;
 pub mod cli;
 pub mod config;
+pub mod content;
 pub mod credentials;
 pub mod definitions;
 pub mod invokables;
