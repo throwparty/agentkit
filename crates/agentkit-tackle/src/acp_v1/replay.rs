@@ -1,4 +1,4 @@
-//! Session replay: mapping stored messages to the notification sequence `session/load` sends, and the wire timestamp rendering.
+//! Session replay: mapping stored messages to the notification sequence `session/load` sends.
 
 use super::wire_kind;
 use agent_client_protocol::schema::v1::{SessionId, SessionNotification, SessionUpdate};
