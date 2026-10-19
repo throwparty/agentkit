@@ -1,6 +1,7 @@
 //! The agent loop: the turn loop and its outcomes, nested agent invocation, and retry. The model seam itself lives in [`crate::providers`].
 
 pub mod compaction;
+pub mod direct;
 pub mod config_options;
 pub mod fork;
 pub mod nested;

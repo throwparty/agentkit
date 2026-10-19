@@ -1,8 +1,10 @@
 //! acp_v1 unit tests: capability capture, per-connection state, project consent, lease heartbeat, and script loading.
 
     use crate::mcp::McpPool;
+    use crate::state::LeaseHeartbeat;
     use super::commands::editor_command;
     use super::*;
+    use std::sync::Arc;
 
     fn client_meta(pairs: &[&str]) -> Option<agent_client_protocol::schema::v1::Meta> {
         let meta: agent_client_protocol::schema::v1::Meta = pairs
