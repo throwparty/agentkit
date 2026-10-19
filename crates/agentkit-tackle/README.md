@@ -47,23 +47,31 @@ telemetry/      logging and OpenTelemetry
 
 ## Invocation and data flow
 
-```
-ACP client ──JSON-RPC──▶ acp_v1
-                          │  initialize → capability negotiation (state)
-                          │  session/new, session/load, session/prompt …
-                          ▼
-                        session orchestration ──▶ agent (run_turn)
-                          │                          │
-                          │                          ▼
-                          │                       providers ──▶ model endpoint
-                          │                          ▲
-                          │            tool calls    │
-                          ▼                          │
-                     invokables ◀──── dispatch ──────┘
-                       │  │  │
-              permissions  scripts  mcp ──▶ MCP servers
-                       │
-                     store ◀── turns, messages, usage
+```mermaid
+flowchart TD
+    client["ACP client"]
+    acp["acp_v1<br/>RPC glue"]
+    agent["agent<br/>turn loop &amp; orchestration"]
+    providers["providers"]
+    model["model endpoint"]
+    invokables["invokables"]
+    permissions["permissions"]
+    scripts["scripts"]
+    mcp["mcp"]
+    servers["MCP servers"]
+    store["store"]
+
+    client -- "JSON-RPC" --> acp
+    acp -- "prompt / direct invocation / fork" --> agent
+    agent -- "stream_completion" --> providers
+    providers --> model
+    agent -- "tool calls" --> invokables
+    invokables -- "permission gate" --> permissions
+    invokables --> scripts
+    invokables --> mcp
+    mcp --> servers
+    agent -- "turns, messages, usage" --> store
+    scripts -. "script-driven model calls" .-> invokables
 ```
 
 - **Inbound**: the ACP client drives everything over JSON-RPC; `acp_v1`
