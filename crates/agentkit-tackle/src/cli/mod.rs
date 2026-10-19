@@ -4,6 +4,8 @@
 //! including resume, is client-driven over ACP — the CLI only selects
 //! transports and shutdown behaviour.
 
+pub mod auth;
+
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
