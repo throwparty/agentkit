@@ -52,8 +52,9 @@ pub fn parse_direct(input: &str) -> Option<DirectInvocation> {
     // brace when the client omitted the separating space. A tool name
     // cannot contain either, so both spellings parse to the same call.
     let boundary = rest
-        .find(char::is_whitespace)
-        .or_else(|| rest.find('{'))
+        .char_indices()
+        .find(|(_, ch)| ch.is_whitespace() || *ch == '{')
+        .map(|(index, _)| index)
         .unwrap_or(rest.len());
     let (invokable, arguments) = rest.split_at(boundary);
     if invokable.is_empty() {

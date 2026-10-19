@@ -521,6 +521,11 @@ mod direct_invocation {
         assert_eq!(parsed.invokable, "mcp.echo.echo");
         assert_eq!(parsed.arguments, "{\"text\": \"hi\"}");
 
+        // The brace wins even when whitespace follows it.
+        let parsed = parse_direct("/!mcp.echo.echo{\"text\": \"hi\"}").unwrap();
+        assert_eq!(parsed.invokable, "mcp.echo.echo");
+        assert_eq!(parsed.arguments, "{\"text\": \"hi\"}");
+
         // No arguments: empty remainder.
         let parsed = parse_direct("/!mcp.echo.echo").unwrap();
         assert_eq!(parsed.invokable, "mcp.echo.echo");
