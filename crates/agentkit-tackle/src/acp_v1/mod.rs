@@ -31,6 +31,7 @@ use notices::connection_notices;
 use permission::AcpPermissionRequester;
 use replay::{replay_updates, timestamp};
 pub use crate::state::{PendingProject, TackleState};
+use crate::content::prompt_text_of;
 use crate::state::{LEASE_TTL_SECS, LeaseHeartbeat, store_session_id, wire_session_id};
 
 use agent_client_protocol::schema::ProtocolVersion;
@@ -1782,13 +1783,6 @@ pub(crate) fn context_window(model_ref: &str) -> Option<u64> {
     let bare = model_ref.split_once('/')?.1;
     let snapshot = agentkit_models::bundled_snapshot_parsed();
     snapshot.models.get(bare)?.context_window.map(u64::from)
-}
-
-/// The text of a stored message: its text blocks joined.
-pub fn prompt_text_of(content: &str) -> String {
-    serde_json::from_str::<Vec<serde_json::Value>>(content)
-        .map(|blocks| crate::agent::turn::prompt_text(&blocks))
-        .unwrap_or_default()
 }
 
 /// The session's selected actor: created in session metadata, falling
