@@ -61,7 +61,6 @@ pub(crate) async fn run_model_tool_call(
     } = ctx;
     let arguments: serde_json::Value =
         serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
-    let kind = crate::invokables::kind_of(&call.name);
 
     sink.tool_call(
         session_id,
@@ -76,61 +75,66 @@ pub(crate) async fn run_model_tool_call(
     );
 
     let policy = crate::scripts::PolicyScripts::load(policy_sources);
-    let verdict = {
-        let mut grants = state.grants.lock().await;
-        let assessment = crate::permissions::Assessment {
-            session_id: session_id.to_string(),
-            actor: actor.to_owned(),
-            invokable: call.name.clone(),
-            kind,
-            arguments: arguments.clone(),
-            interactive: true,
-            tool_call_id: Some(call.id.clone()),
-        };
-        let mut pipeline =
-            crate::permissions::PermissionPipeline::new(&mut grants, &policy, requester);
-        pipeline.assess(&assessment).await
-    };
-
-    let (content, is_error) = match verdict {
-        crate::permissions::Verdict::Allow => match kind {
-            "client" => {
-                if !client_tools.iter().any(|tool| tool.name == call.name) {
-                    (
-                        format!(
-                            "client tool `{}` is not available on this connection",
-                            call.name
-                        ),
-                        true,
-                    )
-                } else {
-                    match executor.execute(session_id, &call.name, &arguments).await {
-                        Ok(executed) => {
-                            tracker.track(session_id, executed.created, executed.finished);
-                            (executed.content, false)
+    let (content, is_error) = match crate::invokables::kind_of(&call.name) {
+        None => (format!("unknown invokable `{}`", call.name), true),
+        Some(kind) => {
+            let verdict = {
+                let mut grants = state.grants.lock().await;
+                let assessment = crate::permissions::Assessment {
+                    session_id: session_id.to_string(),
+                    actor: actor.to_owned(),
+                    invokable: call.name.clone(),
+                    kind: kind.as_str(),
+                    arguments: arguments.clone(),
+                    interactive: true,
+                    tool_call_id: Some(call.id.clone()),
+                };
+                let mut pipeline =
+                    crate::permissions::PermissionPipeline::new(&mut grants, &policy, requester);
+                pipeline.assess(&assessment).await
+            };
+            match verdict {
+                crate::permissions::Verdict::Allow => match kind {
+                    crate::invokables::Kind::Client => {
+                        if !client_tools.iter().any(|tool| tool.name == call.name) {
+                            (
+                                format!(
+                                    "client tool `{}` is not available on this connection",
+                                    call.name
+                                ),
+                                true,
+                            )
+                        } else {
+                            match executor.execute(session_id, &call.name, &arguments).await {
+                                Ok(executed) => {
+                                    tracker.track(session_id, executed.created, executed.finished);
+                                    (executed.content, false)
+                                }
+                                Err(err) => (err, true),
+                            }
                         }
-                        Err(err) => (err, true),
                     }
+                    crate::invokables::Kind::Agent => {
+                        // Spawn a nested agent instance of the target
+                        // actor and return its final message as the tool result.
+                        match run_agent_invocation(state, session_id, &call.name, &arguments).await
+                        {
+                            Ok(text) => (text, false),
+                            Err(err) => (err, true),
+                        }
+                    }
+                    crate::invokables::Kind::Mcp | crate::invokables::Kind::Prompt => {
+                        let pool = pool.lock().await;
+                        match registry.execute_model(&pool, &call.name, &arguments).await {
+                            Ok(text) => (text, false),
+                            Err(err) => (err, true),
+                        }
+                    }
+                },
+                crate::permissions::Verdict::Deny { reason } => {
+                    (format!("Permission denied: {reason}"), true)
                 }
             }
-            "agent" => {
-                // Spawn a nested agent instance of the target
-                // actor and return its final message as the tool result.
-                match run_agent_invocation(state, session_id, &call.name, &arguments).await {
-                    Ok(text) => (text, false),
-                    Err(err) => (err, true),
-                }
-            }
-            _ => {
-                let pool = pool.lock().await;
-                match registry.execute_model(&pool, &call.name, &arguments).await {
-                    Ok(text) => (text, false),
-                    Err(err) => (err, true),
-                }
-            }
-        },
-        crate::permissions::Verdict::Deny { reason } => {
-            (format!("Permission denied: {reason}"), true)
         }
     };
 

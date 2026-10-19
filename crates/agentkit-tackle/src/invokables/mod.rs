@@ -23,5 +23,5 @@ mod tests;
 
 pub use direct::{DirectError, DirectInvocation, parse_direct};
 pub use invokable::Invokable;
-pub use name::{agent_name, kind_of, mcp_name, prompt_name};
+pub use name::{Kind, agent_name, kind_of, mcp_name, prompt_name};
 pub use registry::{ExpansionError, Registry, RegistryError};

@@ -9,12 +9,12 @@ use std::path::PathBuf;
 
 #[test]
 fn kind_of_decodes_every_namespace() {
-    assert_eq!(kind_of("mcp.litterbox.exec"), "mcp");
-    assert_eq!(kind_of("prompt.compact"), "prompt");
-    assert_eq!(kind_of("client.fs.read_text_file"), "client");
-    assert_eq!(kind_of("agent.reviewer"), "agent");
-    // The fallback is agent: actor invokables are `agent.<actor>`.
-    assert_eq!(kind_of("unprefixed"), "agent");
+    assert_eq!(kind_of("mcp.litterbox.exec"), Some(Kind::Mcp));
+    assert_eq!(kind_of("prompt.compact"), Some(Kind::Prompt));
+    assert_eq!(kind_of("client.fs.read_text_file"), Some(Kind::Client));
+    assert_eq!(kind_of("agent.reviewer"), Some(Kind::Agent));
+    // A name with no known prefix is an unknown invokable, never an agent.
+    assert_eq!(kind_of("unprefixed"), None);
 }
 
 fn prompt_def(name: &str, meta: PromptMeta, body: &str) -> (String, Definition<PromptMeta>) {
