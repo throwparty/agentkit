@@ -11,7 +11,7 @@
 //! one. Agent invokables are model-invokable only (the registry already
 //! enforces that; the user path has no `agent.` slash surface).
 
-use crate::agent::{ChatMessage, ModelProvider, ModelRequest};
+use crate::providers::{ChatMessage, ModelProvider, ModelRequest};
 use crate::store::{SessionId, SessionStore, StoreError, TurnUsage};
 
 /// The one-level nesting limit: the parent turn runs at depth 0; a
@@ -128,7 +128,7 @@ pub async fn run_nested_agent<P: ModelProvider>(
         model: model.to_owned(),
         system: persona.to_owned(),
         messages: vec![ChatMessage {
-            role: crate::agent::ChatRole::User,
+            role: crate::providers::ChatRole::User,
             text: prompt.to_owned(),
             ..Default::default()
         }],
@@ -185,12 +185,12 @@ mod tests {
             _request: ModelRequest,
             _on_text_delta: &mut (dyn FnMut(&str) + Send),
             _on_thought_delta: &mut (dyn FnMut(&str) + Send),
-        ) -> impl Future<Output = Result<crate::agent::ModelResponse, crate::agent::ModelError>> + Send
+        ) -> impl Future<Output = Result<crate::providers::ModelResponse, crate::providers::ModelError>> + Send
         {
-            std::future::ready(Ok(crate::agent::ModelResponse {
+            std::future::ready(Ok(crate::providers::ModelResponse {
                 text: "nested answer".to_owned(),
                 tool_calls: Vec::new(),
-                usage: crate::agent::ModelUsage {
+                usage: crate::providers::ModelUsage {
                     input_tokens: 7,
                     output_tokens: 3,
                 },

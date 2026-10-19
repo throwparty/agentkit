@@ -211,7 +211,7 @@ pub fn announcement(trigger: &str, before: u64, after: u64) -> String {
 pub fn prior_messages(
     assembled: &[crate::store::AssembledMessage],
     current_turn: &TurnId,
-) -> Vec<crate::agent::ChatMessage> {
+) -> Vec<crate::providers::ChatMessage> {
     assembled
         .iter()
         .filter(|a| a.message.turn_id != *current_turn)
@@ -226,13 +226,13 @@ pub fn prior_messages(
                 text
             };
             let role = match a.message.role {
-                crate::store::Role::User => crate::agent::ChatRole::User,
+                crate::store::Role::User => crate::providers::ChatRole::User,
                 crate::store::Role::Assistant | crate::store::Role::System => {
-                    crate::agent::ChatRole::Assistant
+                    crate::providers::ChatRole::Assistant
                 }
                 _ => return None,
             };
-            Some(crate::agent::ChatMessage {
+            Some(crate::providers::ChatMessage {
                 role,
                 text,
                 ..Default::default()
@@ -636,16 +636,16 @@ mod tests {
         // ends with the caller's note (naming the script), no retries.
         struct Overflow;
 
-        impl crate::agent::ModelProvider for Overflow {
+        impl crate::providers::ModelProvider for Overflow {
             fn stream_completion(
                 &self,
-                _request: crate::agent::ModelRequest,
+                _request: crate::providers::ModelRequest,
                 _on_text_delta: &mut (dyn FnMut(&str) + Send),
                 _on_thought_delta: &mut (dyn FnMut(&str) + Send),
             ) -> impl std::future::Future<
-                Output = Result<crate::agent::ModelResponse, crate::agent::ModelError>,
+                Output = Result<crate::providers::ModelResponse, crate::providers::ModelError>,
             > + Send {
-                std::future::ready(Err(crate::agent::ModelError::Completion(
+                std::future::ready(Err(crate::providers::ModelError::Completion(
                     "prompt is too long: 300000 tokens > 200000 maximum".to_owned(),
                 )))
             }
@@ -686,7 +686,7 @@ mod tests {
                 |delta: &str| streamed.push(delta.to_owned()),
                 |_: &str| {},
                 |_, _| {},
-                crate::agent::ignore_tool_call,
+                crate::providers::ignore_tool_call,
             )
             .await
             .unwrap();
@@ -717,16 +717,16 @@ mod tests {
         // stored and forgotten (the observed silent-bail bug).
         struct TooLarge;
 
-        impl crate::agent::ModelProvider for TooLarge {
+        impl crate::providers::ModelProvider for TooLarge {
             fn stream_completion(
                 &self,
-                _request: crate::agent::ModelRequest,
+                _request: crate::providers::ModelRequest,
                 _on_text_delta: &mut (dyn FnMut(&str) + Send),
                 _on_thought_delta: &mut (dyn FnMut(&str) + Send),
             ) -> impl std::future::Future<
-                Output = Result<crate::agent::ModelResponse, crate::agent::ModelError>,
+                Output = Result<crate::providers::ModelResponse, crate::providers::ModelError>,
             > + Send {
-                std::future::ready(Err(crate::agent::ModelError::StreamFailed {
+                std::future::ready(Err(crate::providers::ModelError::StreamFailed {
                     text: String::new(),
                     text_len: 0,
                     error: "ProviderResponseError: status 413 Payload Too Large: Failed to \
@@ -771,7 +771,7 @@ mod tests {
                 |delta: &str| streamed.push(delta.to_owned()),
                 |_: &str| {},
                 |_, _| {},
-                crate::agent::ignore_tool_call,
+                crate::providers::ignore_tool_call,
             )
             .await
             .unwrap();
@@ -793,37 +793,37 @@ mod tests {
             requests: std::sync::atomic::AtomicUsize,
         }
 
-        impl crate::agent::ModelProvider for TwoRounds {
+        impl crate::providers::ModelProvider for TwoRounds {
             fn stream_completion(
                 &self,
-                _request: crate::agent::ModelRequest,
+                _request: crate::providers::ModelRequest,
                 _on_text_delta: &mut (dyn FnMut(&str) + Send),
                 _on_thought_delta: &mut (dyn FnMut(&str) + Send),
             ) -> impl std::future::Future<
-                Output = Result<crate::agent::ModelResponse, crate::agent::ModelError>,
+                Output = Result<crate::providers::ModelResponse, crate::providers::ModelError>,
             > + Send {
                 let round = self
                     .requests
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 async move {
                     if round == 0 {
-                        Ok(crate::agent::ModelResponse {
+                        Ok(crate::providers::ModelResponse {
                             text: String::new(),
-                            tool_calls: vec![crate::agent::ModelToolCall {
+                            tool_calls: vec![crate::providers::ModelToolCall {
                                 id: "call_1".to_owned(),
                                 name: "mcp.echo.echo".to_owned(),
                                 arguments: "{}".to_owned(),
                             }],
-                            usage: crate::agent::ModelUsage {
+                            usage: crate::providers::ModelUsage {
                                 input_tokens: 10,
                                 output_tokens: 1,
                             },
                         })
                     } else {
-                        Ok(crate::agent::ModelResponse {
+                        Ok(crate::providers::ModelResponse {
                             text: "done".to_owned(),
                             tool_calls: Vec::new(),
-                            usage: crate::agent::ModelUsage {
+                            usage: crate::providers::ModelUsage {
                                 input_tokens: 20,
                                 output_tokens: 2,
                             },
@@ -870,7 +870,7 @@ mod tests {
                 |_: &str| {},
                 |_: &str| {},
                 |_, _| {},
-                crate::agent::ignore_tool_call,
+                crate::providers::ignore_tool_call,
             )
             .await
             .unwrap();

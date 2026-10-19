@@ -519,7 +519,7 @@ async fn connect_forwarded_servers(
 /// and connected concurrently, so a dead server is a status rather than a
 /// startup failure.
 pub(crate) async fn connect_config_servers(state: &TackleState) -> McpPool {
-    let helper = crate::agent::provider::credential_helper_name(&state.config().config);
+    let helper = crate::credentials::credential_helper_name(&state.config().config);
     let new_pool = || McpPool::new().with_credential_helper(helper.clone());
     let mut pool = new_pool();
     for (server_name, server_config) in &state.config().config.mcp_servers {
@@ -795,7 +795,7 @@ async fn run_prompt_turn(
         .assemble_context(&session_id)
         .await
         .map_err(|err| Error::internal_error().data(err.to_string()))?;
-    let prior: Vec<crate::agent::ChatMessage> = compaction::prior_messages(&assembled, &turn.id);
+    let prior: Vec<crate::providers::ChatMessage> = compaction::prior_messages(&assembled, &turn.id);
     // A user-typed `/name` prompt expands into the
     // model prompt (the stored message stays literal).
     let prompt_text = match first_text.strip_prefix('/') {
@@ -811,7 +811,7 @@ async fn run_prompt_turn(
     };
 
     let provider =
-        crate::agent::provider::provider_for(&model_ref, &state_for_prompt.config().config)
+        crate::providers::openai_chat_completions::provider_for(&model_ref, &state_for_prompt.config().config)
             .map_err(|err| Error::internal_error().data(err.to_string()))?;
     // The context-length failure note: actionable, naming
     // the configured compaction script (or its absence).
@@ -942,8 +942,8 @@ async fn run_prompt_turn(
             let actor = actor_name.clone();
             let sources = policy_script_sources(&state_for_prompt);
             let client_tools = client_tools.clone();
-            move |call: crate::agent::ModelToolCall| -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = crate::agent::ToolCallOutcome> + Send>,
+            move |call: crate::providers::ModelToolCall| -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = crate::providers::ToolCallOutcome> + Send>,
             > {
                 let registry = registry.clone();
                 let state = state.clone();
@@ -2352,8 +2352,8 @@ struct ToolCallContext<'a> {
 /// for the next model request.
 async fn run_model_tool_call(
     ctx: ToolCallContext<'_>,
-    call: crate::agent::ModelToolCall,
-) -> crate::agent::ToolCallOutcome {
+    call: crate::providers::ModelToolCall,
+) -> crate::providers::ToolCallOutcome {
     use agent_client_protocol::schema::v1;
     let ToolCallContext {
         registry,
@@ -2470,7 +2470,7 @@ async fn run_model_tool_call(
         )),
     ));
 
-    crate::agent::ToolCallOutcome { content, is_error }
+    crate::providers::ToolCallOutcome { content, is_error }
 }
 
 /// Runs an `agent.<actor>` invocation: an ephemeral fork of the
@@ -2516,7 +2516,7 @@ async fn run_agent_invocation(
         .clone()
         .or_else(|| config_options::resolve_model_for(state, &session, None))
         .ok_or_else(|| "no model configured for the nested agent".to_owned())?;
-    let provider = crate::agent::provider::provider_for(&model_ref, &state.config().config)
+    let provider = crate::providers::openai_chat_completions::provider_for(&model_ref, &state.config().config)
         .map_err(|err| err.to_string())?;
     let result = crate::agent::nested::run_nested_agent(
         &provider,

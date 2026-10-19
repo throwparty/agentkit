@@ -90,7 +90,7 @@ pub enum EnvValueError {
     Credential {
         key: String,
         #[source]
-        source: crate::agent::provider::CredentialError,
+        source: crate::credentials::CredentialError,
     },
 }
 
@@ -104,7 +104,7 @@ pub fn credential_marker_identity(value: &str) -> Option<&str> {
 
 /// Resolves one env value for a spawn: a value that is the entire
 /// `{cred:IDENTITY}` marker resolves through `credential_helper`
-/// (component [`crate::agent::provider::CREDENTIAL_COMPONENT`]); any
+/// (component [`crate::credentials::CREDENTIAL_COMPONENT`]); any
 /// value without the marker passes through verbatim. Resolution runs
 /// at spawn, never at config load, so secrets never enter `Config`.
 fn resolve_env_value(
@@ -130,7 +130,7 @@ fn resolve_env_value(
             key: key.to_owned(),
         });
     }
-    crate::agent::provider::resolve_credential_value(credential_helper, identity).map_err(
+    crate::credentials::resolve_credential_value(credential_helper, identity).map_err(
         |source| EnvValueError::Credential {
             key: key.to_owned(),
             source,
@@ -421,14 +421,14 @@ impl<S: ElicitationSink> McpPool<S> {
             configs: BTreeMap::new(),
             shadowed: BTreeSet::new(),
             sink: Arc::new(sink),
-            credential_helper: crate::agent::provider::DEFAULT_CREDENTIAL_HELPER.to_owned(),
+            credential_helper: crate::credentials::DEFAULT_CREDENTIAL_HELPER.to_owned(),
         }
     }
 
     /// Overrides the helper that resolves `{cred:IDENTITY}` env
     /// markers at spawn; wiring passes the configured value via
-    /// [`crate::agent::provider::credential_helper_name`]. Defaults to
-    /// [`crate::agent::provider::DEFAULT_CREDENTIAL_HELPER`].
+    /// [`crate::credentials::credential_helper_name`]. Defaults to
+    /// [`crate::credentials::DEFAULT_CREDENTIAL_HELPER`].
     pub fn with_credential_helper(mut self, helper: impl Into<String>) -> Self {
         self.credential_helper = helper.into();
         self
@@ -818,7 +818,7 @@ mod spawn_hygiene_tests {
         env.insert("LITERAL".to_owned(), "plain-value".to_owned());
 
         let mut cmd = RecordingCommand::default();
-        let _guard = crate::agent::provider::PATH_LOCK.lock().unwrap();
+        let _guard = crate::credentials::PATH_LOCK.lock().unwrap();
         let path_var = std::env::var("PATH").unwrap();
         std::env::set_var("PATH", format!("{}:{}", dir.path().display(), path_var));
         let resolved = configure_stdio_spawn(&mut cmd, "server", &[], &env, "test");
