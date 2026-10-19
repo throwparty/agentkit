@@ -14,11 +14,73 @@
 use crate::state::TackleState;
 use crate::config::Auth;
 use crate::store::{Session, SessionId};
-use agent_client_protocol::schema::v1::{Notice, NoticeSeverity};
-use agent_client_protocol::schema::v1::{
-    SessionConfigId, SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
-    SessionConfigSelect, SessionConfigSelectOption, SessionConfigValueId,
-};
+
+/// A notice surfaced to the client (degraded discovery, auto-compaction).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Notice {
+    pub severity: NoticeSeverity,
+    pub message: String,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoticeSeverity {
+    Info,
+    Warning,
+}
+
+impl Notice {
+    pub fn info(message: impl Into<String>) -> Self {
+        Self {
+            severity: NoticeSeverity::Info,
+            message: message.into(),
+            description: None,
+        }
+    }
+
+    pub fn warning(message: impl Into<String>) -> Self {
+        Self {
+            severity: NoticeSeverity::Warning,
+            message: message.into(),
+            description: None,
+        }
+    }
+
+    pub fn description(mut self, description: Option<String>) -> Self {
+        self.description = description;
+        self
+    }
+}
+
+/// A session config option (the model or actor selector).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConfigOption {
+    pub id: String,
+    pub name: String,
+    pub kind: ConfigOptionKind,
+    pub category: ConfigOptionCategory,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConfigOptionKind {
+    Select {
+        current: String,
+        options: Vec<SelectOption>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SelectOption {
+    pub value: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConfigOptionCategory {
+    Model,
+    Other(String),
+}
+
 
 /// The model selector's config id.
 pub const MODEL_SELECTOR_ID: &str = "model";
@@ -53,7 +115,7 @@ async fn discover_models(base_url: &str, credential: Option<String>) -> Option<V
 
 /// Notices discovered while building the selectors (degraded discovery).
 pub struct Selectors {
-    pub options: Vec<SessionConfigOption>,
+    pub options: Vec<ConfigOption>,
     pub notices: Vec<Notice>,
     /// The first listed model option (endpoint-qualified), when the
     /// selector was built — the unset default in the resolution chain.
@@ -128,10 +190,9 @@ pub async fn build(state: &TackleState, session: &Session) -> Selectors {
             None => {
                 if !endpoint.models.is_empty() {
                     notices.push(
-                        Notice::new(
-                            NoticeSeverity::Info,
-                            format!("Endpoint `{name}` model discovery failed; using the configured static list."),
-                        )
+                        Notice::info(format!(
+                            "Endpoint `{name}` model discovery failed; using the configured static list."
+                        ))
                         .description(Some(
                             "Model discovery is primary; the static models list is the fallback."
                                 .to_owned(),
@@ -143,56 +204,51 @@ pub async fn build(state: &TackleState, session: &Session) -> Selectors {
         };
         for model in models {
             let reference = qualified(&model);
-            model_options.push(SessionConfigSelectOption::new(
-                SessionConfigValueId::new(reference.clone()),
-                model.clone(),
-            ));
+            model_options.push(SelectOption {
+                value: reference,
+                label: model,
+            });
         }
     }
-    let first_model = model_options
-        .first()
-        .map(|option| option.value.0.to_string());
+    let first_model = model_options.first().map(|option| option.value.clone());
     if !model_options.is_empty() {
         // The effective model when unset: the shared resolution chain,
         // ending at the first listed option — never a silent mismatch
         // with what the prompt will actually run.
         let current = resolve_model_for(state, session, first_model.as_deref())
-            .map(SessionConfigValueId::new)
             .unwrap_or_else(|| model_options[0].value.clone());
-        options.push(
-            SessionConfigOption::new(
-                SessionConfigId::new(MODEL_SELECTOR_ID),
-                "Model".to_owned(),
-                SessionConfigKind::Select(SessionConfigSelect::new(current, model_options)),
-            )
-            .category(SessionConfigOptionCategory::Model),
-        );
+        options.push(ConfigOption {
+            id: MODEL_SELECTOR_ID.to_owned(),
+            name: "Model".to_owned(),
+            kind: ConfigOptionKind::Select {
+                current,
+                options: model_options,
+            },
+            category: ConfigOptionCategory::Model,
+        });
     }
 
     // The actor selector: the loaded actors.
     let current = crate::store::session_actor_value_free(session);
-    let actor_options: Vec<SessionConfigSelectOption> = state
+    let actor_options: Vec<SelectOption> = state
         .definitions()
         .actors
         .keys()
-        .map(|name| {
-            SessionConfigSelectOption::new(SessionConfigValueId::new(name.clone()), name.clone())
+        .map(|name| SelectOption {
+            value: name.clone(),
+            label: name.clone(),
         })
         .collect();
     if !actor_options.is_empty() {
-        options.push(
-            SessionConfigOption::new(
-                SessionConfigId::new(ACTOR_SELECTOR_ID),
-                "Actor".to_owned(),
-                SessionConfigKind::Select(SessionConfigSelect::new(
-                    current
-                        .map(SessionConfigValueId::new)
-                        .unwrap_or_else(|| actor_options[0].value.clone()),
-                    actor_options,
-                )),
-            )
-            .category(SessionConfigOptionCategory::Other("actor".to_owned())),
-        );
+        options.push(ConfigOption {
+            id: ACTOR_SELECTOR_ID.to_owned(),
+            name: "Actor".to_owned(),
+            kind: ConfigOptionKind::Select {
+                current: current.unwrap_or_else(|| actor_options[0].value.clone()),
+                options: actor_options,
+            },
+            category: ConfigOptionCategory::Other("actor".to_owned()),
+        });
     }
 
     Selectors {
@@ -210,7 +266,7 @@ pub async fn apply_model_switch(
     access: &dyn crate::scripts::host::SessionAccess,
     session_id: &SessionId,
     model_reference: &str,
-    notify: &mut (dyn FnMut(SessionUpdateForOptions) + Send),
+    notify: &mut (dyn FnMut(Notice) + Send),
     notices: std::sync::Arc<dyn crate::scripts::host::NoticeSink>,
 ) -> Result<(), String> {
     // The switch is validated against the new model's window.
@@ -225,15 +281,14 @@ pub async fn apply_model_switch(
             // Auto-compaction: the compaction scripts run, announced,
             // with a context note. The switch still applies, effective
             // the following turn.
-            notify(SessionUpdateForOptions::Notice(
-                Notice::new(
-                    NoticeSeverity::Warning,
+            notify(
+                Notice::warning(
                     "Switching to a model whose context window is smaller than the current context; auto-compacting.",
                 )
                 .description(Some(format!(
                     "The session uses about {used_tokens} tokens; the new window is {window}."
                 ))),
-            ));
+            );
             let _ = (&used_tokens, &window);
             let turn = state
                 .db
@@ -263,12 +318,6 @@ pub async fn apply_model_switch(
         .await
         .map_err(|err| err.to_string())?;
     Ok(())
-}
-
-/// The update kinds the switch path sends (kept opaque so the handler
-/// maps onto the SDK types).
-pub enum SessionUpdateForOptions {
-    Notice(Notice),
 }
 
 /// The actor switch: effective the following turn.

@@ -2,6 +2,7 @@
 
 use super::capabilities::UnstableFeature;
 use super::client_tools;
+use super::{wire_notice, wire_option, wire_options};
 use super::commands::{
     available_commands_update, connect_config_servers, connect_forwarded_servers, editor_command,
     mcp_command, mcp_status_notice,
@@ -199,7 +200,7 @@ where
                     if negotiation_for_new.supports(UnstableFeature::SessionNotices) {
                         let _ = cx.send_notification(SessionNotification::new(
                             wire_session_id(&session.id),
-                            SessionUpdate::Notice(notice.clone()),
+                            SessionUpdate::Notice(wire_notice(notice)),
                         ));
                     }
                 }
@@ -227,7 +228,7 @@ where
                 }
                 let wire_id = wire_session_id(&session.id);
                 let response =
-                    NewSessionResponse::new(wire_id.clone()).config_options(selectors.options);
+                    NewSessionResponse::new(wire_id.clone()).config_options(wire_options(&selectors.options));
                 // Zed drops session updates that arrive before the
                 // session/new response registers the session
                 // (zed-industries/zed#60199) — advertise after.
@@ -883,13 +884,13 @@ where
                     .map_err(|err| Error::internal_error().data(err.to_string()))?;
                 }
                 responder.respond(
-                    LoadSessionResponse::new().config_options(selectors.options),
+                    LoadSessionResponse::new().config_options(wire_options(&selectors.options)),
                 )?;
                 for notice in &selectors.notices {
                     if negotiation_for_load.supports(UnstableFeature::SessionNotices) {
                         let _ = cx.send_notification(SessionNotification::new(
                             request.session_id.clone(),
-                            SessionUpdate::Notice(notice.clone()),
+                            SessionUpdate::Notice(wire_notice(notice)),
                         ));
                     }
                 }
@@ -913,13 +914,13 @@ where
                     .ok_or_else(|| Error::internal_error().data("no such session".to_owned()))?;
                 let selectors = config_options::build(&state_for_resume, &session).await;
                 responder.respond(
-                    ResumeSessionResponse::new().config_options(selectors.options),
+                    ResumeSessionResponse::new().config_options(wire_options(&selectors.options)),
                 )?;
                 for notice in &selectors.notices {
                     if negotiation_for_resume.supports(UnstableFeature::SessionNotices) {
                         let _ = cx.send_notification(SessionNotification::new(
                             request.session_id.clone(),
-                            SessionUpdate::Notice(notice.clone()),
+                            SessionUpdate::Notice(wire_notice(notice)),
                         ));
                     }
                 }
@@ -957,18 +958,10 @@ where
                                     0,
                                     std::sync::Arc::clone(&notices),
                                 );
-                                let mut updates: Vec<agent_client_protocol::schema::v1::Notice> =
-                                    Vec::new();
-                                let mut notify =
-                                    |update: config_options::SessionUpdateForOptions| {
-                                        match update {
-                                            config_options::SessionUpdateForOptions::Notice(
-                                                notice,
-                                            ) => {
-                                                updates.push(notice);
-                                            }
-                                        }
-                                    };
+                                let mut updates: Vec<config_options::Notice> = Vec::new();
+                                let mut notify = |notice: config_options::Notice| {
+                                    updates.push(notice);
+                                };
                                 let result = config_options::apply_model_switch(
                                     &state_for_config,
                                     access.as_ref(),
@@ -978,11 +971,11 @@ where
                                     notices,
                                 )
                                 .await;
-                                for notice in updates {
+                                for notice in &updates {
                                     if negotiation_for_config.supports(UnstableFeature::SessionNotices) {
                                         let _ = cx.send_notification(SessionNotification::new(
                                             request.session_id.clone(),
-                                            SessionUpdate::Notice(notice),
+                                            SessionUpdate::Notice(wire_notice(notice)),
                                         ));
                                     }
                                 }
@@ -1014,13 +1007,13 @@ where
                             request.session_id.clone(),
                             SessionUpdate::ConfigOptionUpdate(
                                 agent_client_protocol::schema::v1::ConfigOptionUpdate::new(
-                                    refreshed.options.clone(),
+                                    refreshed.options.iter().map(wire_option).collect(),
                                 ),
                             ),
                         ));
                         responder.respond(
                             agent_client_protocol::schema::v1::SetSessionConfigOptionResponse::new(
-                                refreshed.options,
+                                refreshed.options.iter().map(wire_option).collect(),
                             ),
                         )
                     }
@@ -1061,7 +1054,7 @@ where
                     if negotiation_for_fork.supports(UnstableFeature::SessionNotices) {
                         let _ = cx.send_notification(SessionNotification::new(
                             wire_session_id(&fork.id),
-                            SessionUpdate::Notice(notice.clone()),
+                            SessionUpdate::Notice(wire_notice(notice)),
                         ));
                     }
                 }
@@ -1069,7 +1062,7 @@ where
                     agent_client_protocol::schema::v1::ForkSessionResponse::new(wire_session_id(
                         &fork.id,
                     ))
-                    .config_options(selectors.options),
+                    .config_options(wire_options(&selectors.options)),
                 )
             },
             agent_client_protocol::on_receive_request!(),
