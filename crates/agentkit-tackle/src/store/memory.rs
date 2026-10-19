@@ -2,7 +2,7 @@
 //! semantics — the readable reference the SQLite queries are tested
 //! against. Not durable; the test backend.
 
-use super::{
+use super::model::{
     ListFilter, Message, Session, SessionId, SessionKind, Turn, TurnId, TurnKind, TurnUsage,
 };
 use std::collections::BTreeMap;
@@ -41,7 +41,7 @@ impl MemoryData {
         if let Some(session) = self.sessions.get_mut(id) {
             session.owner = None;
             session.lease_expires_at = None;
-            session.updated_at = super::unix_now();
+            session.updated_at = super::model::unix_now();
         }
     }
 
@@ -164,7 +164,7 @@ impl MemoryData {
     pub fn set_title(&mut self, id: &SessionId, title: &str) {
         if let Some(session) = self.sessions.get_mut(id) {
             session.title = title.to_owned();
-            session.updated_at = super::unix_now();
+            session.updated_at = super::model::unix_now();
         }
     }
 
@@ -175,7 +175,7 @@ impl MemoryData {
     pub fn set_metadata(&mut self, id: &SessionId, metadata: &str) {
         if let Some(session) = self.sessions.get_mut(id) {
             session.metadata = metadata.to_owned();
-            session.updated_at = super::unix_now();
+            session.updated_at = super::model::unix_now();
         }
     }
 
@@ -189,7 +189,7 @@ impl MemoryData {
         if let Some(session) = self.sessions.get_mut(&turn.session_id) {
             if session.head_turn_id.as_deref() == Some(id.as_str()) {
                 session.head_turn_id = turn.parent_id.clone();
-                session.updated_at = super::unix_now();
+                session.updated_at = super::model::unix_now();
             }
         }
     }
