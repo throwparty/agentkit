@@ -1,6 +1,6 @@
-//! Golden-transcript conformance harness: replay recorded client→agent
-//! JSON-RPC transcripts against the tackle binary and subset-match the
-//! responses.
+//! ACP v1 golden-transcript conformance harness: replay recorded
+//! client→agent JSON-RPC transcripts against the tackle binary and
+//! subset-match the responses.
 
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
