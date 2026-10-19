@@ -1,4 +1,4 @@
-//! First-run integration tests (T-030): empty configuration succeeds
+//! First-run integration tests: empty configuration succeeds
 //! via built-in defaults, the first-session seed documents the
 //! configuration and syntaxes, overrides surface, missing credentials
 //! advertise authMethods, and configuration errors name the file and

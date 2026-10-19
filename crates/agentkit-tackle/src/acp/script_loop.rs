@@ -44,7 +44,7 @@ impl CompletionSink for SharedCompletions {
 
 /// The dispatcher that runs script-issued prompts through the model loop,
 /// publishes the real completion into the shared sink, and surfaces the
-/// call to the client through the notice sink (FR-016).
+/// call to the client through the notice sink.
 pub struct ModelLoopDispatcher {
     state: Arc<TackleState>,
     sink: Arc<SharedCompletions>,
@@ -62,7 +62,7 @@ impl PromptDispatcher for ModelLoopDispatcher {
 
 /// Builds a [`SessionAccess`] whose script-issued prompts run real model
 /// turns, whose completions the script can await, and whose model calls
-/// are surfaced through `notices` (FR-016).
+/// are surfaced through `notices`.
 pub fn access(
     state: &Arc<TackleState>,
     window_size: u64,
@@ -298,7 +298,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn script_model_calls_are_surfaced_to_the_notice_sink() {
         // No reachable endpoint: the model call fails, but the notice
-        // fires before it (FR-016).
+        // fires before it.
         let state = state_with_endpoint("http://127.0.0.1:1");
         let session = state
             .db

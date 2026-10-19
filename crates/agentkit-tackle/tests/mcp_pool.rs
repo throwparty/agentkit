@@ -93,7 +93,7 @@ fn broken_server_config() -> McpServerConfig {
     }
 }
 
-/// AC-001: disabling prevents new connections and closes the existing
+/// Disabling prevents new connections and closes the existing
 /// one, so the server's tools stop being listed.
 #[tokio::test]
 async fn disabling_closes_the_connection_and_hides_its_tools() {
@@ -118,7 +118,7 @@ async fn disabling_closes_the_connection_and_hides_its_tools() {
     );
 }
 
-/// AC-004/FR-004: re-enabling restores the connection the disable tore
+/// Re-enabling restores the connection the disable tore
 /// down, from the config held at registration.
 #[tokio::test]
 async fn enabling_reconnects_from_the_registered_config() {
@@ -155,7 +155,7 @@ async fn toggling_flips_state_and_drives_the_connection() {
     assert!(pool.is_connected("echo"));
 }
 
-/// EC-001: disabling an already-disabled server changes nothing and is
+/// Disabling an already-disabled server changes nothing and is
 /// not an error.
 #[tokio::test]
 async fn disabling_twice_is_a_no_op() {
@@ -169,7 +169,7 @@ async fn disabling_twice_is_a_no_op() {
     assert!(!pool.is_connected("echo"));
 }
 
-/// EC-002: a server that fails to reconnect stays enabled and carries
+/// A server that fails to reconnect stays enabled and carries
 /// the failure as a status rather than as an error.
 #[tokio::test]
 async fn a_failed_reconnect_is_a_status_not_an_error() {
@@ -216,7 +216,7 @@ fn registering_defaults_to_enabled_and_preserves_an_existing_disable() {
     assert!(!pool.is_enabled("echo"));
 }
 
-/// FR-013: a client-forwarded server of the same name wins over the
+/// A client-forwarded server of the same name wins over the
 /// config-declared one, which is recorded as shadowed for the first-turn
 /// report. A non-colliding forwarded server is added alongside it.
 #[tokio::test]

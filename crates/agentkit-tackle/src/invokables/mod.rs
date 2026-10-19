@@ -432,7 +432,7 @@ impl Registry {
             .filter(|invokable| invokable.model_invokable())
     }
 
-    /// The tool definitions offered to the model (FR-009): each
+    /// The tool definitions offered to the model: each
     /// model-invokable with a JSON-schema parameter object.
     pub fn model_tools(&self) -> Vec<crate::agent::ToolDefinition> {
         self.model_invokables()
@@ -448,7 +448,7 @@ impl Registry {
                         serde_json::json!({ "type": "object", "properties": properties })
                     }
                     Invokable::Agent { .. } => {
-                        // FR-026: the invocation arguments form the nested
+                        // The invocation arguments form the nested
                         // agent's prompt.
                         serde_json::json!({
                             "type": "object",
@@ -472,7 +472,7 @@ impl Registry {
             .collect()
     }
 
-    /// The invokable listing injected into the system prompt (FR-012).
+    /// The invokable listing injected into the system prompt.
     pub fn manifest(&self) -> String {
         let mut lines = vec!["Invokables available to you (invoke them as tools):".to_owned()];
         for invokable in self.model_invokables() {

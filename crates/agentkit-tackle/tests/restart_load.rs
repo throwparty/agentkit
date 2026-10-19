@@ -1,8 +1,8 @@
-//! AC-002 persistence (model-free): a turn created by direct
-//! invocation (AC-006) survives process restart. `session/load` must
+//! Persistence (model-free): a turn created by direct
+//! invocation survives process restart. `session/load` must
 //! replay the full user-visible history with stable message and
-//! tool-call ids and send exactly one usage snapshot (FR-005,
-//! FR-007). Direct invocation creates real turn history without a
+//! tool-call ids and send exactly one usage snapshot. Direct
+//! invocation creates real turn history without a
 //! model, so no endpoint is ever contacted.
 //!
 //! Supersedes the empty-session load check in `initialize.rs`

@@ -1,4 +1,4 @@
-//! Fork integration tests (T-027): the RFD path, the v1 /fork fallback,
+//! Fork integration tests: the RFD path, the v1 /fork fallback,
 //! seed insertion, fork titles, and script-failure grace.
 
 use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;

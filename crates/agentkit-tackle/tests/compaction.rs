@@ -1,4 +1,4 @@
-//! Compaction integration tests (T-028): the /compact turn —
+//! Compaction integration tests: the /compact turn —
 //! interception, the in-band announcement with before/after counts, the
 //! visible usage_update drop, the RFD-shaped update for advertising
 //! clients, and summary storage.

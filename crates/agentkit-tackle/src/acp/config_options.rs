@@ -1,4 +1,4 @@
-//! Session configuration options (FR-027): the model selector
+//! Session configuration options: the model selector
 //! and the actor selector.
 //!
 //! The model selector discovers models per endpoint (GET /models, both

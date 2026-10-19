@@ -179,7 +179,7 @@ pub fn fire_post_turn_detached(
 }
 
 /// Resolves the enabled scripts registered for `event` from the cached
-/// bodies (FR-022: loaded once).
+/// bodies (loaded once).
 fn event_sources(state: &TackleState, event: &str) -> Vec<(String, String)> {
     let config = state.config();
     let sources = state.script_sources();

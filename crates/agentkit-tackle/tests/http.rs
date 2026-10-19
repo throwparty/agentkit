@@ -1,4 +1,4 @@
-//! The HTTP transport's integration tests (T-036): initialize through
+//! The HTTP transport's integration tests: initialize through
 //! the session lifecycle over HTTP; multiple concurrent connections
 //! served by one process.
 

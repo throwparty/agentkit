@@ -1,4 +1,4 @@
-//! Two-process integration tests (T-033): two tackle processes sharing
+//! Two-process integration tests: two tackle processes sharing
 //! one session database — cross-process session/list visibility, lease
 //! contention with precise errors, and fork lineage across processes.
 

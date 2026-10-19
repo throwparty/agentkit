@@ -276,7 +276,7 @@ pub fn resolve_script_source(name: &str, file: &str, user_dir: Option<&Path>) ->
 /// name. Called when the configuration is set: process start for user and
 /// built-in scripts, trust resolution for the project layer. The result is
 /// cached and never re-read, so a changed body cannot take effect without
-/// a restart and a re-prompt (FR-022: loaded once, no hot reload).
+/// a restart and a re-prompt (loaded once, no hot reload).
 pub fn resolve_script_sources(config: &Loaded) -> BTreeMap<String, String> {
     let user_dir = config.user_layer.as_deref().and_then(Path::parent);
     config
