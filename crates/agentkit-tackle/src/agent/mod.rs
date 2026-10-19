@@ -10,6 +10,7 @@ pub mod script_loop;
 pub mod seed;
 pub mod sink;
 pub mod titling;
+pub mod tool_call;
 pub mod turn;
 
 use crate::store::TurnUsage;
