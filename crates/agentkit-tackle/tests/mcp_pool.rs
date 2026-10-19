@@ -327,7 +327,7 @@ mod direct_invocation {
 
     #[tokio::test]
     async fn execution_bypasses_the_pipeline_and_reports_the_shape() {
-        let definitions = agentkit_tackle::loader::Definitions::default();
+        let definitions = agentkit_tackle::definitions::Definitions::default();
         let registry = Registry::build(
             &definitions,
             &[agentkit_tackle::mcp::NamespacedTool {
@@ -358,14 +358,14 @@ mod direct_invocation {
     async fn non_mcp_invokables_are_a_precise_error() {
         // A registered user-invokable prompt: /! on it is the NotMcp
         // error, not the unknown-invokable one.
-        let definitions = agentkit_tackle::loader::Definitions {
+        let definitions = agentkit_tackle::definitions::Definitions {
             prompts: BTreeMap::from([(
                 "deploy".to_owned(),
-                agentkit_tackle::loader::Definition {
+                agentkit_tackle::definitions::Definition {
                     name: "deploy".to_owned(),
                     path: std::path::PathBuf::from("/prompts/deploy.md"),
                     raw: String::new(),
-                    frontmatter: agentkit_tackle::loader::PromptMeta::default(),
+                    frontmatter: agentkit_tackle::definitions::PromptMeta::default(),
                     body: "Body.".to_owned(),
                 },
             )]),
@@ -397,7 +397,7 @@ mod direct_invocation {
 
     #[tokio::test]
     async fn oversized_outputs_truncate_with_the_original_size() {
-        let definitions = agentkit_tackle::loader::Definitions::default();
+        let definitions = agentkit_tackle::definitions::Definitions::default();
         let registry = Registry::build(
             &definitions,
             &[agentkit_tackle::mcp::NamespacedTool {

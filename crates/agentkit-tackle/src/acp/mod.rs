@@ -7,7 +7,7 @@
 //! connection); HTTP serves many connections per process.
 
 use crate::config::Loaded;
-use crate::loader::Definitions;
+use crate::definitions::Definitions;
 use crate::mcp::{McpPool, ServerStatus};
 use crate::store::SessionStore;
 
@@ -2758,7 +2758,7 @@ mod tests {
         .unwrap();
 
         let user_dir = dir.join("cfg");
-        let full = crate::loader::discover(&user_dir, Some(&project)).unwrap();
+        let full = crate::definitions::discover(&user_dir, Some(&project)).unwrap();
         let mut active = full.clone();
         active.retain_project(&project, &std::collections::BTreeSet::new());
         let (loaded, project_config) =
@@ -2867,7 +2867,7 @@ mod tests {
         let state = TackleState::new(
             Arc::new(crate::store::SessionStore::in_memory()),
             loaded,
-            crate::loader::Definitions::default().with_builtins(),
+            crate::definitions::Definitions::default().with_builtins(),
         );
         assert_eq!(
             state.script_sources().get("deny").map(String::as_str),

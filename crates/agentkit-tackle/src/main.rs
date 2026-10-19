@@ -2,7 +2,7 @@
 
 use agentkit_tackle::acp::{self, TackleState};
 use agentkit_tackle::store::SessionStore;
-use agentkit_tackle::{auth, cli, config, loader, telemetry};
+use agentkit_tackle::{auth, cli, config, definitions, telemetry};
 use clap::Parser;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -82,7 +82,7 @@ async fn run(args: cli::Cli) -> ExitCode {
         "configuration loaded"
     );
 
-    let mut definitions = match loader::discover(&user_config_dir, Some(&project_config_dir)) {
+    let mut definitions = match definitions::discover(&user_config_dir, Some(&project_config_dir)) {
         Ok(definitions) => definitions,
         Err(err) => return fail(err),
     };
