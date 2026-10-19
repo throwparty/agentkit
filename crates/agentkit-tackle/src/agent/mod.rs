@@ -1,12 +1,17 @@
-//! The agent loop: the turn loop and its outcomes, nested agent invocation, and retry. The model seam itself lives in [`crate::providers`].
+//! The agent loop and the core orchestration: running a prompt turn, direct
+//! invocation, tool-call execution, nested agents, fork, compaction, seed,
+//! and titling. The model seam itself lives in [`crate::providers`]; the RPC
+//! surface that drives this lives in [`crate::acp_v1`].
+//!
+//! This module is declarations and re-exports only.
 
 pub mod compaction;
-pub mod direct;
 pub mod config_options;
+pub mod direct;
 pub mod fork;
 pub mod nested;
-pub mod retry;
 pub mod prompt;
+pub mod retry;
 pub mod runtime;
 pub mod script_loop;
 pub mod seed;
@@ -15,23 +20,6 @@ pub mod titling;
 pub mod tool_call;
 pub mod turn;
 
-use crate::store::TurnUsage;
+mod outcome;
 
-/// The terminal state of one executed turn.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TurnStop {
-    /// The model finished without requesting tools.
-    EndTurn,
-    /// The model-request cap was hit mid-work; the user may continue.
-    MaxTurnRequests,
-    /// The conversation no longer fits the model's window: the turn ended
-    /// with the actionable overflow note instead of a model answer. The
-    /// caller surfaces the context size and may auto-compact.
-    ContextLength,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct TurnOutcome {
-    pub stop: TurnStop,
-    pub usage: TurnUsage,
-}
+pub use outcome::{TurnOutcome, TurnStop};
