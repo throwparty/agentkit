@@ -18,7 +18,7 @@ use crate::content::timestamp;
 use crate::agent::seed as first_run;
 use crate::agent::{compaction, script_loop};
 use crate::agent::config_options::session_actor;
-use super::run_direct_invocation;
+use crate::agent::direct::run_direct_invocation;
 use crate::agent::prompt::run_prompt_turn;
 use crate::state::{LEASE_TTL_SECS, LeaseHeartbeat, TackleState, store_session_id, wire_session_id};
 use agent_client_protocol::schema::ProtocolVersion;
@@ -540,12 +540,30 @@ where
                     let turn_id = turn.id.clone();
                     let owner = owner_for_prompt.clone();
                     let spawn_cx = cx.clone();
+                    let runtime = crate::agent::runtime::TurnRuntime {
+                        pool: negotiation.mcp_pool(),
+                        sink: std::sync::Arc::new(super::ConnectionTurnSink::new(cx.clone())),
+                        requester: std::sync::Arc::new(
+                            super::permission::AcpPermissionRequester {
+                                cx: cx.clone(),
+                                session_id: wire_id.clone(),
+                            },
+                        ),
+                        executor: std::sync::Arc::new(client_tools::ConnectionClientTools {
+                            cx: cx.clone(),
+                        }),
+                        tracker: negotiation.clone(),
+                        compaction_notices: connection_notices(&cx, &negotiation, "compaction"),
+                        titling_notices: connection_notices(&cx, &negotiation, "titling"),
+                        client_tools: client_tools::catalog(
+                            negotiation.client_caps(),
+                            negotiation.editor_toggles(),
+                        ),
+                    };
                     spawn_cx.spawn(async move {
                         match run_direct_invocation(
                             state,
-                            negotiation,
-                            cx,
-                            wire_id,
+                            runtime,
                             turn_id,
                             session_id.clone(),
                             owner,
@@ -554,8 +572,10 @@ where
                         )
                         .await
                         {
-                            Ok(response) => responder.respond(response),
-                            Err(err) => responder.respond_with_error(err),
+                            Ok(()) => responder.respond(PromptResponse::new(StopReason::EndTurn)),
+                            Err(err) => {
+                                responder.respond_with_error(Error::internal_error().data(err))
+                            }
                         }
                     })?;
                     return Ok(());
