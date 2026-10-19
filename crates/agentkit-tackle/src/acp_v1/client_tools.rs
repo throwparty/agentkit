@@ -14,8 +14,9 @@
 
 use crate::config::Config;
 use crate::invokables::client_tools::{
-    ClientTool, ClientToolSelection, FS_READ, FS_WRITE, TERMINAL_CREATE, TERMINAL_KILL,
-    TERMINAL_OUTPUT, TERMINAL_RELEASE, TERMINAL_WAIT, catalog as selection_catalog,
+    ClientTool, ClientToolExecutor, ClientToolSelection, Executed, FS_READ, FS_WRITE,
+    TERMINAL_CREATE, TERMINAL_KILL, TERMINAL_OUTPUT, TERMINAL_RELEASE, TERMINAL_WAIT,
+    catalog as selection_catalog,
 };
 use agent_client_protocol::schema::v1;
 use agent_client_protocol::{Client, ConnectionTo};
@@ -68,12 +69,20 @@ pub fn catalog(caps: ClientCaps, toggles: EditorToggles) -> Vec<ClientTool> {
     })
 }
 
-/// The outcome of one `client.*` call: the text for the model, plus the
-/// terminal bookkeeping (a created or finished terminal id).
-pub struct Executed {
-    pub content: String,
-    pub created: Option<String>,
-    pub finished: Option<String>,
+/// Executes client-capability tools against a live connection.
+pub struct ConnectionClientTools<'a> {
+    pub cx: &'a ConnectionTo<Client>,
+}
+
+impl ClientToolExecutor for ConnectionClientTools<'_> {
+    async fn execute(
+        &self,
+        session: &crate::store::SessionId,
+        invokable: &str,
+        arguments: &serde_json::Value,
+    ) -> Result<Executed, String> {
+        execute(self.cx, &crate::state::wire_session_id(session), invokable, arguments).await
+    }
 }
 
 fn string_argument(arguments: &serde_json::Value, key: &str) -> Result<String, String> {

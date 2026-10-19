@@ -7,11 +7,20 @@
 //! hint for the client's iconography. The invokable name still rides the
 //! `name` field, so nothing is lost.
 
-use agent_client_protocol::schema::v1::ToolKind;
 use serde_json::Value;
 
 /// The maximum length of a value embedded in a title.
 const VALUE_LIMIT: usize = 100;
+
+/// The iconography hint for an invokable, independent of the wire type the
+/// ACP layer maps it to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolKind {
+    Read,
+    Edit,
+    Execute,
+    Other,
+}
 
 /// A short, argument-aware title for a tool call.
 pub fn tool_call_title(name: &str, arguments: &Value) -> String {

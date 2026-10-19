@@ -1,5 +1,6 @@
 //! The ACP `session/request_permission` bridge: the PermissionRequester the permission pipeline asks through.
 
+use super::wire_kind;
 use agent_client_protocol::schema::v1::SessionId;
 
 /// The ACP `session/request_permission` bridge.
@@ -63,7 +64,7 @@ impl crate::permissions::PermissionRequester for AcpPermissionRequester {
                 &request.invokable,
                 &request.arguments,
             ))
-            .kind(crate::invokables::titles::tool_kind(&request.invokable));
+            .kind(wire_kind(crate::invokables::titles::tool_kind(&request.invokable)));
         if let Some(reason) = &request.ask_reason {
             fields = fields.content(vec![v1::ToolCallContent::from(v1::ContentBlock::Text(
                 v1::TextContent::new(reason.clone()),

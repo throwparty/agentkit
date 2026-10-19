@@ -8,6 +8,30 @@
 //! Executing a call against the live connection is the ACP glue layer's
 //! job; the catalogue here is the domain knowledge of what exists.
 
+use crate::store::SessionId;
+use serde_json::Value;
+use std::future::Future;
+
+/// The outcome of one `client.*` call: the text for the model, plus the
+/// terminal bookkeeping (a created or finished terminal id).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Executed {
+    pub content: String,
+    pub created: Option<String>,
+    pub finished: Option<String>,
+}
+
+/// Executes a client-capability tool against the live connection. The ACP
+/// layer implements this; the core loop only needs the trait.
+pub trait ClientToolExecutor: Send + Sync {
+    fn execute(
+        &self,
+        session: &SessionId,
+        invokable: &str,
+        arguments: &Value,
+    ) -> impl Future<Output = Result<Executed, String>> + Send;
+}
+
 /// A tool offered to the model, derived from the client's surface.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClientTool {

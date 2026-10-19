@@ -2,6 +2,7 @@
 
 pub mod nested;
 pub mod retry;
+pub mod sink;
 pub mod turn;
 
 use crate::store::TurnUsage;
