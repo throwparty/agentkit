@@ -10,6 +10,7 @@
 
 mod capabilities;
 mod commands;
+mod notices;
 mod negotiation;
 pub mod client_tools;
 pub mod compaction;
@@ -24,6 +25,7 @@ pub use capabilities::UnstableFeature;
 pub use negotiation::ConnectionNegotiation;
 pub(crate) use commands::connect_config_servers;
 use commands::{available_commands_update, connect_forwarded_servers, editor_command, mcp_command, mcp_status_notice};
+use notices::connection_notices;
 pub use crate::state::{PendingProject, TackleState};
 use crate::state::{LEASE_TTL_SECS, LeaseHeartbeat, store_session_id, wire_session_id};
 
@@ -31,7 +33,7 @@ use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
     CloseSessionResponse, DeleteSessionResponse, InitializeRequest,
     InitializeResponse, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
-    NewSessionRequest, NewSessionResponse, Notice, NoticeSeverity, ResumeSessionRequest,
+    NewSessionRequest, NewSessionResponse, ResumeSessionRequest,
     ResumeSessionResponse, SessionId, SessionInfo, SessionNotification,
     SessionUpdate,
 };
@@ -1538,45 +1540,6 @@ where
     builder.connect_to(transport).await
 }
 
-/// The notice sink for a live connection: a script-driven model call
-/// becomes a session notice when the client advertised the notices
-/// capability. A narrow seam — one-way notification only, never
-/// the connection, so the script loop cannot issue client requests.
-struct ConnectionNotices {
-    cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
-    enabled: bool,
-    source: &'static str,
-}
-
-impl crate::scripts::host::NoticeSink for ConnectionNotices {
-    fn script_model_call(&self, session: &crate::store::SessionId) {
-        if !self.enabled {
-            return;
-        }
-        let notice = Notice::new(
-            NoticeSeverity::Info,
-            format!("Running a background model call ({})", self.source),
-        );
-        let _ = self.cx.send_notification(SessionNotification::new(
-            wire_session_id(session),
-            SessionUpdate::Notice(notice),
-        ));
-    }
-}
-
-/// Builds the notice sink for `cx`, gated on the client's advertised
-/// notices capability and labelled with the calling path.
-fn connection_notices(
-    cx: &agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
-    negotiation: &ConnectionNegotiation,
-    source: &'static str,
-) -> std::sync::Arc<dyn crate::scripts::host::NoticeSink> {
-    std::sync::Arc::new(ConnectionNotices {
-        cx: cx.clone(),
-        enabled: negotiation.supports(UnstableFeature::SessionNotices),
-        source,
-    })
-}
 
 /// The session access the fork scripts act through: the shared store
 /// backend with the real model-loop dispatcher, so a `session_forked`
