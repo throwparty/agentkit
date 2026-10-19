@@ -195,7 +195,7 @@ mod tests {
     use super::*;
     use crate::config::{Auth, EndpointConfig, WireFormat};
     use crate::credentials::PATH_LOCK;
-    use crate::providers::{ChatMessage, ChatRole};
+    use crate::providers::ChatMessage;
     use crate::store::SessionStore;
     use std::io::Write as _;
 
@@ -300,21 +300,9 @@ mod tests {
                     model: "test/test-model".into(),
                     system: "You are testing.".into(),
                     messages: vec![
-                        ChatMessage {
-                            role: ChatRole::User,
-                            text: "prior".into(),
-                            ..Default::default()
-                        },
-                        ChatMessage {
-                            role: ChatRole::Assistant,
-                            text: "prior answer".into(),
-                            ..Default::default()
-                        },
-                        ChatMessage {
-                            role: ChatRole::User,
-                            text: "say hello".into(),
-                            ..Default::default()
-                        },
+                        ChatMessage::user("prior"),
+                        ChatMessage::assistant("prior answer"),
+                        ChatMessage::user("say hello"),
                     ],
                     tools: Vec::new(),
                 },
@@ -361,6 +349,67 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn completion_sends_ordered_text_and_image_content() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/chat/completions"))
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_raw(
+                sse_body("described", 10, 4).into_bytes(),
+                "text/event-stream",
+            ))
+            .mount(&server)
+            .await;
+
+        let config = config_with_endpoint(&server.uri(), Auth::None);
+        let provider = provider_for("test/test-model", &config).unwrap();
+        provider
+            .stream_completion(
+                ModelRequest {
+                    model: "test/test-model".into(),
+                    system: String::new(),
+                    messages: vec![ChatMessage::with_content(
+                        crate::providers::ChatRole::User,
+                        vec![
+                            crate::providers::ChatContent::text("describe"),
+                            crate::providers::ChatContent::Image {
+                                url: "data:image/png;base64,AAAA".into(),
+                            },
+                            crate::providers::ChatContent::text("thanks"),
+                        ],
+                    )],
+                    tools: Vec::new(),
+                },
+                &mut |_: &str| {},
+                &mut |_: &str| {},
+            )
+            .await
+            .unwrap();
+
+        let received = &server.received_requests().await.unwrap()[0];
+        let body: serde_json::Value = serde_json::from_slice(&received.body).unwrap();
+        let user = body["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|message| message["role"] == "user")
+            .unwrap();
+        assert_eq!(
+            user["content"],
+            serde_json::json!([
+                { "type": "text", "text": "describe" },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "data:image/png;base64,AAAA",
+                        "detail": "auto"
+                    }
+                },
+                { "type": "text", "text": "thanks" }
+            ])
+        );
+    }
+
+    #[tokio::test]
     async fn helper_auth_resolves_the_credential() {
         let dir = tempfile::tempdir().unwrap();
         write_fake_helper(dir.path(), "{\"access_token\": \"secret\"}");
@@ -391,11 +440,7 @@ mod tests {
                 ModelRequest {
                     model: "model".into(),
                     system: String::new(),
-                    messages: vec![ChatMessage {
-                        role: ChatRole::User,
-                        text: "hi".into(),
-                        ..Default::default()
-                    }],
+                    messages: vec![ChatMessage::user("hi")],
                     tools: Vec::new(),
                 },
                 &mut |_: &str| {},
@@ -449,11 +494,7 @@ mod tests {
                 ModelRequest {
                     model: "streaming-model".into(),
                     system: String::new(),
-                    messages: vec![ChatMessage {
-                        role: ChatRole::User,
-                        text: "say hi".into(),
-                        ..Default::default()
-                    }],
+                    messages: vec![ChatMessage::user("say hi")],
                     tools: Vec::new(),
                 },
                 &mut |delta: &str| deltas.push(delta.to_owned()),
@@ -506,11 +547,7 @@ mod tests {
                 ModelRequest {
                     model: "streaming-model".into(),
                     system: String::new(),
-                    messages: vec![ChatMessage {
-                        role: ChatRole::User,
-                        text: "think".into(),
-                        ..Default::default()
-                    }],
+                    messages: vec![ChatMessage::user("think")],
                     tools: Vec::new(),
                 },
                 &mut |delta: &str| deltas.push(delta.to_owned()),
@@ -591,7 +628,7 @@ mod tests {
             assistant_id,
             "test/model",
             "system prompt",
-            "the question",
+            vec![crate::providers::ChatContent::text("the question")],
             Vec::new(),
             Vec::new(),
             8,
@@ -700,7 +737,7 @@ mod tests {
             "msg-x",
             "test/model",
             "sys",
-            "the question",
+            vec![crate::providers::ChatContent::text("the question")],
             Vec::new(),
             Vec::new(),
             8,
@@ -770,7 +807,7 @@ data: {not json}
             "msg-partial",
             "test/model",
             "sys",
-            "go",
+            vec![crate::providers::ChatContent::text("go")],
             Vec::new(),
             Vec::new(),
             8,
@@ -816,7 +853,7 @@ data: {not json}
             "msg-r",
             model,
             "sys",
-            "go",
+            vec![crate::providers::ChatContent::text("go")],
             Vec::new(),
             Vec::new(),
             8,

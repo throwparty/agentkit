@@ -223,15 +223,6 @@ pub fn prior_messages(
         .iter()
         .filter(|a| a.message.turn_id != *current_turn)
         .filter_map(|a| {
-            let text = crate::content::prompt_text_of(&a.message.content);
-            if text.is_empty() {
-                return None;
-            }
-            let text = if a.turn_kind == TurnKind::Compaction {
-                wrap_summary(&text)
-            } else {
-                text
-            };
             let role = match a.message.role {
                 crate::store::Role::User => crate::providers::ChatRole::User,
                 crate::store::Role::Assistant | crate::store::Role::System => {
@@ -239,9 +230,33 @@ pub fn prior_messages(
                 }
                 _ => return None,
             };
+            let mut content = match crate::content::prompt_parts_of(&a.message.content) {
+                Ok(content) => content,
+                Err(err) => {
+                    tracing::warn!(
+                        message_id = %a.message.id,
+                        "skipping unreadable stored message: {err}"
+                    );
+                    return None;
+                }
+            };
+            if content.is_empty() {
+                return None;
+            }
+            if a.turn_kind == TurnKind::Compaction {
+                content = content
+                    .into_iter()
+                    .map(|part| match part {
+                        crate::providers::ChatContent::Text(text) => {
+                            crate::providers::ChatContent::Text(wrap_summary(&text))
+                        }
+                        image => image,
+                    })
+                    .collect();
+            }
             Some(crate::providers::ChatMessage {
                 role,
-                text,
+                content,
                 ..Default::default()
             })
         })
@@ -391,9 +406,33 @@ mod tests {
             None,
         ))
         .unwrap();
-        let t3 = block_on(store.append_turn(
+        let t_image = block_on(store.append_turn(
             &session.id,
             Some(&t2.id),
+            TurnKind::Interaction,
+            None,
+            Default::default(),
+        ))
+        .unwrap();
+        block_on(
+            store.append_message(
+                &t_image.id,
+                Role::User,
+                &serde_json::json!([
+                    { "type": "text", "text": "look at this" },
+                    { "type": "image", "data": "AAAA", "mimeType": "image/png" }
+                ])
+                .to_string(),
+                None,
+                None,
+                None,
+                None,
+            ),
+        )
+        .unwrap();
+        let t3 = block_on(store.append_turn(
+            &session.id,
+            Some(&t_image.id),
             TurnKind::Interaction,
             None,
             Default::default(),
@@ -417,10 +456,23 @@ mod tests {
         assert!(
             prior
                 .iter()
-                .any(|message| message.text.contains("<compaction-summary untrusted>"))
+                .any(|message| message.text().contains("<compaction-summary untrusted>"))
         );
-        assert!(!prior.iter().any(|message| message.text == "summary of t1"));
-        assert!(!prior.iter().any(|message| message.text == "next ask"));
+        assert!(
+            !prior
+                .iter()
+                .any(|message| message.text() == "summary of t1")
+        );
+        assert!(!prior.iter().any(|message| message.text() == "next ask"));
+        let image_message = prior
+            .iter()
+            .find(|message| message.text() == "look at this")
+            .unwrap();
+        assert!(image_message.content.iter().any(|part| matches!(
+            part,
+            crate::providers::ChatContent::Image { url }
+                if url == "data:image/png;base64,AAAA"
+        )));
     }
 
     #[test]
@@ -684,7 +736,7 @@ mod tests {
                 "assistant-1",
                 "model",
                 "system prompt (the pinned prefix)",
-                "say something",
+                vec![crate::providers::ChatContent::text("say something")],
                 Vec::new(),
                 Vec::new(),
                 8,
@@ -769,7 +821,7 @@ mod tests {
                 "assistant-1",
                 "model",
                 "system",
-                "prompt",
+                vec![crate::providers::ChatContent::text("prompt")],
                 Vec::new(),
                 Vec::new(),
                 8,
@@ -868,7 +920,7 @@ mod tests {
                 "assistant-1",
                 "model",
                 "system",
-                "prompt",
+                vec![crate::providers::ChatContent::text("prompt")],
                 Vec::new(),
                 Vec::new(),
                 8,

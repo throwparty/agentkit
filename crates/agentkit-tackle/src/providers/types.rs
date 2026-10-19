@@ -11,13 +11,30 @@ pub enum ChatRole {
     Tool,
 }
 
-/// One assembled context message. Carries text plus, for assistant
-/// messages, the tool calls they requested, and, for `Tool` messages,
-/// the result answering one.
+/// One part of a message's ordered content.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChatContent {
+    Text(String),
+    /// A base64 `data:` URL or a remote HTTP(S) URL.
+    Image {
+        url: String,
+    },
+}
+
+impl ChatContent {
+    #[must_use]
+    pub fn text(text: impl Into<String>) -> Self {
+        Self::Text(text.into())
+    }
+}
+
+/// One assembled context message. Carries ordered content plus, for
+/// assistant messages, the tool calls they requested, and, for `Tool`
+/// messages, the result answering one.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ChatMessage {
     pub role: ChatRole,
-    pub text: String,
+    pub content: Vec<ChatContent>,
     pub tool_calls: Vec<ModelToolCall>,
     pub tool_call_id: Option<String>,
     pub tool_name: Option<String>,
@@ -26,18 +43,19 @@ pub struct ChatMessage {
 impl ChatMessage {
     #[must_use]
     pub fn user(text: impl Into<String>) -> Self {
-        Self {
-            role: ChatRole::User,
-            text: text.into(),
-            ..Self::default()
-        }
+        Self::with_content(ChatRole::User, vec![ChatContent::text(text)])
     }
 
     #[must_use]
     pub fn assistant(text: impl Into<String>) -> Self {
+        Self::with_content(ChatRole::Assistant, vec![ChatContent::text(text)])
+    }
+
+    #[must_use]
+    pub fn with_content(role: ChatRole, content: Vec<ChatContent>) -> Self {
         Self {
-            role: ChatRole::Assistant,
-            text: text.into(),
+            role,
+            content,
             ..Self::default()
         }
     }
@@ -50,11 +68,23 @@ impl ChatMessage {
     ) -> Self {
         Self {
             role: ChatRole::Tool,
-            text: content.into(),
+            content: vec![ChatContent::text(content)],
             tool_call_id: Some(call_id.into()),
             tool_name: Some(name.into()),
             ..Self::default()
         }
+    }
+
+    /// The message's text parts concatenated; images are omitted.
+    #[must_use]
+    pub fn text(&self) -> String {
+        self.content
+            .iter()
+            .filter_map(|content| match content {
+                ChatContent::Text(text) => Some(text.as_str()),
+                ChatContent::Image { .. } => None,
+            })
+            .collect()
     }
 }
 

@@ -127,11 +127,7 @@ pub async fn run_nested_agent<P: ModelProvider>(
     let request = ModelRequest {
         model: model.to_owned(),
         system: persona.to_owned(),
-        messages: vec![ChatMessage {
-            role: crate::providers::ChatRole::User,
-            text: prompt.to_owned(),
-            ..Default::default()
-        }],
+        messages: vec![ChatMessage::user(prompt)],
         tools: Vec::new(),
     };
     let response = provider
