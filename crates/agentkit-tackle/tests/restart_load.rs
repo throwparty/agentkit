@@ -225,15 +225,27 @@ async fn restart_replays_history_with_stable_ids_and_a_usage_snapshot() {
             "replay: the first-session seed is missing: {replay_before:?}"
         ));
     }
-    if !replay_before.iter().any(|(kind, id, payload)| {
-        kind == "call"
+    let announced_call = replay_before.iter().find_map(|(kind, id, payload)| {
+        (kind == "call"
             && id.contains('-')
-            && payload.starts_with("Completed|")
-            && payload.contains("mcp.echo.echo")
-    }) {
-        fails.push(format!(
-            "replay: the completed tool call is missing: {replay_before:?}"
-        ));
+            && payload.starts_with("InProgress|")
+            && payload.contains("mcp.echo.echo"))
+        .then(|| id.clone())
+    });
+    match &announced_call {
+        None => fails.push(format!(
+            "replay: the tool-call announcement is missing: {replay_before:?}"
+        )),
+        Some(call_id) => {
+            let completed = replay_before.iter().any(|(kind, id, payload)| {
+                kind == "update" && id == call_id && payload == "Some(Completed)"
+            });
+            if !completed {
+                fails.push(format!(
+                    "replay: the completed tool-call update is missing: {replay_before:?}"
+                ));
+            }
+        }
     }
 
     if replay_before != replay_after {
