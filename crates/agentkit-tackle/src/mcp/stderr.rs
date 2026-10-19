@@ -3,6 +3,10 @@
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 
+/// The most bytes of one stderr line retained for the relay. A child that
+/// never emits a newline is drained, not buffered without bound.
+pub(super) const STDERR_RELAY_MAX_LINE_BYTES: usize = 8 * 1024;
+
 /// Stderr relay rate cap: at most this many lines per relay window.
 pub const STDERR_RELAY_MAX_LINES: usize = 10;
 
@@ -74,24 +78,59 @@ where
     S: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
-    let mut lines = BufReader::new(stderr).lines();
-    while let Some(line) = lines.next_line().await? {
-        match cap.admit(std::time::Instant::now()) {
-            Admission::Relay => {
-                out.write_all(format!("mcp[{server}] {line}\n").as_bytes())
-                    .await?;
+    let mut reader = BufReader::new(stderr);
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        let mut truncated = false;
+        let mut saw_bytes = false;
+        loop {
+            let available = reader.fill_buf().await?;
+            if available.is_empty() {
+                break;
             }
+            saw_bytes = true;
+            let newline = available.iter().position(|&byte| byte == b'\n');
+            let take = newline.unwrap_or(available.len());
+            if !truncated {
+                let remaining = STDERR_RELAY_MAX_LINE_BYTES.saturating_sub(line.len());
+                line.extend_from_slice(&available[..take.min(remaining)]);
+                truncated = take > remaining;
+            }
+            reader.consume(take + usize::from(newline.is_some()));
+            if newline.is_some() {
+                break;
+            }
+        }
+        if !saw_bytes {
+            return Ok(());
+        }
+        let text = String::from_utf8_lossy(&line);
+        match cap.admit(std::time::Instant::now()) {
+            Admission::Relay => write_relayed(out, server, &text, truncated).await?,
             Admission::WindowReset { dropped } => {
                 out.write_all(
                     format!("mcp[{server}] [rate cap: dropped {dropped} stderr lines]\n")
                         .as_bytes(),
                 )
                 .await?;
-                out.write_all(format!("mcp[{server}] {line}\n").as_bytes())
-                    .await?;
+                write_relayed(out, server, &text, truncated).await?;
             }
             Admission::Drop => {}
         }
     }
-    Ok(())
+}
+
+async fn write_relayed<W>(
+    out: &mut W,
+    server: &str,
+    line: &str,
+    truncated: bool,
+) -> std::io::Result<()>
+where
+    W: AsyncWrite + Unpin,
+{
+    let suffix = if truncated { " [truncated]" } else { "" };
+    out.write_all(format!("mcp[{server}] {line}{suffix}\n").as_bytes())
+        .await
 }
