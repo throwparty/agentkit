@@ -4,7 +4,7 @@ sidebar_position: 2
 
 # 🔧 Providers
 
-Tackle talks to any model endpoint exposing a compatible interface — an OpenAI-compatible server, the Anthropic Messages API, or a proxy standing in front of either. Each endpoint is a named block in your configuration; models are addressed as `endpoint-name/model`.
+Tackle talks to endpoints exposing the OpenAI chat-completions API — an OpenAI-compatible server, or a proxy standing in front of another API. Anthropic's Messages API and OpenAI's Responses API are not spoken directly; front them with a translating proxy (see [Examples](#examples)). Each endpoint is a named block in your configuration; models are addressed as `endpoint-name/model`.
 
 :::tip
 
