@@ -8,6 +8,7 @@
 
 use crate::mcp::{McpPool, ServerStatus};
 
+mod capabilities;
 pub mod client_tools;
 pub mod compaction;
 pub mod config_options;
@@ -17,59 +18,22 @@ pub mod http;
 pub mod script_loop;
 pub mod session_titles;
 
+pub use capabilities::UnstableFeature;
 pub use crate::state::{PendingProject, TackleState};
 use crate::state::{LEASE_TTL_SECS, LeaseHeartbeat, store_session_id, wire_session_id};
 
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
-    AgentCapabilities, AvailableCommandsUpdate, CloseSessionResponse, DeleteSessionResponse,
-    InitializeRequest, InitializeResponse, ListSessionsResponse, LoadSessionRequest,
-    LoadSessionResponse, McpCapabilities, NewSessionRequest, NewSessionResponse, Notice,
-    NoticeSeverity, PromptCapabilities, ResumeSessionRequest, ResumeSessionResponse,
-    SessionCapabilities, SessionCloseCapabilities, SessionDeleteCapabilities,
-    SessionForkCapabilities, SessionId, SessionInfo, SessionListCapabilities, SessionNotification,
-    SessionResumeCapabilities, SessionUpdate,
+    AvailableCommandsUpdate, CloseSessionResponse, DeleteSessionResponse, InitializeRequest,
+    InitializeResponse, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
+    NewSessionRequest, NewSessionResponse, Notice, NoticeSeverity, ResumeSessionRequest,
+    ResumeSessionResponse, SessionId, SessionInfo, SessionNotification,
+    SessionUpdate,
 };
 use agent_client_protocol::{Agent, Error, Stdio};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
-/// RFD-shaped features the client advertised support for. Unstable
-/// updates are sent only for features captured here; stable-variant
-/// fallbacks cover everything else.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum UnstableFeature {
-    Fork,
-    SessionCompaction,
-    SessionNotices,
-}
-
-impl UnstableFeature {
-    /// The `_meta` key advertising this feature, per the extensibility
-    /// conventions (feature names double as capability keys).
-    pub fn meta_key(&self) -> &'static str {
-        match self {
-            UnstableFeature::Fork => "unstable_session_fork",
-            UnstableFeature::SessionCompaction => "unstable_session_compaction",
-            UnstableFeature::SessionNotices => "unstable_session_notices",
-        }
-    }
-
-    /// The client-advertised subset of unstable features, read from
-    /// `clientCapabilities._meta`.
-    pub fn advertised_in(meta: &Option<agent_client_protocol::schema::v1::Meta>) -> BTreeSet<Self> {
-        let mut supported = BTreeSet::new();
-        for feature in [Self::Fork, Self::SessionCompaction, Self::SessionNotices] {
-            if meta
-                .as_ref()
-                .is_some_and(|meta| meta.contains_key(feature.meta_key()))
-            {
-                supported.insert(feature);
-            }
-        }
-        supported
-    }
-}
 
 
 /// Per-connection negotiation and client-surface state, captured or
@@ -158,40 +122,6 @@ impl ConnectionNegotiation {
 
 
 
-impl TackleState {
-    /// The capability map: the stable v1 surface plus the unstable
-    /// features tackle implements (advertised unconditionally — the gate
-    /// applies to *sending* RFD-shaped updates).
-    fn capabilities(&self) -> AgentCapabilities {
-        let mut unstable: agent_client_protocol::schema::v1::Meta =
-            agent_client_protocol::schema::v1::Meta::new();
-        for feature in [
-            UnstableFeature::Fork,
-            UnstableFeature::SessionCompaction,
-            UnstableFeature::SessionNotices,
-        ] {
-            unstable.insert(feature.meta_key().to_owned(), serde_json::json!({}));
-        }
-        AgentCapabilities::new()
-            .load_session(true)
-            .prompt_capabilities(
-                PromptCapabilities::new()
-                    .image(true)
-                    .audio(false)
-                    .embedded_context(true),
-            )
-            .mcp_capabilities(McpCapabilities::new().http(true).sse(false))
-            .session_capabilities(
-                SessionCapabilities::new()
-                    .list(Some(SessionListCapabilities::default()))
-                    .close(Some(SessionCloseCapabilities::default()))
-                    .resume(Some(SessionResumeCapabilities::default()))
-                    .delete(Some(SessionDeleteCapabilities::default()))
-                    .fork(Some(SessionForkCapabilities::default())),
-            )
-            .meta(unstable)
-    }
-}
 
 
 /// The `available_commands_update` payload for a session: the registry
