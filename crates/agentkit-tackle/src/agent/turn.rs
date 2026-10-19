@@ -7,7 +7,9 @@
 //! append tool results, request again) slot in without reshaping.
 
 use super::{TurnOutcome, TurnStop};
-use crate::providers::{ChatMessage, ChatRole, ModelError, ModelProvider, ModelRequest};
+use crate::providers::{
+    ChatContent, ChatMessage, ChatRole, ModelError, ModelProvider, ModelRequest,
+};
 use crate::store::{Role, SessionStore, StoreError, TurnId};
 
 #[derive(Debug, thiserror::Error)]
@@ -38,7 +40,7 @@ pub async fn run_turn<P: ModelProvider>(
     assistant_message_id: &str,
     model: &str,
     system: &str,
-    prompt_text: &str,
+    prompt: Vec<ChatContent>,
     prior: Vec<ChatMessage>,
     tools: Vec<crate::providers::ToolDefinition>,
     max_requests: u32,
@@ -55,7 +57,7 @@ pub async fn run_turn<P: ModelProvider>(
 ) -> Result<TurnOutcome, TurnError> {
     let mut request_count = 0u32;
     let mut history = prior;
-    history.push(ChatMessage::user(prompt_text.to_owned()));
+    history.push(ChatMessage::with_content(ChatRole::User, prompt));
     // The running usage delta across the turn's requests. A turn issues one
     // request per tool-call round, and each is billed, so the stored delta
     // is their sum — not the last request's alone.
@@ -230,9 +232,14 @@ pub async fn run_turn<P: ModelProvider>(
 
         // Record the assistant's tool calls, execute each, record its
         // result, and request the model again.
+        let content = if response.text.is_empty() {
+            Vec::new()
+        } else {
+            vec![ChatContent::text(response.text.clone())]
+        };
         history.push(ChatMessage {
             role: ChatRole::Assistant,
-            text: response.text.clone(),
+            content,
             tool_calls: response.tool_calls.clone(),
             ..Default::default()
         });
@@ -290,14 +297,62 @@ fn is_context_overflow(err: &ModelError) -> bool {
 /// resource contents inlined. A resource link — a reference the client
 /// sent without content, e.g. an oversized file or a client that did not
 /// negotiate `embeddedContext` — degrades to its name and URI so the
-/// reference is never silently dropped. Image and audio blocks are
-/// stored faithfully but do not reach the text seam in v1.
+/// reference is never silently dropped. Used where only text can be sent
+/// (compaction and titling); the model prompt uses [`prompt_parts`].
 pub fn prompt_text(blocks: &[serde_json::Value]) -> String {
     blocks
         .iter()
         .filter_map(prompt_block_text)
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// The model prompt in block order: text, embedded resources, resource
+/// links, and images. Image data becomes a `data:` URL carrying the MIME
+/// type exactly as the client declared it; an image with no data may
+/// reference an HTTP(S) or `data:` URI. Any other image is rejected rather
+/// than silently dropped.
+pub fn prompt_parts(blocks: &[serde_json::Value]) -> Result<Vec<ChatContent>, String> {
+    let mut parts = Vec::new();
+    for block in blocks {
+        if block.get("type").and_then(serde_json::Value::as_str) == Some("image") {
+            parts.push(ChatContent::Image {
+                url: image_url(block)?,
+            });
+        } else if let Some(text) = prompt_block_text(block) {
+            parts.push(ChatContent::text(text));
+        }
+    }
+    Ok(parts)
+}
+
+/// Resolves an ACP image block to a URL the provider can fetch: its base64
+/// data with the declared MIME type, or its own URI when no data is set.
+fn image_url(block: &serde_json::Value) -> Result<String, String> {
+    if let Some(data) = block
+        .get("data")
+        .and_then(serde_json::Value::as_str)
+        .filter(|data| !data.is_empty())
+    {
+        let mime = block
+            .get("mimeType")
+            .and_then(serde_json::Value::as_str)
+            .filter(|mime| !mime.is_empty())
+            .ok_or_else(|| "image content has no media type".to_owned())?;
+        return Ok(format!("data:{mime};base64,{data}"));
+    }
+
+    let uri = block
+        .get("uri")
+        .and_then(serde_json::Value::as_str)
+        .filter(|uri| !uri.is_empty());
+    match uri {
+        Some(uri) if uri.starts_with("http://") => Ok(uri.to_owned()),
+        Some(uri) if uri.starts_with("https://") => Ok(uri.to_owned()),
+        Some(uri) if uri.starts_with("data:") => Ok(uri.to_owned()),
+        Some(_) => Err("image content has an unsupported URI scheme".to_owned()),
+        None => Err("image content has no data or URI".to_owned()),
+    }
 }
 
 /// One content block's contribution to the model prompt text.
@@ -337,7 +392,8 @@ fn prompt_block_text(block: &serde_json::Value) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::prompt_text;
+    use super::{prompt_parts, prompt_text};
+    use crate::providers::ChatContent;
 
     #[test]
     fn text_blocks_join() {
@@ -378,11 +434,63 @@ mod tests {
     }
 
     #[test]
-    fn image_blocks_contribute_nothing() {
+    fn prompt_text_omits_images() {
         let blocks = vec![
             serde_json::json!({ "type": "text", "text": "look" }),
             serde_json::json!({ "type": "image", "data": "AAAA", "mimeType": "image/png" }),
         ];
         assert_eq!(prompt_text(&blocks), "look");
+    }
+
+    #[test]
+    fn prompt_parts_preserve_image_order_and_declared_mime() {
+        let blocks = vec![
+            serde_json::json!({ "type": "text", "text": "before" }),
+            serde_json::json!({
+                "type": "image",
+                "data": "AAAA",
+                "mimeType": "image/x-unknown"
+            }),
+            serde_json::json!({ "type": "text", "text": "after" }),
+        ];
+        assert_eq!(
+            prompt_parts(&blocks).unwrap(),
+            vec![
+                ChatContent::text("before"),
+                ChatContent::Image {
+                    url: "data:image/x-unknown;base64,AAAA".to_owned()
+                },
+                ChatContent::text("after"),
+            ]
+        );
+    }
+
+    #[test]
+    fn prompt_parts_accept_a_remote_image_uri() {
+        let blocks = vec![serde_json::json!({
+            "type": "image",
+            "data": "",
+            "mimeType": "image/png",
+            "uri": "https://example.test/a.png"
+        })];
+        assert_eq!(
+            prompt_parts(&blocks).unwrap(),
+            vec![ChatContent::Image {
+                url: "https://example.test/a.png".to_owned()
+            }]
+        );
+    }
+
+    #[test]
+    fn prompt_parts_reject_an_image_with_no_data_or_uri() {
+        let blocks = vec![serde_json::json!({
+            "type": "image",
+            "data": "",
+            "mimeType": "image/png"
+        })];
+        assert_eq!(
+            prompt_parts(&blocks).unwrap_err(),
+            "image content has no data or URI"
+        );
     }
 }

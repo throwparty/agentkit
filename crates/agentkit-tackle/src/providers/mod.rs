@@ -13,6 +13,6 @@ pub mod openai_chat_completions;
 #[cfg(test)]
 pub(crate) use types::ignore_tool_call;
 pub use types::{
-    ChatMessage, ChatRole, ModelError, ModelProvider, ModelRequest, ModelResponse, ModelToolCall,
-    ModelUsage, ToolCallOutcome, ToolDefinition,
+    ChatContent, ChatMessage, ChatRole, ModelError, ModelProvider, ModelRequest, ModelResponse,
+    ModelToolCall, ModelUsage, ToolCallOutcome, ToolDefinition,
 };

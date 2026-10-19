@@ -126,11 +126,7 @@ async fn run_script_turn(
         .ok_or(HostError::Invalid("script turn has no head"))?;
     let assembled = state.db.assemble_context(session).await?;
     let mut messages = crate::agent::compaction::prior_messages(&assembled, &turn_id);
-    messages.push(crate::providers::ChatMessage {
-        role: crate::providers::ChatRole::User,
-        text: prompt.to_owned(),
-        ..Default::default()
-    });
+    messages.push(crate::providers::ChatMessage::user(prompt));
 
     let response = provider
         .stream_completion(

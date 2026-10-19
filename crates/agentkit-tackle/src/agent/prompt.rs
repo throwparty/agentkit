@@ -7,10 +7,10 @@ use crate::agent::sink::TurnSink;
 use crate::agent::tool_call::{ToolCallContext, policy_script_sources, run_model_tool_call};
 use crate::agent::turn::TurnError;
 use crate::agent::{TurnOutcome, TurnStop, compaction, titling};
-use crate::content::{prompt_text_of, timestamp};
+use crate::content::{prompt_parts_of, timestamp};
 use crate::invokables::Registry;
 use crate::providers::openai_chat_completions::{RigProvider, provider_for};
-use crate::providers::{ChatMessage, ModelToolCall, ToolCallOutcome, ToolDefinition};
+use crate::providers::{ChatContent, ChatMessage, ModelToolCall, ToolCallOutcome, ToolDefinition};
 use crate::state::{LeaseHeartbeat, TackleState};
 use crate::store::{Session, SessionId, Turn, TurnId};
 use std::sync::Arc;
@@ -23,7 +23,7 @@ struct LoopInputs {
     provider: RigProvider,
     tools: Vec<ToolDefinition>,
     system: String,
-    prompt_text: String,
+    prompt: Vec<ChatContent>,
     prior: Vec<ChatMessage>,
     context_length_note: String,
 }
@@ -60,7 +60,7 @@ pub(crate) async fn run_prompt_turn(
         &runtime.client_tools,
     )
     .await;
-    let prompt_text = expand_prompt(&first_text, &blocks_json, &registry);
+    let prompt = expand_prompt(&first_text, &blocks_json, &registry)?;
 
     let assembled = state
         .db
@@ -76,7 +76,7 @@ pub(crate) async fn run_prompt_turn(
         provider,
         tools,
         system,
-        prompt_text,
+        prompt,
         prior,
         context_length_note: context_overflow_note(&state),
     };
@@ -176,19 +176,29 @@ async fn build_registry_and_system(
 
 /// Expands a user-typed `/name` prompt into the model prompt; the stored
 /// message stays literal. A failed expansion falls back to the literal
-/// prompt text.
-fn expand_prompt(first_text: &str, blocks_json: &str, registry: &Registry) -> String {
-    match first_text.strip_prefix('/') {
-        Some(rest) => {
-            let mut parts = rest.splitn(2, char::is_whitespace);
-            let name = parts.next().unwrap_or("");
-            let args = parts.next().unwrap_or("").trim();
-            registry
-                .expand_user(name, args)
-                .unwrap_or_else(|_| prompt_text_of(blocks_json))
-        }
-        None => prompt_text_of(blocks_json),
-    }
+/// prompt. Images survive expansion, appended after the command's text.
+fn expand_prompt(
+    first_text: &str,
+    blocks_json: &str,
+    registry: &Registry,
+) -> Result<Vec<ChatContent>, String> {
+    let parts = prompt_parts_of(blocks_json)?;
+    let Some(rest) = first_text.strip_prefix('/') else {
+        return Ok(parts);
+    };
+    let mut words = rest.splitn(2, char::is_whitespace);
+    let name = words.next().unwrap_or("");
+    let args = words.next().unwrap_or("").trim();
+    let Ok(expanded) = registry.expand_user(name, args) else {
+        return Ok(parts);
+    };
+    let mut prompt = vec![ChatContent::text(expanded)];
+    prompt.extend(
+        parts
+            .into_iter()
+            .filter(|part| matches!(part, ChatContent::Image { .. })),
+    );
+    Ok(prompt)
 }
 
 /// The context-length failure note: actionable, naming the configured
@@ -231,7 +241,7 @@ async fn run_turn_loop(
         provider,
         tools,
         system,
-        prompt_text,
+        prompt,
         prior,
         context_length_note,
     } = inputs;
@@ -259,7 +269,7 @@ async fn run_turn_loop(
         &assistant_id,
         model_ref,
         &system,
-        &prompt_text,
+        prompt,
         prior,
         tools,
         max_requests,
