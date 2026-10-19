@@ -201,7 +201,7 @@ async fn model_switch_is_effective_the_following_turn() {
 
 #[test]
 fn window_validation_and_the_context_note() {
-    use agentkit_tackle::acp_v1::config_options::context_window;
+    use agentkit_tackle::agent::config_options::context_window;
 
     // The bundled snapshot's windows back the validation.
     assert_eq!(context_window("models/MiniMax-M2"), Some(204_800));
