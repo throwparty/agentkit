@@ -1,13 +1,13 @@
 //! The `SessionStore` facade: the SQLite backend and the test in-memory backend behind one type, and the operations over them.
 
+#[cfg(test)]
+use super::memory;
 use super::model::*;
 use super::sqlite::{SqliteAssembledRow, SqliteSession, restrict_permissions};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
 use std::path::Path;
 #[cfg(test)]
 use std::sync::{Mutex, MutexGuard};
-#[cfg(test)]
-use super::memory;
 
 /// The session store: SQLite or in-memory backend, behind one type.
 pub struct SessionStore {
@@ -706,4 +706,3 @@ impl SessionStore {
         }
     }
 }
-

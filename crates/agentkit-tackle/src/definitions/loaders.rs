@@ -1,6 +1,6 @@
 //! Definition loading: discovery across the user and project layers, marker-dispatched frontmatter parsing, and built-in registration.
 
-use super::types::{Definition, Definitions, DefinitionError};
+use super::types::{Definition, DefinitionError, Definitions};
 use serde::de::DeserializeOwned;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};

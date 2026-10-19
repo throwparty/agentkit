@@ -6,8 +6,8 @@ use crate::models::db::ModelDb;
 use crate::provider::registry::ProviderRegistry;
 use crate::provider::router::{RoutingError, select_provider};
 use crate::proxy::forwarder;
-use crate::server::middleware::RequestId;
 use crate::proxy::mutation::MutationSet;
+use crate::server::middleware::RequestId;
 use crate::session::sqlite::SqliteSessionManager;
 use crate::session::{RoutingEvent, SessionAffinity};
 use axum::extract::{Query, State};
@@ -259,22 +259,22 @@ async fn proxy_handler(
             }
             None => {
                 let fallback = crate::providers::pack_for_provider(configured_provider);
-                    forwarder::forward_request(
-                        forwarder::ForwardRequest {
-                            method: axum::http::Method::POST,
-                            headers: headers.clone(),
-                            body: body.clone(),
-                            credential: &credential,
-                            billing: &provider_cfg.billing,
-                            base_url: &configured_provider.base_url,
-                            provider_identity: &selection.identity,
-                            session_id: session_id.as_deref(),
-                            mutations,
-                            surface: surface.clone(),
-                            model: &model,
-                        },
-                        &*fallback.http,
-                    )
+                forwarder::forward_request(
+                    forwarder::ForwardRequest {
+                        method: axum::http::Method::POST,
+                        headers: headers.clone(),
+                        body: body.clone(),
+                        credential: &credential,
+                        billing: &provider_cfg.billing,
+                        base_url: &configured_provider.base_url,
+                        provider_identity: &selection.identity,
+                        session_id: session_id.as_deref(),
+                        mutations,
+                        surface: surface.clone(),
+                        model: &model,
+                    },
+                    &*fallback.http,
+                )
                 .await
             }
         };

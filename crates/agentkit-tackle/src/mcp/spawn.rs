@@ -86,12 +86,12 @@ fn resolve_env_value(
             key: key.to_owned(),
         });
     }
-    crate::credentials::resolve_credential_value(credential_helper, identity).map_err(
-        |source| EnvValueError::Credential {
+    crate::credentials::resolve_credential_value(credential_helper, identity).map_err(|source| {
+        EnvValueError::Credential {
             key: key.to_owned(),
             source,
-        },
-    )
+        }
+    })
 }
 
 /// Applies spawn hygiene to a stdio server spawn: explicit argv (no

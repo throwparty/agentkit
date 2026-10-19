@@ -1,11 +1,9 @@
 ---
-
 ## status: accepted created: 2026-06-14 updated: 2026-06-14 author: adrian decision: accepted
 
 # Tasks: Switchboard — Cost-Aware Model Provider Proxy
 
 Each task is an independently testable unit. Tasks can be implemented in any order except where noted. No task depends on the HTTP server being complete — each has its own test harness.
-
 ---
 
 ## T1: Config Types and TOML Loading

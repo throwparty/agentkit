@@ -4,7 +4,9 @@ use super::client_tools;
 use super::negotiation::ConnectionNegotiation;
 use crate::mcp::{McpPool, ServerStatus};
 use crate::state::TackleState;
-use agent_client_protocol::schema::v1::{AvailableCommandsUpdate, Notice, NoticeSeverity, SessionUpdate};
+use agent_client_protocol::schema::v1::{
+    AvailableCommandsUpdate, Notice, NoticeSeverity, SessionUpdate,
+};
 
 /// The `available_commands_update` payload for a session: the registry
 /// view over the loaded definitions — the `!` prefix command plus every
@@ -161,7 +163,6 @@ pub(super) async fn mcp_status_notice(negotiation: &ConnectionNegotiation) -> Op
     )
 }
 
-
 /// One server's line in the `/mcp status` report. A disabled server
 /// reads as disabled and carries no connection state: disabling closes
 /// the connection, so a status alongside it would be noise.
@@ -184,7 +185,10 @@ pub(super) fn mcp_status_line(name: &str, status: &ServerStatus, enabled: bool) 
 /// one from being back. Enabling reconnects from the config held at
 /// registration; a failure to reconnect answers with the reason rather
 /// than leaving the user guessing.
-pub(super) async fn mcp_command(negotiation: &ConnectionNegotiation, first_text: &str) -> Option<String> {
+pub(super) async fn mcp_command(
+    negotiation: &ConnectionNegotiation,
+    first_text: &str,
+) -> Option<String> {
     let mut parts = first_text.split_whitespace();
     parts.next(); // the `/mcp` command itself
     let (subcommand, argument) = match parts.next() {
@@ -237,7 +241,10 @@ pub(super) async fn mcp_command(negotiation: &ConnectionNegotiation, first_text:
 /// the client to have advertised the capability; a toggle takes effect
 /// the following turn (the registry re-reads it per turn). Anything not
 /// matching the shape yields usage, never a silent no-op.
-pub(super) fn editor_command(negotiation: &ConnectionNegotiation, first_text: &str) -> Option<String> {
+pub(super) fn editor_command(
+    negotiation: &ConnectionNegotiation,
+    first_text: &str,
+) -> Option<String> {
     const USAGE: &str = "Usage: /editor <fs|terminal> <true|false>";
     let mut parts = first_text.split_whitespace();
     parts.next(); // the `/editor` command itself
@@ -261,4 +268,3 @@ pub(super) fn editor_command(negotiation: &ConnectionNegotiation, first_text: &s
         if enabled { "enabled" } else { "disabled" }
     ))
 }
-

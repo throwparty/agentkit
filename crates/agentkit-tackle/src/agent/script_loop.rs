@@ -6,13 +6,13 @@
 //! the model loop and the [`CompletionSink`] the awaiting script polls,
 //! so the completion a script receives is the model's real answer.
 
-use crate::state::TackleState;
 use crate::agent::config_options;
 use crate::providers::ModelProvider;
 use crate::scripts::host::{
     Completion, CompletionSink, HostError, NoticeSink, PromptDispatcher, SessionAccess,
     StoreAccess, block_on,
 };
+use crate::state::TackleState;
 use crate::store::SessionId;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -114,8 +114,9 @@ async fn run_script_turn(
                 "no model configured for the script turn",
             ))?,
     };
-    let provider = crate::providers::openai_chat_completions::provider_for(&model_ref, &state.config().config)
-        .map_err(|err| HostError::Model(err.to_string()))?;
+    let provider =
+        crate::providers::openai_chat_completions::provider_for(&model_ref, &state.config().config)
+            .map_err(|err| HostError::Model(err.to_string()))?;
 
     // The prompt's own turn carries the instruction; the rest of the
     // chain (the fork's lineage) is the context to summarise or title.

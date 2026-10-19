@@ -18,10 +18,13 @@ Each skill is a single `SKILL.md` file with YAML frontmatter and markdown body.
 
 ```yaml
 ---
+
 name: <short-name>
 description: <one-line description of when to use>
+
 ---
-```
+
+````
 
 Required fields:
 
@@ -47,7 +50,7 @@ Write instructions, conventions, and examples. Use:
 - Code blocks with language annotations
 - Bullet lists for conventions
 - Prefer concrete examples over abstract rules
-```
+````
 
 ## Best practices
 

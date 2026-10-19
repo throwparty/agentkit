@@ -5,7 +5,7 @@ Normative terminology and conventions for AgentKit components. Tackle (see `adrs
 ## Terminology
 
 - **Message** — a member of a conversation submitted by a participant with a given role. Tool calls, tool results, user messages, and model messages are all messages. The smallest stored unit of a session.
-- **Turn** — an *interaction turn* is the message sequence beginning with a user message and ending before the next user message: everything the agent does in response to one client prompt. The unit of persistence, context assembly, and forking. Turns form a DAG: each turn has at most one parent, and a turn may have any number of children.
+- **Turn** — an _interaction turn_ is the message sequence beginning with a user message and ending before the next user message: everything the agent does in response to one client prompt. The unit of persistence, context assembly, and forking. Turns form a DAG: each turn has at most one parent, and a turn may have any number of children.
 - **Harness turn** — a turn authored by the harness rather than an interaction: **seed turns** and **compaction turns**. Harness turns are never revert points.
 - **Revert point** — a user-authored message, or the position before it. Users revert to something they sent or a revision of it, and retry the turn that followed it. Non-user messages are never revert points.
 - **Session** — a named view onto the turn DAG with a head pointer; the unit of client interaction.

@@ -43,7 +43,10 @@ pub(crate) async fn run_direct_invocation(
                 ),
                 true,
             ),
-            Ok(arguments) => match executor.execute(&session_id, &input.invokable, &arguments).await {
+            Ok(arguments) => match executor
+                .execute(&session_id, &input.invokable, &arguments)
+                .await
+            {
                 Ok(executed) => {
                     tracker.track(&session_id, executed.created, executed.finished);
                     (executed.content, false)

@@ -163,5 +163,8 @@ pub fn server_args() -> Vec<String> {
 fn mcp_server_binary() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir.parent().expect("workspace parent");
-    workspace_root.join("target").join("debug").join("mcp-server")
+    workspace_root
+        .join("target")
+        .join("debug")
+        .join("mcp-server")
 }

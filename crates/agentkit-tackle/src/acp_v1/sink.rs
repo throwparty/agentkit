@@ -6,10 +6,10 @@ use crate::invokables::titles::ToolKind;
 use crate::state::wire_session_id;
 use crate::store::SessionId;
 use agent_client_protocol::schema::v1::{
-    ContentBlock, ContentChunk, MessageId, SessionInfoUpdate,
-    SessionNotification, SessionUpdate, TextContent, ToolCall as WireToolCall, ToolCallContent,
-    ToolCallId, ToolCallStatus as WireStatus, ToolCallUpdate as WireToolCallUpdate,
-    ToolCallUpdateFields, UsageUpdate,
+    ContentBlock, ContentChunk, MessageId, SessionInfoUpdate, SessionNotification, SessionUpdate,
+    TextContent, ToolCall as WireToolCall, ToolCallContent, ToolCallId,
+    ToolCallStatus as WireStatus, ToolCallUpdate as WireToolCallUpdate, ToolCallUpdateFields,
+    UsageUpdate,
 };
 use agent_client_protocol::{Client, ConnectionTo};
 

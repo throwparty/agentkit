@@ -84,4 +84,3 @@ pub(super) fn replay_updates(
 fn notification(session_id: &SessionId, update: SessionUpdate) -> SessionNotification {
     SessionNotification::new(session_id.clone(), update)
 }
-

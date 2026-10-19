@@ -1,13 +1,12 @@
 # Switchboard: Provider Request Mutations
 
-**Status:** implemented  **Created:** 2026-10-15  **Author:** adrian
+**Status:** implemented **Created:** 2026-10-15 **Author:** adrian
 
 The switchboard has grown three ad-hoc mechanisms for bending requests to a provider's quirks: a per-provider headers table, a per-provider user_agent field, and a hardcoded rewrite in routes.rs that injects tools and sets tool_choice to none on every openai-chat-completions request. The first two are static and cannot express dynamic values. The third is unconditional and therefore applied to every provider whether or not it is wanted. All three were added to work around a specific provider's requirements.
 
 This ADR replaces them with one formal mechanism: sandboxed Rhai mutation scripts attached to a provider and executed on the assembled outbound request before credentials are injected. Scripts may set or remove headers and modify the parsed JSON request body, covering both the header and the tools-emulation cases. Provider-specific workarounds become user-supplied scripts maintained by the community at users' own risk and the switchboard ships none.
 
 The sandboxed Rhai engine is packaged as a reusable library crate. Tackle will use the same library.
-
 
 ## Problem
 
@@ -28,7 +27,6 @@ Switchboard cannot mutate outbound provider requests in a general or dynamic way
 - A mutation package registry or installer (future consideration)
 - Shipping or bundling community mutation scripts
 - Hot-reloading scripts at runtime
-
 
 ## Functional Requirements
 
@@ -217,34 +215,39 @@ cargo clippy --all-targets -- -D warnings is clean and cargo test passes
 When the request body is not JSON the body field is () and a script that mutates it fails
 
 **Slug:** `non-json-body`
+
 ### EC-002: Missing Function
 
 A script without a global mutate function is rejected at startup
 
 **Slug:** `missing-function`
+
 ### EC-003: Invalid Header
 
 A script that produces an invalid header name or value fails the request
 
 **Slug:** `invalid-header`
+
 ### EC-004: Empty Mutation List
 
 A provider with an empty mutation list behaves exactly as before
 
 **Slug:** `empty-mutation-list`
+
 ### EC-005: Non-Map Return
 
 A script that returns a non-map value fails the request
 
 **Slug:** `non-map-return`
+
 ### EC-006: No Session
 
 session_id is () when the client sends no X-Session-Id header
 
 **Slug:** `no-session-id`
+
 ### EC-007: Shared Script
 
 The same script path may be referenced by multiple providers and is compiled once
 
 **Slug:** `shared-script`
-

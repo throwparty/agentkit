@@ -12,11 +12,11 @@
 //! prefix — assembled separately from the DAG, so compaction can never
 //! elide them.
 
-use crate::state::TackleState;
 use crate::agent::script_loop;
 pub use crate::scripts::host::StoreAccess;
 use crate::scripts::host::{BehaviourHost, SessionAccess, block_on};
 use crate::scripts::{behaviour_engine, host::register_host_api};
+use crate::state::TackleState;
 use crate::store::{SessionId, TurnId, TurnKind};
 use std::sync::Arc;
 
@@ -33,7 +33,10 @@ pub fn wrap_summary(summary: &str) -> String {
 
 /// Whether the user-typed first token resolves to a compaction-tagged
 /// prompt: those are intercepted instead of becoming model turns.
-pub fn is_compaction_command(definitions: &crate::definitions::Definitions, first_token: &str) -> bool {
+pub fn is_compaction_command(
+    definitions: &crate::definitions::Definitions,
+    first_token: &str,
+) -> bool {
     let Some(name) = first_token.strip_prefix('/') else {
         return false;
     };
@@ -190,7 +193,11 @@ fn event_sources(state: &TackleState, event: &str) -> Vec<(String, String)> {
         .filter(|(_, script)| {
             script.enabled && script.events.iter().any(|registered| registered == event)
         })
-        .filter_map(|(name, _)| sources.get(name).map(|source| (name.clone(), source.clone())))
+        .filter_map(|(name, _)| {
+            sources
+                .get(name)
+                .map(|source| (name.clone(), source.clone()))
+        })
         .collect()
 }
 

@@ -28,6 +28,4 @@ mod tests;
 pub use grants::GrantStore;
 pub use pipeline::{Assessment, ConsentViaPermission, PermissionPipeline, Verdict};
 pub use policy::{Decision, PolicyRequest, PolicyScript, PolicyVerdict};
-pub use request::{
-    PermissionChoice, PermissionRequest, PermissionRequester, ask_options,
-};
+pub use request::{PermissionChoice, PermissionRequest, PermissionRequester, ask_options};

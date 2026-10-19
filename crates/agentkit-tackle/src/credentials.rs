@@ -44,18 +44,13 @@ pub enum CredentialError {
 /// protocol with [`CREDENTIAL_COMPONENT`] as the component. The helper's
 /// stdout is JSON carrying `access_token`.
 pub fn resolve_credential_value(helper: &str, identity: &str) -> Result<String, CredentialError> {
-    let output = agentkit_credentials::consumer::run(
-        helper,
-        "get",
-        CREDENTIAL_COMPONENT,
-        identity,
-        None,
-    )
-    .map_err(|reason| CredentialError::Helper {
-        helper: helper.to_owned(),
-        identity: identity.to_owned(),
-        reason,
-    })?;
+    let output =
+        agentkit_credentials::consumer::run(helper, "get", CREDENTIAL_COMPONENT, identity, None)
+            .map_err(|reason| CredentialError::Helper {
+                helper: helper.to_owned(),
+                identity: identity.to_owned(),
+                reason,
+            })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
         let reason = if stderr.is_empty() {

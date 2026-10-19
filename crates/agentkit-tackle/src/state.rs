@@ -143,7 +143,10 @@ impl TackleState {
     /// [`Self::script_sources`]). A cheap `Arc` clone.
     pub fn script_sources(&self) -> Arc<BTreeMap<String, String>> {
         Arc::clone(
-            &self.script_sources.read().expect("script sources lock poisoned"),
+            &self
+                .script_sources
+                .read()
+                .expect("script sources lock poisoned"),
         )
     }
 
@@ -223,11 +226,12 @@ impl TackleState {
         // Resolve the approved project scripts now, once, alongside the
         // configuration they belong to (loaded once, no hot reload).
         let sources = crate::config::resolve_script_sources(&loaded);
-        *self.script_sources.write().expect("script sources lock poisoned") =
-            Arc::new(sources);
+        *self
+            .script_sources
+            .write()
+            .expect("script sources lock poisoned") = Arc::new(sources);
         *self.config.write().expect("config lock poisoned") = Arc::new(loaded);
-        *self.definitions.write().expect("definitions lock poisoned") =
-            Arc::new(definitions);
+        *self.definitions.write().expect("definitions lock poisoned") = Arc::new(definitions);
 
         // Connect the approved project servers into this connection's
         // pool (built from the user layer when the connection opened).

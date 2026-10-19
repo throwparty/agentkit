@@ -1,8 +1,6 @@
 //! Layered configuration loading: merge precedence, trust gating, project-field rejection, and script-source resolution.
 
-use super::schema::{
-    Config, ConfigError, Loaded, ScriptConfig,
-};
+use super::schema::{Config, ConfigError, Loaded, ScriptConfig};
 use super::trust;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -206,8 +204,7 @@ pub fn resolve_script_sources(config: &Loaded) -> BTreeMap<String, String> {
         .iter()
         .filter(|(_, script)| script.enabled)
         .filter_map(|(name, script)| {
-            resolve_script_source(name, &script.file, user_dir)
-                .map(|source| (name.clone(), source))
+            resolve_script_source(name, &script.file, user_dir).map(|source| (name.clone(), source))
         })
         .collect()
 }
@@ -266,4 +263,3 @@ fn reject_project_security_fields(project: &Config, path: &Path) -> Result<(), C
 }
 
 // --- Schema (the types below are the source of truth for the TOML shape) ---
-

@@ -6,11 +6,11 @@ sidebar_position: 2
 
 The [OpenCode Zen](https://opencode.ai/docs/zen/) gateway serves several model families across three wire formats under a single base URL and API key. Because a Switchboard provider is pinned to one `api_surface` per entry, Zen is configured as three entries sharing the same `base_url` and credential:
 
-| Identity | `api_surface` | Model families |
-| --- | --- | --- |
-| `zen_chat` | `openai-chat-completions` | DeepSeek, GLM, Kimi, MiniMax, and Zen's `-free` models |
-| `zen_responses` | `openai-responses` | GPT, Grok, Muse |
-| `zen_messages` | `anthropic-messages` | Claude, Qwen Plus |
+| Identity        | `api_surface`             | Model families                                         |
+| --------------- | ------------------------- | ------------------------------------------------------ |
+| `zen_chat`      | `openai-chat-completions` | DeepSeek, GLM, Kimi, MiniMax, and Zen's `-free` models |
+| `zen_responses` | `openai-responses`        | GPT, Grok, Muse                                        |
+| `zen_messages`  | `anthropic-messages`      | Claude, Qwen Plus                                      |
 
 ```toml
 [[providers]]

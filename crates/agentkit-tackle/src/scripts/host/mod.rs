@@ -13,10 +13,10 @@ pub use api::{
     Completion, CompletionSink, ContextUsage, HistoryRow, HostError, NoticeSink, PromptDispatcher,
     SessionAccess, block_on, estimate_tokens,
 };
+#[cfg(test)]
+pub use api::{LoopPendingCompletions, LoopPendingDispatcher};
+pub use behaviour::{BehaviourHost, register_host_api};
 pub use budgets::{
     HISTORY_MAX_BYTES, HISTORY_MAX_ROWS, MAX_LIVE_EPHEMERAL_FORKS, MAX_PROMPTS_PER_SCRIPT,
     MAX_PROMPTS_PER_SESSION, MAX_PROMPTS_PER_TURN, PARENT_COST_CAP_USD,
 };
-pub use behaviour::{BehaviourHost, register_host_api};
-#[cfg(test)]
-pub use api::{LoopPendingCompletions, LoopPendingDispatcher};

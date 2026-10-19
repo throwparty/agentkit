@@ -185,8 +185,9 @@ mod tests {
             _request: ModelRequest,
             _on_text_delta: &mut (dyn FnMut(&str) + Send),
             _on_thought_delta: &mut (dyn FnMut(&str) + Send),
-        ) -> impl Future<Output = Result<crate::providers::ModelResponse, crate::providers::ModelError>> + Send
-        {
+        ) -> impl Future<
+            Output = Result<crate::providers::ModelResponse, crate::providers::ModelError>,
+        > + Send {
             std::future::ready(Ok(crate::providers::ModelResponse {
                 text: "nested answer".to_owned(),
                 tool_calls: Vec::new(),
