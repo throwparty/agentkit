@@ -17,13 +17,7 @@ mod sink;
 mod replay;
 mod negotiation;
 pub mod client_tools;
-pub mod compaction;
-pub mod config_options;
-pub mod first_run;
-pub mod fork;
 pub mod http;
-pub mod script_loop;
-pub mod session_titles;
 
 pub use capabilities::UnstableFeature;
 pub use negotiation::ConnectionNegotiation;
@@ -32,6 +26,8 @@ pub(crate) use server::run_agent_over;
 pub(crate) use sink::{ConnectionTurnSink, wire_kind};
 pub use server::run_stdio;
 use replay::timestamp;
+use crate::agent::config_options::context_window;
+use crate::agent::{compaction, config_options, fork, script_loop, titling};
 pub use crate::state::{PendingProject, TackleState};
 use crate::content::prompt_text_of;
 use crate::state::{LeaseHeartbeat, store_session_id};
@@ -325,7 +321,7 @@ pub(super) async fn run_prompt_turn(
     );
 
     // Titling: detached, silent, only for untitled sessions.
-    session_titles::fire_title_trigger_detached(
+    titling::fire_title_trigger_detached(
         state_for_prompt.clone(),
         session_id.clone(),
         size,
@@ -718,25 +714,6 @@ async fn run_agent_invocation(
     Ok(result.final_message)
 }
 
-
-/// The model's context window from the bundled models.dev snapshot;
-/// None when the model is unknown (no usage_update is sent then — the
-/// RFD's guidance for unknowable window sizes).
-pub(crate) fn context_window(model_ref: &str) -> Option<u64> {
-    let bare = model_ref.split_once('/')?.1;
-    let snapshot = agentkit_models::bundled_snapshot_parsed();
-    snapshot.models.get(bare)?.context_window.map(u64::from)
-}
-
-/// The session's selected actor: created in session metadata, falling
-/// back to `[defaults].actor`, then the built-in "default".
-pub(crate) fn session_actor(session: &crate::store::Session, fallback: Option<&str>) -> String {
-    serde_json::from_str::<serde_json::Value>(&session.metadata)
-        .ok()
-        .and_then(|meta| meta.get("actor")?.as_str().map(str::to_owned))
-        .or_else(|| fallback.map(str::to_owned))
-        .unwrap_or_else(|| "default".into())
-}
 
 
 #[cfg(test)]

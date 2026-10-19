@@ -12,8 +12,8 @@
 //! prefix — assembled separately from the DAG, so compaction can never
 //! elide them.
 
-use crate::acp_v1::TackleState;
-use crate::acp_v1::script_loop;
+use crate::state::TackleState;
+use crate::agent::script_loop;
 pub use crate::scripts::host::StoreAccess;
 use crate::scripts::host::{BehaviourHost, SessionAccess, block_on};
 use crate::scripts::{behaviour_engine, host::register_host_api};

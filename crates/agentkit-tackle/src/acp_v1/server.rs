@@ -6,16 +6,18 @@ use super::commands::{
     available_commands_update, connect_config_servers, connect_forwarded_servers, editor_command,
     mcp_command, mcp_status_notice,
 };
-use super::config_options;
-use super::context_window;
-use super::fork;
+use crate::agent::config_options;
+use crate::agent::config_options::context_window;
+use crate::agent::fork;
 use super::fork_access;
 use super::negotiation::ConnectionNegotiation;
 use super::notices::connection_notices;
 use super::permission::AcpPermissionRequester;
 use super::replay::{replay_updates, timestamp};
-use super::{compaction, first_run, script_loop};
-use super::{run_direct_invocation, run_prompt_turn, session_actor};
+use crate::agent::seed as first_run;
+use crate::agent::{compaction, script_loop};
+use crate::agent::config_options::session_actor;
+use super::{run_direct_invocation, run_prompt_turn};
 use crate::state::{LEASE_TTL_SECS, LeaseHeartbeat, TackleState, store_session_id, wire_session_id};
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{

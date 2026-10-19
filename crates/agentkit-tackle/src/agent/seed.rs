@@ -3,7 +3,7 @@
 //! message of every new session documents the loaded configuration and
 //! the `/` and `/!` syntaxes. Built-in overrides surface there.
 
-use crate::acp_v1::TackleState;
+use crate::state::TackleState;
 
 /// The seed message: harness-authored static user-facing content listing
 /// the loaded configuration layers with counts, the overridden built-ins,
