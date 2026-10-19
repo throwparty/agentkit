@@ -70,18 +70,24 @@ pub fn catalog(caps: ClientCaps, toggles: EditorToggles) -> Vec<ClientTool> {
 }
 
 /// Executes client-capability tools against a live connection.
-pub struct ConnectionClientTools<'a> {
-    pub cx: &'a ConnectionTo<Client>,
+pub struct ConnectionClientTools {
+    pub cx: ConnectionTo<Client>,
 }
 
-impl ClientToolExecutor for ConnectionClientTools<'_> {
-    async fn execute(
+impl ClientToolExecutor for ConnectionClientTools {
+    fn execute(
         &self,
         session: &crate::store::SessionId,
         invokable: &str,
         arguments: &serde_json::Value,
-    ) -> Result<Executed, String> {
-        execute(self.cx, &crate::state::wire_session_id(session), invokable, arguments).await
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Executed, String>> + Send + '_>,
+    > {
+        let wire = crate::state::wire_session_id(session);
+        let cx = self.cx.clone();
+        let invokable = invokable.to_owned();
+        let arguments = arguments.clone();
+        Box::pin(async move { execute(&cx, &wire, &invokable, &arguments).await })
     }
 }
 

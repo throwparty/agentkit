@@ -194,6 +194,7 @@ impl TackleState {
                         invokable: "trust".to_owned(),
                         arguments: serde_json::Value::Null,
                         ask_reason: Some(content),
+                        tool_call_id: None,
                     })
                     .await;
                 if matches!(

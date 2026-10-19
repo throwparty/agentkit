@@ -59,10 +59,16 @@
     }
 
     impl PermissionRequester for StubRequester {
-        async fn request(&self, request: PermissionRequest) -> PermissionChoice {
+        fn request(
+            &self,
+            request: PermissionRequest,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = PermissionChoice> + Send + '_>,
+        > {
             self.calls.fetch_add(1, Ordering::SeqCst);
             *self.last_request.lock().unwrap() = Some(request);
-            self.choice
+            let choice = self.choice;
+            Box::pin(async move { choice })
         }
     }
 
@@ -74,6 +80,7 @@
             kind: "mcp",
             arguments: serde_json::json!({ "command": "cargo test" }),
             interactive: true,
+            tool_call_id: None,
         }
     }
 
@@ -310,8 +317,14 @@
     }
 
     impl PermissionRequester for ConsentRequester {
-        async fn request(&self, _request: PermissionRequest) -> PermissionChoice {
-            self.choice
+        fn request(
+            &self,
+            _request: PermissionRequest,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = PermissionChoice> + Send + '_>,
+        > {
+            let choice = self.choice;
+            Box::pin(async move { choice })
         }
     }
 

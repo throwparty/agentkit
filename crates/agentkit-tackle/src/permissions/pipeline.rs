@@ -24,17 +24,20 @@ pub struct Assessment {
     pub kind: &'static str,
     pub arguments: Value,
     pub interactive: bool,
+    /// The in-flight tool call this assessment belongs to, when any: rides
+    /// into the permission request so the client can correlate the prompt.
+    pub tool_call_id: Option<String>,
 }
 
 /// Runs the fixed-order pipeline over one grant store, one policy
 /// source, and one requester.
-pub struct PermissionPipeline<'a, P: PermissionRequester> {
+pub struct PermissionPipeline<'a, P: PermissionRequester + ?Sized> {
     grants: &'a mut GrantStore,
     policy: &'a dyn PolicyScript,
     requester: &'a P,
 }
 
-impl<'a, P: PermissionRequester> PermissionPipeline<'a, P> {
+impl<'a, P: PermissionRequester + ?Sized> PermissionPipeline<'a, P> {
     pub fn new(grants: &'a mut GrantStore, policy: &'a dyn PolicyScript, requester: &'a P) -> Self {
         Self {
             grants,
@@ -102,6 +105,7 @@ impl<'a, P: PermissionRequester> PermissionPipeline<'a, P> {
                 invokable: input.invokable.clone(),
                 arguments: input.arguments.clone(),
                 ask_reason: policy_verdict.and_then(|verdict| verdict.reason),
+                tool_call_id: input.tool_call_id.clone(),
             })
             .await
         {
@@ -155,6 +159,7 @@ impl<P: PermissionRequester> crate::config::trust::ConsentPrompt for ConsentViaP
             invokable: "trust".to_owned(),
             arguments: Value::Null,
             ask_reason: Some(content),
+            tool_call_id: None,
         })) == PermissionChoice::AllowOnce
     }
 }

@@ -70,11 +70,19 @@
     struct ChoiceStub(crate::permissions::PermissionChoice);
 
     impl crate::permissions::PermissionRequester for ChoiceStub {
-        async fn request(
+        fn request(
             &self,
             _request: crate::permissions::PermissionRequest,
-        ) -> crate::permissions::PermissionChoice {
-            self.0
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = crate::permissions::PermissionChoice,
+                    > + Send
+                    + '_,
+            >,
+        > {
+            let choice = self.0;
+            Box::pin(async move { choice })
         }
     }
 

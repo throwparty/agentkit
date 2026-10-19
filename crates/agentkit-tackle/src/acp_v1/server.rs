@@ -150,7 +150,6 @@ where
                     let requester = AcpPermissionRequester {
                         cx: cx.clone(),
                         session_id: trust_session.clone(),
-                        tool_call_id: None,
                     };
                     state_for_new
                         .resolve_pending_project(
@@ -315,7 +314,7 @@ where
                         .terminals
                         .lock()
                         .expect("negotiation poisoned");
-                    map.remove(&request.session_id.to_string())
+                    map.remove(&store_session_id(&request.session_id))
                         .unwrap_or_default()
                         .into_iter()
                         .collect()
