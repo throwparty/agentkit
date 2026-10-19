@@ -89,3 +89,14 @@ impl ConnectionNegotiation {
         }
     }
 }
+
+impl crate::invokables::client_tools::TerminalTracker for ConnectionNegotiation {
+    fn track(
+        &self,
+        session: &crate::store::SessionId,
+        created: Option<String>,
+        finished: Option<String>,
+    ) {
+        self.track_terminals(session, created, finished);
+    }
+}

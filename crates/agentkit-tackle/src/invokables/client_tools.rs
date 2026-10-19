@@ -34,6 +34,13 @@ pub trait ClientToolExecutor: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = Result<Executed, String>> + Send + '_>>;
 }
 
+/// Tracks the terminals the harness created for a session, so they can be
+/// released at session close. The ACP layer implements this; the core loop
+/// only needs the trait.
+pub trait TerminalTracker: Send + Sync {
+    fn track(&self, session: &SessionId, created: Option<String>, finished: Option<String>);
+}
+
 /// A tool offered to the model, derived from the client's surface.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClientTool {

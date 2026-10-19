@@ -28,11 +28,9 @@ pub mod session_titles;
 pub use capabilities::UnstableFeature;
 pub use negotiation::ConnectionNegotiation;
 pub(crate) use commands::connect_config_servers;
-use notices::connection_notices;
 pub(crate) use server::run_agent_over;
 pub(crate) use sink::{ConnectionTurnSink, wire_kind};
 pub use server::run_stdio;
-use permission::AcpPermissionRequester;
 use replay::timestamp;
 pub use crate::state::{PendingProject, TackleState};
 use crate::content::prompt_text_of;
@@ -60,10 +58,7 @@ use std::sync::Arc;
 #[allow(clippy::too_many_arguments)] // the turn's resolved inputs, all needed
 pub(super) async fn run_prompt_turn(
     state: Arc<TackleState>,
-    negotiation: Arc<ConnectionNegotiation>,
-    cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
-    sink: Arc<dyn crate::agent::sink::TurnSink>,
-    wire_session_id: SessionId,
+    runtime: crate::agent::runtime::TurnRuntime,
     session_id: crate::store::SessionId,
     turn: crate::store::Turn,
     actor_name: String,
@@ -75,10 +70,18 @@ pub(super) async fn run_prompt_turn(
     use agent_client_protocol::schema::v1::{
         PromptResponse, StopReason,
     };
+    let crate::agent::runtime::TurnRuntime {
+        pool,
+        sink,
+        requester,
+        executor,
+        tracker,
+        compaction_notices,
+        titling_notices,
+        client_tools,
+    } = runtime;
     let state_for_prompt = state;
-    let negotiation_for_turn = negotiation;
     let owner_for_prompt = owner;
-    let request_session_id = wire_session_id;
     // The caller acquired the lease, but the turn runs in this task, so
     // the heartbeat must live here for the turn's whole duration.
     let _lease_heartbeat = LeaseHeartbeat::spawn(
@@ -90,17 +93,9 @@ pub(super) async fn run_prompt_turn(
     let actor = definitions.actors.get(&actor_name);
     let persona = actor.and_then(|a| definitions.personas.get(&a.frontmatter.persona));
     let mcp_tokens = {
-        let pool = negotiation_for_turn.mcp_pool();
         let pool = pool.lock().await;
         pool.list_tools().await
     };
-    // The client-capability tools the connection advertised
-    // and the categories currently enabled (config seeded,
-    // `/editor` overridable).
-    let client_tools = crate::acp_v1::client_tools::catalog(
-        negotiation_for_turn.client_caps(),
-        negotiation_for_turn.editor_toggles(),
-    );
     let registry = crate::invokables::Registry::build_with_client_tools(
         &definitions,
         &mcp_tokens,
@@ -250,18 +245,11 @@ pub(super) async fn run_prompt_turn(
         {
             let registry = registry.clone();
             let state = state_for_prompt.clone();
-            let negotiation = negotiation_for_turn.clone();
+            let pool = pool.clone();
+            let tracker = tracker.clone();
             let sink = sink.clone();
-            let requester: std::sync::Arc<dyn crate::permissions::PermissionRequester> =
-                std::sync::Arc::new(AcpPermissionRequester {
-                    cx: cx.clone(),
-                    session_id: request_session_id.clone(),
-                });
-            let executor: std::sync::Arc<
-                dyn crate::invokables::client_tools::ClientToolExecutor,
-            > = std::sync::Arc::new(crate::acp_v1::client_tools::ConnectionClientTools {
-                cx: cx.clone(),
-            });
+            let requester = requester.clone();
+            let executor = executor.clone();
             let session = session_id.clone();
             let actor = actor_name.clone();
             let sources = policy_script_sources(&state_for_prompt);
@@ -271,7 +259,8 @@ pub(super) async fn run_prompt_turn(
             > {
                 let registry = registry.clone();
                 let state = state.clone();
-                let negotiation = negotiation.clone();
+                let pool = pool.clone();
+                let tracker = tracker.clone();
                 let sink = sink.clone();
                 let requester = requester.clone();
                 let executor = executor.clone();
@@ -284,7 +273,8 @@ pub(super) async fn run_prompt_turn(
                         ToolCallContext {
                             registry: &registry,
                             state: &state,
-                            negotiation: &negotiation,
+                            pool: &pool,
+                            tracker: tracker.as_ref(),
                             sink: sink.as_ref(),
                             requester: requester.as_ref(),
                             executor: executor.as_ref(),
@@ -331,7 +321,7 @@ pub(super) async fn run_prompt_turn(
         turn.id.clone(),
         actor_name.clone(),
         size,
-        connection_notices(&cx, &negotiation_for_turn, "compaction"),
+        compaction_notices,
     );
 
     // Titling: detached, silent, only for untitled sessions.
@@ -339,7 +329,7 @@ pub(super) async fn run_prompt_turn(
         state_for_prompt.clone(),
         session_id.clone(),
         size,
-        connection_notices(&cx, &negotiation_for_turn, "titling"),
+        titling_notices,
     );
 
     state_for_prompt
@@ -546,7 +536,8 @@ fn policy_script_sources(state: &TackleState) -> Vec<String> {
 struct ToolCallContext<'a> {
     registry: &'a crate::invokables::Registry,
     state: &'a Arc<TackleState>,
-    negotiation: &'a ConnectionNegotiation,
+    pool: &'a Arc<tokio::sync::Mutex<crate::mcp::McpPool>>,
+    tracker: &'a dyn crate::invokables::client_tools::TerminalTracker,
     sink: &'a dyn crate::agent::sink::TurnSink,
     requester: &'a dyn crate::permissions::PermissionRequester,
     executor: &'a dyn crate::invokables::client_tools::ClientToolExecutor,
@@ -566,7 +557,8 @@ async fn run_model_tool_call(
     let ToolCallContext {
         registry,
         state,
-        negotiation,
+        pool,
+        tracker,
         sink,
         requester,
         executor,
@@ -622,11 +614,7 @@ async fn run_model_tool_call(
                 } else {
                     match executor.execute(session_id, &call.name, &arguments).await {
                         Ok(executed) => {
-                            negotiation.track_terminals(
-                                session_id,
-                                executed.created,
-                                executed.finished,
-                            );
+                            tracker.track(session_id, executed.created, executed.finished);
                             (executed.content, false)
                         }
                         Err(err) => (err, true),
@@ -642,7 +630,6 @@ async fn run_model_tool_call(
                 }
             }
             _ => {
-                let pool = negotiation.mcp_pool();
                 let pool = pool.lock().await;
                 match registry.execute_model(&pool, &call.name, &arguments).await {
                     Ok(text) => (text, false),
