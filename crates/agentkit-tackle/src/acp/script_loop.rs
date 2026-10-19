@@ -8,7 +8,7 @@
 
 use crate::acp::TackleState;
 use crate::acp::config_options;
-use crate::agent::ModelProvider;
+use crate::providers::ModelProvider;
 use crate::scripts::host::{
     Completion, CompletionSink, HostError, NoticeSink, PromptDispatcher, SessionAccess,
     StoreAccess, block_on,
@@ -114,7 +114,7 @@ async fn run_script_turn(
                 "no model configured for the script turn",
             ))?,
     };
-    let provider = crate::agent::provider::provider_for(&model_ref, &state.config().config)
+    let provider = crate::providers::openai_chat_completions::provider_for(&model_ref, &state.config().config)
         .map_err(|err| HostError::Model(err.to_string()))?;
 
     // The prompt's own turn carries the instruction; the rest of the
@@ -125,15 +125,15 @@ async fn run_script_turn(
         .ok_or(HostError::Invalid("script turn has no head"))?;
     let assembled = state.db.assemble_context(session).await?;
     let mut messages = crate::acp::compaction::prior_messages(&assembled, &turn_id);
-    messages.push(crate::agent::ChatMessage {
-        role: crate::agent::ChatRole::User,
+    messages.push(crate::providers::ChatMessage {
+        role: crate::providers::ChatRole::User,
         text: prompt.to_owned(),
         ..Default::default()
     });
 
     let response = provider
         .stream_completion(
-            crate::agent::ModelRequest {
+            crate::providers::ModelRequest {
                 model: model_ref,
                 system: persona,
                 messages,

@@ -6,14 +6,14 @@
 //! tool-call iterations (execute via the registry + pipeline,
 //! append tool results, request again) slot in without reshaping.
 
-use super::{ModelProvider, ModelRequest, TurnOutcome, TurnStop};
-use crate::agent::{ChatMessage, ChatRole, ModelError};
+use super::{TurnOutcome, TurnStop};
+use crate::providers::{ChatMessage, ChatRole, ModelError, ModelProvider, ModelRequest};
 use crate::store::{Role, SessionStore, StoreError, TurnId};
 
 #[derive(Debug, thiserror::Error)]
 pub enum TurnError {
     #[error(transparent)]
-    Model(#[from] super::ModelError),
+    Model(#[from] crate::providers::ModelError),
     #[error(transparent)]
     Store(#[from] StoreError),
 }
@@ -40,7 +40,7 @@ pub async fn run_turn<P: ModelProvider>(
     system: &str,
     prompt_text: &str,
     prior: Vec<ChatMessage>,
-    tools: Vec<crate::agent::ToolDefinition>,
+    tools: Vec<crate::providers::ToolDefinition>,
     max_requests: u32,
     context_length_note: &str,
     mut on_usage: impl FnMut(u64, u64, f64) + Send,
@@ -48,9 +48,9 @@ pub async fn run_turn<P: ModelProvider>(
     mut on_thought: impl FnMut(&str) + Send,
     mut on_retry: impl FnMut(u32, &str) + Send,
     mut on_tool_call: impl FnMut(
-        crate::agent::ModelToolCall,
+        crate::providers::ModelToolCall,
     ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = crate::agent::ToolCallOutcome> + Send>,
+        Box<dyn std::future::Future<Output = crate::providers::ToolCallOutcome> + Send>,
     >,
 ) -> Result<TurnOutcome, TurnError> {
     let mut request_count = 0u32;

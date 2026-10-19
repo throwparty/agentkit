@@ -434,7 +434,7 @@ impl Registry {
 
     /// The tool definitions offered to the model: each
     /// model-invokable with a JSON-schema parameter object.
-    pub fn model_tools(&self) -> Vec<crate::agent::ToolDefinition> {
+    pub fn model_tools(&self) -> Vec<crate::providers::ToolDefinition> {
         self.model_invokables()
             .map(|invokable| {
                 let parameters = match invokable {
@@ -463,7 +463,7 @@ impl Registry {
                     }
                     Invokable::Client { schema, .. } => schema.clone(),
                 };
-                crate::agent::ToolDefinition {
+                crate::providers::ToolDefinition {
                     name: invokable.name().to_owned(),
                     description: invokable.description().to_owned(),
                     parameters,

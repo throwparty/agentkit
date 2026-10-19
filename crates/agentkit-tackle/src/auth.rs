@@ -6,7 +6,7 @@
 //! The commands write through the same helper the running server reads,
 //! so a stored token is immediately usable.
 
-use crate::agent::provider::{
+use crate::credentials::{
     CREDENTIAL_COMPONENT, credential_helper_name, resolve_credential_value,
 };
 use agentkit_credentials::consumer::{helper_binary_name, resolve_helper_path};
@@ -275,7 +275,7 @@ mod tests {
         std::fs::create_dir_all(&store).unwrap();
         write_fake_helper(dir.path(), &store);
 
-        let guard = crate::agent::provider::PATH_LOCK.lock().unwrap();
+        let guard = crate::credentials::PATH_LOCK.lock().unwrap();
         let original = std::env::var("PATH").unwrap_or_default();
         std::env::set_var("PATH", format!("{}:{original}", dir.path().display()));
         body();
