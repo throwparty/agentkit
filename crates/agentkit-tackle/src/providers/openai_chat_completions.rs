@@ -524,7 +524,11 @@ mod tests {
             "think more",
             "reasoning streams as thoughts"
         );
-        assert_eq!(deltas.join(""), "Answer", "only answer text is a message delta");
+        assert_eq!(
+            deltas.join(""),
+            "Answer",
+            "only answer text is a message delta"
+        );
         assert_eq!(response.text, "Answer", "thoughts never enter the answer");
     }
 

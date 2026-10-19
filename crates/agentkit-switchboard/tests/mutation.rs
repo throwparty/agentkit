@@ -63,15 +63,14 @@ fn compiled(config: &SwitchboardConfig) -> HashMap<String, Arc<MutationSet>> {
 
 async fn state(mock_base_url: &str, mutations: Vec<std::path::PathBuf>) -> Arc<routes::AppState> {
     let mut config = config(mutations);
-    config
-        .providers
-        .get_mut("mock_openai")
-        .unwrap()
-        .base_url = mock_base_url.to_string();
+    config.providers.get_mut("mock_openai").unwrap().base_url = mock_base_url.to_string();
     let mutations = compiled(&config);
 
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-    sqlx::migrate!("src/db/migrations").run(&pool).await.unwrap();
+    sqlx::migrate!("src/db/migrations")
+        .run(&pool)
+        .await
+        .unwrap();
     let registry = ProviderRegistry::new(&config.providers, "none")
         .expect("AuthType::None providers always resolve a credential");
     let model_db = ModelDb::new(config.models.clone(), &config.providers);
@@ -131,11 +130,15 @@ async fn a_provider_mutation_sets_a_header_upstream() {
 
     let state = state(&mock_server.uri(), vec![fixture("header.rhai")]).await;
     let mut app = routes::build_router(state);
-    let response = tower::Service::call(&mut app, chat_request()).await.unwrap();
+    let response = tower::Service::call(&mut app, chat_request())
+        .await
+        .unwrap();
 
     assert_eq!(response.status(), 200);
     assert_eq!(
-        upstream_header(&mock_server, "x-fixture-provider").await.as_deref(),
+        upstream_header(&mock_server, "x-fixture-provider")
+            .await
+            .as_deref(),
         Some("mock_openai")
     );
 }
@@ -154,7 +157,9 @@ async fn a_provider_mutation_adds_tools_upstream() {
 
     let state = state(&mock_server.uri(), vec![fixture("tools.rhai")]).await;
     let mut app = routes::build_router(state);
-    let response = tower::Service::call(&mut app, chat_request()).await.unwrap();
+    let response = tower::Service::call(&mut app, chat_request())
+        .await
+        .unwrap();
 
     assert_eq!(response.status(), 200);
     let upstream = upstream_body(&mock_server).await;
@@ -183,7 +188,9 @@ async fn two_mutations_run_in_declared_order_upstream() {
     )
     .await;
     let mut app = routes::build_router(state);
-    let response = tower::Service::call(&mut app, chat_request()).await.unwrap();
+    let response = tower::Service::call(&mut app, chat_request())
+        .await
+        .unwrap();
 
     assert_eq!(response.status(), 200);
     assert_eq!(
@@ -203,7 +210,9 @@ async fn an_invalid_mutation_header_fails_the_request() {
 
     let state = state(&mock_server.uri(), vec![fixture("invalid-header.rhai")]).await;
     let mut app = routes::build_router(state);
-    let response = tower::Service::call(&mut app, chat_request()).await.unwrap();
+    let response = tower::Service::call(&mut app, chat_request())
+        .await
+        .unwrap();
 
     assert_fail_closed(response, "an invalid mutation must fail closed").await;
     assert!(
@@ -223,7 +232,9 @@ async fn a_broken_mutation_fails_the_request() {
 
     let state = state(&mock_server.uri(), vec![fixture("broken.rhai")]).await;
     let mut app = routes::build_router(state);
-    let response = tower::Service::call(&mut app, chat_request()).await.unwrap();
+    let response = tower::Service::call(&mut app, chat_request())
+        .await
+        .unwrap();
 
     assert_fail_closed(response, "a script error must fail closed").await;
     assert!(
@@ -262,11 +273,16 @@ async fn a_provider_without_mutations_passes_through_unchanged() {
 
     let state = state(&mock_server.uri(), Vec::new()).await;
     let mut app = routes::build_router(state);
-    let response = tower::Service::call(&mut app, chat_request()).await.unwrap();
+    let response = tower::Service::call(&mut app, chat_request())
+        .await
+        .unwrap();
 
     assert_eq!(response.status(), 200);
     let upstream = upstream_body(&mock_server).await;
-    assert!(upstream.get("tools").is_none(), "no tools should be injected");
+    assert!(
+        upstream.get("tools").is_none(),
+        "no tools should be injected"
+    );
     assert!(upstream.get("tool_choice").is_none());
 }
 

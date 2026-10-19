@@ -3,7 +3,9 @@
 use super::capabilities::UnstableFeature;
 use super::negotiation::ConnectionNegotiation;
 use crate::state::wire_session_id;
-use agent_client_protocol::schema::v1::{Notice, NoticeSeverity, SessionNotification, SessionUpdate};
+use agent_client_protocol::schema::v1::{
+    Notice, NoticeSeverity, SessionNotification, SessionUpdate,
+};
 
 /// The notice sink for a live connection: a script-driven model call
 /// becomes a session notice when the client advertised the notices

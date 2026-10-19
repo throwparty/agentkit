@@ -80,9 +80,8 @@ impl ClientToolExecutor for ConnectionClientTools {
         session: &crate::store::SessionId,
         invokable: &str,
         arguments: &serde_json::Value,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Executed, String>> + Send + '_>,
-    > {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Executed, String>> + Send + '_>>
+    {
         let wire = crate::state::wire_session_id(session);
         let cx = self.cx.clone();
         let invokable = invokable.to_owned();

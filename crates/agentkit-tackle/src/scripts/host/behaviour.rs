@@ -49,7 +49,11 @@ impl BehaviourHost {
         })
     }
 
-    pub(super) fn fork_session(&self, ephemeral: bool, actor: &str) -> Result<SessionId, HostError> {
+    pub(super) fn fork_session(
+        &self,
+        ephemeral: bool,
+        actor: &str,
+    ) -> Result<SessionId, HostError> {
         if !actor.is_empty() && !self.known_actors.contains(actor) {
             return Err(HostError::UnknownActor(actor.to_owned()));
         }
@@ -261,4 +265,3 @@ pub fn register_host_api(engine: &mut ScriptEngine, host: Arc<BehaviourHost>) {
         Ok(Value::Null)
     });
 }
-

@@ -30,12 +30,12 @@ The policy script sees whether a grant already exists; its `allow` and `deny` ar
 
 The ask fallback presents four options:
 
-| Option | Effect |
-|---|---|
-| Allow once | This call proceeds; nothing is remembered |
-| Allow for this session | A grant is recorded for this invokable |
-| Reject once | This call is refused; nothing is remembered |
-| Reject for this session | A standing rejection is recorded |
+| Option                  | Effect                                      |
+| ----------------------- | ------------------------------------------- |
+| Allow once              | This call proceeds; nothing is remembered   |
+| Allow for this session  | A grant is recorded for this invokable      |
+| Reject once             | This call is refused; nothing is remembered |
+| Reject for this session | A standing rejection is recorded            |
 
 A rejection is fed back to the model as the tool result, so it can adapt rather than retry blindly.
 

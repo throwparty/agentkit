@@ -64,4 +64,3 @@ pub fn parse_direct(input: &str) -> Option<DirectInvocation> {
         arguments: arguments.trim().to_owned(),
     })
 }
-

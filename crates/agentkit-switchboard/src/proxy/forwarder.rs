@@ -154,13 +154,13 @@ pub async fn forward_request(
             out_headers.insert(key.clone(), value.clone());
         }
     }
-  if !out_headers.contains_key("content-type") {
-      out_headers.insert("Content-Type", HeaderValue::from_static("application/json"));
-  }
-  out_headers.insert(
-      "User-Agent",
-      HeaderValue::from_static(concat!("agentkit-switchboard/", env!("CARGO_PKG_VERSION"))),
-  );
+    if !out_headers.contains_key("content-type") {
+        out_headers.insert("Content-Type", HeaderValue::from_static("application/json"));
+    }
+    out_headers.insert(
+        "User-Agent",
+        HeaderValue::from_static(concat!("agentkit-switchboard/", env!("CARGO_PKG_VERSION"))),
+    );
     http.default_headers(&mut out_headers);
 
     if let Some(mutations) = mutations {
@@ -369,7 +369,9 @@ mod tests {
             method: Method::POST,
             headers: client_headers,
             body: BODY
-                .get_or_init(|| axum::body::Bytes::from_static(br#"{"model":"gpt-4o","messages":[]}"#))
+                .get_or_init(|| {
+                    axum::body::Bytes::from_static(br#"{"model":"gpt-4o","messages":[]}"#)
+                })
                 .clone(),
             credential: CREDENTIAL.get_or_init(|| ResolvedCredential {
                 value: "test-token".to_string(),
@@ -429,7 +431,11 @@ mod tests {
             )
             .unwrap();
 
-        let captured = forward(HeaderMap::new(), Some(Arc::new(MutationSet::new(engine, vec![script])))).await;
+        let captured = forward(
+            HeaderMap::new(),
+            Some(Arc::new(MutationSet::new(engine, vec![script]))),
+        )
+        .await;
 
         assert_eq!(captured.get("x-from-mutation").unwrap(), "yes");
         assert_ne!(
@@ -478,7 +484,10 @@ mod tests {
             .unwrap();
 
         let mut client_headers = HeaderMap::new();
-        client_headers.insert("authorization", HeaderValue::from_static("Bearer client-token"));
+        client_headers.insert(
+            "authorization",
+            HeaderValue::from_static("Bearer client-token"),
+        );
 
         let captured = forward(
             client_headers,
@@ -505,7 +514,10 @@ mod tests {
 
         let mock_endpoint = MockHttpEndpoint::new();
         let outcome = forward_request(
-            request(HeaderMap::new(), Some(Arc::new(MutationSet::new(engine, vec![script])))),
+            request(
+                HeaderMap::new(),
+                Some(Arc::new(MutationSet::new(engine, vec![script]))),
+            ),
             &mock_endpoint,
         )
         .await;

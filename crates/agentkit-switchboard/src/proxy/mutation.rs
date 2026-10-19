@@ -80,10 +80,11 @@ impl MutationSet {
             None => {}
             Some(Value::Null) if !body_is_json => {}
             Some(value) => {
-                let serialised = serde_json::to_vec(value).map_err(|error| MutationError::Body {
-                    origin,
-                    message: error.to_string(),
-                })?;
+                let serialised =
+                    serde_json::to_vec(value).map_err(|error| MutationError::Body {
+                        origin,
+                        message: error.to_string(),
+                    })?;
                 *body = serialised;
             }
         }
@@ -191,13 +192,11 @@ fn apply_headers(
 ) -> Result<HeaderMap, MutationError> {
     let mut headers = HeaderMap::new();
     for (name, value) in mutated {
-        let value = value
-            .as_str()
-            .ok_or_else(|| MutationError::InvalidHeader {
-                origin: origin.to_string(),
-                name: name.clone(),
-                message: "header value is not a string".to_string(),
-            })?;
+        let value = value.as_str().ok_or_else(|| MutationError::InvalidHeader {
+            origin: origin.to_string(),
+            name: name.clone(),
+            message: "header value is not a string".to_string(),
+        })?;
         let name = HeaderName::from_bytes(name.as_bytes()).map_err(|error| {
             MutationError::InvalidHeader {
                 origin: origin.to_string(),
@@ -205,12 +204,11 @@ fn apply_headers(
                 message: error.to_string(),
             }
         })?;
-        let value =
-            HeaderValue::from_str(value).map_err(|error| MutationError::InvalidHeader {
-                origin: origin.to_string(),
-                name: name.as_str().to_string(),
-                message: error.to_string(),
-            })?;
+        let value = HeaderValue::from_str(value).map_err(|error| MutationError::InvalidHeader {
+            origin: origin.to_string(),
+            name: name.as_str().to_string(),
+            message: error.to_string(),
+        })?;
         headers.insert(name, value);
     }
     Ok(headers)
@@ -289,7 +287,9 @@ mod tests {
             .map(|(index, source)| {
                 engine
                     .compile(
-                        write_script(dir.path(), &format!("{index}.rhai"), source).display().to_string(),
+                        write_script(dir.path(), &format!("{index}.rhai"), source)
+                            .display()
+                            .to_string(),
                         source,
                     )
                     .unwrap()
@@ -303,12 +303,15 @@ mod tests {
         let engine = engine();
         let set = set(
             &engine,
-            &[r#"
+            &[
+                r#"
                 fn mutate(request) {
                     request.headers["x-provider-quirk"] = "on";
                     request
                 }
-            "#, TOOLS_SCRIPT],
+            "#,
+                TOOLS_SCRIPT,
+            ],
         );
 
         let mut headers = HeaderMap::new();
@@ -353,11 +356,12 @@ mod tests {
         let mut headers = HeaderMap::new();
         let mut body = Vec::new();
 
-        let error = set
-            .apply(&context(), &mut headers, &mut body)
-            .unwrap_err();
+        let error = set.apply(&context(), &mut headers, &mut body).unwrap_err();
 
-        assert!(matches!(error, MutationError::InvalidHeader { .. }), "{error:?}");
+        assert!(
+            matches!(error, MutationError::InvalidHeader { .. }),
+            "{error:?}"
+        );
     }
 
     #[test]
@@ -365,7 +369,9 @@ mod tests {
         let engine = engine();
         let set = set(
             &engine,
-            &[r#"fn mutate(request) { request.headers["x-body"] = (if request.body == () { "unit" } else { "json" }); request }"#],
+            &[
+                r#"fn mutate(request) { request.headers["x-body"] = (if request.body == () { "unit" } else { "json" }); request }"#,
+            ],
         );
 
         let mut headers = HeaderMap::new();
@@ -388,9 +394,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         let mut body = b"not json at all".to_vec();
 
-        let error = set
-            .apply(&context(), &mut headers, &mut body)
-            .unwrap_err();
+        let error = set.apply(&context(), &mut headers, &mut body).unwrap_err();
 
         assert!(matches!(error, MutationError::Script { .. }), "{error:?}");
         assert_eq!(body, b"not json at all");
@@ -404,9 +408,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         let mut body = Vec::new();
 
-        let error = set
-            .apply(&context(), &mut headers, &mut body)
-            .unwrap_err();
+        let error = set.apply(&context(), &mut headers, &mut body).unwrap_err();
 
         assert!(matches!(error, MutationError::Script { .. }), "{error:?}");
     }
@@ -454,8 +456,14 @@ mod tests {
 
         let engine = engine();
         let providers = HashMap::from([
-            ("provider_a".to_string(), provider("provider_a", vec![shared.clone()])),
-            ("provider_b".to_string(), provider("provider_b", vec![shared])),
+            (
+                "provider_a".to_string(),
+                provider("provider_a", vec![shared.clone()]),
+            ),
+            (
+                "provider_b".to_string(),
+                provider("provider_b", vec![shared]),
+            ),
         ]);
 
         let sets = compile_provider_mutations(&engine, &providers).unwrap();
@@ -466,10 +474,7 @@ mod tests {
     #[test]
     fn a_provider_without_mutations_gets_an_empty_set() {
         let engine = engine();
-        let providers = HashMap::from([(
-            "bare".to_string(),
-            provider("bare", Vec::new()),
-        )]);
+        let providers = HashMap::from([("bare".to_string(), provider("bare", Vec::new()))]);
 
         let sets = compile_provider_mutations(&engine, &providers).unwrap();
         let bare = sets.get("bare").unwrap();
@@ -528,7 +533,10 @@ mod tests {
     #[test]
     fn a_non_map_headers_value_fails_the_request() {
         let engine = engine();
-        let set = set(&engine, &[r#"fn mutate(request) { request.headers = []; request }"#]);
+        let set = set(
+            &engine,
+            &[r#"fn mutate(request) { request.headers = []; request }"#],
+        );
 
         let mut headers = HeaderMap::new();
         let mut body = Vec::new();
@@ -541,7 +549,10 @@ mod tests {
     #[test]
     fn a_json_body_cleared_by_a_script_is_serialised_as_null() {
         let engine = engine();
-        let set = set(&engine, &[r#"fn mutate(request) { request.body = (); request }"#]);
+        let set = set(
+            &engine,
+            &[r#"fn mutate(request) { request.body = (); request }"#],
+        );
 
         let mut headers = HeaderMap::new();
         let mut body = br#"{"model":"gpt-4o"}"#.to_vec();

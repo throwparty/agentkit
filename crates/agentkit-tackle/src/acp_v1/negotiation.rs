@@ -44,7 +44,10 @@ impl ConnectionNegotiation {
         Arc::clone(&self.mcp_pool)
     }
 
-    pub(super) fn capture(&self, capabilities: &agent_client_protocol::schema::v1::ClientCapabilities) {
+    pub(super) fn capture(
+        &self,
+        capabilities: &agent_client_protocol::schema::v1::ClientCapabilities,
+    ) {
         *self.supported.lock().expect("negotiation poisoned") =
             UnstableFeature::advertised_in(&capabilities.meta);
         *self.caps.lock().expect("negotiation poisoned") =
@@ -71,7 +74,12 @@ impl ConnectionNegotiation {
 
     /// Records a terminal created for `session`, or drops one that has
     /// finished, so session close can release whatever remains.
-    pub(super) fn track_terminals(&self, session_id: &str, created: Option<String>, finished: Option<String>) {
+    pub(super) fn track_terminals(
+        &self,
+        session_id: &str,
+        created: Option<String>,
+        finished: Option<String>,
+    ) {
         if created.is_none() && finished.is_none() {
             return;
         }

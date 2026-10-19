@@ -163,4 +163,3 @@ pub fn block_on<F: std::future::Future>(future: F) -> F::Output {
         }
     }
 }
-

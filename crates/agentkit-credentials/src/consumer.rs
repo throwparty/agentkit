@@ -126,8 +126,8 @@ impl Credential {
     /// error; the optional fields are absent when not present or not
     /// strings.
     pub fn parse(json: &str) -> Result<Self, String> {
-        let value: serde_json::Value =
-            serde_json::from_str(json).map_err(|err| format!("unparseable helper output: {err}"))?;
+        let value: serde_json::Value = serde_json::from_str(json)
+            .map_err(|err| format!("unparseable helper output: {err}"))?;
         let access_token = value
             .get("access_token")
             .and_then(serde_json::Value::as_str)
@@ -185,6 +185,9 @@ mod tests {
 
     #[test]
     fn helper_binary_name_is_prefixed() {
-        assert_eq!(helper_binary_name("keychain"), "agentkit-credential-keychain");
+        assert_eq!(
+            helper_binary_name("keychain"),
+            "agentkit-credential-keychain"
+        );
     }
 }

@@ -11,8 +11,8 @@
 //! announced, with a context note; the switch is effective the following
 //! turn.
 
-use crate::state::TackleState;
 use crate::config::Auth;
+use crate::state::TackleState;
 use crate::store::{Session, SessionId};
 
 /// A notice surfaced to the client (degraded discovery, auto-compaction).
@@ -81,7 +81,6 @@ pub enum ConfigOptionCategory {
     Other(String),
 }
 
-
 /// The model selector's config id.
 pub const MODEL_SELECTOR_ID: &str = "model";
 /// The actor selector's config id.
@@ -148,8 +147,10 @@ pub fn resolve_model_for(
     first_listed: Option<&str>,
 ) -> Option<String> {
     let session_model = crate::store::session_model_free(session);
-    let actor_name =
-        crate::agent::config_options::session_actor(session, state.config().config.defaults.actor.as_deref());
+    let actor_name = crate::agent::config_options::session_actor(
+        session,
+        state.config().config.defaults.actor.as_deref(),
+    );
     let actor_model = state
         .definitions()
         .actors
@@ -302,12 +303,7 @@ pub async fn apply_model_switch(
                 .await
                 .map_err(|err| err.to_string())?;
             crate::agent::compaction::run_compaction(
-                state,
-                session_id,
-                &turn.id,
-                "default",
-                window,
-                notices,
+                state, session_id, &turn.id, "default", window, notices,
             )
             .await;
         }

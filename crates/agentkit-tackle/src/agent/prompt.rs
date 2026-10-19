@@ -92,7 +92,8 @@ pub(crate) async fn run_prompt_turn(
         .assemble_context(&session_id)
         .await
         .map_err(|err| err.to_string())?;
-    let prior: Vec<crate::providers::ChatMessage> = compaction::prior_messages(&assembled, &turn.id);
+    let prior: Vec<crate::providers::ChatMessage> =
+        compaction::prior_messages(&assembled, &turn.id);
     // A user-typed `/name` prompt expands into the
     // model prompt (the stored message stays literal).
     let prompt_text = match first_text.strip_prefix('/') {
@@ -107,9 +108,11 @@ pub(crate) async fn run_prompt_turn(
         None => prompt_text_of(&blocks_json),
     };
 
-    let provider =
-        crate::providers::openai_chat_completions::provider_for(&model_ref, &state_for_prompt.config().config)
-            .map_err(|err| err.to_string())?;
+    let provider = crate::providers::openai_chat_completions::provider_for(
+        &model_ref,
+        &state_for_prompt.config().config,
+    )
+    .map_err(|err| err.to_string())?;
     // The context-length failure note: actionable, naming
     // the configured compaction script (or its absence).
     let context_length_note = compaction::compaction_disabled_note(
@@ -320,4 +323,3 @@ pub(crate) async fn run_prompt_turn(
         Err(err) => Err(err.to_string()),
     }
 }
-

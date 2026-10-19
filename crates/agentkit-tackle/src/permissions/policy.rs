@@ -2,7 +2,6 @@
 
 use serde_json::Value;
 
-
 /// The policy-script decision source: implemented by the Rhai policy
 /// host. The pipeline treats an absent function, malformed
 /// return, or script error — any `None` — as fail-closed to ask.

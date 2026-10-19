@@ -271,4 +271,3 @@ impl SessionAccess for StoreAccess {
         Ok(total)
     }
 }
-

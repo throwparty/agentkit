@@ -66,7 +66,9 @@ impl crate::permissions::PermissionRequester for AcpPermissionRequester {
                 &request.invokable,
                 &request.arguments,
             ))
-            .kind(wire_kind(crate::invokables::titles::tool_kind(&request.invokable)));
+            .kind(wire_kind(crate::invokables::titles::tool_kind(
+                &request.invokable,
+            )));
         if let Some(reason) = &request.ask_reason {
             fields = fields.content(vec![v1::ToolCallContent::from(v1::ContentBlock::Text(
                 v1::TextContent::new(reason.clone()),

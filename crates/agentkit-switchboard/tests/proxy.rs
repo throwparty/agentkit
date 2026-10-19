@@ -145,19 +145,19 @@ async fn forwarder_preserves_upstream_content_type() {
     .unwrap();
 
     let outcome = forward_request(
-         ForwardRequest {
-             method: Method::POST,
-             headers: HeaderMap::new(),
-             body: axum::body::Bytes::from(body),
-             credential: &credential,
-             billing: &BillingModel::PayAsYouGo,
-             base_url: &mock_server.uri(),
-             provider_identity: "mock_openai",
-             session_id: None,
-             mutations: None,
-             surface: ApiSurface::OpenaiChatCompletions,
-             model: "gpt-4o",
-         },
+        ForwardRequest {
+            method: Method::POST,
+            headers: HeaderMap::new(),
+            body: axum::body::Bytes::from(body),
+            credential: &credential,
+            billing: &BillingModel::PayAsYouGo,
+            base_url: &mock_server.uri(),
+            provider_identity: "mock_openai",
+            session_id: None,
+            mutations: None,
+            surface: ApiSurface::OpenaiChatCompletions,
+            model: "gpt-4o",
+        },
         &OpenAiChatCompletionsProvider,
     )
     .await;
@@ -560,17 +560,17 @@ async fn proxy_response_body_passes_through_byte_for_byte() {
         .unwrap();
 
     let response = tower::Service::call(&mut app, request).await.unwrap();
-     assert_eq!(response.status(), 200);
-     let response_body = http_body_util::BodyExt::collect(response.into_body())
-         .await
-         .unwrap()
-         .to_bytes();
-     assert_eq!(
-         String::from_utf8(response_body.to_vec()).unwrap(),
-         raw_body,
-         "response body should pass through byte-for-byte without translation"
-     );
- }
+    assert_eq!(response.status(), 200);
+    let response_body = http_body_util::BodyExt::collect(response.into_body())
+        .await
+        .unwrap()
+        .to_bytes();
+    assert_eq!(
+        String::from_utf8(response_body.to_vec()).unwrap(),
+        raw_body,
+        "response body should pass through byte-for-byte without translation"
+    );
+}
 
 #[tokio::test]
 async fn custom_headers_are_passed_through() {
@@ -579,9 +579,15 @@ async fn custom_headers_are_passed_through() {
 
     // Expect the request to be forwarded to the mock server with custom headers
     wiremock::Mock::given(wiremock::matchers::method("POST"))
-        .and(wiremock::matchers::path("/responses"))  // This is what the provider expects
-        .and(wiremock::matchers::header("x-opencode-session", "test-session-123"))
-        .and(wiremock::matchers::header("x-custom-header", "custom-value"))
+        .and(wiremock::matchers::path("/responses")) // This is what the provider expects
+        .and(wiremock::matchers::header(
+            "x-opencode-session",
+            "test-session-123",
+        ))
+        .and(wiremock::matchers::header(
+            "x-custom-header",
+            "custom-value",
+        ))
         .respond_with(
             wiremock::ResponseTemplate::new(200).set_body_json(json!({"status": "success"})),
         )
@@ -591,8 +597,8 @@ async fn custom_headers_are_passed_through() {
     let state = test_state_with(
         &mock_server.uri(),
         "mock_openai",
-        ApiSurface::OpenaiResponses,  // Use the responses API surface
-        vec!["test"],  // Match the model in our request
+        ApiSurface::OpenaiResponses, // Use the responses API surface
+        vec!["test"],                // Match the model in our request
     )
     .await;
     let mut app = routes::build_router(state);
@@ -606,7 +612,7 @@ async fn custom_headers_are_passed_through() {
     // Act
     let request = axum::http::Request::builder()
         .method("POST")
-        .uri("/openai/v1/responses")  // This is the switchboard endpoint
+        .uri("/openai/v1/responses") // This is the switchboard endpoint
         .header("Content-Type", "application/json")
         .header("x-opencode-session", "test-session-123")
         .header("x-custom-header", "custom-value")

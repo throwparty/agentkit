@@ -22,23 +22,23 @@ file = "deny-secrets.rhai"
 enabled = true
 ```
 
-| Key | Meaning |
-|---|---|
-| `events` | The events this script serves (one or more) |
-| `file` | A path, resolved from `./.agentkit/tackle/scripts/` then `~/.config/agentkit/tackle/scripts/`, or `builtin:<name>` |
-| `enabled` | Set `false` to disable, including a built-in |
+| Key       | Meaning                                                                                                            |
+| --------- | ------------------------------------------------------------------------------------------------------------------ |
+| `events`  | The events this script serves (one or more)                                                                        |
+| `file`    | A path, resolved from `./.agentkit/tackle/scripts/` then `~/.config/agentkit/tackle/scripts/`, or `builtin:<name>` |
+| `enabled` | Set `false` to disable, including a built-in                                                                       |
 
 One file may serve several events: the engine calls the function named after each event, and an absent function is a no-op.
 
 ## Events
 
-| Event | Kind | Fires |
-|---|---|---|
-| `pre_tool_use` | policy | Before any model-initiated tool call |
-| `post_turn` | behaviour | After a turn completes |
-| `session_forked` | behaviour | In the new session, after a fork |
-| `compaction_requested` | behaviour | When a compaction-tagged prompt is intercepted |
-| `title_trigger` | behaviour | After a completed turn, while the session is untitled |
+| Event                  | Kind      | Fires                                                 |
+| ---------------------- | --------- | ----------------------------------------------------- |
+| `pre_tool_use`         | policy    | Before any model-initiated tool call                  |
+| `post_turn`            | behaviour | After a turn completes                                |
+| `session_forked`       | behaviour | In the new session, after a fork                      |
+| `compaction_requested` | behaviour | When a compaction-tagged prompt is intercepted        |
+| `title_trigger`        | behaviour | After a completed turn, while the session is untitled |
 
 Every payload carries the session and actor. `pre_tool_use` receives the namespaced invokable, its structured arguments, whether the session is user-attended, and whether the grant store already holds an allow record. `post_turn` receives the turn id, stop reason, request count, recent turn ids, and context usage.
 

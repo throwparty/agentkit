@@ -24,7 +24,7 @@ mod tests;
 
 pub use pool::{
     AutoDecline, Elicitation, ElicitationResponse, ElicitationSink, McpPool, McpPoolError,
-    NamespacedTool, ServerStatus, ToolResult, TOOL_RESULT_LIMIT,
+    NamespacedTool, ServerStatus, TOOL_RESULT_LIMIT, ToolResult,
 };
 pub use spawn::{
     ConfigureCommand, EnvValueError, configure_stdio_spawn, credential_marker_identity,

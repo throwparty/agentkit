@@ -7,10 +7,10 @@
 //! block: the firing runs detached from the turn and every script error
 //! only logs. Only untitled sessions trigger titling.
 
-use crate::state::TackleState;
 use crate::agent::script_loop;
 use crate::scripts::host::{BehaviourHost, SessionAccess, block_on};
 use crate::scripts::{behaviour_engine, host::register_host_api};
+use crate::state::TackleState;
 use crate::store::SessionId;
 use std::sync::Arc;
 
@@ -75,7 +75,11 @@ fn titling_sources(state: &TackleState) -> Vec<(String, String)> {
         .filter(|(_, script)| {
             script.enabled && script.events.iter().any(|event| event == "title_trigger")
         })
-        .filter_map(|(name, _)| sources.get(name).map(|source| (name.clone(), source.clone())))
+        .filter_map(|(name, _)| {
+            sources
+                .get(name)
+                .map(|source| (name.clone(), source.clone()))
+        })
         .collect()
 }
 

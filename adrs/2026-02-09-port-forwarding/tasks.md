@@ -22,7 +22,7 @@ This document outlines the implementable tasks for the Port Forwarding feature, 
 
 **Description**: Modify `src/config_loader.rs` to parse the `[[ports]]` table from `.litterbox.toml` and `.litterbox.local.toml` into the `PortsConfig` struct. This includes slugifying the `name` field for environment variable generation and detecting conflicts in slugified names.
 **Success Criteria**: `config_loader` successfully parses valid port configurations and reports errors for invalid ones (e.g., duplicate slugified names, invalid port numbers).
-**Test Requirements**: _ Unit tests for `config_loader` to parse valid `PortsConfig`. _ Unit tests for `config_loader` to correctly slugify names (e.g., "Web Server" -> "WEB_SERVER"). _ Unit tests for `config_loader` to detect and report errors on duplicate slugified names. _ Unit tests for `config_loader` to detect and report errors on invalid port numbers (ee.g. 0 or > 65535).
+**Test Requirements**: _ Unit tests for `config_loader` to parse valid `PortsConfig`. _ Unit tests for `config_loader` to correctly slugify names (e.g., "Web Server" -> "WEB*SERVER"). * Unit tests for `config_loader` to detect and report errors on duplicate slugified names. \_ Unit tests for `config_loader` to detect and report errors on invalid port numbers (ee.g. 0 or > 65535).
 **References**: `spec.md` (Functional Requirement 4), `plan.md` (Section 3.1)
 
 ## 2. Sandbox Module (`src/domain.rs`, `src/sandbox/mod.rs`, `src/compute/mod.rs`)
@@ -43,7 +43,7 @@ This document outlines the implementable tasks for the Port Forwarding feature, 
 
 ### [x] Task 2.3: Implement Dynamic Port Allocation and Env Var Generation
 
-**Description**: Implement the logic within `DockerSandboxProvider::create` in `src/sandbox/mod.rs` to: _ Access the `PortsConfig` from `SandboxConfig`. _ For each `ForwardedPort`, dynamically find an available host port within the default range of 3000-8000. _ Generate the `LITTERBOX_FWD_PORT_<SLUGIFIED_NAME>` environment variables. _ Handle concurrency conflicts during port allocation using a simple retry mechanism with a small back-off.
+**Description**: Implement the logic within `DockerSandboxProvider::create` in `src/sandbox/mod.rs` to: _ Access the `PortsConfig` from `SandboxConfig`. _ For each `ForwardedPort`, dynamically find an available host port within the default range of 3000-8000. _ Generate the `LITTERBOX_FWD_PORT_<SLUGIFIED*NAME>` environment variables. * Handle concurrency conflicts during port allocation using a simple retry mechanism with a small back-off.
 **Success Criteria**: Host ports are successfully allocated, environment variables are generated, and a list of `bollard::models::PortBinding` is created. Retry mechanism for port allocation is functional.
 **Test Requirements**: _ Unit tests for host port allocation logic, ensuring unique and available ports are selected from the default range. _ Unit tests for environment variable generation. \* Unit tests for the retry mechanism in port allocation.
 **References**: `spec.md` (Functional Requirements 1, 5), `plan.md` (Section 3.2)

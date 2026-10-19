@@ -9,11 +9,11 @@
 //! user-facing content on their own turn kind. Updates flow only after
 //! the client attaches — the fork handlers perform no session updates.
 
-use crate::state::TackleState;
 use crate::config::ScriptConfig;
 use crate::scripts::behaviour_engine;
 use crate::scripts::host::BehaviourHost;
 use crate::scripts::host::register_host_api;
+use crate::state::TackleState;
 use crate::store::{
     MessageId, Role, Session, SessionId, SessionKind, SessionStore, StoreError, TurnKind,
 };
@@ -57,7 +57,11 @@ pub fn resolve_session_forked_scripts(
         .filter(|(_, config)| {
             config.enabled && config.events.iter().any(|event| event == "session_forked")
         })
-        .filter_map(|(name, _)| sources.get(name).map(|source| (name.clone(), source.clone())))
+        .filter_map(|(name, _)| {
+            sources
+                .get(name)
+                .map(|source| (name.clone(), source.clone()))
+        })
         .collect()
 }
 

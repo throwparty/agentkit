@@ -1,5 +1,4 @@
 ---
-
 ## status: draft created: 2026-07-15 updated: 2026-07-16 author: adrian decision: pending
 
 # Tasks: OpenTelemetry Implementation for Rust Services
@@ -7,13 +6,12 @@
 ## Task List
 
 | #   | Task                                             | Est.  | Depends On     | Spec                      | Plan                         |
-| --- | ------------------------------------------------ | ----- | -------------- | ------------------------- | ---------------------------- |
-| 1   | Scaffold PoC crate and OTel SDK wiring           | 1 day | —              | §2.1, FR4, FR6, NFR1      | §3.1, §3.2, §5.2             |
-| 2   | Build tracing-to-OTel log layer                  | 1 day | Task 1         | FR3, FR5                  | §3.3.3                       |
-| 3   | Wire traces and metrics, compose subscriber      | 1 day | Task 1, Task 2 | FR1, FR2, FR5, NFR5, NFR1 | §3.3.1, §3.3.2, §3.3.4, §3.5 |
-| 4   | Write offline in-memory unit tests               | 1 day | Task 3         | FR1–FR6, NFR4             | §4.1                         |
-| 5   | Manual integration test with otel-desktop-viewer | 1 day | Task 4         | All FRs, NFR1–NFR5        | §4.2, §4.4, §4.5             |
-
+  | --- | ------------------------------------------------ | ----- | -------------- | ------------------------- | ---------------------------- |
+  | 1   | Scaffold PoC crate and OTel SDK wiring           | 1 day | —              | §2.1, FR4, FR6, NFR1      | §3.1, §3.2, §5.2             |
+  | 2   | Build tracing-to-OTel log layer                  | 1 day | Task 1         | FR3, FR5                  | §3.3.3                       |
+  | 3   | Wire traces and metrics, compose subscriber      | 1 day | Task 1, Task 2 | FR1, FR2, FR5, NFR5, NFR1 | §3.3.1, §3.3.2, §3.3.4, §3.5 |
+  | 4   | Write offline in-memory unit tests               | 1 day | Task 3         | FR1–FR6, NFR4             | §4.1                         |
+  | 5   | Manual integration test with otel-desktop-viewer | 1 day | Task 4         | All FRs, NFR1–NFR5        | §4.2, §4.4, §4.5             |
 ---
 
 > **Note**: The original Task 6 ("Integrate OTel into agentkit-switchboard") was moved to

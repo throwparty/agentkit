@@ -140,11 +140,8 @@ mod tests {
         std::fs::write(&script, "fn mutate(request) { request }").unwrap();
 
         let mut config = crate::config::loader::load_config(&fixture("minimal.toml")).unwrap();
-        config
-            .providers
-            .get_mut("test_provider")
-            .unwrap()
-            .mutations = vec![script.join("missing.rhai")];
+        config.providers.get_mut("test_provider").unwrap().mutations =
+            vec![script.join("missing.rhai")];
 
         let engine = Arc::new(agentkit_script::ScriptEngine::new());
         let error = crate::proxy::mutation::compile_provider_mutations(&engine, &config.providers)

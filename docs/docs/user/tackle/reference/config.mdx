@@ -8,9 +8,9 @@ Tackle configuration is sourced from three layers, merged in order of precedence
 
 1. **Defaults**, the built-in scripts (compaction, titling).
 2. **User configuration**, `config.toml` in the user config directory. Its default location differs by platform, and can be overridden with `--config-dir`:
-  a. On Linux: `~/.config/agentkit/tackle`.
-  b. On macOS: `~/Library/Application Support/AgentKit/tackle`.
-  c. On Windows: `~/AppData/LocalLow/AgentKit/tackle`.
+   a. On Linux: `~/.config/agentkit/tackle`.
+   b. On macOS: `~/Library/Application Support/AgentKit/tackle`.
+   c. On Windows: `~/AppData/LocalLow/AgentKit/tackle`.
 3. **Project configuration** located at `.agentkit/tackle/config.toml` in the session's working directory.
 
 The project layer may not set `endpoints` or `credential_helper` — a project trying to change where model traffic goes is rejected outright. Project `mcp_servers`, `scripts`, and definitions (personas, actors, prompts) are trust-gated: the first session in a project prompts for consent, keyed on a hash of each entry, so any change re-prompts.

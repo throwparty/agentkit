@@ -6,7 +6,6 @@ use super::request::{PermissionChoice, PermissionRequest, PermissionRequester};
 use serde_json::Value;
 use std::collections::BTreeSet;
 
-
 /// The pipeline's final verdict — ask never escapes; it always
 /// resolves through the requester.
 #[derive(Debug, Clone, PartialEq)]
@@ -163,4 +162,3 @@ impl<P: PermissionRequester> crate::config::trust::ConsentPrompt for ConsentViaP
         })) == PermissionChoice::AllowOnce
     }
 }
-

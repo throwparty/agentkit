@@ -20,15 +20,15 @@ Everything optional is settled at `initialize`, and both sides treat an omitted 
 
 When the client advertises its file-system and terminal surface, tackle reflects it to the model as `client.*` tools:
 
-| Tool | Underlying RPC |
-|---|---|
-| `client.fs.read_text_file` | `fs/read_text_file` |
-| `client.fs.write_text_file` | `fs/write_text_file` |
-| `client.terminal.create` | `terminal/create` |
-| `client.terminal.output` | `terminal/output` |
+| Tool                            | Underlying RPC           |
+| ------------------------------- | ------------------------ |
+| `client.fs.read_text_file`      | `fs/read_text_file`      |
+| `client.fs.write_text_file`     | `fs/write_text_file`     |
+| `client.terminal.create`        | `terminal/create`        |
+| `client.terminal.output`        | `terminal/output`        |
 | `client.terminal.wait_for_exit` | `terminal/wait_for_exit` |
-| `client.terminal.kill` | `terminal/kill` |
-| `client.terminal.release` | `terminal/release` |
+| `client.terminal.kill`          | `terminal/kill`          |
+| `client.terminal.release`       | `terminal/release`       |
 
 Nothing is authored: the RPC fixes the parameters, so the harness ships no schemas beyond the wire types. A tool exists only when **both** hold — the client advertised the capability, and the category is enabled (`[client_tools]`, seeded at startup, toggled at runtime with `/editor`).
 

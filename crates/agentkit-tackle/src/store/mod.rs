@@ -26,6 +26,6 @@ pub use model::{
 pub use session::SessionStore;
 
 #[cfg(test)]
-pub use graph::SessionGraph;
-#[cfg(test)]
 pub(crate) use assembly::assembly_order;
+#[cfg(test)]
+pub use graph::SessionGraph;

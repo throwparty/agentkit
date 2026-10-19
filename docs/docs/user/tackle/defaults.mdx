@@ -12,21 +12,21 @@ Tackle ships a small set of definitions embedded in the binary, so a session wor
 
 ## Actors
 
-| Actor | Persona | Model | Used for |
-|---|---|---|---|
-| `default` | `default` | `[defaults].model` | Ordinary sessions |
+| Actor        | Persona   | Model              | Used for                                                  |
+| ------------ | --------- | ------------------ | --------------------------------------------------------- |
+| `default`    | `default` | `[defaults].model` | Ordinary sessions                                         |
 | `summariser` | `default` | `[defaults].model` | Background work: compaction summaries and session titling |
 
 `summariser` exists so the harness has an actor for its own ephemeral forks without assuming anything about yours. Neither actor pins a model, so both follow the normal [resolution chain](./agents#which-model-runs).
 
 ## Prompts
 
-| Command | Flags | Does |
-|---|---|---|
-| `/compact` | compaction-tagged | Summarises older turns behind a summary, in an ephemeral fork, announced in-band |
-| `/fork` | user-invokable | Forks the session; the new session id is reported in this turn |
-| `/mcp` | user-invokable, 2 parameters | `enable <server>`, `disable <server>`, `status [server]` for MCP servers |
-| `/editor` | user-invokable, 2 parameters | Toggles the editor's file-system and terminal tool categories |
+| Command    | Flags                        | Does                                                                             |
+| ---------- | ---------------------------- | -------------------------------------------------------------------------------- |
+| `/compact` | compaction-tagged            | Summarises older turns behind a summary, in an ephemeral fork, announced in-band |
+| `/fork`    | user-invokable               | Forks the session; the new session id is reported in this turn                   |
+| `/mcp`     | user-invokable, 2 parameters | `enable <server>`, `disable <server>`, `status [server]` for MCP servers         |
+| `/editor`  | user-invokable, 2 parameters | Toggles the editor's file-system and terminal tool categories                    |
 
 `/compact`, `/fork`, `/mcp` and `/editor` are all **intercepted by the harness** — they never become a model turn. Each is a prompt file like any other, which is why they autocomplete and why you can replace them. See [Prompts](./prompts).
 

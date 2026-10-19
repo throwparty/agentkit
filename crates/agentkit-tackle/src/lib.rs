@@ -13,8 +13,8 @@ pub mod mcp;
 pub mod permissions;
 pub mod providers;
 pub mod scripts;
-pub mod store;
 pub mod state;
+pub mod store;
 pub mod telemetry;
 
 /// Re-exported for integration tests and downstream consumers.
