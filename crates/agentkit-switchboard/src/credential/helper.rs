@@ -1,44 +1,10 @@
 use crate::credential::{CredentialSource, OAuthState, ResolvedCredential};
+use agentkit_credentials::consumer;
 use chrono::{DateTime, Utc};
-use std::path::PathBuf;
-use std::process::{Command, Output};
-
-fn helper_binary_name(helper_name: &str) -> String {
-    format!("agentkit-credential-{helper_name}")
-}
-
-fn resolve_helper_path(helper_name: &str) -> Option<PathBuf> {
-    let name = helper_binary_name(helper_name);
-
-    if let Ok(exe) = std::env::current_exe() {
-        let sibling = exe.parent()?.join(&name);
-        if sibling.is_file() {
-            return Some(sibling);
-        }
-    }
-
-    if let Ok(path_var) = std::env::var("PATH") {
-        for dir in std::env::split_paths(&path_var) {
-            let candidate = dir.join(&name);
-            if candidate.is_file() {
-                return Some(candidate);
-            }
-        }
-    }
-
-    None
-}
+use std::process::Output;
 
 pub fn format_path_for_display() -> String {
-    match std::env::var("PATH") {
-        Ok(path) => {
-            let entries: Vec<String> = std::env::split_paths(&path)
-                .map(|p| p.to_string_lossy().to_string())
-                .collect();
-            entries.join("\n  ")
-        }
-        Err(_) => "(PATH not set)".to_string(),
-    }
+    consumer::format_path_for_display()
 }
 
 pub fn run_helper_raw(
@@ -48,43 +14,7 @@ pub fn run_helper_raw(
     identity: &str,
     stdin_data: Option<&str>,
 ) -> Result<Output, String> {
-    let path = resolve_helper_path(helper_name).ok_or_else(|| {
-        format!(
-            "credential helper 'agentkit-credential-{helper_name}' not found.\n  Searched PATH:\n  {}\n  (target: agentkit-credential-{helper_name})",
-            format_path_for_display(),
-        )
-    })?;
-
-    let mut cmd = Command::new(&path);
-    cmd.arg(command);
-    cmd.arg(component);
-    cmd.arg(identity);
-    cmd.stdout(std::process::Stdio::piped());
-    cmd.stderr(std::process::Stdio::piped());
-
-    if stdin_data.is_some() {
-        cmd.stdin(std::process::Stdio::piped());
-    }
-
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("cannot spawn helper '{}': {e}", path.display()))?;
-
-    if let Some(data) = stdin_data {
-        if let Some(mut stdin) = child.stdin.take() {
-            use std::io::Write;
-            stdin
-                .write_all(data.as_bytes())
-                .map_err(|e| format!("cannot write to helper '{}': {e}", path.display()))?;
-        }
-    }
-
-    child.wait_with_output().map_err(|e| {
-        format!(
-            "helper '{}' wait failed for '{identity}': {e}",
-            path.display()
-        )
-    })
+    consumer::run(helper_name, command, component, identity, stdin_data)
 }
 
 const COMPONENT: &str = "switchboard";
@@ -99,29 +29,20 @@ fn run_helper(
 }
 
 pub fn parse_credential_json(json: &str, source: CredentialSource) -> Option<ResolvedCredential> {
-    let parsed: serde_json::Value = serde_json::from_str(json).ok()?;
-    let access_token = parsed.get("access_token")?.as_str()?.to_string();
-    let refresh_token = parsed
-        .get("refresh_token")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let expires_at = parsed
-        .get("expires_at")
-        .and_then(|v| v.as_str())
+    let credential = consumer::Credential::parse(json).ok()?;
+    let expires_at = credential
+        .expires_at
+        .as_deref()
         .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
         .map(|dt| dt.with_timezone(&Utc));
-    let account_id = parsed
-        .get("account_id")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
 
     Some(ResolvedCredential {
-        value: access_token,
+        value: credential.access_token,
         source,
         oauth: Some(OAuthState {
-            refresh_token,
+            refresh_token: credential.refresh_token,
             expires_at,
-            account_id,
+            account_id: credential.account_id,
         }),
     })
 }

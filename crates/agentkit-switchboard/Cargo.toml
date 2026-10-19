@@ -23,6 +23,7 @@ url = "2"
 chrono = {version = "0.4", features = ["serde"]}
 open = "5"
 base64 = "0.23"
+agentkit-credentials = {path = "../agentkit-credentials"}
 agentkit-models = {path = "../agentkit-models"}
 agentkit-docgen = {path = "../agentkit-docgen"}
 agentkit-path = {path = "../agentkit-path"}
