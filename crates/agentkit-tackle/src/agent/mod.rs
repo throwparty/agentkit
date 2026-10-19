@@ -5,6 +5,7 @@ pub mod config_options;
 pub mod fork;
 pub mod nested;
 pub mod retry;
+pub mod prompt;
 pub mod runtime;
 pub mod script_loop;
 pub mod seed;

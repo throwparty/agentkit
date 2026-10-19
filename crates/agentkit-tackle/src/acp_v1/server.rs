@@ -13,11 +13,13 @@ use crate::agent::fork::fork_access;
 use super::negotiation::ConnectionNegotiation;
 use super::notices::connection_notices;
 use super::permission::AcpPermissionRequester;
-use super::replay::{replay_updates, timestamp};
+use super::replay::replay_updates;
+use crate::content::timestamp;
 use crate::agent::seed as first_run;
 use crate::agent::{compaction, script_loop};
 use crate::agent::config_options::session_actor;
-use super::{run_direct_invocation, run_prompt_turn};
+use super::run_direct_invocation;
+use crate::agent::prompt::run_prompt_turn;
 use crate::state::{LEASE_TTL_SECS, LeaseHeartbeat, TackleState, store_session_id, wire_session_id};
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
@@ -781,8 +783,12 @@ where
                     )
                     .await
                     {
-                        Ok(response) => responder.respond(response),
-                        Err(err) => responder.respond_with_error(err),
+                        Ok(stop) => responder.respond(PromptResponse::new(match stop {
+                            crate::agent::TurnStop::EndTurn
+                            | crate::agent::TurnStop::ContextLength => StopReason::EndTurn,
+                            crate::agent::TurnStop::MaxTurnRequests => StopReason::MaxTurnRequests,
+                        })),
+                        Err(err) => responder.respond_with_error(Error::internal_error().data(err)),
                     }
                 })?;
                 Ok(())
