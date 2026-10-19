@@ -24,10 +24,10 @@ acp_v1/         the ACP v1 RPC surface (glue): transport, handlers,
 state.rs        TackleState — shared runtime state (store, config, MCP
                 pool, scripts, definitions)
 
-agent/          the core loop: run_turn, nested agent invocation, retry
-session orchestration (run_prompt_turn, direct invocation, fork,
-compaction, seed, titling, config options) currently lives in acp_v1 and
-is being extracted into agent/
+agent/          the core loop and orchestration: run_turn,
+                run_prompt_turn, direct invocation, tool-call execution,
+                nested agents, fork, compaction, seed, titling, config
+                options, the turn sink and TurnRuntime
 
 providers/      the model provider: ModelProvider + model types, rig
                 plumbing, the OpenAI chat-completions wire format
