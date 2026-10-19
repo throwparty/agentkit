@@ -11,7 +11,7 @@
 //! announced, with a context note; the switch is effective the following
 //! turn.
 
-use crate::acp::TackleState;
+use crate::acp_v1::TackleState;
 use crate::config::Auth;
 use crate::store::{Session, SessionId};
 use agent_client_protocol::schema::v1::{Notice, NoticeSeverity};
@@ -27,7 +27,7 @@ pub const ACTOR_SELECTOR_ID: &str = "actor";
 
 /// Discover a model id with a context window for window validation.
 pub fn context_window(model_ref: &str) -> Option<u64> {
-    crate::acp::context_window(model_ref)
+    crate::acp_v1::context_window(model_ref)
 }
 
 /// Per-endpoint model discovery: the OpenAI list shape's `data[].id`.
@@ -92,7 +92,7 @@ pub fn resolve_model_for(
 ) -> Option<String> {
     let session_model = crate::store::session_model_free(session);
     let actor_name =
-        crate::acp::session_actor(session, state.config().config.defaults.actor.as_deref());
+        crate::acp_v1::session_actor(session, state.config().config.defaults.actor.as_deref());
     let actor_model = state
         .definitions()
         .actors
@@ -251,7 +251,7 @@ pub async fn apply_model_switch(
                 )
                 .await
                 .map_err(|err| err.to_string())?;
-            crate::acp::compaction::run_compaction(
+            crate::acp_v1::compaction::run_compaction(
                 state,
                 session_id,
                 &turn.id,

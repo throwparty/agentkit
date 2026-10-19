@@ -9,7 +9,7 @@
 //! user-facing content on their own turn kind. Updates flow only after
 //! the client attaches — the fork handlers perform no session updates.
 
-use crate::acp::TackleState;
+use crate::acp_v1::TackleState;
 use crate::config::ScriptConfig;
 use crate::scripts::behaviour_engine;
 use crate::scripts::host::BehaviourHost;
