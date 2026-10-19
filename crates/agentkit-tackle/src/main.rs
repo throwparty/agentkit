@@ -2,7 +2,7 @@
 
 use agentkit_tackle::acp::{self, TackleState};
 use agentkit_tackle::store::SessionStore;
-use agentkit_tackle::{auth, cli, config, definitions, telemetry};
+use agentkit_tackle::{cli, config, definitions, telemetry};
 use clap::Parser;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -153,21 +153,21 @@ fn handle_auth(
         Err(err) => return fail(err),
     };
     let command = match command {
-        cli::AuthCommands::Add { identity, value } => auth::AuthCommand::Add {
+        cli::AuthCommands::Add { identity, value } => cli::auth::AuthCommand::Add {
             identity: identity.clone(),
             value: value.clone(),
         },
-        cli::AuthCommands::Status { identity } => auth::AuthCommand::Status {
+        cli::AuthCommands::Status { identity } => cli::auth::AuthCommand::Status {
             identity: identity.clone(),
         },
-        cli::AuthCommands::Token { identity } => auth::AuthCommand::Token {
+        cli::AuthCommands::Token { identity } => cli::auth::AuthCommand::Token {
             identity: identity.clone(),
         },
-        cli::AuthCommands::Logout { identity } => auth::AuthCommand::Logout {
+        cli::AuthCommands::Logout { identity } => cli::auth::AuthCommand::Logout {
             identity: identity.clone(),
         },
     };
-    match auth::handle_auth(command, &loaded.config, credential_helper) {
+    match cli::auth::handle_auth(command, &loaded.config, credential_helper) {
         Ok(message) => {
             println!("{message}");
             ExitCode::SUCCESS
