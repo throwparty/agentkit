@@ -182,7 +182,7 @@ async fn run_script_turn(
 mod tests {
     use super::*;
     use crate::config::{Auth, Config, EndpointConfig, Loaded, WireFormat};
-    use crate::loader::Definitions;
+    use crate::definitions::Definitions;
     use crate::store::{SessionKind, SessionStore, TurnKind, TurnUsage};
 
     fn sse_body(text: &str) -> String {

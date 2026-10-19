@@ -11,7 +11,7 @@
 //! silent shadow.
 
 use crate::acp::client_tools::ClientTool;
-use crate::loader::Definitions;
+use crate::definitions::Definitions;
 use crate::mcp::{ElicitationSink, McpPool, NamespacedTool};
 use agent_client_protocol::schema::v1::{
     AvailableCommand, AvailableCommandInput, UnstructuredCommandInput,
@@ -698,7 +698,7 @@ pub fn parse_direct(input: &str) -> Option<DirectInvocation> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::loader::{ActorMeta, Definition, PersonaMeta, PromptMeta};
+    use crate::definitions::{ActorMeta, Definition, PersonaMeta, PromptMeta};
     use std::collections::BTreeSet;
     use std::path::PathBuf;
 

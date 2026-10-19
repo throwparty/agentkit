@@ -33,7 +33,7 @@ pub fn wrap_summary(summary: &str) -> String {
 
 /// Whether the user-typed first token resolves to a compaction-tagged
 /// prompt: those are intercepted instead of becoming model turns.
-pub fn is_compaction_command(definitions: &crate::loader::Definitions, first_token: &str) -> bool {
+pub fn is_compaction_command(definitions: &crate::definitions::Definitions, first_token: &str) -> bool {
     let Some(name) = first_token.strip_prefix('/') else {
         return false;
     };
@@ -291,14 +291,14 @@ pub async fn run_compaction(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::loader::{Definition, PromptMeta};
+    use crate::definitions::{Definition, PromptMeta};
     use crate::scripts::host::block_on;
     use crate::scripts::host::{LoopPendingCompletions, LoopPendingDispatcher};
     use crate::store::{Role, SessionKind, SessionStore};
     use std::path::PathBuf;
 
-    fn compaction_definitions() -> crate::loader::Definitions {
-        let mut definitions = crate::loader::Definitions::default();
+    fn compaction_definitions() -> crate::definitions::Definitions {
+        let mut definitions = crate::definitions::Definitions::default();
         definitions.prompts.insert(
             "compact".to_owned(),
             Definition {
@@ -485,7 +485,7 @@ mod tests {
         let state = Arc::new(TackleState::new(
             Arc::clone(&store),
             config,
-            crate::loader::Definitions::default(),
+            crate::definitions::Definitions::default(),
         ));
         let access: Arc<dyn SessionAccess> = Arc::new(StoreAccess::new(
             Arc::clone(&store),
@@ -536,7 +536,7 @@ mod tests {
         let state = Arc::new(TackleState::new(
             Arc::clone(&store),
             crate::config::Loaded::default(),
-            crate::loader::Definitions::default(),
+            crate::definitions::Definitions::default(),
         ));
         let access: Arc<dyn SessionAccess> = Arc::new(StoreAccess::new(
             Arc::clone(&store),

@@ -187,7 +187,7 @@ mod tests {
         Arc::new(TackleState::new(
             Arc::clone(db),
             config,
-            crate::loader::Definitions::default().with_builtins(),
+            crate::definitions::Definitions::default().with_builtins(),
         ))
     }
 
@@ -250,7 +250,7 @@ mod tests {
         let state = Arc::new(TackleState::new(
             Arc::clone(&db),
             config,
-            crate::loader::Definitions::default().with_builtins(),
+            crate::definitions::Definitions::default().with_builtins(),
         ));
         let access: Arc<dyn SessionAccess> = Arc::new(StoreAccess::new(
             Arc::clone(&db),
@@ -321,7 +321,7 @@ mod tests {
         let state = Arc::new(TackleState::new(
             Arc::clone(&db),
             config,
-            crate::loader::Definitions::default().with_builtins(),
+            crate::definitions::Definitions::default().with_builtins(),
         ));
         let access: Arc<dyn SessionAccess> = Arc::new(StoreAccess::new(
             Arc::clone(&db),
