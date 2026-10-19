@@ -11,6 +11,7 @@
 mod capabilities;
 mod commands;
 mod notices;
+mod replay;
 mod negotiation;
 pub mod client_tools;
 pub mod compaction;
@@ -26,6 +27,7 @@ pub use negotiation::ConnectionNegotiation;
 pub(crate) use commands::connect_config_servers;
 use commands::{available_commands_update, connect_forwarded_servers, editor_command, mcp_command, mcp_status_notice};
 use notices::connection_notices;
+use replay::{replay_updates, timestamp};
 pub use crate::state::{PendingProject, TackleState};
 use crate::state::{LEASE_TTL_SECS, LeaseHeartbeat, store_session_id, wire_session_id};
 
@@ -1552,88 +1554,6 @@ fn fork_access(
     script_loop::access(state, 0, notices)
 }
 
-/// Maps stored messages to replay notifications: user/assistant messages
-/// become message chunks (all blocks, sharing the stored message id —
-/// stable identity per logical message); tool call/result pairs collapse
-/// into one completed tool-call update; seeds replay as agent chunks;
-/// compaction summaries are skipped in stable v1 replay.
-fn replay_updates(
-    session_id: &SessionId,
-    assembled: &[crate::store::AssembledMessage],
-) -> Vec<SessionNotification> {
-    use agent_client_protocol::schema::v1::{
-        ContentBlock, ContentChunk, MessageId, ToolCall, ToolCallStatus,
-    };
-
-    let mut updates = Vec::new();
-    for assembled in assembled {
-        let message = &assembled.message;
-        let message_id = MessageId::new(message.id.clone());
-
-        // Tool messages carry raw JSON (arguments/results), not content
-        // blocks, so handle them before the block parser.
-        match message.role {
-            crate::store::Role::ToolCall => {
-                // The pair collapses: one completed tool-call update. The
-                // title is derived from the stored arguments, matching the
-                // live announcement.
-                let name = message.tool_name.clone().unwrap_or_default();
-                let arguments: serde_json::Value =
-                    serde_json::from_str(&message.content).unwrap_or(serde_json::Value::Null);
-                updates.push(notification(
-                    session_id,
-                    SessionUpdate::ToolCall(
-                        ToolCall::new(
-                            message.id.clone(),
-                            crate::invokables::titles::tool_call_title(&name, &arguments),
-                        )
-                        .name(name.clone())
-                        .kind(crate::invokables::titles::tool_kind(&name))
-                        .status(ToolCallStatus::Completed),
-                    ),
-                ));
-                continue;
-            }
-            crate::store::Role::ToolResult => continue,
-            _ => {}
-        }
-
-        let blocks: Vec<ContentBlock> = match serde_json::from_str(&message.content) {
-            Ok(blocks) => blocks,
-            Err(_) => continue, // unparseable stored content: skip, never crash replay
-        };
-
-        match message.role {
-            crate::store::Role::User => {
-                for block in blocks {
-                    updates.push(notification(
-                        session_id,
-                        SessionUpdate::UserMessageChunk(
-                            ContentChunk::new(block).message_id(message_id.clone()),
-                        ),
-                    ));
-                }
-            }
-            crate::store::Role::Assistant | crate::store::Role::System => {
-                for block in blocks {
-                    updates.push(notification(
-                        session_id,
-                        SessionUpdate::AgentMessageChunk(
-                            ContentChunk::new(block).message_id(message_id.clone()),
-                        ),
-                    ));
-                }
-            }
-            _ => {}
-        }
-    }
-    updates
-}
-
-fn notification(session_id: &SessionId, update: SessionUpdate) -> SessionNotification {
-    SessionNotification::new(session_id.clone(), update)
-}
-
 /// The registered `pre_tool_use` policy script sources: every
 /// enabled registration declaring the event, resolved from its layer
 /// (built-in, user, or a trusted project layer).
@@ -1975,12 +1895,6 @@ pub fn prompt_text_of(content: &str) -> String {
         .unwrap_or_default()
 }
 
-/// RFC 3339 rendering of a unix-seconds timestamp (ACP `updatedAt`).
-fn timestamp(unix_seconds: i64) -> String {
-    jiff::Timestamp::from_second(unix_seconds)
-        .map(|ts| ts.to_string())
-        .unwrap_or_default()
-}
 
 #[cfg(test)]
 mod tests {
