@@ -9,7 +9,16 @@ and re-exports only; the orchestration lives in `crate::agent`.
 ```
 mod.rs          module doc + re-exports (no logic)
 server.rs       run_stdio and the per-connection handler builder
-                (run_agent_over): one closure per ACP method
+                (run_agent_over): one thin closure per ACP method,
+                delegating to the handler modules below
+initialize.rs   the initialize and authenticate handlers
+sessions.rs     the session-lifecycle handlers (new, list, close,
+                delete, load, resume, set_config_option, fork)
+prompt.rs       the session/prompt dispatch ladder: the slash-command
+                intercepts (/fork, /!, /mcp, /editor, compaction) and
+                the model turn
+support.rs      shared handler support: the Cx alias, the turn-runtime
+                builder, and the message/notice emitters
 capabilities.rs UnstableFeature and the capability map
 negotiation.rs  ConnectionNegotiation: advertised features, client
                 capability surface, editor toggles, tracked terminals,
