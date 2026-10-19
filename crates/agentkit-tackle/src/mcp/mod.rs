@@ -94,18 +94,12 @@ pub enum EnvValueError {
     },
 }
 
-/// The `{cred:IDENTITY}` marker prefix: a whole env value of this form
-/// resolves through the credential helper at spawn.
-const CRED_MARKER_PREFIX: &str = "{cred:";
-
 /// The identity in a whole-value `{cred:IDENTITY}` marker, if `value`
 /// is exactly one. A marker that is not the entire value, or that
 /// carries an empty identity, yields `None` here; [`resolve_env_value`]
 /// reports those as errors at spawn.
 pub fn credential_marker_identity(value: &str) -> Option<&str> {
-    let rest = value.strip_prefix(CRED_MARKER_PREFIX)?;
-    let identity = rest.strip_suffix('}')?;
-    (!identity.is_empty()).then_some(identity)
+    agentkit_credentials::consumer::parse_marker(value)
 }
 
 /// Resolves one env value for a spawn: a value that is the entire
@@ -118,10 +112,10 @@ fn resolve_env_value(
     key: &str,
     value: &str,
 ) -> Result<String, EnvValueError> {
-    if !value.contains(CRED_MARKER_PREFIX) {
+    if !value.contains(agentkit_credentials::consumer::MARKER_PREFIX) {
         return Ok(value.to_owned());
     }
-    let Some(rest) = value.strip_prefix(CRED_MARKER_PREFIX) else {
+    let Some(rest) = value.strip_prefix(agentkit_credentials::consumer::MARKER_PREFIX) else {
         return Err(EnvValueError::MarkerNotEntire {
             key: key.to_owned(),
         });

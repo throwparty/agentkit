@@ -164,6 +164,7 @@ dependencies = [
 name = "agentkit-switchboard"
 version = "0.1.0"
 dependencies = [
+ "agentkit-credentials",
  "agentkit-docgen",
  "agentkit-models",
  "agentkit-path",
@@ -204,6 +205,7 @@ name = "agentkit-tackle"
 version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
+ "agentkit-credentials",
  "agentkit-docgen",
  "agentkit-models",
  "agentkit-path",

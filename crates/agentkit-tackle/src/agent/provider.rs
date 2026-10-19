@@ -157,50 +157,23 @@ pub enum CredentialError {
     MissingToken { helper: String, identity: String },
 }
 
-/// The helper binary name for a helper name: `agentkit-credential-<name>`.
-pub fn helper_binary_name(helper: &str) -> String {
-    format!("agentkit-credential-{helper}")
-}
-
-/// Resolves a credential-helper binary: a sibling of the running
-/// executable first, then the first match on `PATH`. The sibling lookup
-/// lets a bundled helper next to the binary work without a PATH entry;
-/// this mirrors the resolution the credential helpers document.
-pub fn resolve_helper_path(helper: &str) -> Option<std::path::PathBuf> {
-    let name = helper_binary_name(helper);
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(sibling) = exe.parent().map(|dir| dir.join(&name)) {
-            if sibling.is_file() {
-                return Some(sibling);
-            }
-        }
-    }
-    let path_var = std::env::var_os("PATH")?;
-    std::env::split_paths(&path_var)
-        .map(|dir| dir.join(&name))
-        .find(|candidate| candidate.is_file())
-}
-
 /// Resolves a credential through the helper command: `agentkit-credential-
 /// {helper} get {CREDENTIAL_COMPONENT} {identity}` — the credential-helper
 /// protocol with [`CREDENTIAL_COMPONENT`] as the component. The helper's
 /// stdout is JSON carrying `access_token`.
 pub fn resolve_credential_value(helper: &str, identity: &str) -> Result<String, CredentialError> {
-    let path = resolve_helper_path(helper).ok_or_else(|| CredentialError::Helper {
+    let output = agentkit_credentials::consumer::run(
+        helper,
+        "get",
+        CREDENTIAL_COMPONENT,
+        identity,
+        None,
+    )
+    .map_err(|reason| CredentialError::Helper {
         helper: helper.to_owned(),
         identity: identity.to_owned(),
-        reason: format!("the helper {} was not found", helper_binary_name(helper)),
+        reason,
     })?;
-    let output = std::process::Command::new(path)
-        .arg("get")
-        .arg(CREDENTIAL_COMPONENT)
-        .arg(identity)
-        .output()
-        .map_err(|err| CredentialError::Helper {
-            helper: helper.to_owned(),
-            identity: identity.to_owned(),
-            reason: err.to_string(),
-        })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
         let reason = if stderr.is_empty() {
