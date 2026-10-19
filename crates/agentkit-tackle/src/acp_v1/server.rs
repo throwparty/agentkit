@@ -743,15 +743,32 @@ where
                 let owner_for_prompt = owner_for_prompt.clone();
                 let negotiation_for_turn = negotiation_for_prompt.clone();
                 let spawn_cx = cx.clone();
-                let sink: std::sync::Arc<dyn crate::agent::sink::TurnSink> =
-                    std::sync::Arc::new(super::ConnectionTurnSink::new(cx.clone()));
+                let runtime = crate::agent::runtime::TurnRuntime {
+                    pool: negotiation_for_turn.mcp_pool(),
+                    sink: std::sync::Arc::new(super::ConnectionTurnSink::new(cx.clone())),
+                    requester: std::sync::Arc::new(super::permission::AcpPermissionRequester {
+                        cx: cx.clone(),
+                        session_id: request.session_id.clone(),
+                    }),
+                    executor: std::sync::Arc::new(
+                        client_tools::ConnectionClientTools { cx: cx.clone() },
+                    ),
+                    tracker: negotiation_for_turn.clone(),
+                    compaction_notices: connection_notices(
+                        &cx,
+                        &negotiation_for_turn,
+                        "compaction",
+                    ),
+                    titling_notices: connection_notices(&cx, &negotiation_for_turn, "titling"),
+                    client_tools: client_tools::catalog(
+                        negotiation_for_turn.client_caps(),
+                        negotiation_for_turn.editor_toggles(),
+                    ),
+                };
                 spawn_cx.spawn(async move {
                     match run_prompt_turn(
                         state_for_prompt,
-                        negotiation_for_turn,
-                        cx,
-                        sink,
-                        request.session_id.clone(),
+                        runtime,
                         session_id,
                         turn,
                         actor_name,
