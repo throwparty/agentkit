@@ -1,4 +1,4 @@
-//! Session configuration option tests (T-031): selector population with
+//! Session configuration option tests: selector population with
 //! discovery and fallback, switch semantics, window validation, and the
 //! config_option_update.
 

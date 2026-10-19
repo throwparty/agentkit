@@ -392,7 +392,7 @@ pub struct McpPool<S: ElicitationSink = AutoDecline> {
     /// re-supplying the config.
     configs: BTreeMap<String, McpServerConfig>,
     /// Config-declared servers shadowed by a client-forwarded server of
-    /// the same name (FR-013: the client-declared server wins). Reported
+    /// the same name (the client-declared server wins). Reported
     /// at the first turn.
     shadowed: BTreeSet<String>,
     sink: Arc<S>,

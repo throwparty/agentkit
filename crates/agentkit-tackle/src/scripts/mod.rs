@@ -95,7 +95,7 @@ fn limits(time: Duration) -> Limits {
     }
 }
 
-/// Runs the registered `pre_tool_use` policy scripts (FR-015). The script
+/// Runs the registered `pre_tool_use` policy scripts. The script
 /// sees the request as structured JSON; allow and deny are final (the
 /// first decisive script wins); ask falls through; a script error,
 /// timeout or malformed verdict is fail-closed (never an allow).

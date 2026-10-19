@@ -1,4 +1,4 @@
-//! E2E tool-turn suite (AC-001 / AC-005 / AC-007): one scripted-model
+//! E2E tool-turn suite: one scripted-model
 //! session driving the seams the unit suite cannot reach (plan:
 //! `adrs/2026-09-17-tackle/e2e-tests-plan.md`).
 //!
@@ -647,7 +647,7 @@ async fn scenario_over(
                 }
             }
 
-            // --- AC-007: /name expansion into the conversation ---
+            // --- /name expansion into the conversation ---
             prompt_turn(&connection, &sid, PROMPT_GREET, "prompt 4 (/greet)", &fails).await;
 
             Ok(())

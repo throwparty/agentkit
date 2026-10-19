@@ -1,5 +1,5 @@
 //! Initialize-phase integration tests: the golden transcript harness for
-//! the conformance suite (T-013) starts here. Each test spawns the tackle
+//! the conformance suite starts here. Each test spawns the tackle
 //! binary as a subprocess and drives it with the SDK's client — the same
 //! shape the golden transcripts replay.
 
@@ -46,7 +46,7 @@ async fn initialize_negotiates_v1_and_advertises_capabilities() {
             // so it responds with the same version.
             assert_eq!(response.protocol_version, ProtocolVersion::V1);
 
-            // Capability advertisement per FR-002: the stable surface.
+            // Capability advertisement: the stable surface.
             let capabilities = &response.agent_capabilities;
             assert!(capabilities.load_session, "loadSession must be advertised");
             let session_capabilities: &SessionCapabilities = &capabilities.session_capabilities;
@@ -65,7 +65,7 @@ async fn initialize_negotiates_v1_and_advertises_capabilities() {
             assert!(response.auth_methods.is_empty());
 
             // Unstable features are advertised via _meta and the fork
-            // capability (gated on SENDING, not advertising — FR-002).
+            // capability (gated on SENDING, not advertising).
             let meta = response
                 .agent_capabilities
                 .meta
@@ -299,7 +299,7 @@ async fn available_commands_are_advertised_after_session_new_and_load() {
         .expect("available commands advertisement");
 }
 
-/// T-024 direct invocation: `/!mcp.<server>.<tool>` runs the tool with
+/// Direct invocation: `/!mcp.<server>.<tool>` runs the tool with
 /// no model request and reports the result as a tool call. This is the
 /// only MCP path wired end to end, so it is also the proof that a
 /// configured server reaches a session at all.
@@ -636,7 +636,7 @@ async fn forwarded_mcp_servers_reach_the_session() {
         .unwrap();
 }
 
-/// FR-013: a client-forwarded server that cannot connect is reported at
+/// A client-forwarded server that cannot connect is reported at
 /// the first turn as a warning notice (to clients advertising session
 /// notices), and does not fail session setup.
 #[tokio::test(flavor = "multi_thread")]

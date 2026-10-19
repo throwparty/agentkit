@@ -61,7 +61,7 @@ pub fn fire_title_trigger(
 /// `title_trigger` event (the shipped `titling` registration at the
 /// lowest precedence, replaceable wholesale by a same-name entry), each
 /// from its own layer through the shared resolver.
-/// Resolves the titling scripts from the cached bodies (FR-022: loaded
+/// Resolves the titling scripts from the cached bodies (loaded
 /// once): the registrations declaring the `title_trigger` event (the
 /// shipped `titling` registration at the lowest precedence, replaceable
 /// wholesale by a same-name entry).

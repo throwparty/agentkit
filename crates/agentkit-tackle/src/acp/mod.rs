@@ -235,9 +235,9 @@ pub struct TackleState {
     /// start for user and built-in scripts, trust resolution for the
     /// project layer). Scripts are never re-read, so a body that changes
     /// mid-process cannot take effect without a restart and a re-prompt
-    /// (FR-022: loaded once, no hot reload).
+    /// (loaded once, no hot reload).
     script_sources: std::sync::RwLock<std::sync::Arc<BTreeMap<String, String>>>,
-    /// The in-memory permission grant store (FR-014): keyed by session
+    /// The in-memory permission grant store: keyed by session
     /// and invokable, gone on close, process exit, and resume after
     /// restart.
     pub grants: tokio::sync::Mutex<crate::permissions::GrantStore>,
@@ -359,7 +359,7 @@ impl TackleState {
             project_layer: base.project_layer.clone(),
         };
         // Resolve the approved project scripts now, once, alongside the
-        // configuration they belong to (FR-022: loaded once, no hot
+        // configuration they belong to (loaded once, no hot
         // reload).
         let sources = crate::config::resolve_script_sources(&loaded);
         *self.script_sources.write().expect("script sources lock poisoned") =
@@ -388,7 +388,7 @@ impl TackleState {
 impl TackleState {
     /// The capability map: the stable v1 surface plus the unstable
     /// features tackle implements (advertised unconditionally — the gate
-    /// applies to *sending* RFD-shaped updates, per FR-002).
+    /// applies to *sending* RFD-shaped updates).
     fn capabilities(&self) -> AgentCapabilities {
         let mut unstable: agent_client_protocol::schema::v1::Meta =
             agent_client_protocol::schema::v1::Meta::new();
@@ -547,7 +547,7 @@ pub(crate) async fn connect_config_servers(state: &TackleState) -> McpPool {
     pool
 }
 
-/// The first-turn MCP report (FR-013): a warning notice naming enabled
+/// The first-turn MCP report: a warning notice naming enabled
 /// servers that failed to connect and config servers shadowed by a
 /// client-declared server of the same name. `None` when nothing is
 /// wrong, so a clean session stays silent.
@@ -759,7 +759,7 @@ async fn run_prompt_turn(
     )
     .unwrap_or_default();
     let tools = registry.model_tools();
-    // FR-012: the invokable listing rides the system prompt.
+    // The invokable listing rides the system prompt.
     let mut system = persona.map(|p| p.body.clone()).unwrap_or_default();
     if !tools.is_empty() {
         system.push_str("\n\n");
@@ -796,7 +796,7 @@ async fn run_prompt_turn(
         .await
         .map_err(|err| Error::internal_error().data(err.to_string()))?;
     let prior: Vec<crate::agent::ChatMessage> = compaction::prior_messages(&assembled, &turn.id);
-    // FR-010: a user-typed `/name` prompt expands into the
+    // A user-typed `/name` prompt expands into the
     // model prompt (the stored message stays literal).
     let prompt_text = match first_text.strip_prefix('/') {
         Some(rest) => {
@@ -1967,8 +1967,7 @@ where
                 let selectors = config_options::build(&state_for_load, &session).await;
                 let commands = available_commands_update(&state_for_load, &negotiation_for_load).await;
                 // The usage snapshot: exactly one after replay, so a
-                // reopened client shows the session's context state
-                // (FR-005, FR-007).
+                // reopened client shows the session's context state.
                 let size = config_options::resolve_model_for(&state_for_load, &session, None)
                     .and_then(|model_ref| context_window(&model_ref))
                     .unwrap_or(0);
@@ -2006,7 +2005,7 @@ where
         )
         .on_receive_request(
             async move |request: ResumeSessionRequest, responder, cx| {
-                // Resume reattaches WITHOUT replay (FR-003); config
+                // Resume reattaches WITHOUT replay; config
                 // selectors ride the response like session/new.
                 connect_forwarded_servers(&negotiation_for_resume, &request.mcp_servers).await;
                 let session = state_for_resume
@@ -2185,7 +2184,7 @@ where
 
 /// The notice sink for a live connection: a script-driven model call
 /// becomes a session notice when the client advertised the notices
-/// capability (FR-016). A narrow seam — one-way notification only, never
+/// capability. A narrow seam — one-way notification only, never
 /// the connection, so the script loop cannot issue client requests.
 struct ConnectionNotices {
     cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
@@ -2210,7 +2209,7 @@ impl crate::scripts::host::NoticeSink for ConnectionNotices {
 }
 
 /// Builds the notice sink for `cx`, gated on the client's advertised
-/// notices capability and labelled with the calling path (FR-016).
+/// notices capability and labelled with the calling path.
 fn connection_notices(
     cx: &agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
     negotiation: &ConnectionNegotiation,
@@ -2316,7 +2315,7 @@ fn notification(session_id: &SessionId, update: SessionUpdate) -> SessionNotific
     SessionNotification::new(session_id.clone(), update)
 }
 
-/// The registered `pre_tool_use` policy script sources (FR-015): every
+/// The registered `pre_tool_use` policy script sources: every
 /// enabled registration declaring the event, resolved from its layer
 /// (built-in, user, or a trusted project layer).
 fn policy_script_sources(state: &TackleState) -> Vec<String> {
@@ -2350,7 +2349,7 @@ struct ToolCallContext<'a> {
 
 /// Runs one model tool call: announce it, run the permission pipeline,
 /// execute on allow, report the terminal status, and return the result
-/// for the next model request (FR-009/014).
+/// for the next model request.
 async fn run_model_tool_call(
     ctx: ToolCallContext<'_>,
     call: crate::agent::ModelToolCall,
@@ -2433,7 +2432,7 @@ async fn run_model_tool_call(
                 }
             }
             "agent" => {
-                // FR-026: spawn a nested agent instance of the target
+                // Spawn a nested agent instance of the target
                 // actor and return its final message as the tool result.
                 match run_agent_invocation(state, session_id, &call.name, &arguments).await {
                     Ok(text) => (text, false),
@@ -2474,7 +2473,7 @@ async fn run_model_tool_call(
     crate::agent::ToolCallOutcome { content, is_error }
 }
 
-/// Runs an `agent.<actor>` invocation (FR-026): an ephemeral fork of the
+/// Runs an `agent.<actor>` invocation: an ephemeral fork of the
 /// parent session runs one nested agent instance of the target actor and
 /// its final message becomes the tool result.
 async fn run_agent_invocation(
@@ -2534,7 +2533,7 @@ async fn run_agent_invocation(
     Ok(result.final_message)
 }
 
-/// The ACP `session/request_permission` bridge (FR-014).
+/// The ACP `session/request_permission` bridge.
 ///
 /// `tool_call_id` correlates the ask with the in-flight tool call it
 /// authorises, so clients (Zed upserts tool calls by id) attach the
@@ -2876,7 +2875,7 @@ mod tests {
         );
 
         // A mid-process change to the file is not picked up: the body was
-        // loaded once (FR-022: no hot reload).
+        // loaded once (no hot reload).
         std::fs::write(user.join("scripts/deny.rhai"), "two").unwrap();
         assert_eq!(
             state.script_sources().get("deny").map(String::as_str),

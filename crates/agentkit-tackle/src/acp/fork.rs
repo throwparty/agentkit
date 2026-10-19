@@ -46,8 +46,8 @@ pub async fn create_fork(db: &SessionStore, source_id: &SessionId) -> Result<Ses
     })
 }
 
-/// Resolves the `session_forked` scripts from the cached bodies (FR-022:
-/// loaded once), each from its own layer through the shared resolver.
+/// Resolves the `session_forked` scripts from the cached bodies (loaded
+/// once), each from its own layer through the shared resolver.
 pub fn resolve_session_forked_scripts(
     scripts: &BTreeMap<String, ScriptConfig>,
     sources: &BTreeMap<String, String>,

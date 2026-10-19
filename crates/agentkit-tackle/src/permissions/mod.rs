@@ -1,7 +1,7 @@
 //! The fixed-order permission pipeline — the only path to tool
 //! execution aside from user direct invocation.
 //!
-//! Order (FR-014): grant-store deny records short-circuit; then the
+//! Order: grant-store deny records short-circuit; then the
 //! `pre_tool_use` policy script (allow and deny are final, ask falls
 //! through, the script sees a `previously_granted` flag); then grant
 //! allow records are honoured; then the fixed ask fallback runs

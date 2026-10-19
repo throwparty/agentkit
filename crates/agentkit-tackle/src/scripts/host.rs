@@ -91,13 +91,13 @@ pub trait PromptDispatcher: Send + Sync {
 }
 
 /// Publishes turn completions; await_completion polls it. The turn
-/// loop publishes (T-015 wiring).
+/// loop publishes.
 pub trait CompletionSink: Send + Sync {
     fn publish(&self, session: &SessionId, completion: Completion);
     fn take(&self, session: &SessionId) -> Option<Completion>;
 }
 
-/// Surfaces a script-driven model call to the client (FR-016). A narrow
+/// Surfaces a script-driven model call to the client. A narrow
 /// seam: the script loop gets one-way notification authority only, never
 /// the connection (which also carries client requests).
 pub trait NoticeSink: Send + Sync {

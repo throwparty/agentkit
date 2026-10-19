@@ -1,4 +1,4 @@
-//! Agent invocation integration test (FR-026): a model tool call to
+//! Agent invocation integration test: a model tool call to
 //! `agent.<actor>` spawns a nested agent instance of that actor and the
 //! nested final message returns as the tool result. Before the fix the
 //! invokable was advertised to the model but every call errored.
