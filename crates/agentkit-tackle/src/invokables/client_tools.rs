@@ -11,6 +11,7 @@
 use crate::store::SessionId;
 use serde_json::Value;
 use std::future::Future;
+use std::pin::Pin;
 
 /// The outcome of one `client.*` call: the text for the model, plus the
 /// terminal bookkeeping (a created or finished terminal id).
@@ -22,14 +23,15 @@ pub struct Executed {
 }
 
 /// Executes a client-capability tool against the live connection. The ACP
-/// layer implements this; the core loop only needs the trait.
+/// layer implements this; the core loop only needs the trait. Object-safe
+/// so the core can hold an `Arc<dyn ClientToolExecutor>`.
 pub trait ClientToolExecutor: Send + Sync {
     fn execute(
         &self,
         session: &SessionId,
         invokable: &str,
         arguments: &Value,
-    ) -> impl Future<Output = Result<Executed, String>> + Send;
+    ) -> Pin<Box<dyn Future<Output = Result<Executed, String>> + Send + '_>>;
 }
 
 /// A tool offered to the model, derived from the client's surface.

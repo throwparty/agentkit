@@ -251,8 +251,18 @@ pub(super) async fn run_prompt_turn(
             let registry = registry.clone();
             let state = state_for_prompt.clone();
             let negotiation = negotiation_for_turn.clone();
-            let cx = cx.clone();
-            let session = request_session_id.clone();
+            let sink = sink.clone();
+            let requester: std::sync::Arc<dyn crate::permissions::PermissionRequester> =
+                std::sync::Arc::new(AcpPermissionRequester {
+                    cx: cx.clone(),
+                    session_id: request_session_id.clone(),
+                });
+            let executor: std::sync::Arc<
+                dyn crate::invokables::client_tools::ClientToolExecutor,
+            > = std::sync::Arc::new(crate::acp_v1::client_tools::ConnectionClientTools {
+                cx: cx.clone(),
+            });
+            let session = session_id.clone();
             let actor = actor_name.clone();
             let sources = policy_script_sources(&state_for_prompt);
             let client_tools = client_tools.clone();
@@ -262,7 +272,9 @@ pub(super) async fn run_prompt_turn(
                 let registry = registry.clone();
                 let state = state.clone();
                 let negotiation = negotiation.clone();
-                let cx = cx.clone();
+                let sink = sink.clone();
+                let requester = requester.clone();
+                let executor = executor.clone();
                 let session = session.clone();
                 let actor = actor.clone();
                 let sources = sources.clone();
@@ -273,7 +285,9 @@ pub(super) async fn run_prompt_turn(
                             registry: &registry,
                             state: &state,
                             negotiation: &negotiation,
-                            cx: &cx,
+                            sink: sink.as_ref(),
+                            requester: requester.as_ref(),
+                            executor: executor.as_ref(),
                             session_id: &session,
                             actor: &actor,
                             policy_sources: &sources,
@@ -417,7 +431,7 @@ pub(super) async fn run_direct_invocation(
                 {
                     Ok(executed) => {
                         negotiation.track_terminals(
-                            &wire_id.to_string(),
+                            &store_session_id(&wire_id),
                             executed.created,
                             executed.finished,
                         );
@@ -533,8 +547,10 @@ struct ToolCallContext<'a> {
     registry: &'a crate::invokables::Registry,
     state: &'a Arc<TackleState>,
     negotiation: &'a ConnectionNegotiation,
-    cx: &'a agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
-    session_id: &'a SessionId,
+    sink: &'a dyn crate::agent::sink::TurnSink,
+    requester: &'a dyn crate::permissions::PermissionRequester,
+    executor: &'a dyn crate::invokables::client_tools::ClientToolExecutor,
+    session_id: &'a crate::store::SessionId,
     actor: &'a str,
     policy_sources: &'a [String],
     client_tools: &'a [crate::invokables::client_tools::ClientTool],
@@ -547,12 +563,13 @@ async fn run_model_tool_call(
     ctx: ToolCallContext<'_>,
     call: crate::providers::ModelToolCall,
 ) -> crate::providers::ToolCallOutcome {
-    use agent_client_protocol::schema::v1;
     let ToolCallContext {
         registry,
         state,
         negotiation,
-        cx,
+        sink,
+        requester,
+        executor,
         session_id,
         actor,
         policy_sources,
@@ -562,26 +579,19 @@ async fn run_model_tool_call(
         serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
     let kind = crate::invokables::kind_of(&call.name);
 
-    let _ = cx.send_notification(SessionNotification::new(
-        session_id.clone(),
-        SessionUpdate::ToolCall(
-            v1::ToolCall::new(
-                v1::ToolCallId::new(call.id.clone()),
-                crate::invokables::titles::tool_call_title(&call.name, &arguments),
-            )
-            .name(call.name.clone())
-            .kind(wire_kind(crate::invokables::titles::tool_kind(&call.name)))
-            .status(v1::ToolCallStatus::InProgress)
-            .raw_input(Some(arguments.clone())),
-        ),
-    ));
+    sink.tool_call(
+        session_id,
+        crate::agent::sink::ToolCall {
+            id: call.id.clone(),
+            title: crate::invokables::titles::tool_call_title(&call.name, &arguments),
+            name: call.name.clone(),
+            kind: crate::invokables::titles::tool_kind(&call.name),
+            status: crate::agent::sink::ToolCallStatus::InProgress,
+            arguments: arguments.clone(),
+        },
+    );
 
     let policy = crate::scripts::PolicyScripts::load(policy_sources);
-    let requester = AcpPermissionRequester {
-        cx: cx.clone(),
-        session_id: session_id.clone(),
-        tool_call_id: Some(call.id.clone()),
-    };
     let verdict = {
         let mut grants = state.grants.lock().await;
         let assessment = crate::permissions::Assessment {
@@ -591,9 +601,10 @@ async fn run_model_tool_call(
             kind,
             arguments: arguments.clone(),
             interactive: true,
+            tool_call_id: Some(call.id.clone()),
         };
         let mut pipeline =
-            crate::permissions::PermissionPipeline::new(&mut grants, &policy, &requester);
+            crate::permissions::PermissionPipeline::new(&mut grants, &policy, requester);
         pipeline.assess(&assessment).await
     };
 
@@ -609,12 +620,10 @@ async fn run_model_tool_call(
                         true,
                     )
                 } else {
-                    match crate::acp_v1::client_tools::execute(cx, session_id, &call.name, &arguments)
-                        .await
-                    {
+                    match executor.execute(session_id, &call.name, &arguments).await {
                         Ok(executed) => {
                             negotiation.track_terminals(
-                                &session_id.to_string(),
+                                session_id,
                                 executed.created,
                                 executed.finished,
                             );
@@ -646,22 +655,18 @@ async fn run_model_tool_call(
         }
     };
 
-    let status = if is_error {
-        v1::ToolCallStatus::Failed
-    } else {
-        v1::ToolCallStatus::Completed
-    };
-    let _ = cx.send_notification(SessionNotification::new(
-        session_id.clone(),
-        SessionUpdate::ToolCallUpdate(v1::ToolCallUpdate::new(
-            v1::ToolCallId::new(call.id.clone()),
-            v1::ToolCallUpdateFields::new().status(status).content(vec![
-                v1::ToolCallContent::from(v1::ContentBlock::Text(v1::TextContent::new(
-                    content.clone(),
-                ))),
-            ]),
-        )),
-    ));
+    sink.tool_call_update(
+        session_id,
+        crate::agent::sink::ToolCallUpdate {
+            id: call.id.clone(),
+            status: if is_error {
+                crate::agent::sink::ToolCallStatus::Failed
+            } else {
+                crate::agent::sink::ToolCallStatus::Completed
+            },
+            content: content.clone(),
+        },
+    );
 
     crate::providers::ToolCallOutcome { content, is_error }
 }
@@ -671,12 +676,12 @@ async fn run_model_tool_call(
 /// its final message becomes the tool result.
 async fn run_agent_invocation(
     state: &Arc<TackleState>,
-    parent_session: &SessionId,
+    parent_session: &crate::store::SessionId,
     invokable: &str,
     arguments: &serde_json::Value,
 ) -> Result<String, String> {
     let target = invokable.strip_prefix("agent.").unwrap_or(invokable);
-    let parent = store_session_id(parent_session);
+    let parent = parent_session.clone();
     let definitions = state.definitions();
     let actor = definitions
         .actors
