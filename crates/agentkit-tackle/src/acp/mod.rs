@@ -18,8 +18,8 @@ pub mod first_run;
 pub mod fork;
 pub mod http;
 pub mod script_loop;
-pub mod titles;
-pub mod titling;
+pub mod session_titles;
+pub mod tool_titles;
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
     AgentCapabilities, AvailableCommandsUpdate, CloseSessionResponse, DeleteSessionResponse,
@@ -1012,7 +1012,7 @@ async fn run_prompt_turn(
     );
 
     // Titling: detached, silent, only for untitled sessions.
-    titling::fire_title_trigger_detached(
+    session_titles::fire_title_trigger_detached(
         state_for_prompt.clone(),
         session_id.clone(),
         size,
@@ -1663,10 +1663,10 @@ where
                         serde_json::from_str(&input.arguments).unwrap_or(serde_json::Value::Null);
                     let announce = agent_client_protocol::schema::v1::ToolCall::new(
                         agent_client_protocol::schema::v1::ToolCallId::new(call_id.clone()),
-                        titles::tool_call_title(&input.invokable, &arguments),
+                        tool_titles::tool_call_title(&input.invokable, &arguments),
                     )
                     .name(input.invokable.clone())
-                    .kind(titles::tool_kind(&input.invokable))
+                    .kind(tool_titles::tool_kind(&input.invokable))
                     .status(agent_client_protocol::schema::v1::ToolCallStatus::InProgress)
                     .raw_input(Some(arguments.clone()));
                     let _ = cx.send_notification(SessionNotification::new(
@@ -2267,10 +2267,10 @@ fn replay_updates(
                     SessionUpdate::ToolCall(
                         ToolCall::new(
                             message.id.clone(),
-                            titles::tool_call_title(&name, &arguments),
+                            tool_titles::tool_call_title(&name, &arguments),
                         )
                         .name(name.clone())
-                        .kind(titles::tool_kind(&name))
+                        .kind(tool_titles::tool_kind(&name))
                         .status(ToolCallStatus::Completed),
                     ),
                 ));
@@ -2375,10 +2375,10 @@ async fn run_model_tool_call(
         SessionUpdate::ToolCall(
             v1::ToolCall::new(
                 v1::ToolCallId::new(call.id.clone()),
-                titles::tool_call_title(&call.name, &arguments),
+                tool_titles::tool_call_title(&call.name, &arguments),
             )
             .name(call.name.clone())
-            .kind(titles::tool_kind(&call.name))
+            .kind(tool_titles::tool_kind(&call.name))
             .status(v1::ToolCallStatus::InProgress)
             .raw_input(Some(arguments.clone())),
         ),
@@ -2591,11 +2591,11 @@ impl crate::permissions::PermissionRequester for AcpPermissionRequester {
             .collect();
         let mut fields = v1::ToolCallUpdateFields::new()
             .name(request.invokable.clone())
-            .title(titles::tool_call_title(
+            .title(tool_titles::tool_call_title(
                 &request.invokable,
                 &request.arguments,
             ))
-            .kind(titles::tool_kind(&request.invokable));
+            .kind(tool_titles::tool_kind(&request.invokable));
         if let Some(reason) = &request.ask_reason {
             fields = fields.content(vec![v1::ToolCallContent::from(v1::ContentBlock::Text(
                 v1::TextContent::new(reason.clone()),
