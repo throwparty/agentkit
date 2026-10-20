@@ -20,8 +20,8 @@ AgentKit provides a suite of tools for hosting, integrating, sandboxing and oper
 
 ## Installation
 
-See [the documentation](https://agentkit.throw.party/docs/install).
+See [the documentation](https://agentkit.throw.party/docs/user/install).
 
 ## Configuration
 
-See [the documentation](http://agentkit.throw.party/docs/project-setup).
+See [the documentation](https://agentkit.throw.party/docs/user/).
