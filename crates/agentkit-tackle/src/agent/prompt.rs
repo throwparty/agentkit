@@ -146,7 +146,7 @@ async fn resolve_model_and_window(
 
 /// Builds the invokable registry, the model's tool catalogue, and the
 /// system prompt (the persona body with the invokable listing appended).
-async fn build_registry_and_system(
+pub(crate) async fn build_registry_and_system(
     definitions: &crate::definitions::Definitions,
     actor_name: &str,
     pool: &Arc<tokio::sync::Mutex<crate::mcp::McpPool>>,

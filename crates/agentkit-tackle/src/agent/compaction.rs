@@ -219,6 +219,19 @@ pub fn prior_messages(
     assembled: &[crate::store::AssembledMessage],
     current_turn: &TurnId,
 ) -> Vec<crate::providers::ChatMessage> {
+    prior_messages_tagged(assembled, current_turn)
+        .into_iter()
+        .map(|(message, _)| message)
+        .collect()
+}
+
+/// The prior messages with the turn kind that produced each: the report
+/// needs compaction summaries separated from ordinary assistant text,
+/// while the model path only needs the messages.
+pub fn prior_messages_tagged(
+    assembled: &[crate::store::AssembledMessage],
+    current_turn: &TurnId,
+) -> Vec<(crate::providers::ChatMessage, TurnKind)> {
     assembled
         .iter()
         .filter(|a| a.message.turn_id != *current_turn)
@@ -254,11 +267,14 @@ pub fn prior_messages(
                     })
                     .collect();
             }
-            Some(crate::providers::ChatMessage {
-                role,
-                content,
-                ..Default::default()
-            })
+            Some((
+                crate::providers::ChatMessage {
+                    role,
+                    content,
+                    ..Default::default()
+                },
+                a.turn_kind,
+            ))
         })
         .collect()
 }
@@ -460,6 +476,15 @@ mod tests {
             .iter()
             .any(|message| message.text() == "summary of t1"));
         assert!(!prior.iter().any(|message| message.text() == "next ask"));
+        let tagged = prior_messages_tagged(&assembled, &t3.id);
+        assert!(tagged.iter().any(|(message, kind)| {
+            *kind == TurnKind::Compaction
+                && message.text().contains("<compaction-summary untrusted>")
+        }));
+        assert!(tagged
+            .iter()
+            .any(|(message, kind)| *kind == TurnKind::Interaction
+                && message.text() == "look at this"));
         let image_message = prior
             .iter()
             .find(|message| message.text() == "look at this")
