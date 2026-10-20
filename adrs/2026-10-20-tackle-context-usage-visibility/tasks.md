@@ -54,7 +54,7 @@ Add `send_usage_snapshot` in `acp_v1/sessions.rs`: resolve the effective model, 
 | Depends On | T-002,T-003 |
 | References | lifecycle-snapshots,usage-update-contract |
 
-### T-005: Compaction usage cost
+### T-005: [x] Compaction usage cost
 
 Update the post-compaction `usage_update` in `acp_v1/prompt.rs` to read cumulative session usage and pass it through the shared constructor. Leave the announcement text and the RFD-shaped compaction update untouched.
 
