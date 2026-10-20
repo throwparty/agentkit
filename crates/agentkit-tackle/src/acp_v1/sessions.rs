@@ -7,6 +7,7 @@ use super::negotiation::ConnectionNegotiation;
 use super::notices::connection_notices;
 use super::permission::AcpPermissionRequester;
 use super::replay::replay_updates;
+use super::sink::usage_update;
 use super::support::{send_notices, Cx};
 use super::{wire_option, wire_options};
 use crate::agent::fork::{self, fork_access};
@@ -19,10 +20,55 @@ use agent_client_protocol::schema::v1::{
     ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, Meta, NewSessionRequest,
     NewSessionResponse, ReleaseTerminalRequest, ResumeSessionRequest, ResumeSessionResponse,
     SessionConfigOptionValue, SessionInfo, SessionNotification, SessionUpdate,
-    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, TerminalId, UsageUpdate,
+    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, TerminalId,
 };
 use agent_client_protocol::{Error, Responder};
 use std::sync::Arc;
+
+/// Sends exactly one usage snapshot for a live session: the effective
+/// model's window, the assembled-context estimate, and the cumulative cost
+/// when any request in the session was priced. Unknown windows send
+/// nothing.
+async fn send_usage_snapshot(
+    state: &TackleState,
+    cx: &Cx,
+    wire_session: &agent_client_protocol::schema::v1::SessionId,
+) -> Result<(), Error> {
+    let session_id = store_session_id(wire_session);
+    let session = state
+        .db
+        .get_session(&session_id)
+        .await
+        .map_err(|err| Error::internal_error().data(err.to_string()))?
+        .ok_or_else(|| Error::internal_error().data("no such session".to_owned()))?;
+    let size = config_options::resolve_model_for(state, &session, None)
+        .and_then(|model_ref| config_options::context_window(&model_ref))
+        .unwrap_or(0);
+    if size == 0 {
+        return Ok(());
+    }
+    let assembled = state
+        .db
+        .assemble_context(&session_id)
+        .await
+        .map_err(|err| Error::internal_error().data(err.to_string()))?;
+    let used_bytes: u64 = assembled
+        .iter()
+        .map(|item| item.message.content.len() as u64)
+        .sum();
+    let used = crate::scripts::host::estimate_tokens(used_bytes);
+    let session_usage = state
+        .db
+        .session_usage(&session_id)
+        .await
+        .map_err(|err| Error::internal_error().data(err.to_string()))?;
+    let cost = (session_usage.cost_usd > 0.0).then_some(session_usage.cost_usd);
+    cx.send_notification(SessionNotification::new(
+        wire_session.clone(),
+        SessionUpdate::UsageUpdate(usage_update(used, size, cost)),
+    ))
+    .map_err(|err| Error::internal_error().data(err.to_string()))
+}
 
 /// `session/new`: create the session, resolve project trust, seed the first
 /// turn, build the selectors, and (after the response) connect forwarded
@@ -148,7 +194,8 @@ pub(super) async fn handle_new_session(
         }
     }
     let commands = available_commands_update(&state, &negotiation).await;
-    cx.send_notification(SessionNotification::new(wire_id, commands))
+    cx.send_notification(SessionNotification::new(wire_id.clone(), commands))?;
+    send_usage_snapshot(&state, &cx, &wire_id).await
 }
 
 /// `session/list`: the stored sessions, filtered by the request's cwd and the
@@ -290,30 +337,16 @@ pub(super) async fn handle_load_session(
         .ok_or_else(|| Error::internal_error().data("no such session".to_owned()))?;
     let selectors = config_options::build(&state, &session).await;
     let commands = available_commands_update(&state, &negotiation).await;
-    // The usage snapshot: exactly one after replay, so a reopened client
-    // shows the session's context state.
-    let size = config_options::resolve_model_for(&state, &session, None)
-        .and_then(|model_ref| crate::agent::config_options::context_window(&model_ref))
-        .unwrap_or(0);
-    if size > 0 {
-        let used_bytes: u64 = assembled
-            .iter()
-            .map(|item| item.message.content.len() as u64)
-            .sum();
-        let used = crate::scripts::host::estimate_tokens(used_bytes);
-        cx.send_notification(SessionNotification::new(
-            request.session_id.clone(),
-            SessionUpdate::UsageUpdate(UsageUpdate::new(used, size)),
-        ))
-        .map_err(|err| Error::internal_error().data(err.to_string()))?;
-    }
     responder
         .respond(LoadSessionResponse::new().config_options(wire_options(&selectors.options)))?;
     send_notices(&cx, &negotiation, &request.session_id, &selectors.notices);
     cx.send_notification(SessionNotification::new(
         request.session_id.clone(),
         commands,
-    ))
+    ))?;
+    // The usage snapshot follows the response and replay, so a reopened
+    // client shows the session's context state.
+    send_usage_snapshot(&state, &cx, &request.session_id).await
 }
 
 /// `session/resume`: reattach WITHOUT replay; config selectors ride the
@@ -336,7 +369,7 @@ pub(super) async fn handle_resume_session(
     responder
         .respond(ResumeSessionResponse::new().config_options(wire_options(&selectors.options)))?;
     send_notices(&cx, &negotiation, &request.session_id, &selectors.notices);
-    Ok(())
+    send_usage_snapshot(&state, &cx, &request.session_id).await
 }
 
 /// `session/set_config_option`: apply a model or actor switch and return the
