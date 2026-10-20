@@ -67,7 +67,11 @@ If a credential helper binary is not found or an environment variable is unset, 
 curl http://127.0.0.1:3812/openai/v1/models
 ```
 
-Returns the merged model list from the bundled models.dev data plus any TOML overrides, with provider-specific pricing per model.
+Returns the catalogue: every `(provider, model)` pair under a qualified id
+(`provider/model`), plus a bare model id when its shape is unambiguous.
+Different providers serving the same id with different shapes stay separate;
+a bare id is emitted only when all providers agree on every known property.
+Send a qualified id to pin routing to that provider.
 
 ## Health check
 

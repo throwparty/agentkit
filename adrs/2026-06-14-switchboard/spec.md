@@ -1088,7 +1088,12 @@ Accepts standard OpenAI Chat Completions request body. Streams response in OpenA
 
 ### 9.2 `GET /openai/v1/models`
 
-Returns merged model list from models.dev + overrides + provider pricing.
+Returns the model catalogue. Every configured `(provider, model)` pair appears
+under a provider-qualified id (`identity/model`). A bare model id is also
+exposed as an alias when the model has exactly one shape group: one provider,
+or several providers with complete, identical shape fingerprints. If any shape
+property is unknown, the instance is a singleton and never merges. If a model
+id has multiple shape groups, no bare alias is emitted.
 
 **Response**:
 
@@ -1097,11 +1102,43 @@ Returns merged model list from models.dev + overrides + provider pricing.
   "object": "list",
   "data": [
     {
-      "id": "gpt-4o",
+      "id": "openai_codex_sub/gpt-4o",
+      "model": "gpt-4o",
       "object": "model",
       "created": 1700000000,
       "owned_by": "openai",
-      "context_window": 128000,
+      "provider": "openai_codex_sub",
+      "billing": "subscription",
+      "pricing": { "input_per_mtok": 0.0, "output_per_mtok": 0.0 },
+      "providers": [
+        { "identity": "openai_codex_sub", "billing": "subscription" }
+      ],
+      "context_window": 128000
+    },
+    {
+      "id": "openai_payg/gpt-4o",
+      "model": "gpt-4o",
+      "object": "model",
+      "created": 1700000000,
+      "owned_by": "openai",
+      "provider": "openai_payg",
+      "billing": "pay_as_you_go",
+      "pricing": { "input_per_mtok": 2.5, "output_per_mtok": 10.0 },
+      "providers": [
+        {
+          "identity": "openai_payg",
+          "billing": "pay_as_you_go",
+          "pricing": { "input_per_mtok": 2.5, "output_per_mtok": 10.0 }
+        }
+      ],
+      "context_window": 128000
+    },
+    {
+      "id": "gpt-4o",
+      "model": "gpt-4o",
+      "object": "model",
+      "created": 1700000000,
+      "owned_by": "openai",
       "providers": [
         { "identity": "openai_codex_sub", "billing": "subscription" },
         {
@@ -1109,15 +1146,29 @@ Returns merged model list from models.dev + overrides + provider pricing.
           "billing": "pay_as_you_go",
           "pricing": { "input_per_mtok": 2.5, "output_per_mtok": 10.0 }
         }
-      ]
+      ],
+      "context_window": 128000
     },
     {
-      "id": "llama-3.2",
+      "id": "ollama_local/llama-3.2",
+      "model": "llama-3.2",
       "object": "model",
       "created": 1700000000,
       "owned_by": "meta",
-      "context_window": 128000,
-      "providers": [{ "identity": "ollama_local", "billing": "free" }]
+      "provider": "ollama_local",
+      "billing": "free",
+      "pricing": { "input_per_mtok": 0.0, "output_per_mtok": 0.0 },
+      "providers": [{ "identity": "ollama_local", "billing": "free" }],
+      "context_window": 128000
+    },
+    {
+      "id": "llama-3.2",
+      "model": "llama-3.2",
+      "object": "model",
+      "created": 1700000000,
+      "owned_by": "meta",
+      "providers": [{ "identity": "ollama_local", "billing": "free" }],
+      "context_window": 128000
     }
   ]
 }
@@ -1242,10 +1293,11 @@ Not implemented in first iteration. Listed here to reserve the path pattern.
 
 **Acceptance Criteria**:
 
-- AC6.1: The bundled models.dev snapshot is loaded and merged with TOML `[models.*]` overrides at startup.
-- AC6.2: TOML model overrides take precedence over the bundled snapshot.
-- AC6.3: `GET /openai/v1/models` returns the merged list with provider pricing.
+- AC6.1: The bundled models.dev snapshot is loaded and merged with per-provider TOML `[providers.model_overrides.*]` overrides at startup.
+- AC6.2: Per-provider TOML model overrides take precedence over the bundled snapshot and do not affect other providers.
+- AC6.3: `GET /openai/v1/models` exposes every provider/model pair under a qualified id and emits a bare alias only when the model has one shape group.
 - AC6.4: No outbound HTTP requests for model metadata at startup.
+- AC6.5: A shape with any unknown property is never merged with another instance, including another instance with the same unknown properties.
 
 ### FR7: Credential Pooling
 

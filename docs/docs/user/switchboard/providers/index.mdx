@@ -46,4 +46,4 @@ The HTTP server starts on `127.0.0.1:3812` by default. The session database is c
 curl http://127.0.0.1:3812/openai/v1/models
 ```
 
-This returns the merged model list from the bundled models.dev data plus your TOML overrides. Once you see models, you're ready to [configure your agent](../agents/opencode) to point at Switchboard.
+This returns provider-qualified model ids plus combined bare aliases where the shape is unambiguous. Once you see models, you're ready to [configure your agent](../agents/opencode) to point at Switchboard.

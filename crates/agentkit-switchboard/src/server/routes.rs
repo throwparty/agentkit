@@ -433,28 +433,32 @@ async fn models_handler(
     let known_providers: std::collections::HashSet<String> = providers.keys().cloned().collect();
 
     for model in app_state.model_db.all() {
-        let mut providers_list = Vec::new();
-        for p in &model.providers {
-            if known_providers.contains(&p.identity)
-                && provider_filter.is_none_or(|provider| provider == &p.identity)
-                && billing_filter.is_none_or(|billing| billing == &p.billing)
-            {
-                providers_list.push(json!({
-                    "identity": p.identity,
-                    "billing": p.billing,
-                    "pricing": p.pricing,
-                }));
-            }
+        let matching: Vec<_> = model
+            .providers
+            .iter()
+            .filter(|provider| {
+                known_providers.contains(&provider.identity)
+                    && provider_filter.is_none_or(|filter| filter == &provider.identity)
+                    && billing_filter.is_none_or(|filter| filter == &provider.billing)
+            })
+            .collect();
+        if matching.is_empty() {
+            continue;
         }
+        let single = (model.providers.len() == 1).then(|| &model.providers[0]);
         data.push(json!({
             "id": model.id,
+            "model": model.model,
             "object": "model",
             "created": 1700000000,
             "owned_by": "openai",
+            "provider": single.map(|provider| &provider.identity),
+            "billing": single.map(|provider| &provider.billing),
+            "pricing": single.and_then(|provider| provider.pricing.as_ref()),
+            "providers": matching,
             "context_window": model.context_window,
             "max_output": model.max_output,
             "capabilities": model.capabilities,
-            "providers": providers_list,
         }));
     }
 
