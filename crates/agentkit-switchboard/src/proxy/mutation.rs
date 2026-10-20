@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::http::{HeaderMap, HeaderName, HeaderValue};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::config::{ApiSurface, ProviderConfig};
 use agentkit_script::{CompiledScript, ScriptEngine, ScriptError};

@@ -1,12 +1,12 @@
 //! Fork integration tests: the RFD path, the v1 /fork fallback,
 //! seed insertion, fork titles, and script-failure grace.
 
-use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::schema::v1::ForkSessionRequest;
 use agentkit_tackle::agent_client_protocol::schema::v1::{
     ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, SessionNotification,
     SessionUpdate, TextContent,
 };
+use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
 use agentkit_tackle::store::{SessionStore, TurnKind};
 use std::sync::{Arc as StdArc, Mutex as StdMutex};

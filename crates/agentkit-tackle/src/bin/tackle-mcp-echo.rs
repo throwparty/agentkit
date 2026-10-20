@@ -6,7 +6,7 @@ use rmcp::model::{
     CallToolRequestParams, CallToolResponse, ContentBlock, ListToolsResult, PaginatedRequestParams,
     TextContent, Tool,
 };
-use rmcp::{ErrorData, RoleServer, ServerHandler, ServiceExt, service};
+use rmcp::{service, ErrorData, RoleServer, ServerHandler, ServiceExt};
 use std::borrow::Cow;
 use std::sync::Arc;
 

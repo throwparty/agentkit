@@ -14,7 +14,7 @@
 
 use crate::agent::script_loop;
 pub use crate::scripts::host::StoreAccess;
-use crate::scripts::host::{BehaviourHost, SessionAccess, block_on};
+use crate::scripts::host::{block_on, BehaviourHost, SessionAccess};
 use crate::scripts::{behaviour_engine, host::register_host_api};
 use crate::state::TackleState;
 use crate::store::{SessionId, TurnId, TurnKind};
@@ -453,16 +453,12 @@ mod tests {
         let prior = prior_messages(&assembled, &t3.id);
         // The summary is wrapped as untrusted; the current turn's own
         // message is excluded (it is the prompt the loop re-sends).
-        assert!(
-            prior
-                .iter()
-                .any(|message| message.text().contains("<compaction-summary untrusted>"))
-        );
-        assert!(
-            !prior
-                .iter()
-                .any(|message| message.text() == "summary of t1")
-        );
+        assert!(prior
+            .iter()
+            .any(|message| message.text().contains("<compaction-summary untrusted>")));
+        assert!(!prior
+            .iter()
+            .any(|message| message.text() == "summary of t1"));
         assert!(!prior.iter().any(|message| message.text() == "next ask"));
         let image_message = prior
             .iter()
@@ -658,11 +654,9 @@ mod tests {
             .iter()
             .map(|item| crate::content::prompt_text_of(&item.message.content))
             .collect();
-        assert!(
-            texts
-                .iter()
-                .any(|text| text.contains("summary of the elided prefix"))
-        );
+        assert!(texts
+            .iter()
+            .any(|text| text.contains("summary of the elided prefix")));
         assert!(
             !texts.iter().any(|text| text.contains("turn 0")),
             "elided: {texts:?}"

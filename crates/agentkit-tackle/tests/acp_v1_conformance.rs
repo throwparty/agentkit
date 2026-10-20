@@ -2,7 +2,7 @@
 //! client→agent JSON-RPC transcripts against the tackle binary and
 //! subset-match the responses.
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 

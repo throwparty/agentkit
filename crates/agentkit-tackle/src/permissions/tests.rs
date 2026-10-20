@@ -3,8 +3,8 @@
 use super::*;
 use crate::config::trust::ConsentPrompt;
 use std::collections::BTreeSet;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 /// Records every call: the order assertions hang on these counters.
 struct RecorderPolicy {

@@ -3,13 +3,13 @@
 //! back over ACP to the client, and the client's answer reaches the next
 //! model request as the tool result.
 
-use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::schema::v1::{
     ClientCapabilities, ContentBlock, FileSystemCapabilities, InitializeRequest, NewSessionRequest,
     PromptRequest, ReadTextFileRequest, ReadTextFileResponse, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
     SessionNotification, SessionUpdate, TextContent,
 };
+use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
 use std::path::PathBuf;
 use std::sync::{Arc as StdArc, Mutex as StdMutex};

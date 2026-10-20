@@ -1,5 +1,5 @@
-use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use sqlx::SqlitePool;
 use std::str::FromStr;
 
 pub async fn create_pool(path: &str) -> Result<SqlitePool, sqlx::Error> {

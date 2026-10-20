@@ -1,14 +1,14 @@
 //! The MCP client pool: connections, tool namespacing, per-server status, and elicitation forwarding.
 
 use super::spawn::configure_stdio_spawn;
-use super::stderr::{STDERR_RELAY_MAX_LINES, STDERR_RELAY_WINDOW, StderrRateCap, relay_stderr};
+use super::stderr::{relay_stderr, StderrRateCap, STDERR_RELAY_MAX_LINES, STDERR_RELAY_WINDOW};
 use crate::config::McpServerConfig;
-use rmcp::ClientHandler;
 use rmcp::model::{
     CallToolRequestParams, ClientCapabilities, ClientConfig, ElicitRequestParams, ElicitResult,
     ElicitationAction, Implementation,
 };
 use rmcp::service::{RequestContext, RoleClient, RunningService};
+use rmcp::ClientHandler;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;

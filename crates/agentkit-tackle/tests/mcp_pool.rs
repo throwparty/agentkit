@@ -134,12 +134,11 @@ async fn enabling_reconnects_from_the_registered_config() {
         pool.statuses().get("echo"),
         Some(&(ServerStatus::Connected, true))
     );
-    assert!(
-        pool.list_tools()
-            .await
-            .iter()
-            .any(|tool| tool.name == "mcp.echo.echo")
-    );
+    assert!(pool
+        .list_tools()
+        .await
+        .iter()
+        .any(|tool| tool.name == "mcp.echo.echo"));
 }
 
 /// Toggling flips the state and does the matching lifecycle work.
@@ -323,7 +322,7 @@ async fn elicitation_cancellation_and_the_fail_closed_default() {
 
 mod direct_invocation {
     use super::*;
-    use agentkit_tackle::invokables::{Registry, parse_direct};
+    use agentkit_tackle::invokables::{parse_direct, Registry};
 
     #[tokio::test]
     async fn execution_bypasses_the_pipeline_and_reports_the_shape() {

@@ -140,11 +140,9 @@ fn send_prompt_dispatches_records_and_enforces_budgets() {
     );
     // The prompt entered the target session as a user message.
     let assembled = block_on(fixture.access.store.assemble_context(&target)).unwrap();
-    assert!(
-        assembled
-            .iter()
-            .any(|item| item.message.content.contains("do the thing"))
-    );
+    assert!(assembled
+        .iter()
+        .any(|item| item.message.content.contains("do the thing")));
 
     // Budget exhaustion: prompts per script.
     host.send_prompt(&target, "again").unwrap();

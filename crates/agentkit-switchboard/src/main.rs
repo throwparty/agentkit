@@ -1,5 +1,5 @@
 use agentkit_switchboard::auth;
-use agentkit_switchboard::cli::{AuthCommands, Cli, Commands, DocgenCommand, config_path};
+use agentkit_switchboard::cli::{config_path, AuthCommands, Cli, Commands, DocgenCommand};
 use agentkit_switchboard::config;
 use clap::{CommandFactory, Parser};
 

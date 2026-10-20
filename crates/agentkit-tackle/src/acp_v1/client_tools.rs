@@ -14,9 +14,9 @@
 
 use crate::config::Config;
 use crate::invokables::client_tools::{
-    ClientTool, ClientToolExecutor, ClientToolSelection, Executed, FS_READ, FS_WRITE,
-    TERMINAL_CREATE, TERMINAL_KILL, TERMINAL_OUTPUT, TERMINAL_RELEASE, TERMINAL_WAIT,
-    catalog as selection_catalog,
+    catalog as selection_catalog, ClientTool, ClientToolExecutor, ClientToolSelection, Executed,
+    FS_READ, FS_WRITE, TERMINAL_CREATE, TERMINAL_KILL, TERMINAL_OUTPUT, TERMINAL_RELEASE,
+    TERMINAL_WAIT,
 };
 use agent_client_protocol::schema::v1;
 use agent_client_protocol::{Client, ConnectionTo};

@@ -11,8 +11,8 @@
 
 use crate::config::ScriptConfig;
 use crate::scripts::behaviour_engine;
-use crate::scripts::host::BehaviourHost;
 use crate::scripts::host::register_host_api;
+use crate::scripts::host::BehaviourHost;
 use crate::state::TackleState;
 use crate::store::{
     MessageId, Role, Session, SessionId, SessionKind, SessionStore, StoreError, TurnKind,

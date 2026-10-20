@@ -3,11 +3,11 @@
 //! visible usage_update drop, the RFD-shaped update for advertising
 //! clients, and summary storage.
 
-use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::schema::v1::{
     ClientCapabilities, ContentBlock, InitializeRequest, Meta, NewSessionRequest, PromptRequest,
     SessionNotification, SessionUpdate, TextContent,
 };
+use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
 use agentkit_tackle::store::{SessionStore, TurnKind};
 use std::sync::{Arc as StdArc, Mutex as StdMutex};

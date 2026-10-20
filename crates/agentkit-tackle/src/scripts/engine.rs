@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use agentkit_script::{CompiledScript, INLINE_ORIGIN, Limits, ScriptEngine, ScriptError};
+use agentkit_script::{CompiledScript, Limits, ScriptEngine, ScriptError, INLINE_ORIGIN};
 use serde_json::Value;
 
 /// The script source size cap, bounding compile work.

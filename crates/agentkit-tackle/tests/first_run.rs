@@ -4,11 +4,11 @@
 //! advertise authMethods, and configuration errors name the file and
 //! key.
 
-use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::schema::v1::{
     AuthenticateRequest, ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest,
     TextContent,
 };
+use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
 use agentkit_tackle::store::{SessionStore, TurnKind};
 

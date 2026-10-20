@@ -16,7 +16,7 @@ pub mod script;
 pub use engine::ScriptEngine;
 pub use error::ScriptError;
 pub use limits::Limits;
-pub use payload::{PAYLOAD_CAP, cap_payload};
+pub use payload::{cap_payload, PAYLOAD_CAP};
 pub use script::CompiledScript;
 
 /// Origin recorded for scripts that were not loaded from a file.

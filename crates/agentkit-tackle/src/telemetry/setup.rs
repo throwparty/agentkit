@@ -2,7 +2,7 @@
 
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_sdk::trace::SdkTracerProvider as TracerProvider;
-use tracing_subscriber::{EnvFilter, Layer, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 
 /// Initialises the tracing subscriber: env-filtered (`RUST_LOG`), writing
 /// to stderr, with the OTel trace layer when the OTLP endpoint is

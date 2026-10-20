@@ -376,13 +376,14 @@ impl Registry {
     /// the unstructured input hint mapped from the prompt's declared
     /// parameters.
     pub fn available_commands(&self) -> Vec<AvailableCommand> {
-        let mut commands = vec![
-            AvailableCommand::new("!", "Execute a tool directly with no model request").input(
-                AvailableCommandInput::Unstructured(UnstructuredCommandInput::new(
-                    "mcp.<server>.<tool> | client.<surface>.<method> {json arguments}",
-                )),
-            ),
-        ];
+        let mut commands =
+            vec![
+                AvailableCommand::new("!", "Execute a tool directly with no model request").input(
+                    AvailableCommandInput::Unstructured(UnstructuredCommandInput::new(
+                        "mcp.<server>.<tool> | client.<surface>.<method> {json arguments}",
+                    )),
+                ),
+            ];
 
         for invokable in self.entries.values() {
             if !invokable.user_invokable() {

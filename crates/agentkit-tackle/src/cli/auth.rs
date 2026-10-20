@@ -7,7 +7,7 @@
 //! so a stored token is immediately usable.
 
 use crate::config::{Auth as EndpointAuth, Config, McpServerConfig};
-use crate::credentials::{CREDENTIAL_COMPONENT, credential_helper_name, resolve_credential_value};
+use crate::credentials::{credential_helper_name, resolve_credential_value, CREDENTIAL_COMPONENT};
 use agentkit_credentials::consumer::{helper_binary_name, resolve_helper_path};
 use std::collections::BTreeMap;
 use std::io::Write as _;

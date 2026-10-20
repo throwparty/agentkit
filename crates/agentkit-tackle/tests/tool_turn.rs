@@ -27,13 +27,13 @@
 //! every assertion below records instead of aborting, so a single run
 //! exposes the whole list.
 
-use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::schema::v1::{
     ContentBlock, InitializeRequest, ListSessionsRequest, NewSessionRequest, PromptRequest,
     RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
     SelectedPermissionOutcome, SessionId, SessionNotification, SessionUpdate, StopReason,
     TextContent,
 };
+use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::{
     AcpAgent, Agent, Channel, Client, ConnectionTo, RawJsonRpcMessage, TransportFrame,
 };

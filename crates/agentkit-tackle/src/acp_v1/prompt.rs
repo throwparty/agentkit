@@ -7,7 +7,7 @@ use super::commands::available_commands_update;
 use super::negotiation::ConnectionNegotiation;
 use super::notices::connection_notices;
 use super::support::{
-    Cx, append_assistant_text, send_agent_message_chunk, send_updated_at, turn_runtime,
+    append_assistant_text, send_agent_message_chunk, send_updated_at, turn_runtime, Cx,
 };
 use super::wire_kind;
 use crate::agent::compaction;
@@ -16,7 +16,7 @@ use crate::agent::direct::run_direct_invocation;
 use crate::agent::fork::{self, fork_access};
 use crate::agent::prompt::run_prompt_turn;
 use crate::state::{
-    LEASE_TTL_SECS, LeaseHeartbeat, TackleState, store_session_id, wire_session_id,
+    store_session_id, wire_session_id, LeaseHeartbeat, TackleState, LEASE_TTL_SECS,
 };
 use agent_client_protocol::schema::v1::{
     CompactionId, CompactionStatus, CompactionUpdate, ContentBlock, PromptRequest, PromptResponse,

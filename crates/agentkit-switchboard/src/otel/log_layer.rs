@@ -1,11 +1,11 @@
-use opentelemetry::Key;
 use opentelemetry::logs::{AnyValue, LogRecord, Logger, Severity};
+use opentelemetry::Key;
 use opentelemetry_sdk::logs::SdkLogger;
 use std::collections::HashMap;
 use tracing::field::Visit;
-use tracing_subscriber::Layer;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::Layer;
 
 pub struct OtelLogLayer {
     logger: SdkLogger,

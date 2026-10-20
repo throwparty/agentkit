@@ -1,5 +1,5 @@
 use agentkit_switchboard::config::{ApiSurface, BillingModel, PricingConfig};
-use agentkit_switchboard::provider::router::{RoutingError, SelectionReason, select_provider};
+use agentkit_switchboard::provider::router::{select_provider, RoutingError, SelectionReason};
 use agentkit_switchboard::provider::{ProviderStatus, ProviderView};
 use agentkit_switchboard::session::SessionAffinity;
 use std::collections::HashMap;

@@ -2,11 +2,11 @@
 //! one session database — cross-process session/list visibility, lease
 //! contention with precise errors, and fork lineage across processes.
 
-use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::schema::v1::ForkSessionRequest;
 use agentkit_tackle::agent_client_protocol::schema::v1::{
     InitializeRequest, ListSessionsRequest, NewSessionRequest, PromptRequest, TextContent,
 };
+use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
 use agentkit_tackle::store::SessionStore;
 

@@ -1,8 +1,8 @@
 use crate::config::ProviderConfig;
 use crate::credential;
-use crate::domain::quota::{ProviderQuotaState, handle_response_status};
+use crate::domain::quota::{handle_response_status, ProviderQuotaState};
 use crate::provider::{ProviderRuntime, ProviderStatus, ProviderView};
-use crate::providers::{ProviderMap, ProviderPack, build_provider_map};
+use crate::providers::{build_provider_map, ProviderMap, ProviderPack};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;

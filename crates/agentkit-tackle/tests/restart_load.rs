@@ -9,11 +9,11 @@
 //! (`session_load_on_an_empty_session_answers`) — that one loads a
 //! session with no turns and therefore asserts nothing about replay.
 
-use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::schema::v1::{
     ContentBlock, InitializeRequest, ListSessionsRequest, LoadSessionRequest, NewSessionRequest,
     PromptRequest, SessionId, SessionNotification, SessionUpdate, StopReason, TextContent,
 };
+use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
 use std::sync::{Arc as StdArc, Mutex as StdMutex};
 
