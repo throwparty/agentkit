@@ -37,6 +37,48 @@ fn make_provider_with_overrides(
     }
 }
 
+async fn model_rows(providers: HashMap<String, ProviderConfig>) -> Vec<serde_json::Value> {
+    use agentkit_switchboard::config::SwitchboardConfig;
+    use agentkit_switchboard::provider::registry::ProviderRegistry;
+    use agentkit_switchboard::server::routes;
+    use agentkit_switchboard::session::sqlite::SqliteSessionManager;
+    use http_body_util::BodyExt as _;
+    use std::sync::Arc;
+
+    let config = SwitchboardConfig {
+        providers,
+        credential_helper: None,
+        session_db_path: None,
+    };
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+    sqlx::migrate!("src/db/migrations")
+        .run(&pool)
+        .await
+        .unwrap();
+    let registry = ProviderRegistry::new(&config.providers, "none").unwrap();
+    let state = Arc::new(routes::AppState {
+        model_db: ModelDb::new(&config.providers),
+        config,
+        registry,
+        session_manager: Arc::new(SqliteSessionManager::new(pool)),
+        credential_helper: "none".to_string(),
+        session_db_path: std::path::PathBuf::from("/tmp/test_switchboard.db"),
+        started_at: std::time::Instant::now(),
+        mutations: HashMap::new(),
+    });
+    let mut app = routes::build_router(state);
+    let request = axum::http::Request::builder()
+        .method("GET")
+        .uri("/openai/v1/models")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = tower::Service::call(&mut app, request).await.unwrap();
+    assert_eq!(response.status(), 200);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    json["data"].as_array().unwrap().clone()
+}
+
 #[test]
 fn models_lookup_found() {
     let mut providers = HashMap::new();
@@ -263,4 +305,80 @@ fn models_load_external_snapshot() {
     assert_eq!(capabilities.tool_calling, Some(true));
     assert_eq!(capabilities.reasoning, Some(false));
     assert_eq!(capabilities.structured_output, Some(true));
+}
+
+#[tokio::test]
+async fn models_override_is_forwarded_by_the_models_route() {
+    let mut overrides = HashMap::new();
+    overrides.insert(
+        "deepseek-v4.1-flash".into(),
+        ModelConfig {
+            context_window: Some(131_072),
+            max_output: Some(8_192),
+            capabilities: None,
+        },
+    );
+    let mut alternate_overrides = HashMap::new();
+    alternate_overrides.insert(
+        "deepseek-v4.1-flash".into(),
+        ModelConfig {
+            context_window: Some(1_000_000),
+            max_output: Some(8_192),
+            capabilities: None,
+        },
+    );
+    let mut providers = HashMap::new();
+    providers.insert(
+        "zen_chat".into(),
+        make_provider_with_overrides("zen_chat", vec!["deepseek-v4.1-flash"], overrides),
+    );
+    providers.insert(
+        "zen_chat_alt".into(),
+        make_provider_with_overrides(
+            "zen_chat_alt",
+            vec!["deepseek-v4.1-flash"],
+            alternate_overrides,
+        ),
+    );
+    let models = model_rows(providers).await;
+    assert!(
+        models
+            .iter()
+            .all(|model| model["id"] != "deepseek-v4.1-flash"),
+        "unknown shape prevents a combined alias"
+    );
+    let primary = models
+        .iter()
+        .find(|model| model["id"] == "zen_chat/deepseek-v4.1-flash")
+        .expect("primary provider/model instance is listed");
+    assert_eq!(primary["provider"], "zen_chat");
+    assert_eq!(primary["context_window"], 131_072);
+    assert_eq!(primary["max_output"], 8_192);
+    let alternate = models
+        .iter()
+        .find(|model| model["id"] == "zen_chat_alt/deepseek-v4.1-flash")
+        .expect("alternate provider/model instance is listed");
+    assert_eq!(alternate["provider"], "zen_chat_alt");
+    assert_eq!(alternate["context_window"], 1_000_000);
+}
+
+#[tokio::test]
+async fn models_combined_alias_is_forwarded_by_the_models_route() {
+    let mut providers = HashMap::new();
+    providers.insert("first".into(), make_provider("first", vec!["gpt-4o"]));
+    providers.insert("second".into(), make_provider("second", vec!["gpt-4o"]));
+
+    let models = model_rows(providers).await;
+    let alias = models
+        .iter()
+        .find(|model| model["id"] == "gpt-4o")
+        .expect("combined alias is listed");
+    assert_eq!(alias["model"], "gpt-4o");
+    assert!(alias["provider"].is_null());
+    assert!(alias["billing"].is_null());
+    assert!(alias["pricing"].is_null());
+    let providers = alias["providers"].as_array().unwrap();
+    assert_eq!(providers.len(), 2);
+    assert_eq!(providers[0]["identity"], "first");
+    assert_eq!(providers[1]["identity"], "second");
 }

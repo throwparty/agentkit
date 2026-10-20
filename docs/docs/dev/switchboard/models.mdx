@@ -13,11 +13,30 @@ Two layers of data:
 
 Model metadata is resolved in this precedence order (highest wins):
 
-1. **TOML `[models.*]` overrides** in the user's switchboard config file.
+1. **Per-provider TOML `[providers.model_overrides.*]`** in the user's switchboard config file.
 2. **Bundled models.dev snapshot** (provider pricing merged on top of model-agnostic facts).
 3. **Built-in defaults** (empty — every model fact must come from a source above).
 
-The merge is field-level: if the user's TOML override only specifies `context_window`, only that field is replaced. All other fields from the bundled snapshot are preserved.
+The merge is field-level: if the user's TOML override only specifies `context_window`, only that field is replaced. All other fields from the bundled snapshot are preserved. Overrides apply only to the provider that declares them; they do not affect the same model ID at another provider. An override key also adds the model to that provider's served list.
+
+## Catalogue shape
+
+Every configured `(provider, model)` pair is exposed under a provider-qualified
+id: `identity/model-id`. That id can be sent in a request; Switchboard strips
+the qualifier, pins routing to that provider, and rewrites the upstream
+`model` field back to the bare id.
+
+A bare model id is also exposed as an alias when the model has exactly one
+shape group:
+
+- one provider, or
+- several providers whose complete shape fingerprints are identical.
+
+A shape fingerprint covers every exposed property. If any property is unknown
+(`null`/absent), the instance remains a singleton provider-qualified row and
+is never merged. Two unknown instances are not assumed to match. When a model
+id has multiple shape groups, no bare alias exists; clients must use a
+qualified id.
 
 ## Model lookup
 
@@ -28,8 +47,9 @@ Used by the routing algorithm to:
 3. Assemble the `GET /openai/v1/models` response.
 
 ```rust
-fn lookup(model_name: &str) -> Option<MergedModel>;
-fn provider_pricing(provider_identity: &str, model_name: &str) -> Option<PerModelPricing>;
+fn lookup(id: &str) -> Option<EnrichedModel>;
+fn lookup_for(provider_identity: &str, model: &str) -> Option<EnrichedModel>;
+fn has_alias(model: &str) -> bool;
 ```
 
 ## Pricing overlay
@@ -50,4 +70,4 @@ When a model has no per-model override, the provider's base pricing is used. The
 
 ## Refresh cadence
 
-The models.dev snapshot is regenerated in CI on each release. A future improvement may add periodic refresh at runtime (e.g., weekly check for updated pricing). Between releases, users can override any field via `[models.*]` TOML in their config file.
+The models.dev snapshot is regenerated in CI on each release. A future improvement may add periodic refresh at runtime (e.g., weekly check for updated pricing). Between releases, users can override any field via `[providers.model_overrides.*]` TOML in their config file.
