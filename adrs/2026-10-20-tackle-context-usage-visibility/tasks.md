@@ -67,7 +67,7 @@ Update the post-compaction `usage_update` in `acp_v1/prompt.rs` to read cumulati
 | Depends On | T-002,T-003 |
 | References | cumulative-cost,cost-omission |
 
-### T-006: Tagged prior messages and shared system builder
+### T-006: [x] Tagged prior messages and shared system builder
 
 Make `build_registry_and_system` in `agent/prompt.rs` `pub(crate)`. Add `compaction::prior_messages_tagged` returning each assembled message with its turn kind, and keep `prior_messages` as a thin adapter for the turn loop. The tagged path must apply the same role filtering, empty-content filtering, and summary wrapping as today.
 
