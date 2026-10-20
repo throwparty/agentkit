@@ -275,6 +275,13 @@ async fn available_commands_are_advertised_after_session_new_and_load() {
                 // /editor is advertised the same way: the harness command
                 // is unreachable unless a registered prompt carries it.
                 assert!(seen[0].iter().any(|name| name == "editor"), "{:?}", seen[0]);
+                // /context is advertised by its built-in prompt and
+                // intercepted before any model request.
+                assert!(
+                    seen[0].iter().any(|name| name == "context"),
+                    "{:?}",
+                    seen[0]
+                );
             }
 
             connection

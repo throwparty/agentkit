@@ -93,7 +93,7 @@ Add `agent/context_report.rs` with a report struct and renderer. Inputs: system 
 | Depends On | T-006 |
 | References | composition-report,estimation-basis,unknown-window |
 
-### T-008: Context command advertisement
+### T-008: [x] Context command advertisement
 
 Add `builtins/context-prompt.md` with the description `Show estimated context-window composition and session usage`, no parameters, and a body that is never expanded. Register it as `CONTEXT_PROMPT` in `builtins/assets.rs` and in `defaults()`.
 
