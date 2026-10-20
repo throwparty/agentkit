@@ -119,7 +119,7 @@ Add `acp_v1/context.rs` with `run_context_case`: fetch the session, resolve the 
 | Depends On | T-007,T-008 |
 | References | context-command,ephemeral-reply,composition-report |
 
-### T-010: End-to-end usage and context coverage
+### T-010: [x] End-to-end usage and context coverage
 
 Extend the existing ACP integration harness with lifecycle and command coverage: cost-bearing updates for a priced endpoint, cost omission for an unpriced endpoint, exactly one snapshot per lifecycle path, unknown-window behaviour, and the ephemeral `/context` round-trip. Reuse the stub provider and in-process client rather than adding a new harness.
 
