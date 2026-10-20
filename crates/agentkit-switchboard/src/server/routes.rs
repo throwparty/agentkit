@@ -160,7 +160,16 @@ async fn proxy_handler(
         Some(m) => m.to_string(),
         None => return (StatusCode::BAD_REQUEST, "missing model field").into_response(),
     };
-    let (pinned_provider, model) = split_model(&requested_model, &app_state.config.providers);
+    let (pinned_provider, model) = match app_state.model_db.lookup_qualified(&requested_model) {
+        Some(qualified) => (
+            qualified
+                .providers
+                .first()
+                .map(|provider| provider.identity.clone()),
+            qualified.model.clone(),
+        ),
+        None => (None, requested_model.clone()),
+    };
     if pinned_provider.is_none() && !app_state.model_db.has_alias(&model) {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -429,30 +438,6 @@ fn selection_reason(reason: &crate::provider::router::SelectionReason) -> &'stat
         crate::provider::router::SelectionReason::Cost => "cost",
         crate::provider::router::SelectionReason::Fallback => "fallback",
         crate::provider::router::SelectionReason::Pinned => "pinned",
-    }
-}
-
-/// Splits a provider-qualified model id (`identity/model`) into its pin and
-/// the upstream model name. Bare ids pass through unchanged.
-fn split_model(
-    requested: &str,
-    providers: &std::collections::HashMap<String, crate::config::ProviderConfig>,
-) -> (Option<String>, String) {
-    let mut matched: Option<(&str, &str)> = None;
-    for identity in providers.keys() {
-        let Some(model) = requested
-            .strip_prefix(identity)
-            .and_then(|rest| rest.strip_prefix('/'))
-        else {
-            continue;
-        };
-        if matched.is_none_or(|(best, _)| identity.len() > best.len()) {
-            matched = Some((identity, model));
-        }
-    }
-    match matched {
-        Some((identity, model)) => (Some(identity.to_owned()), model.to_owned()),
-        None => (None, requested.to_owned()),
     }
 }
 
