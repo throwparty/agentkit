@@ -41,7 +41,7 @@ In `agent/turn.rs`, track whether any request in the turn was priced. On each re
 | Depends On | T-001,T-002 |
 | References | cumulative-cost,cost-omission,usage-update-contract |
 
-### T-004: Lifecycle usage snapshots
+### T-004: [x] Lifecycle usage snapshots
 
 Add `send_usage_snapshot` in `acp_v1/sessions.rs`: resolve the effective model, return early when the window is unknown, estimate `used` from assembled content, read cumulative cost, and send exactly one update. Call it after the `session/new` response and command advertisement, after the `session/resume` response and notices, and after the `session/load` response while replay stays before the response. Leave `session/fork` unchanged.
 
