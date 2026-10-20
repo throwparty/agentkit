@@ -1,6 +1,6 @@
 # Context Usage Visibility
 
-**Status:** draft  **Created:** 2026-10-20  **Author:** adrian
+**Status:** implemented  **Created:** 2026-10-20  **Author:** adrian
 
 The ACP session-usage RFD completed on 2026-06-05 and defines stable `UsageUpdate` notifications carrying `used`, `size`, and an optional cumulative session `cost`. Tackle already emits used/size after each model request, once after `session/load`, and after compaction, but never attaches cost, sends no snapshot on `session/new` or `session/resume`, and emits the load snapshot before the load response. Clients that render the update include Zed 1.7.2 (context ring, cost tracked) and acp.nvim (percentage counter); clients that ignore it remain unaffected. Tackle has no `/context` command.
 
