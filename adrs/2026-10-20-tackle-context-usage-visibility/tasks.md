@@ -28,7 +28,7 @@ Change `TurnSink::usage` to take `Option<f64>`. Add a shared `usage_update(used,
 | Depends On | T-001 |
 | References | usage-update-contract,cumulative-cost,cost-omission |
 
-### T-003: Turn and session cost accumulation
+### T-003: [x] Turn and session cost accumulation
 
 In `agent/turn.rs`, track whether any request in the turn was priced. On each response add `request_cost` to `TurnUsage.cost_usd`, persist the delta, read `session_usage`, and pass `Some(cumulative)` when any cost is known, including a prior turn's cost, or `None` otherwise. Keep request-cap, tool-loop, and stop-reason paths unchanged.
 
