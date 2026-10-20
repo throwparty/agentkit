@@ -6,6 +6,7 @@ use super::capabilities::UnstableFeature;
 use super::commands::available_commands_update;
 use super::negotiation::ConnectionNegotiation;
 use super::notices::connection_notices;
+use super::sink::usage_update;
 use super::support::{
     append_assistant_text, send_agent_message_chunk, send_updated_at, turn_runtime, Cx,
 };
@@ -21,7 +22,7 @@ use crate::state::{
 use agent_client_protocol::schema::v1::{
     CompactionId, CompactionStatus, CompactionUpdate, ContentBlock, PromptRequest, PromptResponse,
     SessionId, SessionNotification, SessionUpdate, StopReason, TextContent, ToolCall, ToolCallId,
-    ToolCallStatus, UsageUpdate,
+    ToolCallStatus,
 };
 use agent_client_protocol::{Error, Responder};
 use std::sync::Arc;
@@ -319,11 +320,18 @@ pub(super) async fn run_compaction_case(
     let message = append_assistant_text(&state, &turn_id, &note).await?;
     send_agent_message_chunk(&cx, &wire_session, &message.id, &note);
 
-    // The visible usage_update drop.
+    // The visible usage_update drop, carrying the session's cumulative cost
+    // when known.
     if size > 0 {
+        let session_usage = state
+            .db
+            .session_usage(&store_session)
+            .await
+            .map_err(|err| Error::internal_error().data(err.to_string()))?;
+        let cost = (session_usage.cost_usd > 0.0).then_some(session_usage.cost_usd);
         let _ = cx.send_notification(SessionNotification::new(
             wire_session.clone(),
-            SessionUpdate::UsageUpdate(UsageUpdate::new(after, size)),
+            SessionUpdate::UsageUpdate(usage_update(after, size, cost)),
         ));
     }
 
