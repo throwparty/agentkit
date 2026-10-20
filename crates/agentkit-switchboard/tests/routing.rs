@@ -104,9 +104,42 @@ fn routing_prefers_subscription() {
         make_provider("payg", BillingModel::PayAsYouGo, vec!["gpt-4o"], true),
         make_provider("sub", BillingModel::Subscription, vec!["gpt-4o"], true),
     ]);
-    let result = select_provider(chat_surface(), "gpt-4o", None, &p).unwrap();
+    let result = select_provider(chat_surface(), "gpt-4o", None, None, &p).unwrap();
     assert_eq!(result.identity, "sub");
     assert_eq!(result.reason, SelectionReason::Cost);
+}
+
+#[test]
+fn routing_pinned_provider_wins_over_cost() {
+    let p = providers_from(vec![
+        make_provider("sub", BillingModel::Subscription, vec!["gpt-4o"], true),
+        make_provider("payg", BillingModel::PayAsYouGo, vec!["gpt-4o"], true),
+    ]);
+    let result = select_provider(chat_surface(), "gpt-4o", Some("payg"), None, &p).unwrap();
+    assert_eq!(result.identity, "payg");
+    assert_eq!(result.reason, SelectionReason::Pinned);
+}
+
+#[test]
+fn routing_pinned_provider_must_serve_the_model() {
+    let p = providers_from(vec![
+        make_provider("one", BillingModel::PayAsYouGo, vec!["gpt-4o"], true),
+        make_provider("two", BillingModel::PayAsYouGo, vec!["other"], true),
+    ]);
+    let result = select_provider(chat_surface(), "gpt-4o", Some("two"), None, &p);
+    assert_eq!(result, Err(RoutingError::ModelNotFound));
+}
+
+#[test]
+fn routing_pinned_provider_must_be_available() {
+    let p = providers_from(vec![make_provider(
+        "only",
+        BillingModel::PayAsYouGo,
+        vec!["gpt-4o"],
+        false,
+    )]);
+    let result = select_provider(chat_surface(), "gpt-4o", Some("only"), None, &p);
+    assert_eq!(result, Err(RoutingError::NoProvider));
 }
 
 #[test]
@@ -115,7 +148,7 @@ fn routing_falls_through_on_quota_exhausted() {
         make_provider("payg", BillingModel::PayAsYouGo, vec!["gpt-4o"], true),
         make_provider("sub", BillingModel::Subscription, vec!["gpt-4o"], false),
     ]);
-    let result = select_provider(chat_surface(), "gpt-4o", None, &p).unwrap();
+    let result = select_provider(chat_surface(), "gpt-4o", None, None, &p).unwrap();
     assert_eq!(result.identity, "payg");
 }
 
@@ -125,7 +158,7 @@ fn routing_ranks_by_cost() {
         make_provider_with_cost("expensive", BillingModel::PayAsYouGo, 10.0, vec!["gpt-4o"]),
         make_provider_with_cost("cheap", BillingModel::PayAsYouGo, 1.0, vec!["gpt-4o"]),
     ]);
-    let result = select_provider(chat_surface(), "gpt-4o", None, &p).unwrap();
+    let result = select_provider(chat_surface(), "gpt-4o", None, None, &p).unwrap();
     assert_eq!(result.identity, "cheap");
 }
 
@@ -135,7 +168,7 @@ fn routing_tiebreaker_identity() {
         make_provider_with_cost("b_provider", BillingModel::PayAsYouGo, 2.50, vec!["gpt-4o"]),
         make_provider_with_cost("a_provider", BillingModel::PayAsYouGo, 2.50, vec!["gpt-4o"]),
     ]);
-    let result = select_provider(chat_surface(), "gpt-4o", None, &p).unwrap();
+    let result = select_provider(chat_surface(), "gpt-4o", None, None, &p).unwrap();
     assert_eq!(result.identity, "a_provider");
 }
 
@@ -147,7 +180,7 @@ fn routing_model_not_available() {
         vec!["gpt-4o"],
         true,
     )]);
-    let result = select_provider(chat_surface(), "nonexistent", None, &p);
+    let result = select_provider(chat_surface(), "nonexistent", None, None, &p);
     assert_eq!(result, Err(RoutingError::ModelNotFound));
 }
 
@@ -159,7 +192,7 @@ fn routing_no_credential() {
         vec!["gpt-4o"],
         false,
     )]);
-    let result = select_provider(chat_surface(), "gpt-4o", None, &p);
+    let result = select_provider(chat_surface(), "gpt-4o", None, None, &p);
     assert_eq!(result, Err(RoutingError::NoProvider));
 }
 
@@ -175,7 +208,7 @@ fn routing_session_affinity() {
         model_name: "gpt-4o".into(),
         api_surface: "openai".into(),
     };
-    let result = select_provider(chat_surface(), "gpt-4o", Some(&session), &p).unwrap();
+    let result = select_provider(chat_surface(), "gpt-4o", None, Some(&session), &p).unwrap();
     assert_eq!(result.identity, "payg");
     assert_eq!(result.reason, SelectionReason::Affinity);
     assert_eq!(result.switch_count, 0);
@@ -198,7 +231,7 @@ fn routing_session_breaks_on_degradation() {
         model_name: "gpt-4o".into(),
         api_surface: "openai".into(),
     };
-    let result = select_provider(chat_surface(), "gpt-4o", Some(&session), &p).unwrap();
+    let result = select_provider(chat_surface(), "gpt-4o", None, Some(&session), &p).unwrap();
     assert_eq!(result.identity, "payg");
     assert_eq!(result.reason, SelectionReason::Fallback);
     assert_eq!(result.switch_count, 1);
@@ -210,7 +243,7 @@ fn routing_all_degraded() {
         make_provider("p1", BillingModel::PayAsYouGo, vec!["gpt-4o"], false),
         make_provider("p2", BillingModel::Subscription, vec!["gpt-4o"], false),
     ]);
-    let result = select_provider(chat_surface(), "gpt-4o", None, &p);
+    let result = select_provider(chat_surface(), "gpt-4o", None, None, &p);
     assert_eq!(result, Err(RoutingError::NoProvider));
 }
 
@@ -225,7 +258,7 @@ fn routing_responses_never_selects_chat_completions() {
             vec!["gpt-4o"],
         ),
     ]);
-    let result = select_provider(&ApiSurface::OpenaiResponses, "gpt-4o", None, &p).unwrap();
+    let result = select_provider(&ApiSurface::OpenaiResponses, "gpt-4o", None, None, &p).unwrap();
     assert_eq!(result.identity, "resp");
 }
 
@@ -237,6 +270,6 @@ fn routing_responses_model_not_found_in_surface() {
         vec!["gpt-4o"],
         true,
     )]);
-    let result = select_provider(&ApiSurface::OpenaiResponses, "gpt-4o", None, &p);
+    let result = select_provider(&ApiSurface::OpenaiResponses, "gpt-4o", None, None, &p);
     assert_eq!(result, Err(RoutingError::ModelNotFound));
 }

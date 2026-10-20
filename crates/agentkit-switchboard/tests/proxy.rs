@@ -58,6 +58,10 @@ async fn test_state_with(
         },
     );
 
+    state_with_providers(providers).await
+}
+
+async fn state_with_providers(providers: HashMap<String, ProviderConfig>) -> Arc<routes::AppState> {
     let config = SwitchboardConfig {
         providers,
         credential_helper: None,
@@ -289,6 +293,112 @@ async fn proxy_non_streaming_response() {
     let body_text = String::from_utf8(body_bytes.to_vec()).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&body_text).unwrap();
     assert_eq!(parsed["choices"][0]["message"]["content"], "Hi");
+}
+
+#[tokio::test]
+async fn proxy_qualified_model_pins_provider_and_rewrites_upstream_model() {
+    let mock_server = wiremock::MockServer::start().await;
+
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/chat/completions"))
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_raw(
+            r#"{"choices":[{"message":{"role":"assistant","content":"Hi"},"index":0,"finish_reason":"stop"}]}"#,
+            "application/json",
+        ))
+        .mount(&mock_server)
+        .await;
+
+    let state = test_state(&mock_server.uri()).await;
+    let mut app = routes::build_router(state);
+
+    let body = serde_json::to_vec(&json!({
+        "model": "mock_openai/gpt-4o",
+        "messages": [{"role": "user", "content": "hi"}],
+    }))
+    .unwrap();
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/openai/v1/chat/completions")
+        .header("Content-Type", "application/json")
+        .body(axum::body::Body::from(body))
+        .unwrap();
+
+    let response = tower::Service::call(&mut app, request).await.unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        response
+            .headers()
+            .get("x-switchboard-provider")
+            .and_then(|value| value.to_str().ok()),
+        Some("mock_openai")
+    );
+
+    let requests = mock_server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 1);
+    let upstream: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert_eq!(upstream["model"], "gpt-4o");
+}
+
+#[tokio::test]
+async fn proxy_ambiguous_bare_model_503() {
+    let mock_server = wiremock::MockServer::start().await;
+    let mut providers = HashMap::new();
+    for (identity, context_window) in [("first", 1_000), ("second", 2_000)] {
+        let mut model_overrides = HashMap::new();
+        model_overrides.insert(
+            "ambiguous-model".to_string(),
+            agentkit_switchboard::config::ModelConfig {
+                context_window: Some(context_window),
+                max_output: Some(100),
+                capabilities: None,
+            },
+        );
+        providers.insert(
+            identity.to_string(),
+            ProviderConfig {
+                mutations: Vec::new(),
+                identity: identity.to_string(),
+                api_surface: ApiSurface::OpenaiChatCompletions,
+                base_url: mock_server.uri(),
+                billing: BillingModel::PayAsYouGo,
+                auth: AuthConfig {
+                    r#type: AuthType::None,
+                    oauth: None,
+                },
+                pricing: PricingConfig {
+                    input_per_mtok: 0.0,
+                    output_per_mtok: 0.0,
+                    cache_read_per_mtok: None,
+                    cache_write_per_mtok: None,
+                    reasoning_per_mtok: None,
+                    models: HashMap::new(),
+                },
+                models: Some(vec!["ambiguous-model".to_string()]),
+                model_overrides,
+            },
+        );
+    }
+    let state = state_with_providers(providers).await;
+    assert!(!state.model_db.has_alias("ambiguous-model"));
+    let mut app = routes::build_router(state);
+
+    let body = serde_json::to_vec(&json!({
+        "model": "ambiguous-model",
+        "messages": [{"role": "user", "content": "hi"}],
+    }))
+    .unwrap();
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/openai/v1/chat/completions")
+        .header("Content-Type", "application/json")
+        .body(axum::body::Body::from(body))
+        .unwrap();
+
+    let response = tower::Service::call(&mut app, request).await.unwrap();
+    assert_eq!(response.status(), 503);
+    assert!(mock_server.received_requests().await.unwrap().is_empty());
 }
 
 #[tokio::test]

@@ -156,9 +156,26 @@ async fn proxy_handler(
         Err(_) => return (StatusCode::BAD_REQUEST, "invalid JSON body").into_response(),
     };
 
-    let model = match parsed.get("model").and_then(|v| v.as_str()) {
+    let requested_model = match parsed.get("model").and_then(|v| v.as_str()) {
         Some(m) => m.to_string(),
         None => return (StatusCode::BAD_REQUEST, "missing model field").into_response(),
+    };
+    let (pinned_provider, model) = split_model(&requested_model, &app_state.config.providers);
+    if pinned_provider.is_none() && !app_state.model_db.has_alias(&model) {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error": "model not found"})),
+        )
+            .into_response();
+    }
+    let forwarded_body = if requested_model == model {
+        body.clone()
+    } else {
+        let mut rewritten = parsed.clone();
+        rewritten["model"] = Value::String(model.clone());
+        axum::body::Bytes::from(
+            serde_json::to_vec(&rewritten).expect("a JSON value serializes back to JSON"),
+        )
     };
 
     let mut session = if let Some(ref sid) = session_id {
@@ -168,13 +185,23 @@ async fn proxy_handler(
     };
 
     let helper_name = &app_state.credential_helper;
-    let max_attempts = app_state.registry.get_states().await.len().max(1);
+    let max_attempts = if pinned_provider.is_some() {
+        1
+    } else {
+        app_state.registry.get_states().await.len().max(1)
+    };
     let mut attempt_errors: Vec<(String, u16)> = Vec::new();
 
     for attempt in 0..max_attempts {
         let providers = app_state.registry.get_states().await;
         let session_ref = session.as_ref();
-        let selection = match select_provider(&surface, &model, session_ref, &providers) {
+        let selection = match select_provider(
+            &surface,
+            &model,
+            pinned_provider.as_deref(),
+            session_ref,
+            &providers,
+        ) {
             Ok(s) => s,
             Err(RoutingError::ModelNotFound) => {
                 return (
@@ -243,7 +270,7 @@ async fn proxy_handler(
                     forwarder::ForwardRequest {
                         method: axum::http::Method::POST,
                         headers: headers.clone(),
-                        body: body.clone(),
+                        body: forwarded_body.clone(),
                         credential: &credential,
                         billing: &provider_cfg.billing,
                         base_url: &configured_provider.base_url,
@@ -263,7 +290,7 @@ async fn proxy_handler(
                     forwarder::ForwardRequest {
                         method: axum::http::Method::POST,
                         headers: headers.clone(),
-                        body: body.clone(),
+                        body: forwarded_body.clone(),
                         credential: &credential,
                         billing: &provider_cfg.billing,
                         base_url: &configured_provider.base_url,
@@ -401,6 +428,31 @@ fn selection_reason(reason: &crate::provider::router::SelectionReason) -> &'stat
         crate::provider::router::SelectionReason::Affinity => "affinity",
         crate::provider::router::SelectionReason::Cost => "cost",
         crate::provider::router::SelectionReason::Fallback => "fallback",
+        crate::provider::router::SelectionReason::Pinned => "pinned",
+    }
+}
+
+/// Splits a provider-qualified model id (`identity/model`) into its pin and
+/// the upstream model name. Bare ids pass through unchanged.
+fn split_model(
+    requested: &str,
+    providers: &std::collections::HashMap<String, crate::config::ProviderConfig>,
+) -> (Option<String>, String) {
+    let mut matched: Option<(&str, &str)> = None;
+    for identity in providers.keys() {
+        let Some(model) = requested
+            .strip_prefix(identity)
+            .and_then(|rest| rest.strip_prefix('/'))
+        else {
+            continue;
+        };
+        if matched.is_none_or(|(best, _)| identity.len() > best.len()) {
+            matched = Some((identity, model));
+        }
+    }
+    match matched {
+        Some((identity, model)) => (Some(identity.to_owned()), model.to_owned()),
+        None => (None, requested.to_owned()),
     }
 }
 

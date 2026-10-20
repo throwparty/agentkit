@@ -1174,6 +1174,10 @@ id has multiple shape groups, no bare alias is emitted.
 }
 ```
 
+A request using `openai_payg/gpt-4o` pins routing to `openai_payg` and rewrites
+the upstream `model` field to `gpt-4o`. A request using `gpt-4o` uses the
+normal affinity/cost policy.
+
 **Query parameters**:
 
 - `?provider=<identity>` — Filter to a specific provider's models
@@ -1298,6 +1302,7 @@ Not implemented in first iteration. Listed here to reserve the path pattern.
 - AC6.3: `GET /openai/v1/models` exposes every provider/model pair under a qualified id and emits a bare alias only when the model has one shape group.
 - AC6.4: No outbound HTTP requests for model metadata at startup.
 - AC6.5: A shape with any unknown property is never merged with another instance, including another instance with the same unknown properties.
+- AC6.6: A provider-qualified id pins routing to that provider and is rewritten to the bare upstream model id.
 
 ### FR7: Credential Pooling
 
