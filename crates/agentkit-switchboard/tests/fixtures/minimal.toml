@@ -1,8 +1,5 @@
 credential_helper = "keychain"
 
-[models."gpt-4o"]
-context_window = 128000
-
 [[providers]]
 identity = "test_provider"
 api_surface = "openai-chat-completions"
@@ -16,3 +13,6 @@ type = "bearer_token"
 [providers.pricing]
 input_per_mtok = 2.50
 output_per_mtok = 10.00
+
+[providers.model_overrides."gpt-4o"]
+context_window = 128000

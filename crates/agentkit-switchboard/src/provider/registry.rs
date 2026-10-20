@@ -107,7 +107,10 @@ impl ProviderRegistry {
         let mut out = HashMap::new();
         for (identity, runtime) in states.iter() {
             if let Some(config) = self.configs.get(identity) {
-                let models = config.models.clone().unwrap_or_default();
+                let mut models = config.models.clone().unwrap_or_default();
+                models.extend(config.model_overrides.keys().cloned());
+                models.sort();
+                models.dedup();
                 out.insert(
                     identity.clone(),
                     ProviderView {

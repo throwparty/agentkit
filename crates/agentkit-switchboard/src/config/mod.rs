@@ -7,8 +7,6 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SwitchboardConfig {
-    #[serde(default)]
-    pub models: HashMap<String, ModelConfig>,
     pub providers: HashMap<String, ProviderConfig>,
     pub credential_helper: Option<String>,
     pub session_db_path: Option<PathBuf>,
@@ -38,6 +36,10 @@ pub struct ProviderConfig {
     pub auth: AuthConfig,
     pub pricing: PricingConfig,
     pub models: Option<Vec<String>>,
+    /// Per-model metadata overrides for this provider. These take precedence
+    /// over the provider-agnostic facts in the bundled models.dev snapshot.
+    #[serde(default)]
+    pub model_overrides: HashMap<String, ModelConfig>,
     /// Ordered mutation scripts run against every outbound request to this
     /// provider. Relative paths resolve against the config file's directory.
     #[serde(default)]

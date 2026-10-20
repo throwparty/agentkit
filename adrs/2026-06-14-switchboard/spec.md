@@ -295,9 +295,12 @@ Two layers of data:
 
 Model metadata is resolved in this precedence order (highest wins):
 
-1. **TOML `[models.*]` overrides** in the user's switchboard config file.
+1. **Per-provider TOML `[providers.model_overrides.*]`** in the user's switchboard config file.
 1. **Bundled models.dev snapshot** (provider pricing merged on top of model-agnostic facts).
 1. **Built-in defaults** (empty — every model fact must come from a source above).
+
+Overrides are scoped to the provider that declares them: the same model ID may
+have a different shape at another provider.
 
 ### 5.3 Refresh Cadence
 
@@ -319,17 +322,6 @@ The models.dev snapshot is regenerated in CI on each release. A future improveme
 # Default: "keychain" (uses system keychain via agentkit-credential-keychain).
 # Set to "file" for encrypted JSON file (headless/CI).
 credential_helper = "keychain"
-
-# --- Model Metadata Overrides ---
-# Merge on top of the bundled models.dev snapshot.
-# Provider-agnostic: context window, capabilities, etc.
-# Pricing is NOT here — it's per provider.
-
-[models."gpt-4o"]
-context_window = 128000
-
-[models."gpt-4o-mini"]
-context_window = 128000
 
 # --- Provider Definitions ---
 # Keyed by identity (used for env var naming, credential helper key, routing).
@@ -356,6 +348,12 @@ scopes = "openid email profile"
 # overflow/usage-credit comparison with pay-as-you-go providers.
 input_per_mtok = 0
 output_per_mtok = 0
+
+[providers.model_overrides."gpt-4o"]
+context_window = 128000
+
+[providers.model_overrides."gpt-4o-mini"]
+context_window = 128000
 
 models = ["gpt-4o", "gpt-4o-mini", "gpt-5.4", "gpt-5.3-codex"]
 
@@ -412,9 +410,6 @@ output_per_mtok = 10.00
 ```rust
 /// Config root
 struct SwitchboardConfig {
-    /// Per-model metadata overrides. Key is model id.
-    models: HashMap<String, ModelConfig>,
-
     /// Provider definitions, keyed by identity.
     providers: HashMap<String, ProviderConfig>,
 
@@ -451,6 +446,9 @@ struct ProviderConfig {
     /// pricing snapshot: find all models in `providers/<identity>/models/*.toml`
     /// that have pricing entries for this provider's identity.
     models: Option<Vec<String>>,
+
+    /// Per-model metadata overrides for this provider. Key is model id.
+    model_overrides: HashMap<String, ModelConfig>,
 }
 
 enum ApiSurface {

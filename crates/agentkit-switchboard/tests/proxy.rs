@@ -54,11 +54,11 @@ async fn test_state_with(
                 models: HashMap::new(),
             },
             models: Some(models.into_iter().map(|m| m.to_string()).collect()),
+            model_overrides: HashMap::new(),
         },
     );
 
     let config = SwitchboardConfig {
-        models: HashMap::new(),
         providers,
         credential_helper: None,
         session_db_path: None,
@@ -71,7 +71,7 @@ async fn test_state_with(
         .unwrap();
     let registry = ProviderRegistry::new(&config.providers, "none")
         .expect("AuthType::None providers always resolve a credential");
-    let model_db = ModelDb::new(config.models.clone(), &config.providers);
+    let model_db = ModelDb::new(&config.providers);
     let session_manager = Arc::new(SqliteSessionManager::new(pool));
 
     Arc::new(routes::AppState {

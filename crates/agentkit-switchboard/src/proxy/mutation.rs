@@ -581,6 +581,7 @@ mod tests {
                 models: HashMap::new(),
             },
             models: None,
+            model_overrides: HashMap::new(),
             mutations,
         }
     }
