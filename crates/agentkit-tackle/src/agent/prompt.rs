@@ -283,7 +283,7 @@ async fn run_turn_loop(
                 if size == 0 {
                     return;
                 }
-                sink.usage(&session, input, size);
+                sink.usage(&session, input, size, None);
             }
         },
         {
@@ -432,7 +432,7 @@ async fn finish_turn(
             })
             .unwrap_or(0);
         let used = crate::scripts::host::estimate_tokens(used_bytes);
-        sink.usage(session_id, used, size);
+        sink.usage(session_id, used, size, None);
     }
 
     Ok(result.stop)

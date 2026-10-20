@@ -6,8 +6,8 @@ use crate::invokables::titles::ToolKind;
 use crate::state::wire_session_id;
 use crate::store::SessionId;
 use agent_client_protocol::schema::v1::{
-    ContentBlock, ContentChunk, MessageId, SessionInfoUpdate, SessionNotification, SessionUpdate,
-    TextContent, ToolCall as WireToolCall, ToolCallContent, ToolCallId,
+    ContentBlock, ContentChunk, Cost, MessageId, SessionInfoUpdate, SessionNotification,
+    SessionUpdate, TextContent, ToolCall as WireToolCall, ToolCallContent, ToolCallId,
     ToolCallStatus as WireStatus, ToolCallUpdate as WireToolCallUpdate, ToolCallUpdateFields,
     UsageUpdate,
 };
@@ -27,6 +27,15 @@ impl ConnectionTurnSink {
         let _ = self
             .cx
             .send_notification(SessionNotification::new(wire_session_id(session), update));
+    }
+}
+
+/// A usage update with the cumulative cost attached only when known.
+pub(crate) fn usage_update(used: u64, size: u64, cost: Option<f64>) -> UsageUpdate {
+    let update = UsageUpdate::new(used, size);
+    match cost {
+        Some(amount) => update.cost(Cost::new(amount, "USD")),
+        None => update,
     }
 }
 
@@ -55,10 +64,10 @@ fn wire_status(status: ToolCallStatus) -> WireStatus {
 }
 
 impl TurnSink for ConnectionTurnSink {
-    fn usage(&self, session: &SessionId, input_tokens: u64, context_size: u64) {
+    fn usage(&self, session: &SessionId, input_tokens: u64, context_size: u64, cost: Option<f64>) {
         self.send(
             session,
-            SessionUpdate::UsageUpdate(UsageUpdate::new(input_tokens, context_size)),
+            SessionUpdate::UsageUpdate(usage_update(input_tokens, context_size, cost)),
         );
     }
 
@@ -111,5 +120,20 @@ impl TurnSink for ConnectionTurnSink {
                 SessionInfoUpdate::new().updated_at(updated_at.to_owned()),
             ),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::usage_update;
+
+    #[test]
+    fn cost_is_attached_only_when_known() {
+        let priced = usage_update(10, 100, Some(0.42));
+        let cost = priced.cost.expect("cost present");
+        assert_eq!(cost.amount, 0.42);
+        assert_eq!(cost.currency, "USD");
+
+        assert!(usage_update(10, 100, None).cost.is_none());
     }
 }

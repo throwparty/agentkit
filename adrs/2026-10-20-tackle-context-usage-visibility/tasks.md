@@ -15,7 +15,7 @@ Add `request_cost(model_ref, input_tokens, output_tokens) -> Option<f64>` to `ag
 | Depends On |  |
 | References | cumulative-cost,cost-omission |
 
-### T-002: Optional cost through the sink
+### T-002: [x] Optional cost through the sink
 
 Change `TurnSink::usage` to take `Option<f64>`. Add a shared `usage_update(used, size, cost)` constructor in `acp_v1/sink.rs` that attaches `Cost::new(amount, "USD")` only for `Some`. Update `ConnectionTurnSink` and the context-overflow fallback to use it so omitted cost means unchanged.
 
