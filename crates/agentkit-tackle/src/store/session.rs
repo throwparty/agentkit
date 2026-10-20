@@ -636,14 +636,8 @@ impl SessionStore {
                             sqlx::Error::RowNotFound => StoreError::NotFound(turn_id.clone()),
                             other => StoreError::Sqlx(other),
                         })?;
-                sqlx::query("DELETE FROM messages WHERE turn_id = ?")
-                    .bind(turn_id)
-                    .execute(&mut *tx)
-                    .await?;
-                sqlx::query("DELETE FROM turns WHERE id = ?")
-                    .bind(turn_id)
-                    .execute(&mut *tx)
-                    .await?;
+                // Move the head first: sessions.head_turn_id references the
+                // turn and foreign keys are immediate.
                 sqlx::query(
                     "UPDATE sessions SET head_turn_id = ?, updated_at = ? WHERE id = ? AND head_turn_id = ?",
                 )
@@ -653,6 +647,14 @@ impl SessionStore {
                 .bind(turn_id)
                 .execute(&mut *tx)
                 .await?;
+                sqlx::query("DELETE FROM messages WHERE turn_id = ?")
+                    .bind(turn_id)
+                    .execute(&mut *tx)
+                    .await?;
+                sqlx::query("DELETE FROM turns WHERE id = ?")
+                    .bind(turn_id)
+                    .execute(&mut *tx)
+                    .await?;
                 tx.commit().await?;
             }
             #[cfg(test)]

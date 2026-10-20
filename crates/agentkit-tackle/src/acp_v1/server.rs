@@ -222,6 +222,25 @@ where
                         })
                         .unwrap_or_else(|| "default".into());
 
+                    // `/context`: an ephemeral composition report. Exact
+                    // first-token match with no arguments; the command turn
+                    // is deleted before the lease is released.
+                    if first_text == "/context" {
+                        return super::context::run_context_case(
+                            state.clone(),
+                            negotiation.clone(),
+                            cx.clone(),
+                            request.session_id.clone(),
+                            session_id.clone(),
+                            owner.clone(),
+                            turn.id.clone(),
+                            actor_name.clone(),
+                            session_row.clone(),
+                            responder,
+                        )
+                        .await;
+                    }
+
                     // Compaction-tagged prompts: intercepted — the
                     // compaction_requested script event fires instead of a
                     // model turn in the main session.

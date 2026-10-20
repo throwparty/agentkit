@@ -124,7 +124,7 @@ pub(crate) async fn run_prompt_turn(
 /// Resolves the model through the shared chain — metadata, actor
 /// frontmatter, `[defaults].model`, then the first listed selector option —
 /// and the model's context window (0 when unknown).
-async fn resolve_model_and_window(
+pub(crate) async fn resolve_model_and_window(
     state: &TackleState,
     session_row: Option<&Session>,
 ) -> Result<(String, u64), String> {

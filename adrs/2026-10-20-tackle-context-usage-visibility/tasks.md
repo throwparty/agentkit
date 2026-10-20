@@ -106,7 +106,7 @@ Add `builtins/context-prompt.md` with the description `Show estimated context-wi
 | Depends On |  |
 | References | context-command |
 
-### T-009: Ephemeral context handler and dispatch
+### T-009: [x] Ephemeral context handler and dispatch
 
 Add `acp_v1/context.rs` with `run_context_case`: fetch the session, resolve the actor, build the runtime, build the system prompt and tools, assemble context, render the report, stream one `agent_message_chunk` with a generated id, delete the command turn, release the lease, and respond `end_turn`. Wire exact `/context` dispatch in `acp_v1/server.rs` after actor resolution and before compaction. On any error delete the turn and release the lease before returning the precise no-model or internal error.
 

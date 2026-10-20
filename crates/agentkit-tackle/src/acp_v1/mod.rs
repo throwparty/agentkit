@@ -14,6 +14,7 @@
 mod capabilities;
 mod commands;
 mod config_options;
+mod context;
 mod initialize;
 mod negotiation;
 mod notices;
