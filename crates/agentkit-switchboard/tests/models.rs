@@ -118,3 +118,63 @@ fn models_load_external_snapshot() {
     assert_eq!(capabilities.reasoning, Some(false));
     assert_eq!(capabilities.structured_output, Some(true));
 }
+
+#[tokio::test]
+async fn models_override_is_forwarded_by_the_models_route() {
+    use agentkit_switchboard::config::SwitchboardConfig;
+    use agentkit_switchboard::provider::registry::ProviderRegistry;
+    use agentkit_switchboard::server::routes;
+    use agentkit_switchboard::session::sqlite::SqliteSessionManager;
+    use http_body_util::BodyExt as _;
+    use std::sync::Arc;
+
+    let mut overrides = HashMap::new();
+    overrides.insert(
+        "deepseek-v4.1-flash".into(),
+        ModelConfig {
+            context_window: Some(131_072),
+            max_output: Some(8_192),
+            capabilities: None,
+        },
+    );
+    let config = SwitchboardConfig {
+        models: overrides,
+        providers: HashMap::new(),
+        credential_helper: None,
+        session_db_path: None,
+    };
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+    sqlx::migrate!("src/db/migrations")
+        .run(&pool)
+        .await
+        .unwrap();
+    let registry = ProviderRegistry::new(&config.providers, "none").unwrap();
+    let state = Arc::new(routes::AppState {
+        model_db: ModelDb::new(config.models.clone(), &config.providers),
+        config,
+        registry,
+        session_manager: Arc::new(SqliteSessionManager::new(pool)),
+        credential_helper: "none".to_string(),
+        session_db_path: std::path::PathBuf::from("/tmp/test_switchboard.db"),
+        started_at: std::time::Instant::now(),
+        mutations: HashMap::new(),
+    });
+    let mut app = routes::build_router(state);
+    let request = axum::http::Request::builder()
+        .method("GET")
+        .uri("/openai/v1/models")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = tower::Service::call(&mut app, request).await.unwrap();
+    assert_eq!(response.status(), 200);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let model = json["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|model| model["id"] == "deepseek-v4.1-flash")
+        .expect("override model is listed");
+    assert_eq!(model["context_window"], 131_072);
+    assert_eq!(model["max_output"], 8_192);
+}
