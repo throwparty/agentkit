@@ -9,6 +9,12 @@ fn make_provider(id: &str, models: Vec<&str>) -> ProviderConfig {
     make_provider_with_overrides(id, models, HashMap::new())
 }
 
+fn make_provider_without_models(id: &str) -> ProviderConfig {
+    let mut provider = make_provider(id, vec![]);
+    provider.models = None;
+    provider
+}
+
 fn make_provider_with_overrides(
     id: &str,
     models: Vec<&str>,
@@ -55,9 +61,12 @@ async fn model_rows(providers: HashMap<String, ProviderConfig>) -> Vec<serde_jso
         .run(&pool)
         .await
         .unwrap();
-    let registry = ProviderRegistry::new(&config.providers, "none").unwrap();
+    let model_db = ModelDb::new(&config.providers);
+    let registry =
+        ProviderRegistry::new_with_models(&config.providers, "none", model_db.provider_models())
+            .unwrap();
     let state = Arc::new(routes::AppState {
-        model_db: ModelDb::new(&config.providers),
+        model_db,
         config,
         registry,
         session_manager: Arc::new(SqliteSessionManager::new(pool)),
@@ -360,6 +369,58 @@ async fn models_override_is_forwarded_by_the_models_route() {
         .expect("alternate provider/model instance is listed");
     assert_eq!(alternate["provider"], "zen_chat_alt");
     assert_eq!(alternate["context_window"], 1_000_000);
+}
+
+#[tokio::test]
+async fn models_infer_from_snapshot_when_models_are_absent() {
+    use agentkit_switchboard::provider::registry::ProviderRegistry;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("models.dev.json");
+    let snapshot = serde_json::json!({
+        "models": {
+            "inferred-model": {
+                "context_window": 1234,
+                "max_output": 56,
+                "capabilities": {
+                    "tool_calling": true,
+                    "reasoning": false,
+                    "structured_output": true
+                }
+            }
+        },
+        "providers": {
+            "inferred_provider": {
+                "billing": "pay_as_you_go",
+                "models": {
+                    "inferred-model": {
+                        "input_per_mtok": 1.0,
+                        "output_per_mtok": 2.0
+                    }
+                }
+            }
+        }
+    });
+    std::fs::write(&path, serde_json::to_vec(&snapshot).unwrap()).unwrap();
+
+    let mut providers = HashMap::new();
+    providers.insert(
+        "inferred_provider".into(),
+        make_provider_without_models("inferred_provider"),
+    );
+    let db = ModelDb::from_snapshot_path(&path, &providers).unwrap();
+    assert!(db
+        .lookup_for("inferred_provider", "inferred-model")
+        .is_some());
+    assert_eq!(
+        db.provider_models().get("inferred_provider").unwrap(),
+        &vec!["inferred-model".to_string()]
+    );
+
+    let registry =
+        ProviderRegistry::new_with_models(&providers, "none", db.provider_models()).unwrap();
+    let states = registry.get_states().await;
+    assert!(states["inferred_provider"].serves_model("inferred-model"));
 }
 
 #[tokio::test]

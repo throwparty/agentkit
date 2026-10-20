@@ -9,6 +9,7 @@ use std::{
 
 pub struct ModelDb {
     models: Vec<EnrichedModel>,
+    provider_models: HashMap<String, Vec<String>>,
 }
 
 struct Instance {
@@ -60,20 +61,14 @@ impl ModelDb {
         snapshot: ModelSnapshot,
     ) -> Self {
         let mut by_model: BTreeMap<String, Vec<Instance>> = BTreeMap::new();
+        let mut provider_models = HashMap::new();
 
         for (prov_identity, prov_cfg) in providers {
-            let mut model_ids: Vec<&String> = prov_cfg
-                .models
-                .as_deref()
-                .unwrap_or_default()
-                .iter()
-                .collect();
-            model_ids.extend(prov_cfg.model_overrides.keys());
-            model_ids.sort();
-            model_ids.dedup();
+            let model_ids = served_models(prov_identity, prov_cfg, &snapshot);
+            provider_models.insert(prov_identity.clone(), model_ids.clone());
 
             for model_id in model_ids {
-                let snapshot_entry = snapshot.models.get(model_id);
+                let snapshot_entry = snapshot.models.get(&model_id);
                 let base_caps = snapshot_entry
                     .and_then(|entry| entry.capabilities.as_ref())
                     .map(|c| ModelCapabilities {
@@ -81,7 +76,7 @@ impl ModelDb {
                         reasoning: c.reasoning,
                         structured_output: c.structured_output,
                     });
-                let overrides = prov_cfg.model_overrides.get(model_id);
+                let overrides = prov_cfg.model_overrides.get(&model_id);
 
                 by_model
                     .entry(model_id.clone())
@@ -95,7 +90,7 @@ impl ModelDb {
                             .and_then(|o| o.max_output)
                             .or_else(|| snapshot_entry.and_then(|e| e.max_output)),
                         capabilities: merge_capabilities(base_caps, overrides),
-                        provider: provider_info(prov_identity, prov_cfg, model_id),
+                        provider: provider_info(prov_identity, prov_cfg, &model_id),
                     });
             }
         }
@@ -136,7 +131,14 @@ impl ModelDb {
                 .then_with(|| a.id.cmp(&b.id))
         });
 
-        Self { models }
+        Self {
+            models,
+            provider_models,
+        }
+    }
+
+    pub fn provider_models(&self) -> &HashMap<String, Vec<String>> {
+        &self.provider_models
     }
 
     pub async fn sync_to_db(&self, pool: &SqlitePool) -> Result<(), sqlx::Error> {
@@ -169,6 +171,12 @@ impl ModelDb {
         self.lookup(&id)
     }
 
+    pub fn lookup_qualified(&self, id: &str) -> Option<&EnrichedModel> {
+        self.models
+            .iter()
+            .find(|model| !model.alias && model.id == id)
+    }
+
     pub fn has_alias(&self, model_id: &str) -> bool {
         self.models
             .iter()
@@ -178,6 +186,21 @@ impl ModelDb {
     pub fn all(&self) -> impl Iterator<Item = &EnrichedModel> {
         self.models.iter()
     }
+}
+
+fn served_models(identity: &str, config: &ProviderConfig, snapshot: &ModelSnapshot) -> Vec<String> {
+    let mut models = match &config.models {
+        Some(models) => models.clone(),
+        None => snapshot
+            .providers
+            .get(identity)
+            .map(|provider| provider.models.keys().cloned().collect())
+            .unwrap_or_default(),
+    };
+    models.extend(config.model_overrides.keys().cloned());
+    models.sort();
+    models.dedup();
+    models
 }
 
 fn alias(model_id: &str, group: &[Instance]) -> EnrichedModel {

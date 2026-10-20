@@ -1,6 +1,7 @@
 use crate::config::ProviderConfig;
 use crate::credential;
 use crate::domain::quota::{handle_response_status, ProviderQuotaState};
+use crate::models::db::ModelDb;
 use crate::provider::{ProviderRuntime, ProviderStatus, ProviderView};
 use crate::providers::{build_provider_map, ProviderMap, ProviderPack};
 use std::collections::HashMap;
@@ -10,6 +11,7 @@ use tokio::sync::RwLock;
 pub struct ProviderRegistry {
     pub configs: HashMap<String, ProviderConfig>,
     pub provider_packs: ProviderMap,
+    provider_models: HashMap<String, Vec<String>>,
     states: Arc<RwLock<HashMap<String, ProviderRuntime>>>,
     quotas: Arc<RwLock<HashMap<String, ProviderQuotaState>>>,
 }
@@ -18,6 +20,15 @@ impl ProviderRegistry {
     pub fn new(
         configs: &HashMap<String, ProviderConfig>,
         helper_name: &str,
+    ) -> Result<Self, String> {
+        let model_db = ModelDb::new(configs);
+        Self::new_with_models(configs, helper_name, model_db.provider_models())
+    }
+
+    pub fn new_with_models(
+        configs: &HashMap<String, ProviderConfig>,
+        helper_name: &str,
+        provider_models: &HashMap<String, Vec<String>>,
     ) -> Result<Self, String> {
         let mut states = HashMap::new();
         let mut quotas = HashMap::new();
@@ -77,6 +88,7 @@ impl ProviderRegistry {
         Ok(Self {
             configs: configs.clone(),
             provider_packs,
+            provider_models: provider_models.clone(),
             states: Arc::new(RwLock::new(states)),
             quotas: Arc::new(RwLock::new(quotas)),
         })
@@ -107,7 +119,11 @@ impl ProviderRegistry {
         let mut out = HashMap::new();
         for (identity, runtime) in states.iter() {
             if let Some(config) = self.configs.get(identity) {
-                let mut models = config.models.clone().unwrap_or_default();
+                let mut models = self
+                    .provider_models
+                    .get(identity)
+                    .cloned()
+                    .unwrap_or_else(|| config.models.clone().unwrap_or_default());
                 models.extend(config.model_overrides.keys().cloned());
                 models.sort();
                 models.dedup();
