@@ -12,7 +12,7 @@ use super::support::{
 };
 use super::wire_kind;
 use crate::agent::compaction;
-use crate::agent::config_options::{context_window, resolve_model_for};
+use crate::agent::config_options::{effective_context_window, resolve_model_for};
 use crate::agent::direct::run_direct_invocation;
 use crate::agent::fork::{self, fork_access};
 use crate::agent::prompt::run_prompt_turn;
@@ -303,7 +303,7 @@ pub(super) async fn run_compaction_case(
     let size = session_row
         .as_ref()
         .and_then(|row| resolve_model_for(&state, row, None))
-        .and_then(|model_ref| context_window(&model_ref))
+        .and_then(|model_ref| effective_context_window(&state, &model_ref))
         .unwrap_or(0);
     let (before, after) = compaction::run_compaction(
         &state,
