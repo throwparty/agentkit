@@ -346,7 +346,6 @@ pub fn context_window(model_ref: &str) -> Option<u64> {
 /// endpoint-qualified reference splits into the provider key and model
 /// name; an endpoint that is not a models.dev provider, or a model with
 /// no rates, is unknowable and returns None. A zero rate is known.
-#[allow(dead_code)] // wired into the turn loop in T-003
 pub(crate) fn request_cost(model_ref: &str, input_tokens: u64, output_tokens: u64) -> Option<f64> {
     let (provider, model) = model_ref.split_once('/')?;
     let snapshot = agentkit_models::bundled_snapshot_parsed();

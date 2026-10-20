@@ -919,7 +919,7 @@ mod tests {
                 Vec::new(),
                 8,
                 "note",
-                |input: u64, _output: u64, _cost: f64| usage_updates.push(input),
+                |input: u64, _output: u64, _cost: Option<f64>| usage_updates.push(input),
                 |_: &str| {},
                 |_: &str| {},
                 |_, _| {},

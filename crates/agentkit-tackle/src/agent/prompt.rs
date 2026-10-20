@@ -279,11 +279,11 @@ async fn run_turn_loop(
         {
             let sink = sink_for_usage;
             let session = sink_session.clone();
-            move |input: u64, _output: u64, _cost: f64| {
+            move |input: u64, _output: u64, cost: Option<f64>| {
                 if size == 0 {
                     return;
                 }
-                sink.usage(&session, input, size, None);
+                sink.usage(&session, input, size, cost);
             }
         },
         {

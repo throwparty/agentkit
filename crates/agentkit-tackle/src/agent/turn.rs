@@ -45,7 +45,7 @@ pub async fn run_turn<P: ModelProvider>(
     tools: Vec<crate::providers::ToolDefinition>,
     max_requests: u32,
     context_length_note: &str,
-    mut on_usage: impl FnMut(u64, u64, f64) + Send,
+    mut on_usage: impl FnMut(u64, u64, Option<f64>) + Send,
     mut on_delta: impl FnMut(&str) + Send,
     mut on_thought: impl FnMut(&str) + Send,
     mut on_retry: impl FnMut(u32, &str) + Send,
@@ -62,6 +62,10 @@ pub async fn run_turn<P: ModelProvider>(
     // request per tool-call round, and each is billed, so the stored delta
     // is their sum — not the last request's alone.
     let mut turn_usage = crate::store::TurnUsage::default();
+    // A prior turn may already have made the session's cost known: later
+    // updates keep reporting the cumulative total even when this request
+    // cannot be priced.
+    let mut cost_known = db.session_usage(session_id).await?.cost_usd > 0.0;
 
     loop {
         request_count += 1;
@@ -213,13 +217,23 @@ pub async fn run_turn<P: ModelProvider>(
         // every request but the last).
         turn_usage.input_tokens += response.usage.input_tokens;
         turn_usage.output_tokens += response.usage.output_tokens;
+        if let Some(cost) = crate::agent::config_options::request_cost(
+            model,
+            response.usage.input_tokens,
+            response.usage.output_tokens,
+        ) {
+            turn_usage.cost_usd += cost;
+            cost_known = true;
+        }
         db.set_turn_usage(turn_id, turn_usage).await?;
         // The live usage indicator tracks the latest request's prompt size
-        // (the current context), not the running total.
+        // (the current context), not the running total. Cost is the
+        // cumulative session total, omitted until some request is priced.
+        let session_usage = db.session_usage(session_id).await?;
         on_usage(
             response.usage.input_tokens,
             response.usage.output_tokens,
-            0.0,
+            cost_known.then_some(session_usage.cost_usd),
         );
 
         // A final answer (no tool calls) ends the turn.
@@ -392,8 +406,142 @@ fn prompt_block_text(block: &serde_json::Value) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{prompt_parts, prompt_text};
-    use crate::providers::ChatContent;
+    use super::{prompt_parts, prompt_text, run_turn};
+    use crate::providers::{
+        ChatContent, ModelProvider, ModelRequest, ModelResponse, ModelToolCall, ModelUsage,
+        ToolCallOutcome,
+    };
+    use crate::store::{SessionKind, SessionStore, TurnKind};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct TwoRounds(AtomicUsize);
+
+    impl ModelProvider for TwoRounds {
+        fn stream_completion(
+            &self,
+            _request: ModelRequest,
+            _on_text_delta: &mut (dyn FnMut(&str) + Send),
+            _on_thought_delta: &mut (dyn FnMut(&str) + Send),
+        ) -> impl std::future::Future<Output = Result<ModelResponse, crate::providers::ModelError>> + Send
+        {
+            let round = self.0.fetch_add(1, Ordering::SeqCst);
+            async move {
+                Ok(if round == 0 {
+                    ModelResponse {
+                        text: String::new(),
+                        tool_calls: vec![ModelToolCall {
+                            id: "call-1".to_owned(),
+                            name: "test.tool".to_owned(),
+                            arguments: "{}".to_owned(),
+                        }],
+                        usage: ModelUsage {
+                            input_tokens: 1_000_000,
+                            output_tokens: 0,
+                        },
+                    }
+                } else {
+                    ModelResponse {
+                        text: "done".to_owned(),
+                        tool_calls: Vec::new(),
+                        usage: ModelUsage {
+                            input_tokens: 0,
+                            output_tokens: 500_000,
+                        },
+                    }
+                })
+            }
+        }
+    }
+
+    async fn turn_fixture() -> (SessionStore, crate::store::SessionId, crate::store::TurnId) {
+        let store = SessionStore::in_memory();
+        let session = store
+            .create_session(SessionKind::Interactive, "/tmp", None, None, "{}")
+            .await
+            .unwrap();
+        let turn = store
+            .append_turn(
+                &session.id,
+                None,
+                TurnKind::Interaction,
+                None,
+                Default::default(),
+            )
+            .await
+            .unwrap();
+        (store, session.id, turn.id)
+    }
+
+    #[tokio::test]
+    async fn multi_request_turn_sums_cost_and_reports_the_cumulative_total() {
+        let (store, session, turn) = turn_fixture().await;
+        let mut usage = Vec::new();
+        let outcome = run_turn(
+            &TwoRounds(AtomicUsize::new(0)),
+            &store,
+            &session,
+            &turn,
+            "assistant-1",
+            "openai/gpt-4o",
+            "system",
+            vec![ChatContent::text("hi")],
+            Vec::new(),
+            Vec::new(),
+            8,
+            "note",
+            |input, output, cost| usage.push((input, output, cost)),
+            |_: &str| {},
+            |_: &str| {},
+            |_, _| {},
+            |_call| {
+                Box::pin(async {
+                    ToolCallOutcome {
+                        content: "ok".to_owned(),
+                        is_error: false,
+                    }
+                })
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(usage.len(), 2);
+        assert_eq!(usage[0].2, Some(2.5), "input-only request");
+        assert_eq!(usage[1].2, Some(7.5), "cumulative after both requests");
+        assert_eq!(outcome.usage.input_tokens, 1_000_000);
+        assert_eq!(outcome.usage.output_tokens, 500_000);
+        assert!((outcome.usage.cost_usd - 7.5).abs() < 1e-12);
+    }
+
+    #[tokio::test]
+    async fn unpriced_turn_omits_cost() {
+        let (store, session, turn) = turn_fixture().await;
+        let mut usage = Vec::new();
+        let outcome = run_turn(
+            &TwoRounds(AtomicUsize::new(1)),
+            &store,
+            &session,
+            &turn,
+            "assistant-1",
+            "switchboard/gpt-4o",
+            "system",
+            vec![ChatContent::text("hi")],
+            Vec::new(),
+            Vec::new(),
+            8,
+            "note",
+            |input, output, cost| usage.push((input, output, cost)),
+            |_: &str| {},
+            |_: &str| {},
+            |_, _| {},
+            crate::providers::ignore_tool_call,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(usage[0].2, None);
+        assert_eq!(outcome.usage.cost_usd, 0.0);
+    }
 
     #[test]
     fn text_blocks_join() {
