@@ -2,7 +2,7 @@
 
 ## Tasks
 
-### T-001: Pricing lookup
+### T-001: [x] Pricing lookup
 
 Add `request_cost(model_ref, input_tokens, output_tokens) -> Option<f64>` to `agent/config_options.rs`. Split the endpoint-qualified model reference, look up `providers[endpoint].models[model]` in `bundled_snapshot_parsed`, and sum the input and output per-million-token rates. Return `None` when the provider or model is absent or neither rate exists; treat an explicit zero rate as known.
 

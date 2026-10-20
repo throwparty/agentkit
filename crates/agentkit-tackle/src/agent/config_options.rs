@@ -342,6 +342,37 @@ pub fn context_window(model_ref: &str) -> Option<u64> {
     snapshot.models.get(bare)?.context_window.map(u64::from)
 }
 
+/// The cost of one request from the bundled models.dev snapshot. The
+/// endpoint-qualified reference splits into the provider key and model
+/// name; an endpoint that is not a models.dev provider, or a model with
+/// no rates, is unknowable and returns None. A zero rate is known.
+#[allow(dead_code)] // wired into the turn loop in T-003
+pub(crate) fn request_cost(model_ref: &str, input_tokens: u64, output_tokens: u64) -> Option<f64> {
+    let (provider, model) = model_ref.split_once('/')?;
+    let snapshot = agentkit_models::bundled_snapshot_parsed();
+    let pricing = snapshot.providers.get(provider)?.models.get(model)?;
+    priced(
+        input_tokens,
+        output_tokens,
+        pricing.input_per_mtok,
+        pricing.output_per_mtok,
+    )
+}
+
+fn priced(
+    input_tokens: u64,
+    output_tokens: u64,
+    input_rate: Option<f64>,
+    output_rate: Option<f64>,
+) -> Option<f64> {
+    if input_rate.is_none() && output_rate.is_none() {
+        return None;
+    }
+    let input = input_rate.map_or(0.0, |rate| rate * input_tokens as f64 / 1_000_000.0);
+    let output = output_rate.map_or(0.0, |rate| rate * output_tokens as f64 / 1_000_000.0);
+    Some(input + output)
+}
+
 /// The session's selected actor: created in session metadata, falling
 /// back to `[defaults].actor`, then the built-in "default".
 pub(crate) fn session_actor(session: &crate::store::Session, fallback: Option<&str>) -> String {
@@ -354,7 +385,48 @@ pub(crate) fn session_actor(session: &crate::store::Session, fallback: Option<&s
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_model;
+    use super::{priced, request_cost, resolve_model};
+
+    fn close(actual: f64, expected: f64) {
+        assert!(
+            (actual - expected).abs() < 1e-12,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    #[test]
+    fn request_cost_prices_a_bundled_provider_model() {
+        // openai/gpt-4o: $2.50/M input, $10/M output.
+        close(
+            request_cost("openai/gpt-4o", 1_000_000, 500_000).unwrap(),
+            7.5,
+        );
+    }
+
+    #[test]
+    fn request_cost_is_unknown_for_an_unlisted_provider() {
+        assert_eq!(request_cost("switchboard/gpt-4o", 1, 1), None);
+    }
+
+    #[test]
+    fn request_cost_is_unknown_for_a_model_missing_from_a_known_provider() {
+        assert_eq!(request_cost("openai/not-a-real-model", 1, 1), None);
+    }
+
+    #[test]
+    fn request_cost_prices_whichever_rates_exist() {
+        close(priced(1_000_000, 1_000_000, Some(2.0), None).unwrap(), 2.0);
+        close(priced(1_000_000, 1_000_000, None, Some(8.0)).unwrap(), 8.0);
+        assert_eq!(priced(1, 1, None, None), None);
+    }
+
+    #[test]
+    fn request_cost_treats_an_explicit_zero_as_known() {
+        close(
+            priced(1_000_000, 1_000_000, Some(0.0), Some(0.0)).unwrap(),
+            0.0,
+        );
+    }
 
     #[test]
     fn resolution_chain_prefers_session_then_actor_then_defaults_then_first() {
