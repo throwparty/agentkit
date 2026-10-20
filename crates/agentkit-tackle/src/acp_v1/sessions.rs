@@ -42,7 +42,7 @@ async fn send_usage_snapshot(
         .map_err(|err| Error::internal_error().data(err.to_string()))?
         .ok_or_else(|| Error::internal_error().data("no such session".to_owned()))?;
     let size = config_options::resolve_model_for(state, &session, None)
-        .and_then(|model_ref| config_options::context_window(&model_ref))
+        .and_then(|model_ref| config_options::effective_context_window(state, &model_ref))
         .unwrap_or(0);
     if size == 0 {
         return Ok(());

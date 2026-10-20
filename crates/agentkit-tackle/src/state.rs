@@ -10,7 +10,7 @@ use crate::mcp::McpPool;
 use crate::permissions::{PermissionChoice, PermissionRequest, PermissionRequester};
 use crate::store::SessionStore;
 use agent_client_protocol::schema::v1::SessionId;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 /// A crashed or stalled connection frees its session after this long.
@@ -98,6 +98,11 @@ pub struct TackleState {
     /// mid-process cannot take effect without a restart and a re-prompt
     /// (loaded once, no hot reload).
     script_sources: std::sync::RwLock<Arc<BTreeMap<String, String>>>,
+    /// Context windows reported by endpoint model discovery, keyed by
+    /// endpoint-qualified model reference. Endpoints are authoritative for
+    /// their own models, so these take precedence over the bundled
+    /// models.dev snapshot.
+    discovered_windows: std::sync::RwLock<HashMap<String, u64>>,
     /// The in-memory permission grant store: keyed by session
     /// and invokable, gone on close, process exit, and resume after
     /// restart.
@@ -128,6 +133,7 @@ impl TackleState {
             config: std::sync::RwLock::new(Arc::new(config)),
             definitions: std::sync::RwLock::new(Arc::new(definitions)),
             script_sources: std::sync::RwLock::new(Arc::new(script_sources)),
+            discovered_windows: std::sync::RwLock::new(HashMap::new()),
             grants: tokio::sync::Mutex::new(crate::permissions::GrantStore::default()),
             pending_project: tokio::sync::Mutex::new(None),
         }
@@ -137,6 +143,34 @@ impl TackleState {
     /// hold a lock guard across an await.
     pub fn config(&self) -> Arc<Loaded> {
         Arc::clone(&self.config.read().expect("config lock poisoned"))
+    }
+
+    /// Replaces the discovered windows for one endpoint, so a fresh
+    /// discovery never leaves stale models behind.
+    pub(crate) fn replace_discovered_windows(
+        &self,
+        endpoint: &str,
+        windows: impl IntoIterator<Item = (String, u64)>,
+    ) {
+        let prefix = format!("{endpoint}/");
+        let mut known = self
+            .discovered_windows
+            .write()
+            .expect("discovered windows lock poisoned");
+        known.retain(|model_ref, _| !model_ref.starts_with(&prefix));
+        for (model, window) in windows {
+            known.insert(format!("{endpoint}/{model}"), window);
+        }
+    }
+
+    /// The endpoint-reported context window for an endpoint-qualified
+    /// model reference, when discovery supplied one.
+    pub(crate) fn discovered_window(&self, model_ref: &str) -> Option<u64> {
+        self.discovered_windows
+            .read()
+            .expect("discovered windows lock poisoned")
+            .get(model_ref)
+            .copied()
     }
 
     /// The resolved script bodies by registration name, loaded once (see

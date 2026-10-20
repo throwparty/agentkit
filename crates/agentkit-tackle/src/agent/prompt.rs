@@ -1,7 +1,7 @@
 //! One prompt turn: resolve the actor, model, tools, and context, run the turn loop, report usage/compaction/titling, and release the lease.
 
 use crate::agent::config_options;
-use crate::agent::config_options::context_window;
+use crate::agent::config_options::effective_context_window;
 use crate::agent::runtime::TurnRuntime;
 use crate::agent::sink::TurnSink;
 use crate::agent::tool_call::{policy_script_sources, run_model_tool_call, ToolCallContext};
@@ -140,7 +140,7 @@ pub(crate) async fn resolve_model_and_window(
             })?
         }
     };
-    let size = context_window(&model_ref).unwrap_or(0);
+    let size = effective_context_window(state, &model_ref).unwrap_or(0);
     Ok((model_ref, size))
 }
 

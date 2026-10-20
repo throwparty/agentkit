@@ -86,13 +86,23 @@ pub const MODEL_SELECTOR_ID: &str = "model";
 /// The actor selector's config id.
 pub const ACTOR_SELECTOR_ID: &str = "actor";
 
-/// Per-endpoint model discovery: the OpenAI list shape's `data[].id`.
+/// One entry from endpoint model discovery: the id, plus the context
+/// window when the endpoint reports one.
+struct DiscoveredModel {
+    id: String,
+    context_window: Option<u64>,
+}
+
+/// Per-endpoint model discovery: the OpenAI list shape's `data[]`.
 /// Discovery is queried fresh at each session setup — no process-global
 /// cache, so a model added to a running endpoint appears immediately and
 /// two endpoints never collide. Failures return nothing and surface as
 /// degraded discovery.
-async fn discover_models(base_url: &str, credential: Option<String>) -> Option<Vec<String>> {
-    // The OpenAI list shape: `data[].id` under `/models`.
+async fn discover_models(
+    base_url: &str,
+    credential: Option<String>,
+) -> Option<Vec<DiscoveredModel>> {
+    // The OpenAI list shape: `data[]` under `/models`.
     let url = format!("{base_url}/models");
     let request = reqwest::Client::new().get(url);
     let request = match &credential {
@@ -101,15 +111,29 @@ async fn discover_models(base_url: &str, credential: Option<String>) -> Option<V
     };
     let response = request.send().await.ok()?.error_for_status().ok()?;
     let body: serde_json::Value = response.json().await.ok()?;
-    let ids: Vec<String> = body["data"]
+    let models: Vec<DiscoveredModel> = body["data"]
         .as_array()?
         .iter()
-        .filter_map(|model| model["id"].as_str().map(str::to_owned))
+        .filter_map(|model| {
+            model["id"].as_str().map(|id| DiscoveredModel {
+                id: id.to_owned(),
+                context_window: model_context_window(model),
+            })
+        })
         .collect();
-    if ids.is_empty() {
+    if models.is_empty() {
         return None;
     }
-    Some(ids)
+    Some(models)
+}
+
+/// The window fields seen across OpenAI-compatible model lists and
+/// gateways; standard OpenAI omits it entirely.
+fn model_context_window(model: &serde_json::Value) -> Option<u64> {
+    ["context_window", "context_length", "max_model_len"]
+        .into_iter()
+        .find_map(|key| model[key].as_u64())
+        .or_else(|| model["limit"]["context"].as_u64())
 }
 
 /// Notices discovered while building the selectors (degraded discovery).
@@ -187,8 +211,19 @@ pub async fn build(state: &TackleState, session: &Session) -> Selectors {
         let qualified = |model: &str| format!("{name}/{model}");
         let discovered = discover_models(&endpoint.base_url, credential).await;
         let models = match discovered {
-            Some(models) => models,
+            Some(models) => {
+                state.replace_discovered_windows(
+                    name,
+                    models.iter().filter_map(|model| {
+                        model
+                            .context_window
+                            .map(|window| (model.id.clone(), window))
+                    }),
+                );
+                models.into_iter().map(|model| model.id).collect()
+            }
             None => {
+                state.replace_discovered_windows(name, std::iter::empty());
                 if !endpoint.models.is_empty() {
                     notices.push(
                         Notice::info(format!(
@@ -271,7 +306,7 @@ pub async fn apply_model_switch(
     notices: std::sync::Arc<dyn crate::scripts::host::NoticeSink>,
 ) -> Result<(), String> {
     // The switch is validated against the new model's window.
-    let window = context_window(model_reference).unwrap_or(0);
+    let window = effective_context_window(state, model_reference).unwrap_or(0);
     if window > 0 {
         // context_usage reports tokens, the same unit as the window.
         let used_tokens = access
@@ -342,6 +377,14 @@ pub fn context_window(model_ref: &str) -> Option<u64> {
     snapshot.models.get(bare)?.context_window.map(u64::from)
 }
 
+/// The model's context window, preferring what its endpoint reported during
+/// discovery and falling back to the bundled models.dev snapshot.
+pub fn effective_context_window(state: &TackleState, model_ref: &str) -> Option<u64> {
+    state
+        .discovered_window(model_ref)
+        .or_else(|| context_window(model_ref))
+}
+
 /// The cost of one request from the bundled models.dev snapshot. The
 /// endpoint-qualified reference splits into the provider key and model
 /// name; an endpoint that is not a models.dev provider, or a model with
@@ -384,12 +427,36 @@ pub(crate) fn session_actor(session: &crate::store::Session, fallback: Option<&s
 
 #[cfg(test)]
 mod tests {
-    use super::{priced, request_cost, resolve_model};
+    use super::{model_context_window, priced, request_cost, resolve_model};
 
     fn close(actual: f64, expected: f64) {
         assert!(
             (actual - expected).abs() < 1e-12,
             "expected {expected}, got {actual}"
+        );
+    }
+
+    #[test]
+    fn discovered_windows_accept_the_provider_list_shapes() {
+        assert_eq!(
+            model_context_window(&serde_json::json!({"context_window": 65_536})),
+            Some(65_536)
+        );
+        assert_eq!(
+            model_context_window(&serde_json::json!({"context_length": 131_072})),
+            Some(131_072)
+        );
+        assert_eq!(
+            model_context_window(&serde_json::json!({"max_model_len": 32_768})),
+            Some(32_768)
+        );
+        assert_eq!(
+            model_context_window(&serde_json::json!({"limit": {"context": 8_192}})),
+            Some(8_192)
+        );
+        assert_eq!(
+            model_context_window(&serde_json::json!({"id": "plain"})),
+            None
         );
     }
 

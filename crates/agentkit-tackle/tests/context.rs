@@ -181,3 +181,93 @@ async fn context_without_a_model_errors_after_cleanup() {
         .await
         .expect("no-model error and cleanup");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn discovered_window_reaches_the_report() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/models"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "object": "list",
+                "data": [{
+                    "id": "custom-model",
+                    "object": "model",
+                    "context_window": 65_536,
+                }]
+            })),
+        )
+        .mount(&server)
+        .await;
+    let agent = spawn_agent(
+        dir.path(),
+        &format!(
+            "[endpoints.live]\nbase_url = \"{}\"\nwire_format = \"openai-chat-completions\"\nauth = \"none\"\nmodels = [\"custom-model\"]\n\n\
+             [defaults]\nmodel = \"live/custom-model\"\n",
+            server.uri()
+        ),
+    );
+
+    let chunks: StdArc<StdMutex<Vec<String>>> = StdArc::default();
+    let sizes: StdArc<StdMutex<Vec<u64>>> = StdArc::default();
+    let chunk_handler = chunks.clone();
+    let size_handler = sizes.clone();
+    Client
+        .builder()
+        .on_receive_notification(
+            async move |notification: SessionNotification, _cx| {
+                match &notification.update {
+                    SessionUpdate::AgentMessageChunk(chunk) => {
+                        if let agentkit_tackle::agent_client_protocol::schema::v1::ContentBlock::Text(
+                            text,
+                        ) = &chunk.content
+                        {
+                            chunk_handler.lock().unwrap().push(text.text.clone());
+                        }
+                    }
+                    SessionUpdate::UsageUpdate(update) => {
+                        size_handler.lock().unwrap().push(update.size);
+                    }
+                    _ => {}
+                }
+                Ok(())
+            },
+            agentkit_tackle::agent_client_protocol::on_receive_notification!(),
+        )
+        .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
+            connection
+                .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            let created = connection
+                .send_request(NewSessionRequest::new(std::path::PathBuf::from("/work")))
+                .block_task()
+                .await?;
+            let response = connection
+                .send_request(PromptRequest::new(
+                    created.session_id.clone(),
+                    vec![ContentBlock::Text(TextContent::new("/context"))],
+                ))
+                .block_task()
+                .await?;
+            assert_eq!(response.stop_reason, StopReason::EndTurn);
+            connection
+                .send_request(ListSessionsRequest::new())
+                .block_task()
+                .await?;
+
+            assert_eq!(
+                *sizes.lock().unwrap(),
+                vec![65_536],
+                "session/new carries the discovered window"
+            );
+            let report = chunks.lock().unwrap().join("");
+            assert!(report.contains("/ 65,536 tokens"), "{report}");
+            assert!(report.contains("Free"), "{report}");
+            assert!(!report.contains("window unknown"), "{report}");
+            Ok(())
+        })
+        .await
+        .expect("discovered window");
+}
