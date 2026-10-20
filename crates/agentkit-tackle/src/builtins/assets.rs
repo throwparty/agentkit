@@ -40,6 +40,10 @@ pub const MCP_PROMPT: &str = include_str!("mcp-prompt.md");
 /// /mcp, the body is never expanded — the harness intercepts the command.
 pub const EDITOR_PROMPT: &str = include_str!("editor-prompt.md");
 
+/// The shipped /context prompt: the discoverability stub for the
+/// ephemeral context-composition report. The body is never expanded.
+pub const CONTEXT_PROMPT: &str = include_str!("context-prompt.md");
+
 /// Resolves a built-in script file reference (`builtin:<name>.rhai`) to
 /// the shipped source.
 pub fn script_source(file: &str) -> Option<&'static str> {
@@ -60,6 +64,7 @@ pub fn defaults() -> impl Iterator<Item = (&'static str, &'static str, &'static 
         ("prompt", "compact", COMPACT_PROMPT),
         ("prompt", "mcp", MCP_PROMPT),
         ("prompt", "editor", EDITOR_PROMPT),
+        ("prompt", "context", CONTEXT_PROMPT),
     ]
     .into_iter()
 }
