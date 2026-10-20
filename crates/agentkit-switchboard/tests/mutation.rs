@@ -44,11 +44,11 @@ fn config(mutations: Vec<std::path::PathBuf>) -> SwitchboardConfig {
                 models: HashMap::new(),
             },
             models: Some(vec!["gpt-4o".to_string()]),
+            model_overrides: HashMap::new(),
             mutations,
         },
     );
     SwitchboardConfig {
-        models: HashMap::new(),
         providers,
         credential_helper: None,
         session_db_path: None,
@@ -73,7 +73,7 @@ async fn state(mock_base_url: &str, mutations: Vec<std::path::PathBuf>) -> Arc<r
         .unwrap();
     let registry = ProviderRegistry::new(&config.providers, "none")
         .expect("AuthType::None providers always resolve a credential");
-    let model_db = ModelDb::new(config.models.clone(), &config.providers);
+    let model_db = ModelDb::new(&config.providers);
     let session_manager = Arc::new(SqliteSessionManager::new(pool));
 
     Arc::new(routes::AppState {

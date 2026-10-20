@@ -19,8 +19,9 @@ fn config_parse_valid() {
     assert_eq!(provider.auth.r#type.to_string(), "bearer_token");
     assert_eq!(provider.auth.r#type.to_string(), "bearer_token");
     assert_eq!(cfg.credential_helper.as_deref(), Some("keychain"));
-    assert_eq!(cfg.models.len(), 1);
-    assert!(cfg.models.contains_key("gpt-4o"));
+    let overrides = &provider.model_overrides;
+    assert_eq!(overrides.len(), 1);
+    assert_eq!(overrides["gpt-4o"].context_window, Some(128000));
 }
 
 #[test]

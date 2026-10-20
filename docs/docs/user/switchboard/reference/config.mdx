@@ -18,30 +18,41 @@ Name of the credential helper binary. Resolved as `agentkit-credential-<name>` i
 - Default: `"keychain"`
 - Set to `"file"` for headless/CI environments without a keychain daemon.
 
-## Model metadata overrides
+## Per-provider model metadata overrides
 
-Merge on top of the bundled models.dev snapshot. Provider-agnostic model facts only — pricing is per-provider.
+Model metadata is scoped to the provider serving the model, because the same
+model ID can mean different things at different providers. Overrides merge on
+top of the bundled models.dev snapshot for that provider only. Declaring an
+override also adds that model to the provider's served list; it does not need
+to be repeated in `models`. Pricing remains under `[providers.pricing]`.
 
 ```toml
-[models."gpt-4o"]
+[[providers]]
+identity = "openai_payg"
+api_surface = "openai-chat-completions"
+base_url = "https://api.openai.com/v1"
+billing = "pay_as_you_go"
+models = ["gpt-4o"]
+
+[providers.model_overrides."gpt-4o"]
 context_window = 128000
 max_output = 16384
 
-[models."gpt-4o".capabilities]
+[providers.model_overrides."gpt-4o".capabilities]
 tool_calling = true
 reasoning = false
 structured_output = true
 ```
 
-### `models.<id>.context_window`
+### `providers.model_overrides.<id>.context_window`
 
-Maximum context window size in tokens.
+Maximum context window size in tokens for this provider's model.
 
-### `models.<id>.max_output`
+### `providers.model_overrides.<id>.max_output`
 
-Maximum output tokens the model can generate.
+Maximum output tokens this provider's model can generate.
 
-### `models.<id>.capabilities`
+### `providers.model_overrides.<id>.capabilities`
 
 - `tool_calling` — whether the model supports function/tool calling.
 - `reasoning` — whether the model supports reasoning/thinking modes.

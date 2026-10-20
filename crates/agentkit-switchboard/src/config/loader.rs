@@ -1,4 +1,4 @@
-use crate::config::{ModelConfig, ProviderConfig, SwitchboardConfig};
+use crate::config::{ProviderConfig, SwitchboardConfig};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -16,9 +16,8 @@ pub enum ConfigError {
 }
 
 #[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawConfig {
-    #[serde(default)]
-    pub models: HashMap<String, ModelConfig>,
     pub providers: Option<Vec<ProviderConfig>>,
     pub credential_helper: Option<String>,
     pub session_db_path: Option<PathBuf>,
@@ -56,7 +55,6 @@ pub fn load_config(path: &Path) -> Result<SwitchboardConfig, ConfigError> {
     }
 
     Ok(SwitchboardConfig {
-        models: raw.models,
         providers,
         credential_helper: raw.credential_helper,
         session_db_path: raw.session_db_path,

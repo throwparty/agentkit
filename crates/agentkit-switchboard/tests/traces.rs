@@ -38,11 +38,11 @@ async fn test_state(mock_base_url: &str) -> Arc<routes::AppState> {
                 models: HashMap::new(),
             },
             models: Some(vec!["gpt-4o".to_string()]),
+            model_overrides: HashMap::new(),
         },
     );
 
     let config = SwitchboardConfig {
-        models: HashMap::new(),
         providers,
         credential_helper: None,
         session_db_path: None,
@@ -55,7 +55,7 @@ async fn test_state(mock_base_url: &str) -> Arc<routes::AppState> {
         .unwrap();
     let registry = ProviderRegistry::new(&config.providers, "none")
         .expect("none-auth provider needs no credential");
-    let model_db = ModelDb::new(config.models.clone(), &config.providers);
+    let model_db = ModelDb::new(&config.providers);
     let session_manager = Arc::new(SqliteSessionManager::new(pool));
 
     Arc::new(routes::AppState {

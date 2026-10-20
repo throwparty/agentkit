@@ -173,6 +173,7 @@ fn provider_with_auth(auth_type: AuthType) -> ProviderConfig {
             models: std::collections::HashMap::new(),
         },
         models: Some(vec!["gpt-4o".to_string()]),
+        model_overrides: HashMap::new(),
     }
 }
 
