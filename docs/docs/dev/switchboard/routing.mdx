@@ -1,15 +1,16 @@
 # Routing algorithm
 
-The core routing algorithm in `proxy/router.rs` is a pure function — no HTTP, no database, no credential helpers. All state is passed as arguments, making it fully unit-testable.
+The core routing algorithm in `provider/router.rs` is a pure function — no HTTP, no database, no credential helpers. All state is passed as arguments, making it fully unit-testable.
 
 ## Function signature
 
 ```rust
 fn select_provider(
+    surface: &ApiSurface,
     model: &str,
-    api_surface: ApiSurface,
+    pinned_provider: Option<&str>,
     session: Option<&SessionAffinity>,
-    providers: &HashMap<String, ProviderState>,
+    providers: &HashMap<String, ProviderView>,
 ) -> Result<ProviderSelection, RoutingError>
 ```
 
@@ -31,7 +32,10 @@ For each incoming request:
 
 1. **Determine API surface** from path prefix (`/openai/v1/...` -> `"openai"`).
 
-2. **Resolve model metadata** from merged model DB. Unknown model -> `RoutingError::ModelNotFound`.
+2. **Resolve the requested model id**. A provider-qualified id
+   (`identity/model`) pins that provider and is rewritten to the bare model
+   before forwarding. A bare id must exist as a catalogue alias; otherwise the
+   request fails with `RoutingError::ModelNotFound`.
 
 3. **Filter candidate providers** (all must pass):
    - `provider.api_surface` matches the request's API surface.
@@ -39,7 +43,11 @@ For each incoming request:
    - Provider has a valid credential (helper or env var).
    - Provider is not currently degraded.
 
-4. **Check session affinity** (if `X-Session-Id` present):
+4. **Apply a qualified-id pin** before affinity or ranking: the pinned
+   provider must serve the model and be available, with no fallback to another
+   provider.
+
+5. **Check session affinity** (if `X-Session-Id` present):
    - Look up session DB for existing provider assignment.
    - If found and assigned provider passes the filter -> **use it directly** (skip ranking). This is the affinity fast path that preserves KV cache benefits.
    - If found but assigned provider fails the filter (degraded, credential lost) -> log the switch reason, increment `switch_count`, fall through to ranking.

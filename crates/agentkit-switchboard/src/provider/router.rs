@@ -15,6 +15,7 @@ pub enum SelectionReason {
     Affinity,
     Cost,
     Fallback,
+    Pinned,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -34,9 +35,25 @@ fn score_billing(billing: &BillingModel) -> u8 {
 pub fn select_provider(
     surface: &ApiSurface,
     model: &str,
+    pinned_provider: Option<&str>,
     session: Option<&SessionAffinity>,
     providers: &HashMap<String, ProviderView>,
 ) -> Result<ProviderSelection, RoutingError> {
+    if let Some(identity) = pinned_provider {
+        let provider = providers.get(identity).ok_or(RoutingError::NoProvider)?;
+        if provider.surface != *surface || !provider.serves_model(model) {
+            return Err(RoutingError::ModelNotFound);
+        }
+        if !provider.is_available() {
+            return Err(RoutingError::NoProvider);
+        }
+        return Ok(ProviderSelection {
+            identity: provider.identity.clone(),
+            reason: SelectionReason::Pinned,
+            switch_count: 0,
+        });
+    }
+
     let mut candidates: Vec<&ProviderView> = providers
         .values()
         .filter(|p| p.is_available() && p.surface == *surface && p.serves_model(model))
