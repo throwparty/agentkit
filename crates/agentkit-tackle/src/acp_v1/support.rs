@@ -2,12 +2,12 @@
 //! builder, and the assistant-message and notice emitters the request
 //! handlers share.
 
-use super::ConnectionTurnSink;
 use super::capabilities::UnstableFeature;
 use super::client_tools;
 use super::negotiation::ConnectionNegotiation;
 use super::permission::AcpPermissionRequester;
 use super::wire_notice;
+use super::ConnectionTurnSink;
 use crate::agent::config_options::Notice;
 use crate::agent::runtime::TurnRuntime;
 use crate::content::timestamp;

@@ -10,7 +10,7 @@
 //! `x-acp-connection` header; subsequent POSTs pass
 //! `?connection=<id>`.
 
-use crate::acp_v1::{ConnectionNegotiation, TackleState, run_agent_over};
+use crate::acp_v1::{run_agent_over, ConnectionNegotiation, TackleState};
 use axum::extract::{Query, State as AxumState};
 use axum::http::HeaderMap;
 use axum::response::sse::{Event as SseEvent, Sse};

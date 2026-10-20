@@ -3,7 +3,7 @@
 #[cfg(test)]
 use super::memory;
 use super::model::*;
-use super::sqlite::{SqliteAssembledRow, SqliteSession, restrict_permissions};
+use super::sqlite::{restrict_permissions, SqliteAssembledRow, SqliteSession};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
 use std::path::Path;
 #[cfg(test)]

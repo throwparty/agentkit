@@ -1,11 +1,10 @@
 pub mod log_layer;
 pub mod metrics;
 
-use opentelemetry::KeyValue;
 use opentelemetry::logs::LoggerProvider;
 use opentelemetry::trace::TracerProvider;
+use opentelemetry::KeyValue;
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::{BatchConfigBuilder as LogBatchConfigBuilder, BatchLogProcessor};
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::resource::{
@@ -14,10 +13,11 @@ use opentelemetry_sdk::resource::{
 use opentelemetry_sdk::trace::{
     BatchConfigBuilder as TraceBatchConfigBuilder, BatchSpanProcessor, SdkTracerProvider,
 };
+use opentelemetry_sdk::Resource;
 use std::time::Duration;
-use tracing_subscriber::Layer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::Layer;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExporterKind {

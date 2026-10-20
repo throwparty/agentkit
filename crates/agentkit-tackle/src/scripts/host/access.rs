@@ -1,8 +1,8 @@
 //! The `SessionAccess` implementation over the store: the acting surface behaviour scripts drive.
 
 use super::api::{
-    Completion, CompletionSink, ContextUsage, HistoryRow, HostError, PromptDispatcher,
-    SessionAccess, block_on, estimate_tokens,
+    block_on, estimate_tokens, Completion, CompletionSink, ContextUsage, HistoryRow, HostError,
+    PromptDispatcher, SessionAccess,
 };
 use super::budgets::{COMPLETION_POLL, HISTORY_MAX_BYTES, HISTORY_MAX_ROWS};
 use crate::store::{Role, SessionId, SessionKind, SessionStore, TurnId, TurnKind};

@@ -9,7 +9,7 @@ use agentkit_switchboard::credential::{CredentialSource, ResolvedCredential};
 use agentkit_switchboard::models::db::ModelDb;
 use agentkit_switchboard::provider::registry::ProviderRegistry;
 use agentkit_switchboard::providers::openai::OpenAiChatCompletionsProvider;
-use agentkit_switchboard::proxy::forwarder::{ForwardRequest, forward_request};
+use agentkit_switchboard::proxy::forwarder::{forward_request, ForwardRequest};
 use agentkit_switchboard::server::routes;
 use agentkit_switchboard::session::sqlite::SqliteSessionManager;
 use axum::http::{HeaderMap, Method};

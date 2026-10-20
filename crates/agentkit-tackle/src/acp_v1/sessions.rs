@@ -7,13 +7,13 @@ use super::negotiation::ConnectionNegotiation;
 use super::notices::connection_notices;
 use super::permission::AcpPermissionRequester;
 use super::replay::replay_updates;
-use super::support::{Cx, send_notices};
+use super::support::{send_notices, Cx};
 use super::{wire_option, wire_options};
 use crate::agent::fork::{self, fork_access};
 use crate::agent::seed as first_run;
 use crate::agent::{config_options, script_loop};
 use crate::content::timestamp;
-use crate::state::{TackleState, store_session_id, wire_session_id};
+use crate::state::{store_session_id, wire_session_id, TackleState};
 use agent_client_protocol::schema::v1::{
     CloseSessionResponse, ConfigOptionUpdate, DeleteSessionResponse, ForkSessionResponse,
     ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, Meta, NewSessionRequest,

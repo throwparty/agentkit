@@ -246,12 +246,10 @@ mod tests {
             Some(parent.as_str())
         );
         let assembled = futures_now(store.assemble_context(&result.session_id)).unwrap();
-        assert!(
-            assembled
-                .iter()
-                .any(|item| item.message.role == crate::store::Role::Assistant
-                    && item.message.content.contains("nested answer"))
-        );
+        assert!(assembled
+            .iter()
+            .any(|item| item.message.role == crate::store::Role::Assistant
+                && item.message.content.contains("nested answer")));
     }
 
     #[test]

@@ -3,12 +3,12 @@
 //! binary as a subprocess and drives it with the SDK's client — the same
 //! shape the golden transcripts replay.
 
-use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::schema::v1::{
     ClientCapabilities, InitializeRequest, ListSessionsRequest, LoadSessionRequest, McpServer,
     McpServerStdio, Meta, NewSessionRequest, SessionCapabilities, SessionNotification,
     SessionUpdate,
 };
+use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
 use std::sync::{Arc as StdArc, Mutex as StdMutex};
 

@@ -487,7 +487,7 @@ mod direct_invocation {
 
     #[test]
     fn client_tools_are_advertised_under_the_bang_prefix() {
-        use crate::acp_v1::client_tools::{ClientCaps, EditorToggles, catalog};
+        use crate::acp_v1::client_tools::{catalog, ClientCaps, EditorToggles};
 
         let definitions = definitions_with(Vec::new());
         let client_tools = catalog(

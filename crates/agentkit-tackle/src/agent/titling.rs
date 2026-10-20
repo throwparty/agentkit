@@ -8,7 +8,7 @@
 //! only logs. Only untitled sessions trigger titling.
 
 use crate::agent::script_loop;
-use crate::scripts::host::{BehaviourHost, SessionAccess, block_on};
+use crate::scripts::host::{block_on, BehaviourHost, SessionAccess};
 use crate::scripts::{behaviour_engine, host::register_host_api};
 use crate::state::TackleState;
 use crate::store::SessionId;

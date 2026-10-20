@@ -20,8 +20,8 @@ mod engine;
 
 pub mod host;
 
-pub use agentkit_script::{PAYLOAD_CAP, cap_payload};
+pub use agentkit_script::{cap_payload, PAYLOAD_CAP};
 pub use engine::{
-    BEHAVIOUR_TIME, Compiled, POLICY_TIME, PolicyScripts, SCRIPT_MAX_SIZE, behaviour_engine,
-    policy_engine,
+    behaviour_engine, policy_engine, Compiled, PolicyScripts, BEHAVIOUR_TIME, POLICY_TIME,
+    SCRIPT_MAX_SIZE,
 };

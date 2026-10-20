@@ -20,8 +20,8 @@ mod memory;
 mod tests;
 
 pub use model::{
-    AssembledMessage, ListFilter, Message, MessageId, Role, Session, SessionId, SessionKind,
-    StoreError, Turn, TurnId, TurnKind, TurnUsage, session_actor_value_free, session_model_free,
+    session_actor_value_free, session_model_free, AssembledMessage, ListFilter, Message, MessageId,
+    Role, Session, SessionId, SessionKind, StoreError, Turn, TurnId, TurnKind, TurnUsage,
 };
 pub use session::SessionStore;
 

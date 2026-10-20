@@ -3,12 +3,12 @@
 //! nested final message returns as the tool result. Before the fix the
 //! invokable was advertised to the model but every call errored.
 
-use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::schema::v1::{
     ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
     SessionNotification, SessionUpdate, TextContent,
 };
+use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
 use agentkit_tackle::store::{SessionKind, SessionStore};
 use std::sync::{Arc as StdArc, Mutex as StdMutex};

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use rhai::packages::Package;
-use rhai::{AST, Dynamic, EvalAltResult, Position, Scope};
+use rhai::{Dynamic, EvalAltResult, Position, Scope, AST};
 use serde_json::Value;
 
 use crate::error::ScriptError;

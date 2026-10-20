@@ -1,5 +1,5 @@
 use agentkit_switchboard::domain::quota::{
-    DegradationReason, ProviderQuotaState, handle_response_status,
+    handle_response_status, DegradationReason, ProviderQuotaState,
 };
 use agentkit_switchboard::providers::anthropic::quota::AnthropicQuota;
 use agentkit_switchboard::providers::openai::quota::OpenAiQuota;

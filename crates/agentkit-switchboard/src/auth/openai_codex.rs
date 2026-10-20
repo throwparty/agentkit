@@ -2,7 +2,7 @@ use crate::auth::OAuthEndpointConfig;
 use crate::config::SwitchboardConfig;
 use crate::credential::helper;
 use crate::credential::{CredentialSource, OAuthState, ResolvedCredential};
-use axum::{Router, extract::Query, response::IntoResponse, routing::get};
+use axum::{extract::Query, response::IntoResponse, routing::get, Router};
 use base64::Engine;
 use oauth2::PkceCodeChallenge;
 use serde::Deserialize;

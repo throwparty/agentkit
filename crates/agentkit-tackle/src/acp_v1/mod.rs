@@ -38,4 +38,4 @@ pub(crate) use config_options::{wire_notice, wire_option, wire_options};
 pub use negotiation::ConnectionNegotiation;
 pub(crate) use server::run_agent_over;
 pub use server::run_stdio;
-pub(crate) use sink::{ConnectionTurnSink, wire_kind};
+pub(crate) use sink::{wire_kind, ConnectionTurnSink};

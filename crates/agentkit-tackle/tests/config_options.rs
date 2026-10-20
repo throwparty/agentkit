@@ -2,11 +2,11 @@
 //! discovery and fallback, switch semantics, window validation, and the
 //! config_option_update.
 
-use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::schema::v1::{
     ForkSessionRequest, InitializeRequest, LoadSessionRequest, NewSessionRequest,
     ResumeSessionRequest, SessionNotification, SessionUpdate, SetSessionConfigOptionRequest,
 };
+use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
 use agentkit_tackle::store::SessionStore;
 use std::sync::{Arc as StdArc, Mutex as StdMutex};

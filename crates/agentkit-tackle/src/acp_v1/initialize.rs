@@ -5,10 +5,10 @@
 use super::negotiation::ConnectionNegotiation;
 use crate::agent::seed as first_run;
 use crate::state::TackleState;
-use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
     AuthMethod, AuthMethodAgent, AuthenticateResponse, InitializeRequest, InitializeResponse,
 };
+use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{Error, Responder};
 use std::sync::Arc;
 

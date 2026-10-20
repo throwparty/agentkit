@@ -9,8 +9,8 @@
 use crate::agent::config_options;
 use crate::providers::ModelProvider;
 use crate::scripts::host::{
-    Completion, CompletionSink, HostError, NoticeSink, PromptDispatcher, SessionAccess,
-    StoreAccess, block_on,
+    block_on, Completion, CompletionSink, HostError, NoticeSink, PromptDispatcher, SessionAccess,
+    StoreAccess,
 };
 use crate::state::TackleState;
 use crate::store::SessionId;
