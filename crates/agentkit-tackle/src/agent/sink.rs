@@ -37,8 +37,9 @@ pub struct ToolCallUpdate {
 /// loop calls these inline while streaming.
 pub trait TurnSink: Send + Sync {
     /// Per-model-request usage. `context_size` is the model's window; when
-    /// unknown the caller skips the event entirely.
-    fn usage(&self, session: &SessionId, input_tokens: u64, context_size: u64);
+    /// unknown the caller skips the event entirely. `cost` is the
+    /// cumulative session cost in USD, omitted when unknowable.
+    fn usage(&self, session: &SessionId, input_tokens: u64, context_size: u64, cost: Option<f64>);
 
     /// A streamed assistant text delta, belonging to `message_id`.
     fn text_delta(&self, session: &SessionId, message_id: &str, text: &str);
