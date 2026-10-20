@@ -80,7 +80,7 @@ Make `build_registry_and_system` in `agent/prompt.rs` `pub(crate)`. Add `compact
 | Depends On |  |
 | References | estimation-basis |
 
-### T-007: Context report builder
+### T-007: [x] Context report builder
 
 Add `agent/context_report.rs` with a report struct and renderer. Inputs: system prompt, tool definitions, tagged prior messages, window size, and session usage. Count system and serialized tool-catalogue bytes, then per-category text and image payload bytes, convert through `estimate_tokens`, compute percentage and free space only when the window is known, and format the fixed ASCII layout with comma grouping and the exact column widths.
 

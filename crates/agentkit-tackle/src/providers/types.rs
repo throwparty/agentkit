@@ -97,7 +97,7 @@ pub struct ModelToolCall {
 }
 
 /// A tool offered to the model, in the registry's namespaced form.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct ToolDefinition {
     pub name: String,
     pub description: String,

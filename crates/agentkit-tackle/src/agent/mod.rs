@@ -7,6 +7,7 @@
 
 pub mod compaction;
 pub mod config_options;
+pub mod context_report;
 pub mod direct;
 pub mod fork;
 pub mod nested;
