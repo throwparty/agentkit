@@ -497,7 +497,7 @@ async fn models_handler(
         if matching.is_empty() {
             continue;
         }
-        let single = (model.providers.len() == 1).then(|| &model.providers[0]);
+        let single = (!model.alias).then(|| &model.providers[0]);
         data.push(json!({
             "id": model.id,
             "model": model.model,

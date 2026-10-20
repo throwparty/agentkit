@@ -424,6 +424,22 @@ async fn models_infer_from_snapshot_when_models_are_absent() {
 }
 
 #[tokio::test]
+async fn models_single_provider_alias_does_not_claim_a_provider() {
+    let mut providers = HashMap::new();
+    providers.insert("only".into(), make_provider("only", vec!["gpt-4o"]));
+
+    let models = model_rows(providers).await;
+    let alias = models
+        .iter()
+        .find(|model| model["id"] == "gpt-4o")
+        .expect("single-provider alias is listed");
+    assert!(alias["provider"].is_null());
+    assert!(alias["billing"].is_null());
+    assert!(alias["pricing"].is_null());
+    assert_eq!(alias["providers"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn models_combined_alias_is_forwarded_by_the_models_route() {
     let mut providers = HashMap::new();
     providers.insert("first".into(), make_provider("first", vec!["gpt-4o"]));
