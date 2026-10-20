@@ -26,6 +26,30 @@ async fn test_state(mock_base_url: &str) -> Arc<routes::AppState> {
     .await
 }
 
+fn provider_config(identity: &str, base_url: &str, models: Vec<&str>) -> ProviderConfig {
+    ProviderConfig {
+        mutations: Vec::new(),
+        identity: identity.to_string(),
+        api_surface: ApiSurface::OpenaiChatCompletions,
+        base_url: base_url.to_string(),
+        billing: BillingModel::PayAsYouGo,
+        auth: AuthConfig {
+            r#type: AuthType::None,
+            oauth: None,
+        },
+        pricing: PricingConfig {
+            input_per_mtok: 0.0,
+            output_per_mtok: 0.0,
+            cache_read_per_mtok: None,
+            cache_write_per_mtok: None,
+            reasoning_per_mtok: None,
+            models: HashMap::new(),
+        },
+        models: Some(models.into_iter().map(|m| m.to_string()).collect()),
+        model_overrides: HashMap::new(),
+    }
+}
+
 async fn test_state_with(
     mock_base_url: &str,
     identity: &str,
@@ -33,30 +57,9 @@ async fn test_state_with(
     models: Vec<&str>,
 ) -> Arc<routes::AppState> {
     let mut providers = HashMap::new();
-    providers.insert(
-        identity.to_string(),
-        ProviderConfig {
-            mutations: Vec::new(),
-            identity: identity.to_string(),
-            api_surface: surface,
-            base_url: mock_base_url.to_string(),
-            billing: BillingModel::PayAsYouGo,
-            auth: AuthConfig {
-                r#type: AuthType::None,
-                oauth: None,
-            },
-            pricing: PricingConfig {
-                input_per_mtok: 0.0,
-                output_per_mtok: 0.0,
-                cache_read_per_mtok: None,
-                cache_write_per_mtok: None,
-                reasoning_per_mtok: None,
-                models: HashMap::new(),
-            },
-            models: Some(models.into_iter().map(|m| m.to_string()).collect()),
-            model_overrides: HashMap::new(),
-        },
-    );
+    let mut provider = provider_config(identity, mock_base_url, models);
+    provider.api_surface = surface;
+    providers.insert(identity.to_string(), provider);
 
     state_with_providers(providers).await
 }
@@ -73,9 +76,10 @@ async fn state_with_providers(providers: HashMap<String, ProviderConfig>) -> Arc
         .run(&pool)
         .await
         .unwrap();
-    let registry = ProviderRegistry::new(&config.providers, "none")
-        .expect("AuthType::None providers always resolve a credential");
     let model_db = ModelDb::new(&config.providers);
+    let registry =
+        ProviderRegistry::new_with_models(&config.providers, "none", model_db.provider_models())
+            .expect("AuthType::None providers always resolve a credential");
     let session_manager = Arc::new(SqliteSessionManager::new(pool));
 
     Arc::new(routes::AppState {
@@ -338,6 +342,65 @@ async fn proxy_qualified_model_pins_provider_and_rewrites_upstream_model() {
     assert_eq!(requests.len(), 1);
     let upstream: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
     assert_eq!(upstream["model"], "gpt-4o");
+}
+
+#[tokio::test]
+async fn proxy_bare_model_with_provider_prefix_uses_catalogue_alias() {
+    let mock_server = wiremock::MockServer::start().await;
+
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/chat/completions"))
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_raw(
+            r#"{"choices":[{"message":{"role":"assistant","content":"Hi"},"index":0,"finish_reason":"stop"}]}"#,
+            "application/json",
+        ))
+        .mount(&mock_server)
+        .await;
+
+    let mut providers = HashMap::new();
+    providers.insert(
+        "local".into(),
+        provider_config("local", &mock_server.uri(), vec!["anthropic/claude-sonnet"]),
+    );
+    providers.insert(
+        "anthropic".into(),
+        provider_config("anthropic", &mock_server.uri(), vec!["other-model"]),
+    );
+    let state = state_with_providers(providers).await;
+    assert!(state.model_db.has_alias("anthropic/claude-sonnet"));
+    assert!(state
+        .model_db
+        .lookup_qualified("anthropic/claude-sonnet")
+        .is_none());
+    let mut app = routes::build_router(state);
+
+    let body = serde_json::to_vec(&json!({
+        "model": "anthropic/claude-sonnet",
+        "messages": [{"role": "user", "content": "hi"}],
+    }))
+    .unwrap();
+
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/openai/v1/chat/completions")
+        .header("Content-Type", "application/json")
+        .body(axum::body::Body::from(body))
+        .unwrap();
+
+    let response = tower::Service::call(&mut app, request).await.unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        response
+            .headers()
+            .get("x-switchboard-provider")
+            .and_then(|value| value.to_str().ok()),
+        Some("local")
+    );
+
+    let requests = mock_server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 1);
+    let upstream: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert_eq!(upstream["model"], "anthropic/claude-sonnet");
 }
 
 #[tokio::test]
