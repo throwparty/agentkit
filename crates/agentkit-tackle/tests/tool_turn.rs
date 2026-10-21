@@ -351,11 +351,6 @@ file = "veto.rhai"
     .unwrap();
     std::fs::write(cfg.join("scripts").join("veto.rhai"), VETO_SCRIPT).unwrap();
     std::fs::write(project.join("prompts").join("greet.md"), GREET_PROMPT).unwrap();
-    let trust = format!(
-        "[\".\"]\n\"prompts/greet.md\" = \"{}\"\n",
-        agentkit_tackle::config::trust::hash(GREET_PROMPT)
-    );
-    std::fs::write(cfg.join("trust.toml"), trust).unwrap();
 }
 
 fn spawn_agent(dir: &std::path::Path) -> AcpAgent {

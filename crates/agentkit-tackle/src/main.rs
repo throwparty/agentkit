@@ -87,14 +87,10 @@ async fn run(args: cli::Cli) -> ExitCode {
         "configuration loaded"
     );
 
-    let mut definitions = match definitions::discover(Some(&project_config_dir)) {
+    let definitions = match definitions::discover(Some(&project_config_dir)) {
         Ok(definitions) => definitions,
         Err(err) => return fail(err),
     };
-    // Keep the full definitions for the pending project layer, but drop
-    // the project entries from the active set until they are trusted.
-    let full_definitions = definitions.clone();
-    definitions.retain_project(&project_config_dir, &std::collections::BTreeSet::new());
     tracing::info!(
         personas = definitions.personas.len(),
         actors = definitions.actors.len(),
@@ -112,14 +108,13 @@ async fn run(args: cli::Cli) -> ExitCode {
     // client-forwarded servers never bleed between connections.
     let state = Arc::new(TackleState::new(Arc::new(db), loaded, definitions));
 
-    // Hold the project layer until the first session resolves trust. A
-    // project may have config, definitions, or both.
-    let project_entries = full_definitions.project_trust_entries(&project_config_dir);
-    if project_config.is_some() || !project_entries.is_empty() {
+    // Hold the executable project configuration until the first session
+    // resolves trust. Definitions are repository content and are already
+    // active.
+    if let Some(project_config) = project_config {
         state
             .set_pending_project(acp_v1::PendingProject {
-                config: project_config.unwrap_or_default(),
-                definitions: full_definitions,
+                config: project_config,
                 project_dir: project_config_dir.clone(),
                 identity,
                 trust_store,
