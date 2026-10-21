@@ -13,7 +13,7 @@ Every session runs as an actor. The default configuration ships one, so a sessio
 
 ## Where definitions live
 
-Personas are stored in the `personas` subdirectory of [the configuration directory](reference/config). A project definition with the same name replaces the user definition wholesale, which replaces the built-in. The definition name is the filename without the extension: `actors/reviewer.md` is `reviewer`.
+Personas are stored in `.agentkit/tackle/personas/` in the repository, as a flat file (`reviewer.md`) or a package directory (`reviewer/PERSONA.md` plus resources). A discovered definition replaces the built-in wholesale. The definition name is the file stem: `.agentkit/tackle/personas/reviewer.md` is `reviewer`.
 
 Definitions are markdown with frontmatter. `---` fences parse as YAML and `+++` fences as TOML — pick either, per file.
 
@@ -63,7 +63,7 @@ The actor selector is an ACP config option, so it appears in your harness alongs
 
 ## Trust
 
-Project-defined personas and actors are executable configuration: the first session in a project prompts for consent. A change to a file re-prompts, and a refused definition is dropped before it can be selected. See [Security model](./security).
+Personas and actors are repository-resident context and load without a prompt. Only unbounded host execution such as MCP servers is denied at project scope. See [Security model](./security).
 
 ## Built-ins
 

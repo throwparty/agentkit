@@ -17,24 +17,18 @@ We believe that the harness is responsible for mediating the admission of data i
 
 ## Projects are untrusted
 
-A cloned repository is untrusted input. Some configuration is denied at project-scope:
+A cloned repository is untrusted input, but the sandbox is the consent boundary: launching Tackle in a repository already admits that repository's content to the sandbox. Context-bearing project configuration therefore loads without a prompt.
 
-- `endpoints` for model providers, since projects must not be able to exfiltrate traffic to endpoints without consent.
-- `credential_helper` used for credential resolution could allow exfiltration of credentials.
-- `client_tools` a project must not be able to hand the model your editor's shell or filesystem.
+- Definitions — personas, actors, and prompts — are repository-resident, including any package resources. Their bodies and resources are context the model may already read, not host execution.
+- Bounded Rhai project scripts load because the engine limits are the consent. See [Scripts are bounded](#scripts-are-bounded).
 
-Everything else a project may declare is subject to **consent**.
+Unbounded host execution is denied at project scope:
 
-## Consent
+- `mcp_servers` and `client_tools` declared by a project are ignored.
+- `endpoints` and `credential_helper` are rejected outright.
+- The same entries are honoured only from user configuration outside the repository.
 
-Project-defined `mcp_servers`, `scripts`, `personas`, `actors`, and `prompts` are executable configuration, so they require consent before they load:
-
-- the first session in a project prompts for approval, keyed on a **hash of each entry**;
-- any change to an entry re-prompts;
-- an unapproved entry is dropped before it can take effect;
-- consent is recorded against the repository remote, so a moved checkout keeps it.
-
-Definitions are loaded once at process start and without hot reload, so a change is only picked up on the next run.
+There is no launch-time consent prompt. Configuration and definitions load once at process start without hot reload, so a change is picked up on the next run.
 
 ## Spawn hygiene
 

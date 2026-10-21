@@ -13,7 +13,7 @@ Tackle configuration is sourced from three layers, merged in order of precedence
    c. On Windows: `~/AppData/LocalLow/AgentKit/tackle`.
 3. **Project configuration** located at `.agentkit/tackle/config.toml` in the session's working directory.
 
-The project layer may not set `endpoints` or `credential_helper` — a project trying to change where model traffic goes is rejected outright. Project `mcp_servers`, `scripts`, and definitions (personas, actors, prompts) are trust-gated: the first session in a project prompts for consent, keyed on a hash of each entry, so any change re-prompts.
+The project layer may not set `endpoints` or `credential_helper` — a project trying to change where model traffic goes is rejected outright. Project `mcp_servers` and `client_tools` are ignored. Project scripts are bounded by the engine and load without a prompt, and definitions (personas, actors, prompts) are repository-only and load from `.agentkit/tackle/` without a prompt.
 
 Maps merge per key: a project entry with the same name replaces one wholesale, so a disabling entry needs no file. Scalars merge per field.
 
@@ -46,7 +46,7 @@ actor = "builtins/actuator"              # persona/actor override
 
 ## `mcp_servers`
 
-Tool providers, namespaced by server name; a session's tools are addressed as `mcp.<server>.<tool>`. Both layers may declare servers, with project entries trust-gated (see [tools](../tools)):
+Tool providers, namespaced by server name; a session's tools are addressed as `mcp.<server>.<tool>`. Only user configuration may declare servers; project entries are ignored (see [tools](../tools)):
 
 ```toml
 [mcp_servers.litterbox]
@@ -111,7 +111,7 @@ The built-ins are `compaction` (on `post_turn` and `compaction_requested`) and `
 
 ## Built-in definitions
 
-Personas, actors, and prompts ship at the lowest precedence through the same discovery path as user definitions: any discovered definition with the same name replaces the built-in wholesale. (The built-in scripts — `compaction`, `titling` — register separately, as `scripts` entries; see above.)
+Personas, actors, and prompts ship at the lowest precedence through the same discovery path as repository definitions: any discovered definition with the same name replaces the built-in wholesale. (The built-in scripts — `compaction`, `titling` — register separately, as `scripts` entries; see above.)
 
 - **Personas**: `default`.
 - **Actors**: `default` (persona `default`), and `summariser` — the no-tools background actor the built-in scripts fork as for titling and compaction summaries.
