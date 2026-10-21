@@ -454,7 +454,6 @@ async fn finish_turn(
 mod tests {
     use super::*;
     use crate::definitions::{ActorMeta, Definition, Definitions, PersonaMeta};
-    use std::collections::BTreeMap;
     use std::path::PathBuf;
 
     fn definitions() -> Definitions {
