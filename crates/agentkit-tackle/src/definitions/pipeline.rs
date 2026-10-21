@@ -523,7 +523,7 @@ personas = ["reviewer"]
         let source = dir.path().join("source");
         repository(&source);
         commit(&source, "body", "main");
-        write_manifest(&project, &source.to_str().unwrap().to_owned(), Some("main"));
+        write_manifest(&project, source.to_str().unwrap(), Some("main"));
         let err = get(&project).unwrap_err();
         assert!(err.to_string().contains("definitions get"), "{err}");
     }

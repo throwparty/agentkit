@@ -171,7 +171,7 @@ Wire get and update: get resolves the manifest against the lock and vendors the 
 | Depends On | T-009,T-012 |
 | References | definitions-cli,fail-closed,determinism |
 
-### T-014: Definitions subcommand surface
+### T-014: [x] Definitions subcommand surface
 
 Add the tackle definitions subcommand with the def alias: init scaffolds a manifest, add and remove edit selections, get and update drive the vendoring pipeline, and list reports declared and vendored definitions with status. The loader remains independent of the manifest and lock.
 

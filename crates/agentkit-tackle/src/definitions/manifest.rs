@@ -6,7 +6,7 @@
 //! Sourcing is fail-closed, so every structural problem is a parse error
 //! naming the offending source or definition.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -15,30 +15,30 @@ use super::source;
 /// The manifest filename under the tackle project directory.
 pub const MANIFEST_FILE: &str = "definitions.toml";
 
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 pub struct Manifest {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub source: Vec<SourceDecl>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub definitions: BTreeMap<String, Selections>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extends: Vec<ExtendDecl>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct SourceDecl {
     /// The name selections use to refer to this source.
     pub name: String,
     /// `git` or `path`. Required: there is no default.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git: Option<GitSpec>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<PathSpec>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct GitSpec {
     pub url: String,
     /// The requested ref (branch, tag, or commit). `HEAD` when absent.
@@ -49,14 +49,14 @@ pub struct GitSpec {
     pub path: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct PathSpec {
     /// A local directory holding the kind directories.
     pub dir: String,
 }
 
 /// A delegated manifest, resolved by the lock.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ExtendDecl {
     pub url: String,
     #[serde(default, rename = "ref")]
@@ -66,13 +66,13 @@ pub struct ExtendDecl {
 }
 
 /// The definitions selected from one source, keyed by kind.
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 pub struct Selections {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub personas: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub actors: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub prompts: Vec<String>,
 }
 
