@@ -363,6 +363,8 @@ mod direct_invocation {
                 agentkit_tackle::definitions::Definition {
                     name: "deploy".to_owned(),
                     path: std::path::PathBuf::from("/prompts/deploy.md"),
+                    directory: None,
+                    resources: Vec::new(),
                     raw: String::new(),
                     frontmatter: agentkit_tackle::definitions::PromptMeta::default(),
                     body: "Body.".to_owned(),

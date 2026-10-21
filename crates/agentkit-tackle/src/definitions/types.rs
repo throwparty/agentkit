@@ -25,15 +25,105 @@ pub enum DefinitionError {
 pub struct Definition<T> {
     /// Definition name: the file stem, addressable in its namespace.
     pub name: String,
-    /// Where the definition was loaded from.
+    /// Where the definition was loaded from: the entry point for a
+    /// package, or the single file for a flat definition.
     pub path: PathBuf,
-    /// The raw file contents — the unit hashed by TOFU trust records.
+    /// The package directory for a directory definition, repository
+    /// relative. `None` for a flat definition, which carries no
+    /// resources.
+    pub directory: Option<PathBuf>,
+    /// Resource paths relative to [`Self::directory`], sorted so the
+    /// listing and the lock hash are deterministic. Always empty for a
+    /// flat definition and for built-ins.
+    pub resources: Vec<String>,
+    /// The raw entry-point contents — the unit hashed by TOFU trust
+    /// records.
     pub raw: String,
     /// Parsed frontmatter.
     pub frontmatter: T,
     /// The markdown body: the persona's behavioural prompt, or the
     /// prompt's expansion template.
     pub body: String,
+}
+
+/// Enumerates the resource files in a package directory, relative to it
+/// and sorted. The entry point is excluded: it is the definition, not a
+/// resource. Directory entries are walked recursively; symbolic links are
+/// not followed.
+#[allow(dead_code)]
+pub(crate) fn collect_resources(
+    directory: &Path,
+    entry: &Path,
+) -> Result<Vec<String>, DefinitionError> {
+    let mut resources = Vec::new();
+    walk_resources(directory, directory, entry, &mut resources)?;
+    resources.sort();
+    Ok(resources)
+}
+
+#[allow(dead_code)]
+fn walk_resources(
+    root: &Path,
+    dir: &Path,
+    entry: &Path,
+    out: &mut Vec<String>,
+) -> Result<(), DefinitionError> {
+    let entries = std::fs::read_dir(dir).map_err(|source| DefinitionError::Io {
+        path: dir.into(),
+        source,
+    })?;
+    for item in entries {
+        let item = item.map_err(|source| DefinitionError::Io {
+            path: dir.into(),
+            source,
+        })?;
+        let path = item.path();
+        let file_type = item.file_type().map_err(|source| DefinitionError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        if file_type.is_dir() {
+            walk_resources(root, &path, entry, out)?;
+        } else if file_type.is_file() && path != entry {
+            let rel = path.strip_prefix(root).expect("walk stays under root");
+            out.push(rel.to_string_lossy().replace('\\', "/"));
+        }
+    }
+    Ok(())
+}
+
+/// The total size of every file in a package, entry point included. A flat
+/// definition is a package of one.
+#[allow(dead_code)]
+pub(crate) fn package_size(directory: &Path) -> Result<usize, DefinitionError> {
+    let mut total = 0usize;
+    let entries = std::fs::read_dir(directory).map_err(|source| DefinitionError::Io {
+        path: directory.into(),
+        source,
+    })?;
+    for item in entries {
+        let item = item.map_err(|source| DefinitionError::Io {
+            path: directory.into(),
+            source,
+        })?;
+        let path = item.path();
+        let file_type = item.file_type().map_err(|source| DefinitionError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        if file_type.is_dir() {
+            total += package_size(&path)?;
+        } else if file_type.is_file() {
+            total += item
+                .metadata()
+                .map_err(|source| DefinitionError::Io {
+                    path: path.clone(),
+                    source,
+                })?
+                .len() as usize;
+        }
+    }
+    Ok(total)
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -131,4 +221,81 @@ pub struct PromptMeta {
 
 fn default_true() -> bool {
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn directory_definition_reports_sorted_resources() {
+        let dir = tempfile::tempdir().unwrap();
+        let package = dir.path().join("package");
+        std::fs::create_dir_all(package.join("nested")).unwrap();
+        std::fs::write(package.join("PERSONA.md"), "body").unwrap();
+        std::fs::write(package.join("z.txt"), "z").unwrap();
+        std::fs::write(package.join("a.txt"), "a").unwrap();
+        std::fs::write(package.join("nested/b.txt"), "b").unwrap();
+
+        let entry = package.join("PERSONA.md");
+        let resources = collect_resources(&package, &entry).unwrap();
+        assert_eq!(resources, vec!["a.txt", "nested/b.txt", "z.txt"]);
+
+        let definition = Definition {
+            name: "package".to_owned(),
+            path: entry.clone(),
+            directory: Some(PathBuf::from(".agentkit/tackle/personas/package")),
+            resources,
+            raw: "body".to_owned(),
+            frontmatter: PersonaMeta { description: None },
+            body: "body".to_owned(),
+        };
+        assert_eq!(
+            definition.directory.as_deref(),
+            Some(Path::new(".agentkit/tackle/personas/package"))
+        );
+        assert_eq!(definition.resources.len(), 3);
+    }
+
+    #[test]
+    fn flat_definition_reports_no_directory_or_resources() {
+        let definition = Definition {
+            name: "flat".to_owned(),
+            path: PathBuf::from("flat.md"),
+            directory: None,
+            resources: Vec::new(),
+            raw: "body".to_owned(),
+            frontmatter: PersonaMeta { description: None },
+            body: "body".to_owned(),
+        };
+        assert!(definition.directory.is_none());
+        assert!(definition.resources.is_empty());
+    }
+
+    #[test]
+    fn resource_enumeration_is_order_stable() {
+        let dir = tempfile::tempdir().unwrap();
+        let package = dir.path().join("package");
+        std::fs::create_dir_all(&package).unwrap();
+        for name in ["c", "a", "b"] {
+            std::fs::write(package.join(format!("{name}.md")), name).unwrap();
+        }
+        let entry = package.join("ENTRY.md");
+        std::fs::write(&entry, "entry").unwrap();
+        let first = collect_resources(&package, &entry).unwrap();
+        let second = collect_resources(&package, &entry).unwrap();
+        assert_eq!(first, second);
+        assert_eq!(first, vec!["a.md", "b.md", "c.md"]);
+    }
+
+    #[test]
+    fn package_size_counts_every_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let package = dir.path().join("package");
+        std::fs::create_dir_all(package.join("nested")).unwrap();
+        std::fs::write(package.join("ENTRY.md"), "1234").unwrap();
+        std::fs::write(package.join("nested/resource"), "12").unwrap();
+        let size = package_size(&package).unwrap();
+        assert_eq!(size, 6);
+    }
 }
