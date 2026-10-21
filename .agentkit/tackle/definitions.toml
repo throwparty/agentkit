@@ -1,0 +1,6 @@
+# Shared agent definitions, imported wholesale from the agent-definitions
+# repository. Run `tackle def update` to vendor the selected definitions
+# into `.agentkit/tackle/`.
+
+[[extends]]
+url = "/home/lukecarrier/Code/throwparty/agent-definitions"
