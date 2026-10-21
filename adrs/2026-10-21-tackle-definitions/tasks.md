@@ -15,7 +15,7 @@ Add an optional package directory and a sorted resource listing to Definition. E
 | Depends On |  |
 | References | definition-packages |
 
-### T-002: Directory definition discovery
+### T-002: [x] Directory definition discovery
 
 Extend the loader to scan .agentkit/tackle/<kind>/ for directory definitions at <name>/<ENTRY>.md, dispatching on the per-kind entry point name PROMPT.md, PERSONA.md, or ACTOR.md. A directory whose entry point is missing or misnamed is a load error naming the path. Size caps apply to the package total.
 
