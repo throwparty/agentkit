@@ -158,7 +158,7 @@ Resolve kind = path sources from the local filesystem and vendor selected defini
 | Depends On | T-010,T-011 |
 | References | source-specifications,definitions-cli |
 
-### T-013: Vendoring pipeline and fail-closed behaviour
+### T-013: [x] Vendoring pipeline and fail-closed behaviour
 
 Wire get and update: get resolves the manifest against the lock and vendors the locked revisions, update re-resolves refs, re-vendors, and rewrites the lock. Both are the only network operations. A failure at any point leaves the tree and lock unchanged.
 
