@@ -54,7 +54,7 @@ Add the $ namespace to prompt expansion. $.name is the definition name and $.dir
 | Depends On | T-001 |
 | References | context-variables |
 
-### T-005: Resource listing for prompts
+### T-005: [x] Resource listing for prompts
 
 Append the resource listing to the expanded body of a prompt, after substitution, so the model knows which paths under $.dir it may read. A prompt with no resources gets no listing.
 

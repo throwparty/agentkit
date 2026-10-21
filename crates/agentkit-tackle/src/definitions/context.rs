@@ -37,6 +37,35 @@ pub fn render(
     substitute(body, &values)
 }
 
+/// Renders a model-facing body: parameter and `$` namespace substitution,
+/// then the package resource listing. A definition with no resources is
+/// unchanged by the listing step.
+pub fn render_with_resources(
+    body: &str,
+    parameters: &BTreeMap<String, String>,
+    name: &str,
+    directory: Option<&Path>,
+    resources: &[String],
+) -> String {
+    let mut rendered = render(body, parameters, name, directory);
+    append_listing(&mut rendered, resources);
+    rendered
+}
+
+/// Appends the package's sorted resource paths so the model knows what it
+/// may read under `$.dir`.
+pub fn append_listing(body: &mut String, resources: &[String]) {
+    if resources.is_empty() {
+        return;
+    }
+    body.push_str("\n\nResources in this definition package:\n");
+    for resource in resources {
+        body.push_str("- ");
+        body.push_str(resource);
+        body.push('\n');
+    }
+}
+
 /// Substitutes placeholders from `values`; `{{ key }}` and `{{key}}` are
 /// equivalent.
 pub fn substitute(body: &str, values: &BTreeMap<String, String>) -> String {
@@ -95,6 +124,27 @@ mod tests {
             rendered,
             "param=/tmp context=.agentkit/tackle/prompts/deploy"
         );
+    }
+
+    #[test]
+    fn a_resource_listing_is_appended_after_substitution() {
+        let resources = vec!["a.md".to_owned(), "nested/b.rhai".to_owned()];
+        let rendered = render_with_resources(
+            "body {{ $.name }}",
+            &BTreeMap::new(),
+            "deploy",
+            Some(Path::new(".agentkit/tackle/prompts/deploy")),
+            &resources,
+        );
+        assert!(rendered.starts_with("body deploy"));
+        assert!(rendered.ends_with("- nested/b.rhai\n"), "{rendered}");
+        assert!(rendered.contains("- a.md"));
+    }
+
+    #[test]
+    fn a_resource_less_body_is_unchanged_by_listing() {
+        let rendered = render_with_resources("body", &BTreeMap::new(), "flat", None, &[]);
+        assert_eq!(rendered, "body");
     }
 
     #[test]

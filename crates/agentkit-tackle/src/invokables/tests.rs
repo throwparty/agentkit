@@ -603,3 +603,29 @@ fn a_flat_definition_yields_an_empty_context_directory() {
     .unwrap();
     assert_eq!(registry.expand_user("deploy", "").unwrap(), "dir=");
 }
+
+#[test]
+fn an_expanded_prompt_ends_with_its_resource_listing() {
+    let (_, mut definition) = prompt_def("deploy", default_prompt_meta(), "Deploy.");
+    definition.directory = Some(PathBuf::from(".agentkit/tackle/prompts/deploy"));
+    definition.resources = vec!["docs/guide.md".to_owned(), "run.rhai".to_owned()];
+    let registry = Registry::build(
+        &definitions_with(vec![("deploy".to_owned(), definition)]),
+        &[],
+    )
+    .unwrap();
+    let expanded = registry.expand_user("deploy", "").unwrap();
+    assert!(expanded.starts_with("Deploy."));
+    assert!(expanded.ends_with("- run.rhai\n"), "{expanded}");
+    assert!(expanded.contains("- docs/guide.md"), "{expanded}");
+}
+
+#[test]
+fn a_resource_less_prompt_is_unchanged() {
+    let registry = Registry::build(
+        &definitions_with(vec![prompt_def("deploy", default_prompt_meta(), "Deploy.")]),
+        &[],
+    )
+    .unwrap();
+    assert_eq!(registry.expand_user("deploy", "").unwrap(), "Deploy.");
+}
