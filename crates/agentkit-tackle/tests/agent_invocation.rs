@@ -120,8 +120,10 @@ impl Respond for ScriptedModel {
 
 fn write_config(dir: &std::path::Path, endpoint_uri: &str) {
     let cfg = dir.join("cfg");
-    std::fs::create_dir_all(cfg.join("personas")).unwrap();
-    std::fs::create_dir_all(cfg.join("actors")).unwrap();
+    std::fs::create_dir_all(&cfg).unwrap();
+    let project = dir.join(".agentkit").join("tackle");
+    std::fs::create_dir_all(project.join("personas")).unwrap();
+    std::fs::create_dir_all(project.join("actors")).unwrap();
     std::fs::write(
         cfg.join("config.toml"),
         format!(
@@ -130,15 +132,19 @@ fn write_config(dir: &std::path::Path, endpoint_uri: &str) {
     )
     .unwrap();
     std::fs::write(
-        cfg.join("personas").join("worker.md"),
+        project.join("personas").join("worker.md"),
         format!("+++\ndescription = \"Test worker persona\"\n+++\n{WORKER_MARKER}\n"),
     )
     .unwrap();
-    std::fs::write(
-        cfg.join("actors").join("worker.md"),
-        "+++\npersona = \"worker\"\n+++\n",
-    )
-    .unwrap();
+    let actor = "+++\npersona = \"worker\"\n+++\n";
+    std::fs::write(project.join("actors").join("worker.md"), actor).unwrap();
+    let persona = format!("+++\ndescription = \"Test worker persona\"\n+++\n{WORKER_MARKER}\n");
+    let trust = format!(
+        "[\".\"]\n\"personas/worker.md\" = \"{}\"\n\"actors/worker.md\" = \"{}\"\n",
+        agentkit_tackle::config::trust::hash(&persona),
+        agentkit_tackle::config::trust::hash(actor),
+    );
+    std::fs::write(cfg.join("trust.toml"), trust).unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -153,15 +159,14 @@ async fn agent_invocation_returns_the_nested_final_message() {
     write_config(dir.path(), &server.uri());
     let db_path = dir.path().join("sessions.db");
 
-    let agent = AcpAgent::from_args([
+    let command = format!(
+        "cd {} && exec {} stdio --config-dir {} --db-path {}",
+        dir.path().display(),
         env!("CARGO_BIN_EXE_agentkit-tackle"),
-        "stdio",
-        "--config-dir",
-        dir.path().join("cfg").to_str().unwrap(),
-        "--db-path",
-        db_path.to_str().unwrap(),
-    ])
-    .expect("agent arguments");
+        dir.path().join("cfg").display(),
+        db_path.display()
+    );
+    let agent = AcpAgent::from_args(["/bin/sh", "-c", &command]).expect("agent arguments");
 
     let results: StdArc<StdMutex<Vec<String>>> = StdArc::default();
     let results_handler = results.clone();

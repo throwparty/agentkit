@@ -13,15 +13,14 @@ use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, Connection
 use agentkit_tackle::store::{SessionStore, TurnKind};
 
 fn spawn_agent(dir: &std::path::Path) -> AcpAgent {
-    AcpAgent::from_args([
+    let command = format!(
+        "cd {} && exec {} stdio --config-dir {} --db-path {}",
+        dir.display(),
         env!("CARGO_BIN_EXE_agentkit-tackle"),
-        "stdio",
-        "--config-dir",
-        dir.join("cfg").to_str().unwrap(),
-        "--db-path",
-        dir.join("sessions.db").to_str().unwrap(),
-    ])
-    .expect("agent arguments")
+        dir.join("cfg").display(),
+        dir.join("sessions.db").display()
+    );
+    AcpAgent::from_args(["/bin/sh", "-c", &command]).expect("agent arguments")
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -84,13 +83,17 @@ async fn builtin_overrides_surface_in_the_seed() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("sessions.db");
     let cfg = dir.path().join("cfg");
-    // An override of the built-in default actor.
-    std::fs::create_dir_all(cfg.join("actors")).unwrap();
-    std::fs::write(
-        cfg.join("actors").join("default.md"),
-        "+++\npersona = \"default\"\n+++\nCustom default actor.\n",
-    )
-    .unwrap();
+    std::fs::create_dir_all(&cfg).unwrap();
+    // An override of the built-in default actor, in the repository tree.
+    let project = dir.path().join(".agentkit").join("tackle");
+    std::fs::create_dir_all(project.join("actors")).unwrap();
+    let actor = "+++\npersona = \"default\"\n+++\nCustom default actor.\n";
+    std::fs::write(project.join("actors").join("default.md"), actor).unwrap();
+    let trust = format!(
+        "[\".\"]\n\"actors/default.md\" = \"{}\"\n",
+        agentkit_tackle::config::trust::hash(actor)
+    );
+    std::fs::write(cfg.join("trust.toml"), trust).unwrap();
     let agent = spawn_agent(dir.path());
 
     Client

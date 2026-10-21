@@ -100,7 +100,7 @@ async fn pending_project_state(dir: &std::path::Path) -> Arc<TackleState> {
     .unwrap();
 
     let user_dir = dir.join("cfg");
-    let full = crate::definitions::discover(&user_dir, Some(&project)).unwrap();
+    let full = crate::definitions::discover(Some(&project)).unwrap();
     let mut active = full.clone();
     active.retain_project(&project, &std::collections::BTreeSet::new());
     let (loaded, project_config) =

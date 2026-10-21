@@ -108,18 +108,27 @@ pub(super) async fn handle_new_session(
     // first session does) before the seed and selectors read the effective
     // configuration.
     {
+        // Consent goes back to the client, so the resolution must run off
+        // the dispatch task: awaiting the reply inside the handler would
+        // deadlock on the connection's own response routing.
+        let state = Arc::clone(&state);
+        let cx = cx.clone();
+        let pool = negotiation.mcp_pool();
         let trust_session = wire_session_id(&session.id);
-        let requester = AcpPermissionRequester {
-            cx: cx.clone(),
-            session_id: trust_session.clone(),
-        };
-        state
-            .resolve_pending_project(
-                Some(negotiation.mcp_pool()),
-                &requester,
-                &trust_session.to_string(),
-            )
-            .await;
+        let session_arg = trust_session.to_string();
+        let resolved = tokio::spawn(async move {
+            let requester = AcpPermissionRequester {
+                cx,
+                session_id: trust_session,
+            };
+            state
+                .resolve_pending_project(Some(pool), &requester, &session_arg)
+                .await;
+        })
+        .await;
+        if let Err(err) = resolved {
+            tracing::error!("project trust resolution failed: {err}");
+        }
     }
     // The first-session seed: harness-authored static content documenting the
     // loaded configuration and the command syntaxes, on its own seed turn.
