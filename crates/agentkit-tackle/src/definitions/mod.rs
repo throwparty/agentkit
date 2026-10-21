@@ -11,6 +11,7 @@ mod types;
 
 pub mod context;
 pub mod loaders;
+pub mod lock;
 pub mod manifest;
 pub mod source;
 

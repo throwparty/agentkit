@@ -119,7 +119,7 @@ Resolve [[extends]] entries transitively: fetch each delegated definitions.toml 
 | Depends On | T-007 |
 | References | manifest-delegation |
 
-### T-010: Lock schema and package hashing
+### T-010: [x] Lock schema and package hashing
 
 Read and write .agentkit/tackle/definitions.lock: each source resolved to an immutable commit, each definition to a content hash over its sorted files (relative path plus length plus bytes). A flat definition hashes as bare file content so existing records stay stable. The lock carries integrity only and never gates loading.
 
