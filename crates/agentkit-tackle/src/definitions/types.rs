@@ -13,6 +13,14 @@ pub enum DefinitionError {
     },
     #[error("{path}: definition exceeds the {max}-byte size cap")]
     TooLarge { path: PathBuf, max: usize },
+    #[error("{path}: directory definition is missing its {entry} entry point")]
+    MissingEntryPoint { path: PathBuf, entry: &'static str },
+    #[error("{name}: flat definition {flat} collides with directory definition {directory}")]
+    FlatDirectoryCollision {
+        name: String,
+        flat: PathBuf,
+        directory: PathBuf,
+    },
     #[error("{path}: missing frontmatter fence (--- or +++)")]
     MissingFrontmatter { path: PathBuf },
     #[error("{path}: unterminated frontmatter fence")]
@@ -50,7 +58,6 @@ pub struct Definition<T> {
 /// and sorted. The entry point is excluded: it is the definition, not a
 /// resource. Directory entries are walked recursively; symbolic links are
 /// not followed.
-#[allow(dead_code)]
 pub(crate) fn collect_resources(
     directory: &Path,
     entry: &Path,
@@ -61,7 +68,6 @@ pub(crate) fn collect_resources(
     Ok(resources)
 }
 
-#[allow(dead_code)]
 fn walk_resources(
     root: &Path,
     dir: &Path,
@@ -94,7 +100,6 @@ fn walk_resources(
 
 /// The total size of every file in a package, entry point included. A flat
 /// definition is a package of one.
-#[allow(dead_code)]
 pub(crate) fn package_size(directory: &Path) -> Result<usize, DefinitionError> {
     let mut total = 0usize;
     let entries = std::fs::read_dir(directory).map_err(|source| DefinitionError::Io {
