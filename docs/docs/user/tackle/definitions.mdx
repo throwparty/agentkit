@@ -138,7 +138,7 @@ tackle def list
 tackle def verify
 ```
 
-`update` re-resolves refs and rewrites the lock. `get` fetches the locked commits and reproduces their contents. Both are the only network operations.
+`update` re-resolves refs and rewrites the lock. `get` fetches the locked commits and reproduces their contents. When no lock exists yet, `get` resolves refs and writes the lock exactly as `update` does, so it is safe as the first command. Both are the only network operations.
 
 Vendoring writes the entry point and every resource into `.agentkit/tackle/<kind>/<name>/`, replacing the previous package directory. A flat source definition is vendored as a package with its kind's entry point and no resources, so the tree has one shape regardless of how the source laid it out.
 

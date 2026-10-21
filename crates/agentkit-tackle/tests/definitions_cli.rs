@@ -27,3 +27,43 @@ fn definitions_are_resolved_under_the_repository_root() {
     let output = run(&["def", "--project-dir", &root, "list"]);
     assert!(output.status.success(), "{output:?}");
 }
+
+#[test]
+fn get_without_a_lock_vendors_from_a_path_source() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().to_str().unwrap().to_owned();
+    let shared = dir.path().join("shared");
+    std::fs::create_dir_all(shared.join("prompts").join("triage")).unwrap();
+    std::fs::write(
+        shared.join("prompts/triage/PROMPT.md"),
+        "---\ndescription: Triage\n---\nTriage it.\n",
+    )
+    .unwrap();
+
+    let output = run(&["definitions", "--project-dir", &root, "init"]);
+    assert!(output.status.success(), "{output:?}");
+    std::fs::write(
+        dir.path().join(".agentkit/tackle/definitions.toml"),
+        r#"
+[[source]]
+name = "local"
+kind = "path"
+
+[source.path]
+dir = "shared"
+
+[definitions.local]
+prompts = ["triage"]
+"#,
+    )
+    .unwrap();
+
+    let output = run(&["def", "--project-dir", &root, "get"]);
+    assert!(output.status.success(), "{output:?}");
+    let vendored = dir.path().join(".agentkit/tackle/prompts/triage/PROMPT.md");
+    assert!(vendored.is_file(), "vendored at {}", vendored.display());
+    assert!(dir
+        .path()
+        .join(".agentkit/tackle/definitions.lock")
+        .is_file());
+}
