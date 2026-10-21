@@ -1,0 +1,20 @@
+flowchart TD
+  subgraph Repo[".agentkit/tackle/ (repository)"]
+    Manifest["definitions.toml"]
+    Lock["definitions.lock"]
+    Tree["personas/ actors/ prompts/<br/>(directory + flat definitions)"]
+  end
+
+  CLI["tackle definitions<br/>(get / update / verify)"]
+  Manifest --> CLI
+  Lock <--> CLI
+  CLI -->|resolve| Source["git2 / path source resolver"]
+  Source -->|vendor| Tree
+
+  Loader["definitions loader"]
+  Builtins["built-in defaults"]
+  Tree --> Loader
+  Builtins --> Loader
+  Loader --> Registry["invokable registry"]
+  Registry -->|"body + parameters + $.dir/$.name + listing"| Model["model context"]
+  Model -->|"existing file tools"| Tree
