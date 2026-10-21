@@ -10,7 +10,7 @@ Who can invoke a prompt is determined by the frontmatter fields `user_invokable`
 
 ## Where prompts live
 
-Prompts are stored in the `prompts` subdirectory of [the configuration directory](reference/config). The filename without the extension is the prompt's name, and therefore the command. `prompts/review.md` is `/review`. Frontmatter fences may be `---` (YAML) or `+++` (TOML).
+Prompts are stored in `.agentkit/tackle/prompts/` in the repository, as a flat file or a package directory. The file stem is the prompt's name, and therefore the command: `.agentkit/tackle/prompts/review.md` is `/review`. Frontmatter fences may be `---` (YAML) or `+++` (TOML).
 
 ## Authoring
 
@@ -85,4 +85,4 @@ They are described in full in [Defaults](./defaults). Define a prompt with the s
 
 ## Trust
 
-Project-layer prompts are trust-gated exactly like personas and actors: consent on first use, keyed on a hash, re-prompted on any change. See [Security model](./security).
+Prompts are repository-resident context and load without a prompt, exactly like personas and actors. See [Security model](./security).

@@ -74,4 +74,4 @@ A policy script that errors or times out **fails closed to `ask`** with the erro
 
 ## Trust
 
-Project scripts are trust-gated: the first session in a project prompts for consent, keyed on a hash of each file, and any change re-prompts. A refused script is dropped before it loads. See [Security model](./security).
+Project scripts load without a prompt: the engine limits described above are the consent boundary. See [Security model](./security).

@@ -223,7 +223,7 @@ Deny unbounded host execution at project scope: mcp_servers, client_tools, endpo
 | Depends On | T-016 |
 | References | trust-boundary,security-posture |
 
-### T-018: Reconcile security and tackle documentation
+### T-018: [x] Reconcile security and tackle documentation
 
 Update security.mdx to state the sandbox-boundary posture and remove the per-entry consent description, and amend the tackle ADR FR-022 and AC-010 to record repository-only definitions and the retired trust gate.
 

@@ -1,6 +1,6 @@
 # Tackle Definition Packages
 
-**Status:** draft  **Created:** 2026-10-21  **Author:** adrian
+**Status:** implemented  **Created:** 2026-10-21  **Author:** adrian
 
 Tackle's definitions — personas, actors, and prompts — are single markdown files discovered from the user and project configuration layers, with project-layer definitions trust-gated per file (adrs/2026-09-17-tackle FR-010, FR-022, AC-010). Two limits have surfaced. A definition cannot carry resources, so a prompt that needs a supporting document or an invokable script has nowhere to put it. And definitions sourced from a shared location have no reproducible delivery mechanism.
 
