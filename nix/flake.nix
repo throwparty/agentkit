@@ -13,8 +13,10 @@
     };
     throwparty = {
       url = "git+ssh://git@github.com/throwparty/nix";
-      inputs.flake-utils.follows = "flake-utils";
-      inputs.nixpkgs.follows = "nixpkgs";
+      inputs = {
+        flake-utils.follows = "flake-utils";
+        nixpkgs.follows = "nixpkgs";
+      };
     };
   };
   outputs =
