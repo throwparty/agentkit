@@ -80,7 +80,7 @@ Substitute context variables into persona bodies and append the persona resource
 | Depends On | T-004 |
 | References | context-variables,resource-listing |
 
-### T-007: Manifest parsing
+### T-007: [x] Manifest parsing
 
 Parse .agentkit/tackle/definitions.toml into sources and selections. Each [[source]] declares a required kind with no default and a kind-named spec table: git with url plus optional ref and path, or path with dir. Selections under [definitions.<source>] are keyed by kind with a list of names. The url field also accepts the PEP 508 git+ URL form, parsed into url, ref, and subdirectory.
 

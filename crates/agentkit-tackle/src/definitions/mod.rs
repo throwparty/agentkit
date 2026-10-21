@@ -11,6 +11,7 @@ mod types;
 
 pub mod context;
 pub mod loaders;
+pub mod manifest;
 
 pub use loaders::discover;
 pub use types::{ActorMeta, Definition, DefinitionError, Definitions, PersonaMeta, PromptMeta};
