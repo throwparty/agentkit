@@ -187,7 +187,9 @@ pub fn get(project_dir: &Path) -> Result<Vec<Vendored>, PipelineError> {
         staged.push((definition, selection, actual));
     }
 
-    apply(project_dir, &staged, None)?;
+    // `get` writes the lock too: both network operations leave the lock
+    // recording the revisions and hashes they produced.
+    apply(project_dir, &staged, Some(&lock))?;
     Ok(vendored(project_dir, staged))
 }
 
