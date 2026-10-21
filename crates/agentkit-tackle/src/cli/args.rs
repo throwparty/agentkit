@@ -122,6 +122,8 @@ pub enum DefinitionsCommands {
     Update,
     /// Report declared and vendored definitions
     List,
+    /// Check vendored packages against the lock
+    Verify,
 }
 
 #[derive(Debug, Subcommand)]

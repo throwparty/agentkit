@@ -28,6 +28,8 @@ pub enum DefinitionsError {
         path: PathBuf,
         source: std::io::Error,
     },
+    #[error("definition drift:\n{details}")]
+    Drift { details: String },
 }
 
 pub fn init(project_dir: &Path) -> Result<String, DefinitionsError> {
@@ -172,6 +174,37 @@ fn format_vendored(vendored: Vec<Vendored>) -> String {
     }
 }
 
+/// Re-hashes every vendored package against the lock. Any difference is
+/// drift and is reported with a non-zero exit.
+pub fn verify(project_dir: &Path) -> Result<String, DefinitionsError> {
+    let lock = Lock::load(project_dir)?;
+    let mut drifted = Vec::new();
+    for (key, definition) in &lock.definitions {
+        let Some((kind, name)) = key.split_once('/') else {
+            drifted.push(format!("{key} malformed lock entry"));
+            continue;
+        };
+        let path = project_dir.join(kind).join(name);
+        if !path.is_dir() {
+            drifted.push(format!("{key} missing"));
+            continue;
+        }
+        let actual = lock::hash_package(&path)?;
+        if actual != definition.hash {
+            drifted.push(format!("{key} changed"));
+        }
+    }
+    if drifted.is_empty() {
+        Ok(format!("verified {} definitions", lock.definitions.len()))
+    } else {
+        drifted.sort();
+        drifted.push("run `tackle definitions get` to restore the locked revisions".into());
+        Err(DefinitionsError::Drift {
+            details: drifted.join("\n"),
+        })
+    }
+}
+
 /// Reports every declared and locked definition with its status:
 /// `ok`, `missing`, `drift`, `unlocked`, or `undeclared`.
 pub fn list(project_dir: &Path) -> Result<String, DefinitionsError> {
@@ -263,6 +296,35 @@ dir = "shared"
         remove(&project, "local", "personas", "reviewer").unwrap();
         let loaded = Manifest::load(&project).unwrap();
         assert!(!loaded.definitions.contains_key("local"));
+    }
+
+    #[test]
+    fn verify_reports_drift_and_accepts_a_clean_tree() {
+        let (dir, project) = project();
+        let shared = dir.path().join("shared");
+        std::fs::create_dir_all(shared.join("personas").join("reviewer")).unwrap();
+        std::fs::write(
+            shared.join("personas/reviewer/PERSONA.md"),
+            "---\ndescription: Review\n---\nBody\n",
+        )
+        .unwrap();
+        std::fs::write(shared.join("personas/reviewer/notes.txt"), "notes\n").unwrap();
+        manifest(&project);
+        add(&project, "local", "personas", "reviewer").unwrap();
+        update(&project).unwrap();
+        assert!(verify(&project).unwrap().contains("verified"));
+
+        std::fs::write(project.join("personas/reviewer/notes.txt"), "edited\n").unwrap();
+        let err = verify(&project).unwrap_err();
+        assert!(err.to_string().contains("personas/reviewer"), "{err}");
+    }
+
+    #[test]
+    fn verify_without_a_lock_names_get() {
+        let (_dir, project) = project();
+        std::fs::write(manifest::manifest_path(&project), "# empty\n").unwrap();
+        let err = verify(&project).unwrap_err();
+        assert!(err.to_string().contains("definitions get"), "{err}");
     }
 
     #[test]
