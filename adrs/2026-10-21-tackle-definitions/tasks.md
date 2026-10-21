@@ -106,7 +106,7 @@ Enforce the manifest invariants at parse time: unique local definition names acr
 | Depends On | T-007 |
 | References | definitions-manifest,source-specifications |
 
-### T-009: Manifest delegation
+### T-009: [x] Manifest delegation
 
 Resolve [[extends]] entries transitively: fetch each delegated definitions.toml at its pinned revision, union-merge its sources and selections with the local manifest, and treat duplicate names anywhere in the resolved set as a parse error. No override is permitted.
 

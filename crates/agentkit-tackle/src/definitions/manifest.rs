@@ -10,6 +10,8 @@ use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use super::source;
+
 /// The manifest filename under the tackle project directory.
 pub const MANIFEST_FILE: &str = "definitions.toml";
 
@@ -155,6 +157,97 @@ impl Manifest {
         self.source.iter().find(|source| source.name == name)
     }
 
+    /// Resolves `[[extends]]` transitively: fetches each delegated
+    /// manifest at its ref, union-merges its sources and selections with
+    /// this one, and rejects duplicate names anywhere in the resolved set.
+    /// No override is permitted.
+    pub fn resolve(&self, project_dir: &Path) -> Result<Manifest, ManifestError> {
+        let path = manifest_path(project_dir);
+        let mut visited = BTreeSet::new();
+        let mut resolved = Manifest::default();
+        self.collect(&path, &mut visited, &mut resolved)?;
+        resolved.reject_duplicate_names(&path)?;
+        Ok(resolved)
+    }
+
+    fn collect(
+        &self,
+        path: &Path,
+        visited: &mut BTreeSet<String>,
+        out: &mut Manifest,
+    ) -> Result<(), ManifestError> {
+        for extend in &self.extends {
+            let key = format!(
+                "{}@{}#{}",
+                extend.url,
+                extend.git_ref.as_deref().unwrap_or("HEAD"),
+                extend.path.as_deref().unwrap_or("")
+            );
+            if !visited.insert(key.clone()) {
+                return Err(ManifestError::invalid(
+                    path,
+                    format!("manifest delegation cycle detected at `{key}`"),
+                ));
+            }
+            let checkout = source::resolve_git("extends", &extend.url, extend.git_ref.as_deref())
+                .map_err(|err| ManifestError::invalid(path, err.to_string()))?;
+            let subdirectory = extend.path.as_deref().unwrap_or("");
+            let delegated_path = checkout.path().join(subdirectory).join(MANIFEST_FILE);
+            let source =
+                std::fs::read_to_string(&delegated_path).map_err(|source| ManifestError::Io {
+                    path: delegated_path.clone(),
+                    source,
+                })?;
+            let delegated = Manifest::parse(&source, &delegated_path)?;
+            delegated.collect(&delegated_path, visited, out)?;
+        }
+        self.merge_into(out, path)
+    }
+
+    fn merge_into(&self, out: &mut Manifest, path: &Path) -> Result<(), ManifestError> {
+        for source in &self.source {
+            if out
+                .source
+                .iter()
+                .any(|existing| existing.name == source.name)
+            {
+                return Err(ManifestError::invalid(
+                    path,
+                    format!(
+                        "source `{}` is declared twice in the resolved set",
+                        source.name
+                    ),
+                ));
+            }
+            out.source.push(source.clone());
+        }
+        for (name, selections) in &self.definitions {
+            let entry = out.definitions.entry(name.clone()).or_default();
+            entry.personas.extend(selections.personas.iter().cloned());
+            entry.actors.extend(selections.actors.iter().cloned());
+            entry.prompts.extend(selections.prompts.iter().cloned());
+        }
+        Ok(())
+    }
+
+    /// Unique names across the resolved set: one name, one definition.
+    fn reject_duplicate_names(&self, path: &Path) -> Result<(), ManifestError> {
+        let mut names: BTreeMap<(&str, &str), &str> = BTreeMap::new();
+        for (source_name, selections) in &self.definitions {
+            for (kind, name) in selections.entries() {
+                if let Some(previous) = names.insert((kind, name), source_name) {
+                    return Err(ManifestError::invalid(
+                        path,
+                        format!(
+                            "definition `{kind}/{name}` is selected by both `{previous}` and `{source_name}`"
+                        ),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Enforces the manifest invariants: unique source and local
     /// definition names, selections that name a declared source, and
     /// source and definition paths confined to their roots.
@@ -219,22 +312,7 @@ impl Manifest {
             }
         }
 
-        // Unique names across the resolved local set: one name, one
-        // definition. No override is permitted.
-        let mut names: BTreeMap<(&str, &str), &str> = BTreeMap::new();
-        for (source_name, selections) in &self.definitions {
-            for (kind, name) in selections.entries() {
-                if let Some(previous) = names.insert((kind, name), source_name) {
-                    return Err(ManifestError::invalid(
-                        &path,
-                        format!(
-                            "definition `{kind}/{name}` is selected by both `{previous}` and `{source_name}`"
-                        ),
-                    ));
-                }
-            }
-        }
-        Ok(())
+        self.reject_duplicate_names(&path)
     }
 }
 
@@ -254,7 +332,7 @@ fn confined_relative(path: &str) -> bool {
 }
 
 /// A local source directory must stay inside the repository.
-fn confined_to(root: &Path, dir: &str) -> bool {
+fn confined_to(_root: &Path, dir: &str) -> bool {
     let dir = Path::new(dir);
     if dir.is_absolute() {
         return false;
@@ -546,6 +624,178 @@ personas = ["reviewer"]
 "#,
         )
         .unwrap();
+    }
+
+    fn git_repo(manifest: &str) -> (tempfile::TempDir, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        std::fs::write(dir.path().join(MANIFEST_FILE), manifest).unwrap();
+        let mut index = repo.index().unwrap();
+        index
+            .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+            .unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let signature = git2::Signature::now("test", "test@example.com").unwrap();
+        repo.commit(Some("HEAD"), &signature, &signature, "fixture", &tree, &[])
+            .unwrap();
+        let url = dir.path().to_str().unwrap().to_owned();
+        (dir, url)
+    }
+
+    fn local_manifest(extends: &str, extra: &str) -> (tempfile::TempDir, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join(".agentkit").join("tackle");
+        std::fs::create_dir_all(&project).unwrap();
+        let manifest = format!(
+            r#"
+[[source]]
+name = "local"
+kind = "path"
+
+[source.path]
+dir = "shared"
+
+[[extends]]
+url = "{extends}"
+{extra}
+
+[definitions.local]
+personas = ["local-reviewer"]
+"#
+        );
+        std::fs::write(project.join(MANIFEST_FILE), manifest).unwrap();
+        let project_string = project.to_str().unwrap().to_owned();
+        (dir, project_string)
+    }
+
+    #[test]
+    fn a_delegated_manifest_contributes_its_definitions() {
+        let (_delegated_dir, delegated) = git_repo(
+            r#"
+[[source]]
+name = "team"
+kind = "path"
+
+[source.path]
+dir = "shared"
+
+[definitions.team]
+personas = ["reviewer"]
+"#,
+        );
+        let (_dir, project) = local_manifest(&delegated, "");
+        let manifest = Manifest::load(Path::new(&project)).unwrap();
+        let resolved = manifest.resolve(Path::new(&project)).unwrap();
+        let team = resolved.definitions.get("team").unwrap();
+        assert_eq!(team.personas, vec!["reviewer"]);
+        assert!(resolved.definitions.contains_key("local"));
+        assert!(resolved.source.iter().any(|source| source.name == "team"));
+    }
+
+    #[test]
+    fn a_name_contributed_by_a_delegated_manifest_cannot_be_overridden() {
+        let (_delegated_dir, delegated) = git_repo(
+            r#"
+[[source]]
+name = "team"
+kind = "path"
+
+[source.path]
+dir = "shared"
+
+[definitions.team]
+personas = ["local-reviewer"]
+"#,
+        );
+        let (_dir, project) = local_manifest(&delegated, "");
+        let manifest = Manifest::load(Path::new(&project)).unwrap();
+        let err = manifest.resolve(Path::new(&project)).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("local-reviewer"), "{message}");
+        assert!(message.contains("local"), "{message}");
+        assert!(message.contains("team"), "{message}");
+    }
+
+    #[test]
+    fn nested_delegation_contributes_every_level() {
+        let (_inner_dir, inner) = git_repo(
+            r#"
+[[source]]
+name = "inner"
+kind = "path"
+
+[source.path]
+dir = "shared"
+
+[definitions.inner]
+prompts = ["triage"]
+"#,
+        );
+        let (_middle_dir, middle) = git_repo(&format!(
+            r#"
+[[source]]
+name = "middle"
+kind = "path"
+
+[source.path]
+dir = "shared"
+
+[[extends]]
+url = "{inner}"
+
+[definitions.middle]
+actors = ["worker"]
+"#
+        ));
+        let (_dir, project) = local_manifest(&middle, "");
+        let manifest = Manifest::load(Path::new(&project)).unwrap();
+        let resolved = manifest.resolve(Path::new(&project)).unwrap();
+        assert!(resolved.definitions.contains_key("inner"));
+        assert!(resolved.definitions.contains_key("middle"));
+        assert!(resolved.definitions.contains_key("local"));
+    }
+
+    #[test]
+    fn a_delegation_cycle_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        let url = dir.path().to_str().unwrap().to_owned();
+        std::fs::write(
+            dir.path().join(MANIFEST_FILE),
+            format!(
+                r#"
+[[extends]]
+url = "{url}"
+"#
+            ),
+        )
+        .unwrap();
+        let mut index = repo.index().unwrap();
+        index
+            .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+            .unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let signature = git2::Signature::now("test", "test@example.com").unwrap();
+        repo.commit(Some("HEAD"), &signature, &signature, "cycle", &tree, &[])
+            .unwrap();
+
+        let project = dir.path().join(".agentkit").join("tackle");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(
+            project.join(MANIFEST_FILE),
+            format!(
+                r#"
+[[extends]]
+url = "{url}"
+"#
+            ),
+        )
+        .unwrap();
+        let manifest = Manifest::load(&project).unwrap();
+        let err = manifest.resolve(&project).unwrap_err();
+        assert!(err.to_string().contains("cycle"), "{err}");
     }
 
     #[test]
