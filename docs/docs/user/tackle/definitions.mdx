@@ -4,9 +4,15 @@ sidebar_position: 4
 
 # 🧩 Definitions
 
-Definitions are the reusable content Tackle loads from a repository: **prompts**, **personas**, and **actors**. A definition is either a flat markdown file or a package directory that carries supporting resources alongside its entry point.
+Definitions are the reusable content Tackle loads from a repository: [prompts](prompts.mdx), [personas](agents.mdx#personas), and [actors](agents.mdx#actors). A definition is either a flat markdown file or a package directory that carries supporting resources alongside its entry point.
 
-Definitions are repository-only. Discovery reads `.agentkit/tackle/` in the repository; a definition placed in the user configuration directory is ignored because its resources would not be reachable by the model.
+:::tip
+
+**Definitions are sourced only from the repository.**
+
+Discovery reads `.agentkit/tackle/` in the repository, and ignores any defined in the global configuration directory because its resources would not be reachable by the model.
+
+:::
 
 ## Layout
 
@@ -18,7 +24,7 @@ The kind directory and entry-point filename are fixed:
 | Persona | `.agentkit/tackle/personas/` | `PERSONA.md` |
 | Actor | `.agentkit/tackle/actors/` | `ACTOR.md` |
 
-A flat definition is a single markdown file whose stem is its name:
+A flat definition is a single markdown file whose basename is its name:
 
 ```text
 .agentkit/tackle/prompts/review.md          -> /review
@@ -146,4 +152,4 @@ Sourcing fails closed: an unreachable source, an unreadable manifest, or a faile
 
 ## Trust
 
-Definitions are context, not host execution, and load without a prompt — launching Tackle in a repository already admits that content to the sandbox. The same applies to bounded Rhai scripts. Unbounded project-scope host execution, such as MCP servers, endpoints, and credential helpers, remains denied. See [Security model](./security).
+Tackle does not attempt to guard against the content of the project's repository content, but won't execute it without consent. See [Security](security.mdx) for more information.
