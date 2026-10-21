@@ -11,10 +11,11 @@ mod paths;
 mod shutdown;
 
 pub mod auth;
+pub mod definitions;
 
 #[cfg(test)]
 mod tests;
 
-pub use args::{AuthCommands, Cli, Commands, DocgenCommand};
+pub use args::{AuthCommands, Cli, Commands, DefinitionsCommands, DocgenCommand};
 pub use paths::{config_dir, db_path, project_config_dir_at};
 pub use shutdown::wait_for_shutdown;

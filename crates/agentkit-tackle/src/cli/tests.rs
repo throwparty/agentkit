@@ -63,6 +63,62 @@ fn honours_overrides() {
 }
 
 #[test]
+fn definitions_and_def_are_equivalent() {
+    let long = Cli::parse_from(["tackle", "definitions", "list"]);
+    let short = Cli::parse_from(["tackle", "def", "list"]);
+    assert!(matches!(
+        long.command,
+        Commands::Definitions {
+            command: DefinitionsCommands::List,
+            ..
+        }
+    ));
+    assert!(matches!(
+        short.command,
+        Commands::Definitions {
+            command: DefinitionsCommands::List,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn init_writes_a_parseable_manifest() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join(".agentkit").join("tackle");
+    definitions::init(&project).unwrap();
+    crate::definitions::manifest::Manifest::load(&project).unwrap();
+}
+
+#[test]
+fn add_and_remove_update_selections() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join(".agentkit").join("tackle");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(
+        project.join("definitions.toml"),
+        r#"
+[[source]]
+name = "local"
+kind = "path"
+
+[source.path]
+dir = "shared"
+"#,
+    )
+    .unwrap();
+    definitions::add(&project, "local", "prompts", "triage").unwrap();
+    let manifest = crate::definitions::manifest::Manifest::load(&project).unwrap();
+    assert_eq!(
+        manifest.definitions["local"].prompts,
+        vec!["triage".to_string()]
+    );
+    definitions::remove(&project, "local", "prompts", "triage").unwrap();
+    let manifest = crate::definitions::manifest::Manifest::load(&project).unwrap();
+    assert!(manifest.definitions.is_empty());
+}
+
+#[test]
 fn command_builds() {
     Cli::command().build();
 }

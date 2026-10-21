@@ -17,6 +17,10 @@ fn main() -> ExitCode {
             credential_helper,
             command,
         } => handle_auth(config_dir.as_ref(), credential_helper.as_deref(), command),
+        cli::Commands::Definitions {
+            project_dir,
+            command,
+        } => handle_definitions(project_dir, command),
         _ => {
             let _telemetry = telemetry::init();
 
@@ -49,6 +53,7 @@ async fn run(args: cli::Cli) -> ExitCode {
         ),
         cli::Commands::Docgen { .. } => unreachable!("handled before the runtime"),
         cli::Commands::Auth { .. } => unreachable!("handled before the runtime"),
+        cli::Commands::Definitions { .. } => unreachable!("handled before the runtime"),
     };
 
     tracing::info!("tackle starting");
@@ -168,6 +173,31 @@ fn handle_auth(
         },
     };
     match cli::auth::handle_auth(command, &loaded.config, credential_helper) {
+        Ok(message) => {
+            println!("{message}");
+            ExitCode::SUCCESS
+        }
+        Err(err) => fail(err),
+    }
+}
+
+fn handle_definitions(
+    project_dir: &std::path::Path,
+    command: &cli::DefinitionsCommands,
+) -> ExitCode {
+    let result = match command {
+        cli::DefinitionsCommands::Init => cli::definitions::init(project_dir),
+        cli::DefinitionsCommands::Add { source, kind, name } => {
+            cli::definitions::add(project_dir, source, kind, name)
+        }
+        cli::DefinitionsCommands::Remove { source, kind, name } => {
+            cli::definitions::remove(project_dir, source, kind, name)
+        }
+        cli::DefinitionsCommands::Get => cli::definitions::get(project_dir),
+        cli::DefinitionsCommands::Update => cli::definitions::update(project_dir),
+        cli::DefinitionsCommands::List => cli::definitions::list(project_dir),
+    };
+    match result {
         Ok(message) => {
             println!("{message}");
             ExitCode::SUCCESS

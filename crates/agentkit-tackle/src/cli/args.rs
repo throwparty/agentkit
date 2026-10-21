@@ -66,6 +66,18 @@ pub enum Commands {
         #[command(subcommand)]
         command: AuthCommands,
     },
+    /// Manage definition sources, selections, and vendoring
+    ///
+    /// `def` is an alias.
+    #[command(alias = "def")]
+    Definitions {
+        /// Repository root (defaults to the current directory).
+        #[arg(long, default_value = ".")]
+        project_dir: PathBuf,
+
+        #[command(subcommand)]
+        command: DefinitionsCommands,
+    },
     /// Generate reference documentation
     ///
     /// Prints docs to stdout.
@@ -86,6 +98,30 @@ pub enum AuthCommands {
     Token { identity: String },
     /// Remove a stored credential
     Logout { identity: String },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DefinitionsCommands {
+    /// Scaffold a definitions manifest
+    Init,
+    /// Select a definition from a declared source
+    Add {
+        source: String,
+        kind: String,
+        name: String,
+    },
+    /// Remove a selected definition
+    Remove {
+        source: String,
+        kind: String,
+        name: String,
+    },
+    /// Vendor the locked revisions
+    Get,
+    /// Re-resolve refs, re-vendor, and rewrite the lock
+    Update,
+    /// Report declared and vendored definitions
+    List,
 }
 
 #[derive(Debug, Subcommand)]
