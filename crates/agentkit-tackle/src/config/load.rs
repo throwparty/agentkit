@@ -17,8 +17,8 @@ pub fn load_layered(
     let project_layer = project_path.filter(|p| p.is_file());
     let project = match &project_layer {
         Some(path) => {
-            let project = load_file(path)?.unwrap_or_default();
-            reject_project_security_fields(&project, path)?;
+            let mut project = load_file(path)?.unwrap_or_default();
+            sanitise_project_layer(&mut project, path)?;
             if let Some(gate) = gate {
                 let project_dir = path.parent().unwrap_or_else(|| Path::new("."));
                 gate_project_entries(gate, project, project_dir)
@@ -57,10 +57,8 @@ pub fn load_layered_deferred(
     let project_layer = project_path.filter(|p| p.is_file());
     let project = match &project_layer {
         Some(path) => {
-            let project = load_file(path)?.unwrap_or_default();
-            // Endpoint/credential rejection is not trust-gated: it holds
-            // regardless of consent, so it fails at load.
-            reject_project_security_fields(&project, path)?;
+            let mut project = load_file(path)?.unwrap_or_default();
+            sanitise_project_layer(&mut project, path)?;
             Some(project)
         }
         None => None,
@@ -186,10 +184,11 @@ pub fn resolve_script_sources(config: &Loaded) -> BTreeMap<String, String> {
 /// hash covers the serialised entry, so any field change re-prompts.
 fn gate_project_entries(gate: &mut trust::Gate<'_>, project: Config, project_dir: &Path) -> Config {
     let entries = project_trust_entries(&project, project_dir);
-    if entries.is_empty() {
-        return project;
-    }
-    let approved = gate.gate(&entries);
+    let approved = if entries.is_empty() {
+        BTreeSet::new()
+    } else {
+        gate.gate(&entries)
+    };
     retain_project_entries(project, project_dir, &approved)
 }
 
@@ -212,6 +211,18 @@ fn load_file(path: &Path) -> Result<Option<Config>, ConfigError> {
         })
 }
 
+/// Denies unbounded host execution at project scope. Endpoints and the
+/// credential helper are hard denials: they fail at load. MCP servers and
+/// client tools are ignored outright, since a cloned repository must not
+/// hand the model its host's shell, filesystem, or servers. The same
+/// entries are honoured from user configuration outside the repository.
+fn sanitise_project_layer(project: &mut Config, path: &Path) -> Result<(), ConfigError> {
+    reject_project_security_fields(project, path)?;
+    project.mcp_servers.clear();
+    project.client_tools = None;
+    Ok(())
+}
+
 fn reject_project_security_fields(project: &Config, path: &Path) -> Result<(), ConfigError> {
     if !project.endpoints.is_empty() {
         return Err(ConfigError::ProjectForbidden {
@@ -223,12 +234,6 @@ fn reject_project_security_fields(project: &Config, path: &Path) -> Result<(), C
         return Err(ConfigError::ProjectForbidden {
             path: path.to_path_buf(),
             key: "credential_helper",
-        });
-    }
-    if project.client_tools.is_some() {
-        return Err(ConfigError::ProjectForbidden {
-            path: path.to_path_buf(),
-            key: "client_tools",
         });
     }
     Ok(())

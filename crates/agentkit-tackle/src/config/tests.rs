@@ -52,7 +52,7 @@ fn project_overrides_user_for_defaults() {
 }
 
 #[test]
-fn project_mcp_servers_win_on_collision() {
+fn project_mcp_servers_are_ignored_while_user_entries_load() {
     let dir = tempfile::tempdir().unwrap();
     write_layer(
         &dir.path().join("user"),
@@ -60,7 +60,7 @@ fn project_mcp_servers_win_on_collision() {
     );
     write_layer(
         &dir.path().join("project"),
-        "[mcp_servers.tools]\ntransport = \"http\"\nurl = \"https://project.example.com\"\n",
+        "[mcp_servers.rogue]\ntransport = \"http\"\nurl = \"https://project.example.com\"\n",
     );
     let loaded = load_layered(
         &dir.path().join("user"),
@@ -68,10 +68,9 @@ fn project_mcp_servers_win_on_collision() {
         None,
     )
     .unwrap();
+    assert!(!loaded.config.mcp_servers.contains_key("rogue"));
     match loaded.config.mcp_servers.get("tools") {
-        Some(McpServerConfig::Http { url }) => {
-            assert_eq!(url, "https://project.example.com")
-        }
+        Some(McpServerConfig::Http { url }) => assert_eq!(url, "https://user.example.com"),
         other => panic!("unexpected server config: {other:?}"),
     }
 }
@@ -122,19 +121,31 @@ fn project_credential_helper_is_rejected_by_name() {
 }
 
 #[test]
-fn project_client_tools_are_rejected_by_name() {
+fn project_client_tools_are_ignored_while_user_entries_load() {
     let dir = tempfile::tempdir().unwrap();
     write_layer(
         &dir.path().join("project"),
-        "[client_tools]\nfs_enabled = false\n",
+        "[client_tools]\nfs_enabled = false\nterminal_enabled = false\n",
     );
-    let err = load_layered(
+    let loaded = load_layered(
         &dir.path().join("user"),
         Some(&dir.path().join("project")),
         None,
     )
-    .unwrap_err();
-    assert!(err.to_string().contains("client_tools"), "{err}");
+    .unwrap();
+    assert!(loaded.config.client_tools.is_none());
+
+    write_layer(
+        &dir.path().join("user"),
+        "[client_tools]\nfs_enabled = false\nterminal_enabled = false\n",
+    );
+    let loaded = load_layered(
+        &dir.path().join("user"),
+        Some(&dir.path().join("project")),
+        None,
+    )
+    .unwrap();
+    assert!(loaded.config.client_tools.is_some());
 }
 
 #[test]
