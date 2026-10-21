@@ -62,16 +62,27 @@ impl SourceCheckout {
     /// Resolves a source declaration. Git sources are fetched at the
     /// declared ref; path sources resolve relative to the repository.
     pub fn resolve(project_dir: &Path, declaration: &SourceDecl) -> Result<Self, VendorError> {
+        Self::resolve_at(project_dir, declaration, None)
+    }
+
+    /// Resolves a git source at an explicit immutable revision, ignoring
+    /// the declared ref. Path sources are unaffected.
+    pub fn resolve_at(
+        project_dir: &Path,
+        declaration: &SourceDecl,
+        at: Option<&str>,
+    ) -> Result<Self, VendorError> {
         let repo_root = project_dir
             .parent()
             .and_then(Path::parent)
             .unwrap_or(project_dir);
         if let Some(git) = &declaration.git {
-            let checkout = source::resolve_git(&declaration.name, &git.url, git.git_ref.as_deref())
-                .map_err(|err| VendorError::Resolve {
-                    origin: declaration.name.clone(),
-                    message: err.to_string(),
-                })?;
+            let checkout =
+                source::resolve_git(&declaration.name, &git.url, at.or(git.git_ref.as_deref()))
+                    .map_err(|err| VendorError::Resolve {
+                        origin: declaration.name.clone(),
+                        message: err.to_string(),
+                    })?;
             let relative = git.path.as_deref().unwrap_or("");
             let root = checkout.path().join(relative);
             return Ok(Self {
@@ -113,14 +124,23 @@ pub fn entry_point(kind: &str) -> Option<&'static str> {
     }
 }
 
-/// Vendors one selected definition. The destination is replaced only
-/// after its replacement has been fully staged.
-pub fn vendor_definition(
-    project_dir: &Path,
+/// A definition staged outside the tree, ready to be swapped into place.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StagedDefinition {
+    pub kind: String,
+    pub name: String,
+    /// The staged package directory.
+    pub path: PathBuf,
+}
+
+/// Stages one selected definition under `staging_root` without touching
+/// the repository tree.
+pub fn stage_definition(
+    staging_root: &Path,
     checkout: &SourceCheckout,
     kind: &str,
     name: &str,
-) -> Result<VendoredDefinition, VendorError> {
+) -> Result<StagedDefinition, VendorError> {
     let entry = entry_point(kind).ok_or_else(|| VendorError::UnknownKind {
         origin: checkout.name.clone(),
         kind: kind.to_owned(),
@@ -145,19 +165,18 @@ pub fn vendor_definition(
         });
     }
 
-    let destination = project_dir.join(kind).join(name);
-    let temporary = project_dir.join(kind).join(format!(".{name}.staging"));
-    if temporary.exists() {
-        remove_dir_all(&temporary)?;
+    let staged = staging_root.join(kind).join(name);
+    if staged.exists() {
+        remove_dir_all(&staged)?;
     }
-    std::fs::create_dir_all(&temporary).map_err(|source| VendorError::Io {
-        path: temporary.clone(),
+    std::fs::create_dir_all(&staged).map_err(|source| VendorError::Io {
+        path: staged.clone(),
         source,
     })?;
 
-    let staged = (|| {
+    let result = (|| {
         if is_flat {
-            std::fs::copy(&flat, temporary.join(entry)).map_err(|source| VendorError::Io {
+            std::fs::copy(&flat, staged.join(entry)).map_err(|source| VendorError::Io {
                 path: flat.clone(),
                 source,
             })?;
@@ -171,23 +190,51 @@ pub fn vendor_definition(
                     entry,
                 });
             }
-            copy_tree(checkout, kind, name, &package, &temporary)?;
+            copy_tree(checkout, kind, name, &package, &staged)?;
         }
         Ok(())
     })();
 
-    if let Err(error) = staged {
-        let _ = remove_dir_all(&temporary);
+    if let Err(error) = result {
+        let _ = remove_dir_all(&staged);
         return Err(error);
     }
+
+    Ok(StagedDefinition {
+        kind: kind.to_owned(),
+        name: name.to_owned(),
+        path: staged,
+    })
+}
+
+/// Vendors one selected definition. The destination is replaced only
+/// after its replacement has been fully staged.
+pub fn vendor_definition(
+    project_dir: &Path,
+    checkout: &SourceCheckout,
+    kind: &str,
+    name: &str,
+) -> Result<VendoredDefinition, VendorError> {
+    let staging_root = project_dir.join(".vendor-staging");
+    std::fs::create_dir_all(&staging_root).map_err(|source| VendorError::Io {
+        path: staging_root.clone(),
+        source,
+    })?;
+    let staged = stage_definition(&staging_root, checkout, kind, name)?;
+    let destination = project_dir.join(kind).join(name);
+    std::fs::create_dir_all(project_dir.join(kind)).map_err(|source| VendorError::Io {
+        path: project_dir.join(kind),
+        source,
+    })?;
 
     if destination.exists() {
         remove_dir_all(&destination)?;
     }
-    std::fs::rename(&temporary, &destination).map_err(|source| VendorError::Io {
+    std::fs::rename(&staged.path, &destination).map_err(|source| VendorError::Io {
         path: destination.clone(),
         source,
     })?;
+    let _ = std::fs::remove_dir_all(&staging_root);
 
     Ok(VendoredDefinition {
         kind: kind.to_owned(),

@@ -13,6 +13,7 @@ pub mod context;
 pub mod loaders;
 pub mod lock;
 pub mod manifest;
+pub mod pipeline;
 pub mod source;
 pub mod vendor;
 
