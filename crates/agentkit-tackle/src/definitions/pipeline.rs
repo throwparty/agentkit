@@ -55,8 +55,10 @@ struct Scratch {
 }
 
 impl Scratch {
-    fn new() -> Result<Self, PipelineError> {
-        let path = std::env::temp_dir().join(format!("tackle-vendor-{}", uuid::Uuid::new_v4()));
+    /// Staging lives under the project directory so the final moves are
+    /// same-filesystem renames. The leading dot keeps it out of discovery.
+    fn new(project_dir: &Path) -> Result<Self, PipelineError> {
+        let path = project_dir.join(format!(".vendor-staging-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&path).map_err(|source| PipelineError::Io {
             path: path.clone(),
             source,
@@ -153,9 +155,15 @@ fn verify_source(declaration: &SourceDecl, locked: &LockedSource) -> Result<(), 
 
 pub fn get(project_dir: &Path) -> Result<Vec<Vendored>, PipelineError> {
     let manifest = load_manifest(project_dir)?;
-    let lock = Lock::load(project_dir)?;
+    let lock = match Lock::load(project_dir) {
+        Ok(lock) => lock,
+        // First run: there is nothing to reproduce yet, so resolve refs
+        // and write the lock exactly as `update` does.
+        Err(lock::LockError::Missing { .. }) => return update(project_dir),
+        Err(err) => return Err(err.into()),
+    };
     let checkouts = checkouts(project_dir, &manifest, Some(&lock))?;
-    let scratch = Scratch::new()?;
+    let scratch = Scratch::new(project_dir)?;
 
     let mut staged = Vec::new();
     for selection in selections(&manifest) {
@@ -196,7 +204,7 @@ pub fn get(project_dir: &Path) -> Result<Vec<Vendored>, PipelineError> {
 pub fn update(project_dir: &Path) -> Result<Vec<Vendored>, PipelineError> {
     let manifest = load_manifest(project_dir)?;
     let checkouts = checkouts(project_dir, &manifest, None)?;
-    let scratch = Scratch::new()?;
+    let scratch = Scratch::new(project_dir)?;
 
     let mut staged = Vec::new();
     for selection in selections(&manifest) {
@@ -283,7 +291,7 @@ fn apply(
         })?;
     }
 
-    let scratch = Scratch::new()?;
+    let scratch = Scratch::new(project_dir)?;
     let mut applied: Vec<(PathBuf, Option<PathBuf>)> = Vec::new();
     for (definition, _, _) in staged {
         let destination = project_dir.join(&definition.kind).join(&definition.name);
@@ -520,13 +528,18 @@ personas = ["reviewer"]
     }
 
     #[test]
-    fn get_without_a_lock_names_update() {
+    fn get_without_a_lock_resolves_and_writes_it() {
         let (dir, project) = project();
         let source = dir.path().join("source");
         repository(&source);
         commit(&source, "body", "main");
         write_manifest(&project, source.to_str().unwrap(), Some("main"));
-        let err = get(&project).unwrap_err();
-        assert!(err.to_string().contains("definitions get"), "{err}");
+        assert!(Lock::load(&project).is_err());
+        get(&project).unwrap();
+        assert!(Lock::load(&project).is_ok());
+        assert_eq!(
+            std::fs::read_to_string(project.join("personas/reviewer/PERSONA.md")).unwrap(),
+            "---\ndescription: Review\n---\nbody\n"
+        );
     }
 }
