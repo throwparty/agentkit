@@ -82,7 +82,7 @@ async fn run(args: cli::Cli) -> ExitCode {
         "configuration loaded"
     );
 
-    let mut definitions = match definitions::discover(&user_config_dir, Some(&project_config_dir)) {
+    let mut definitions = match definitions::discover(Some(&project_config_dir)) {
         Ok(definitions) => definitions,
         Err(err) => return fail(err),
     };

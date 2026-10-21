@@ -89,30 +89,26 @@ impl Definitions {
     }
 }
 
-/// Discovers definitions from the project layer (overriding) and the user
-/// layer, then registers built-in defaults beneath both.
-pub fn discover(
-    user_dir: &Path,
-    project_dir: Option<&Path>,
-) -> Result<Definitions, DefinitionError> {
+/// Discovers definitions from the repository tree, then registers
+/// built-in defaults beneath them. Definitions are repository-only: a
+/// definition in the user configuration directory would carry resources
+/// the model could not reach.
+pub fn discover(project_dir: Option<&Path>) -> Result<Definitions, DefinitionError> {
     let mut defs = Definitions::default();
     discover_kind(
         &mut defs.personas,
-        user_dir,
         project_dir,
         KIND_DIRS.personas,
         ENTRY_POINTS.personas,
     )?;
     discover_kind(
         &mut defs.actors,
-        user_dir,
         project_dir,
         KIND_DIRS.actors,
         ENTRY_POINTS.actors,
     )?;
     discover_kind(
         &mut defs.prompts,
-        user_dir,
         project_dir,
         KIND_DIRS.prompts,
         ENTRY_POINTS.prompts,
@@ -122,21 +118,18 @@ pub fn discover(
 
 fn discover_kind<T: DeserializeOwned>(
     out: &mut BTreeMap<String, Definition<T>>,
-    user_dir: &Path,
     project_dir: Option<&Path>,
     kind_dir: &str,
     entry_name: &'static str,
 ) -> Result<(), DefinitionError> {
-    // User layer first: project entries overwrite by name.
-    scan_dir(out, &user_dir.join(kind_dir), entry_name, None)?;
-    if let Some(project_dir) = project_dir {
-        let root = project_dir
-            .parent()
-            .and_then(Path::parent)
-            .unwrap_or(project_dir);
-        scan_dir(out, &project_dir.join(kind_dir), entry_name, Some(root))?;
-    }
-    Ok(())
+    let Some(project_dir) = project_dir else {
+        return Ok(());
+    };
+    let root = project_dir
+        .parent()
+        .and_then(Path::parent)
+        .unwrap_or(project_dir);
+    scan_dir(out, &project_dir.join(kind_dir), entry_name, Some(root))
 }
 
 /// Scans one kind directory for both definition shapes: flat
@@ -340,7 +333,7 @@ mod tests {
     fn yaml_frontmatter_parses() {
         let dir = tempfile::tempdir().unwrap();
         write_def(dir.path(), "personas", "test", YAML_PERSONA);
-        let defs = discover(dir.path(), None).unwrap();
+        let defs = discover(Some(dir.path())).unwrap();
         let persona = defs.personas.get("test").unwrap();
         assert_eq!(
             persona.frontmatter.description.as_deref(),
@@ -353,7 +346,7 @@ mod tests {
     fn toml_frontmatter_parses_identically() {
         let dir = tempfile::tempdir().unwrap();
         write_def(dir.path(), "personas", "test", TOML_PERSONA);
-        let defs = discover(dir.path(), None).unwrap();
+        let defs = discover(Some(dir.path())).unwrap();
         assert_eq!(
             defs.personas["test"].frontmatter.description.as_deref(),
             Some("Test persona")
@@ -361,30 +354,55 @@ mod tests {
     }
 
     #[test]
-    fn project_layer_overrides_user_by_name() {
+    fn user_layer_definitions_are_ignored() {
         let dir = tempfile::tempdir().unwrap();
         let user = dir.path().join("user");
         let project = dir.path().join("project");
-        write_def(&user, "personas", "shared", YAML_PERSONA);
+        write_def(&user, "personas", "only-user", YAML_PERSONA);
+        write_def(&project, "personas", "shared", YAML_PERSONA);
+        let defs = discover(Some(&project)).unwrap();
+        assert!(defs.personas.contains_key("shared"));
+        assert!(!defs.personas.contains_key("only-user"));
+    }
+
+    #[test]
+    fn flat_definition_still_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        write_def(dir.path(), "personas", "flat", YAML_PERSONA);
+        let defs = discover(Some(dir.path())).unwrap();
+        let persona = defs.personas.get("flat").unwrap();
+        assert_eq!(persona.body.trim(), "Body line.");
+        assert!(persona.directory.is_none());
+        assert!(persona.resources.is_empty());
+    }
+
+    #[test]
+    fn flat_and_directory_collision_names_both_paths() {
+        let dir = tempfile::tempdir().unwrap();
         write_def(
-            &project,
-            "personas",
-            "shared",
-            "+++\ndescription = \"project\"\n+++\n",
+            dir.path(),
+            "prompts",
+            "deploy",
+            "---\ndescription: flat\n---\nbody",
         );
-        let defs = discover(&user, Some(&project)).unwrap();
-        assert_eq!(
-            defs.personas["shared"].frontmatter.description.as_deref(),
-            Some("project")
-        );
-        assert!(defs.personas["shared"].path.starts_with(&project));
+        let package = dir.path().join("prompts").join("deploy");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(
+            package.join("PROMPT.md"),
+            "---\ndescription: dir\n---\nbody",
+        )
+        .unwrap();
+        let err = discover(Some(dir.path())).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("deploy.md"), "{message}");
+        assert!(message.contains("prompts/deploy"), "{message}");
     }
 
     #[test]
     fn missing_frontmatter_names_the_file() {
         let dir = tempfile::tempdir().unwrap();
         write_def(dir.path(), "personas", "bare", "just a body\n");
-        let err = discover(dir.path(), None).unwrap_err();
+        let err = discover(Some(dir.path())).unwrap_err();
         assert!(err.to_string().contains("bare.md"), "{err}");
         assert!(err.to_string().contains("frontmatter"), "{err}");
     }
@@ -398,7 +416,7 @@ mod tests {
             "orphan",
             "---\ndescription: no persona\n---\n",
         );
-        let err = discover(dir.path(), None).unwrap_err();
+        let err = discover(Some(dir.path())).unwrap_err();
         assert!(err.to_string().contains("persona"), "{err}");
     }
 
@@ -411,7 +429,7 @@ mod tests {
             "cmd",
             "---\ndescription: A command\n---\nDo $1.\n",
         );
-        let defs = discover(dir.path(), None).unwrap();
+        let defs = discover(Some(dir.path())).unwrap();
         let prompt = defs.prompts.get("cmd").unwrap();
         assert!(prompt.frontmatter.user_invokable);
         assert!(!prompt.frontmatter.model_invokable);
@@ -426,21 +444,21 @@ mod tests {
             "x".repeat(DEFINITION_MAX_SIZE + 1)
         );
         write_def(dir.path(), "personas", "huge", &huge);
-        let err = discover(dir.path(), None).unwrap_err();
+        let err = discover(Some(dir.path())).unwrap_err();
         assert!(err.to_string().contains("size cap"), "{err}");
     }
 
     #[test]
     fn empty_config_yields_builtin_defaults() {
         let dir = tempfile::tempdir().unwrap();
-        let defs = discover(dir.path(), None).unwrap();
+        let defs = discover(Some(dir.path())).unwrap();
         assert!(defs.personas.contains_key("default"));
         assert!(defs.actors.contains_key("default"));
         assert_eq!(defs.actors["default"].frontmatter.persona, "default");
     }
 
     #[test]
-    fn discovered_definitions_replace_builtins() {
+    fn discovered_definitions_replace_builtins_and_are_surfaced() {
         let dir = tempfile::tempdir().unwrap();
         write_def(
             dir.path(),
@@ -448,8 +466,9 @@ mod tests {
             "default",
             "---\npersona: default\n---\nCustom.\n",
         );
-        let defs = discover(dir.path(), None).unwrap();
+        let defs = discover(Some(dir.path())).unwrap();
         assert_eq!(defs.actors["default"].body.trim(), "Custom.");
+        assert!(defs.builtin_overrides.contains("actor:default"));
     }
 }
 
@@ -506,7 +525,7 @@ mod package_tests {
             &[("script.rhai", "fn main() {}")],
         );
 
-        let defs = discover(dir.path(), None).unwrap();
+        let defs = discover(Some(dir.path())).unwrap();
         let persona = defs.personas.get("styled").unwrap();
         assert_eq!(persona.body.trim(), "Persona body.");
         assert_eq!(persona.resources, vec!["guide.md"]);
@@ -524,7 +543,7 @@ mod package_tests {
         let package = dir.path().join("personas").join("missing");
         std::fs::create_dir_all(&package).unwrap();
         std::fs::write(package.join("resource.md"), "resource").unwrap();
-        let err = discover(dir.path(), None).unwrap_err();
+        let err = discover(Some(dir.path())).unwrap_err();
         let message = err.to_string();
         assert!(message.contains("missing"), "{message}");
         assert!(message.contains("PERSONA.md"), "{message}");
@@ -536,7 +555,7 @@ mod package_tests {
         let package = dir.path().join("personas").join("wrong");
         std::fs::create_dir_all(&package).unwrap();
         std::fs::write(package.join("PROMPT.md"), "---\n---\nbody").unwrap();
-        let err = discover(dir.path(), None).unwrap_err();
+        let err = discover(Some(dir.path())).unwrap_err();
         let message = err.to_string();
         assert!(message.contains("wrong"), "{message}");
         assert!(message.contains("PERSONA.md"), "{message}");
@@ -553,14 +572,13 @@ mod package_tests {
             "---\ndescription: big\n---\nbody",
             &[("resource.txt", &"x".repeat(DEFINITION_MAX_SIZE + 1))],
         );
-        let err = discover(dir.path(), None).unwrap_err();
+        let err = discover(Some(dir.path())).unwrap_err();
         assert!(err.to_string().contains("size cap"), "{err}");
     }
 
     #[test]
     fn directory_path_is_repository_relative() {
         let dir = tempfile::tempdir().unwrap();
-        let user = dir.path().join("user");
         let project = dir.path().join("project");
         write_package(
             &project,
@@ -570,7 +588,7 @@ mod package_tests {
             "---\ndescription: Styled\n---\nbody",
             &[],
         );
-        let defs = discover(&user, Some(&project)).unwrap();
+        let defs = discover(Some(&project)).unwrap();
         let directory = defs.personas["styled"].directory.as_deref().unwrap();
         assert!(
             directory.ends_with("project/personas/styled"),

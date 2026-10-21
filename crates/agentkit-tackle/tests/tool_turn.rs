@@ -320,8 +320,9 @@ Hello, {{ who }}!
 
 fn write_config(dir: &std::path::Path, endpoint_uri: &str) {
     let cfg = dir.join("cfg");
+    let project = dir.join(".agentkit").join("tackle");
     std::fs::create_dir_all(cfg.join("scripts")).unwrap();
-    std::fs::create_dir_all(cfg.join("prompts")).unwrap();
+    std::fs::create_dir_all(project.join("prompts")).unwrap();
     std::fs::write(
         cfg.join("config.toml"),
         format!(
@@ -349,19 +350,23 @@ file = "veto.rhai"
     )
     .unwrap();
     std::fs::write(cfg.join("scripts").join("veto.rhai"), VETO_SCRIPT).unwrap();
-    std::fs::write(cfg.join("prompts").join("greet.md"), GREET_PROMPT).unwrap();
+    std::fs::write(project.join("prompts").join("greet.md"), GREET_PROMPT).unwrap();
+    let trust = format!(
+        "[\".\"]\n\"prompts/greet.md\" = \"{}\"\n",
+        agentkit_tackle::config::trust::hash(GREET_PROMPT)
+    );
+    std::fs::write(cfg.join("trust.toml"), trust).unwrap();
 }
 
 fn spawn_agent(dir: &std::path::Path) -> AcpAgent {
-    AcpAgent::from_args([
+    let command = format!(
+        "cd {} && exec {} stdio --config-dir {} --db-path {}",
+        dir.display(),
         env!("CARGO_BIN_EXE_agentkit-tackle"),
-        "stdio",
-        "--config-dir",
-        dir.join("cfg").to_str().unwrap(),
-        "--db-path",
-        dir.join("sessions.db").to_str().unwrap(),
-    ])
-    .expect("agent arguments")
+        dir.join("cfg").display(),
+        dir.join("sessions.db").display()
+    );
+    AcpAgent::from_args(["/bin/sh", "-c", &command]).expect("agent arguments")
 }
 
 // ---------------------------------------------------------------------------
@@ -962,6 +967,7 @@ fn spawn_http_agent(dir: &std::path::Path) -> HttpAgentChild {
     drop(listener);
 
     let child = std::process::Command::new(env!("CARGO_BIN_EXE_agentkit-tackle"))
+        .current_dir(dir)
         .args([
             "http",
             "--bind",

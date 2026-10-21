@@ -28,7 +28,7 @@ Extend the loader to scan .agentkit/tackle/<kind>/ for directory definitions at 
 | Depends On | T-001 |
 | References | definition-packages,entry-point-convention |
 
-### T-003: Repository-only definitions and flat compatibility
+### T-003: [x] Repository-only definitions and flat compatibility
 
 Remove the user configuration layer for personas, actors, and prompts so definitions load only from the repository tree, and keep flat single-file definitions loading unchanged for definitions without resources. A flat and a directory definition of the same name in one kind directory is a load error naming both paths. Built-in defaults remain flat embedded assets at the lowest precedence.
 
