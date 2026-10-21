@@ -93,7 +93,7 @@ Parse .agentkit/tackle/definitions.toml into sources and selections. Each [[sour
 | Depends On |  |
 | References | definitions-manifest,source-specifications |
 
-### T-008: Manifest validation invariants
+### T-008: [x] Manifest validation invariants
 
 Enforce the manifest invariants at parse time: unique local definition names across the resolved set, source and definition paths confined to their roots, and no override of a delegated or local name. Violations are parse errors naming the offending source and definition.
 
