@@ -7,7 +7,7 @@
 //! naming the offending source or definition.
 
 use serde::Deserialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 /// The manifest filename under the tackle project directory.
@@ -154,6 +154,113 @@ impl Manifest {
     pub fn source(&self, name: &str) -> Option<&SourceDecl> {
         self.source.iter().find(|source| source.name == name)
     }
+
+    /// Enforces the manifest invariants: unique source and local
+    /// definition names, selections that name a declared source, and
+    /// source and definition paths confined to their roots.
+    pub fn validate(&self, project_dir: &Path) -> Result<(), ManifestError> {
+        let path = manifest_path(project_dir);
+        let repo_root = project_dir
+            .parent()
+            .and_then(Path::parent)
+            .unwrap_or(project_dir);
+
+        let mut sources = BTreeSet::new();
+        for source in &self.source {
+            if !sources.insert(source.name.as_str()) {
+                return Err(ManifestError::invalid(
+                    &path,
+                    format!("source `{}` is declared twice", source.name),
+                ));
+            }
+        }
+
+        for (source_name, selections) in &self.definitions {
+            if self.source(source_name).is_none() {
+                return Err(ManifestError::invalid(
+                    &path,
+                    format!("selections name unknown source `{source_name}`"),
+                ));
+            }
+            for (kind, name) in selections.entries() {
+                if !valid_definition_name(name) {
+                    return Err(ManifestError::invalid(
+                        &path,
+                        format!("source `{source_name}` selects an invalid {kind} name `{name}`"),
+                    ));
+                }
+            }
+        }
+
+        for source in &self.source {
+            if let Some(git) = &source.git {
+                if let Some(subdirectory) = git.path.as_deref() {
+                    if !confined_relative(subdirectory) {
+                        return Err(ManifestError::invalid(
+                            &path,
+                            format!(
+                                "source `{}` path `{subdirectory}` escapes the source root",
+                                source.name
+                            ),
+                        ));
+                    }
+                }
+            }
+            if let Some(spec) = &source.path {
+                if !confined_to(repo_root, &spec.dir) {
+                    return Err(ManifestError::invalid(
+                        &path,
+                        format!(
+                            "source `{}` directory `{}` escapes the repository",
+                            source.name, spec.dir
+                        ),
+                    ));
+                }
+            }
+        }
+
+        // Unique names across the resolved local set: one name, one
+        // definition. No override is permitted.
+        let mut names: BTreeMap<(&str, &str), &str> = BTreeMap::new();
+        for (source_name, selections) in &self.definitions {
+            for (kind, name) in selections.entries() {
+                if let Some(previous) = names.insert((kind, name), source_name) {
+                    return Err(ManifestError::invalid(
+                        &path,
+                        format!(
+                            "definition `{kind}/{name}` is selected by both `{previous}` and `{source_name}`"
+                        ),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// A definition name is one ordinary path component: it cannot escape the
+/// kind directory or name a file in it.
+fn valid_definition_name(name: &str) -> bool {
+    !name.is_empty() && name != "." && name != ".." && !name.contains('/') && !name.contains('\\')
+}
+
+/// A source-relative path must stay under the source root.
+fn confined_relative(path: &str) -> bool {
+    let path = Path::new(path);
+    !path.is_absolute()
+        && path
+            .components()
+            .all(|component| matches!(component, std::path::Component::Normal(_)))
+}
+
+/// A local source directory must stay inside the repository.
+fn confined_to(root: &Path, dir: &str) -> bool {
+    let dir = Path::new(dir);
+    if dir.is_absolute() {
+        return false;
+    }
+    !dir.components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
 }
 
 impl SourceDecl {
@@ -325,6 +432,120 @@ url = "https://example.com/team.git"
         let message = err.to_string();
         assert!(message.contains("team"), "{message}");
         assert!(message.contains("kind"), "{message}");
+    }
+
+    fn validate(source: &str) -> Result<(), ManifestError> {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join(".agentkit").join("tackle");
+        std::fs::create_dir_all(&project).unwrap();
+        let manifest = Manifest::parse(source, &manifest_path(&project))?;
+        manifest.validate(&project)
+    }
+
+    #[test]
+    fn a_duplicate_name_across_sources_errors() {
+        let err = validate(
+            r#"
+[[source]]
+name = "a"
+kind = "git"
+
+[source.git]
+url = "https://example.com/a.git"
+
+[[source]]
+name = "b"
+kind = "git"
+
+[source.git]
+url = "https://example.com/b.git"
+
+[definitions.a]
+personas = ["shared"]
+
+[definitions.b]
+personas = ["shared"]
+"#,
+        )
+        .unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("shared"), "{message}");
+        assert!(message.contains('a'), "{message}");
+        assert!(message.contains('b'), "{message}");
+    }
+
+    #[test]
+    fn a_source_path_escaping_the_source_root_errors() {
+        let err = validate(
+            r#"
+[[source]]
+name = "team"
+kind = "git"
+
+[source.git]
+url = "https://example.com/team.git"
+path = "../outside"
+"#,
+        )
+        .unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("team"), "{message}");
+        assert!(message.contains("escapes"), "{message}");
+    }
+
+    #[test]
+    fn a_definition_path_escaping_the_repository_errors() {
+        let err = validate(
+            r#"
+[[source]]
+name = "local"
+kind = "path"
+
+[source.path]
+dir = "../outside"
+"#,
+        )
+        .unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("local"), "{message}");
+        assert!(message.contains("escapes the repository"), "{message}");
+    }
+
+    #[test]
+    fn an_invalid_definition_name_errors() {
+        let err = validate(
+            r#"
+[[source]]
+name = "local"
+kind = "path"
+
+[source.path]
+dir = "shared"
+
+[definitions.local]
+personas = ["../escape"]
+"#,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("../escape"), "{err}");
+    }
+
+    #[test]
+    fn a_valid_manifest_validates() {
+        validate(
+            r#"
+[[source]]
+name = "local"
+kind = "path"
+
+[source.path]
+dir = "shared"
+
+[definitions.local]
+personas = ["reviewer"]
+"#,
+        )
+        .unwrap();
     }
 
     #[test]
