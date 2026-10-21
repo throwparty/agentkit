@@ -23,6 +23,8 @@ fn prompt_def(name: &str, meta: PromptMeta, body: &str) -> (String, Definition<P
         Definition {
             name: name.to_owned(),
             path: PathBuf::from(format!("/prompts/{name}.md")),
+            directory: None,
+            resources: Vec::new(),
             raw: body.to_owned(),
             frontmatter: meta,
             body: body.to_owned(),
@@ -70,6 +72,8 @@ fn registration_namespaces_by_mechanism() {
         Definition {
             name: "default".to_owned(),
             path: PathBuf::from("/personas/default.md"),
+            directory: None,
+            resources: Vec::new(),
             raw: String::new(),
             frontmatter: PersonaMeta { description: None },
             body: String::new(),
@@ -80,6 +84,8 @@ fn registration_namespaces_by_mechanism() {
         Definition {
             name: "builder".to_owned(),
             path: PathBuf::from("/actors/builder.md"),
+            directory: None,
+            resources: Vec::new(),
             raw: String::new(),
             frontmatter: ActorMeta {
                 persona: "default".to_owned(),
@@ -141,6 +147,8 @@ fn visibility_flags_come_from_frontmatter_and_mechanism() {
         Definition {
             name: "worker".to_owned(),
             path: PathBuf::from("/actors/worker.md"),
+            directory: None,
+            resources: Vec::new(),
             raw: String::new(),
             frontmatter: ActorMeta {
                 persona: "default".to_owned(),
@@ -193,6 +201,8 @@ fn agent_tools_expose_a_required_prompt() {
         Definition {
             name: "worker".to_owned(),
             path: PathBuf::from("/actors/worker.md"),
+            directory: None,
+            resources: Vec::new(),
             raw: String::new(),
             frontmatter: ActorMeta {
                 persona: "default".to_owned(),
@@ -239,6 +249,8 @@ fn cross_namespace_names_cannot_collide() {
         Definition {
             name: "echo".to_owned(),
             path: PathBuf::from("/actors/echo.md"),
+            directory: None,
+            resources: Vec::new(),
             raw: String::new(),
             frontmatter: ActorMeta {
                 persona: "default".to_owned(),

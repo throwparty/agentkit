@@ -159,6 +159,8 @@ fn parse_definition<T: DeserializeOwned>(
     Ok(Definition {
         name: name.to_owned(),
         path: path.to_path_buf(),
+        directory: None,
+        resources: Vec::new(),
         raw: raw.to_owned(),
         frontmatter,
         body: body.to_owned(),

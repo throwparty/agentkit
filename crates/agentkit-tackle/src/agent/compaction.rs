@@ -342,6 +342,8 @@ mod tests {
             Definition {
                 name: "compact".to_owned(),
                 path: PathBuf::from("/prompts/compact.md"),
+                directory: None,
+                resources: Vec::new(),
                 raw: String::new(),
                 frontmatter: PromptMeta {
                     compaction: true,
@@ -355,6 +357,8 @@ mod tests {
             Definition {
                 name: "plain".to_owned(),
                 path: PathBuf::from("/prompts/plain.md"),
+                directory: None,
+                resources: Vec::new(),
                 raw: String::new(),
                 frontmatter: PromptMeta::default(),
                 body: String::new(),

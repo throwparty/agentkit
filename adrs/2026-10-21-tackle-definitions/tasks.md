@@ -2,7 +2,7 @@
 
 ## Tasks
 
-### T-001: Extend the definition type for packages
+### T-001: [x] Extend the definition type for packages
 
 Add an optional package directory and a sorted resource listing to Definition. Enumerate resources as paths relative to the package directory, excluding the entry point, with a stable sort so the listing and the lock hash are deterministic.
 
