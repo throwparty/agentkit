@@ -111,7 +111,7 @@ impl Registry {
             parameters,
             body,
             directory,
-            resources: _,
+            resources,
             user_invokable,
             ..
         } = invokable
@@ -124,11 +124,12 @@ impl Registry {
             });
         }
         let filled = fill_positional(name, parameters, arguments)?;
-        Ok(context::render(
+        Ok(context::render_with_resources(
             body,
             &filled,
             name.strip_prefix("prompt.").unwrap_or(name),
             directory.as_deref(),
+            resources,
         ))
     }
 
@@ -148,7 +149,7 @@ impl Registry {
             parameters,
             body,
             directory,
-            resources: _,
+            resources,
             model_invokable,
             ..
         } = invokable
@@ -178,11 +179,12 @@ impl Registry {
                 return Err(ExpansionError::Arity { usage });
             }
         }
-        Ok(context::render(
+        Ok(context::render_with_resources(
             body,
             &filled,
             name.strip_prefix("prompt.").unwrap_or(name),
             directory.as_deref(),
+            resources,
         ))
     }
 }
