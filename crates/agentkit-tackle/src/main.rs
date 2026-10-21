@@ -180,6 +180,7 @@ fn handle_definitions(
     project_dir: &std::path::Path,
     command: &cli::DefinitionsCommands,
 ) -> ExitCode {
+    let project_dir = &cli::project_config_dir_at(project_dir);
     let result = match command {
         cli::DefinitionsCommands::Init => cli::definitions::init(project_dir),
         cli::DefinitionsCommands::Add { source, kind, name } => {
