@@ -155,12 +155,48 @@ mod tests {
     }
 
     #[test]
+    fn a_branch_resolves_to_its_tip() {
+        let (dir, first) = repo_with_tag();
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        let first = repo
+            .find_commit(git2::Oid::from_str(&first).unwrap())
+            .unwrap();
+        repo.branch("feature", &first, false).unwrap();
+        repo.set_head("refs/heads/feature").unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+        std::fs::write(dir.path().join("second.md"), "second\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index
+            .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+            .unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let signature = git2::Signature::now("test", "test@example.com").unwrap();
+        let second = repo
+            .commit(
+                Some("HEAD"),
+                &signature,
+                &signature,
+                "second",
+                &tree,
+                &[&first],
+            )
+            .unwrap();
+
+        let checkout = resolve_git("team", dir.path().to_str().unwrap(), Some("feature")).unwrap();
+        assert_eq!(checkout.commit(), second.to_string());
+        assert!(checkout.path().join("second.md").is_file());
+    }
+
+    #[test]
     fn an_unknown_ref_errors_naming_the_source() {
         let (dir, _) = repo_with_tag();
         let err = resolve_git("team", dir.path().to_str().unwrap(), Some("missing")).unwrap_err();
         let message = err.to_string();
         assert!(message.contains("team"), "{message}");
         assert!(message.contains("missing"), "{message}");
+        assert!(message.contains(dir.path().to_str().unwrap()), "{message}");
     }
 
     #[test]

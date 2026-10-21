@@ -132,7 +132,7 @@ Read and write .agentkit/tackle/definitions.lock: each source resolved to an imm
 | Depends On | T-001 |
 | References | lock-file |
 
-### T-011: Git source resolution
+### T-011: [x] Git source resolution
 
 Resolve git sources through git2: clone or fetch the url, check out the requested ref, and resolve it to a commit. Reuse the existing git2 dependency; add no new dependency. An unreachable or unresolvable source fails with the source name and URL.
 
