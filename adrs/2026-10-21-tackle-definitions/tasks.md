@@ -184,7 +184,7 @@ Add the tackle definitions subcommand with the def alias: init scaffolds a manif
 | Depends On | T-013 |
 | References | definitions-cli,loader-independence |
 
-### T-015: Verify drift detection
+### T-015: [x] Verify drift detection
 
 Implement verify: re-hash each vendored package and compare against the lock, reporting drift for any package whose files changed and exiting non-zero. A missing or stale lock is an error naming tackle definitions get.
 

@@ -196,6 +196,7 @@ fn handle_definitions(
         cli::DefinitionsCommands::Get => cli::definitions::get(project_dir),
         cli::DefinitionsCommands::Update => cli::definitions::update(project_dir),
         cli::DefinitionsCommands::List => cli::definitions::list(project_dir),
+        cli::DefinitionsCommands::Verify => cli::definitions::verify(project_dir),
     };
     match result {
         Ok(message) => {
