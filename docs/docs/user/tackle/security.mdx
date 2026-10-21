@@ -11,24 +11,25 @@ Tackle's security posture is to **fail-closed**:
 
 :::info
 
-We believe that the harness is responsible for mediating the admission of data into the model's context window and the model's requests for access to resources. The harness and its configuration should not be configured by the model without the user's expess consent, and it therefore belongs outside of any compute sandbox.
+We believe the harness is responsible for two things a repository must not decide: the model's access to resources, and the harness's own configuration. Both belong outside any compute sandbox.
 
 :::
 
-## Projects are untrusted
+## The sandbox is the consent boundary
 
-A cloned repository is untrusted input, but the sandbox is the consent boundary: launching Tackle in a repository already admits that repository's content to the sandbox. Context-bearing project configuration therefore loads without a prompt.
+A cloned repository is untrusted input. But trust is not a property of the repository as a whole — it is a property of what a piece of configuration can *do*. Tackle admits configuration whose only power is to place text in the model's context, and denies configuration that can act on its own.
 
-- Definitions — personas, actors, and prompts — are repository-resident, including any package resources. Their bodies and resources are context the model may already read, not host execution.
-- Bounded Rhai project scripts load because the engine limits are the consent. See [Scripts are bounded](#scripts-are-bounded).
+**Context is admitted.** The model already reads the repository with its own tools, so a definition's body or a package resource grants it nothing it could not read anyway. Definitions — personas, actors, and prompts — therefore load without a prompt, as do bounded Rhai scripts, whose engine limits are the consent (see [Scripts are bounded](#scripts-are-bounded)).
 
-Unbounded host execution is denied at project scope:
+A definition can steer the model — that is what it is for — but steering is not acting. Everything the model does in response still passes through the permission pipeline, which is where the boundary actually sits.
+
+**Host execution is denied at project scope.** A project may not, on its own authority, run a program, reach the network, or move a credential:
 
 - `mcp_servers` and `client_tools` declared by a project are ignored.
 - `endpoints` and `credential_helper` are rejected outright.
 - The same entries are honoured only from user configuration outside the repository.
 
-There is no launch-time consent prompt. Configuration and definitions load once at process start without hot reload, so a change is picked up on the next run.
+There is no launch-time consent prompt, because there is nothing to consent to: the sandbox already holds the repository's content, and no project declaration escalates beyond it. Configuration and definitions load once at process start without hot reload, so a change is picked up on the next run.
 
 ## Spawn hygiene
 
