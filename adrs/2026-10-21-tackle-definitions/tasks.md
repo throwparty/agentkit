@@ -210,7 +210,7 @@ Remove the per-path TOFU trust record for definitions now that they are reposito
 | Depends On | T-003 |
 | References | trust-boundary |
 
-### T-017: Project-scope host execution denial
+### T-017: [x] Project-scope host execution denial
 
 Deny unbounded host execution at project scope: mcp_servers, client_tools, endpoints, and credential_helper declared in project configuration are ignored, and are honoured only from user configuration outside the repository. Preserve the existing hard denials.
 

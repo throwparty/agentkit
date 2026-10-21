@@ -119,11 +119,11 @@ async fn pending_project_state(dir: &std::path::Path) -> Arc<TackleState> {
 }
 
 #[tokio::test]
-async fn project_definitions_load_without_consent_while_mcp_waits() {
+async fn project_definitions_load_and_project_mcp_is_ignored() {
     let dir = tempfile::tempdir().unwrap();
     let state = pending_project_state(dir.path()).await;
-    // Definitions are repository content: active before consent. The
-    // unbounded MCP server waits.
+    // Definitions are repository content: active immediately. The
+    // project's unbounded MCP server is ignored, never prompted for.
     assert!(!state.config().config.mcp_servers.contains_key("proj"));
     assert!(state.definitions().personas.contains_key("proj-persona"));
 
@@ -135,12 +135,12 @@ async fn project_definitions_load_without_consent_while_mcp_waits() {
         )
         .await;
 
-    assert!(state.config().config.mcp_servers.contains_key("proj"));
+    assert!(!state.config().config.mcp_servers.contains_key("proj"));
     assert!(state.definitions().personas.contains_key("proj-persona"));
 }
 
 #[tokio::test]
-async fn a_denied_mcp_server_is_dropped_but_definitions_remain() {
+async fn a_denied_project_layer_leaves_definitions_active() {
     let dir = tempfile::tempdir().unwrap();
     let state = pending_project_state(dir.path()).await;
     state
