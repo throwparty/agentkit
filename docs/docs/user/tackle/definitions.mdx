@@ -1,0 +1,149 @@
+---
+sidebar_position: 4
+---
+
+# 🧩 Definitions
+
+Definitions are the reusable content Tackle loads from a repository: **prompts**, **personas**, and **actors**. A definition is either a flat markdown file or a package directory that carries supporting resources alongside its entry point.
+
+Definitions are repository-only. Discovery reads `.agentkit/tackle/` in the repository; a definition placed in the user configuration directory is ignored because its resources would not be reachable by the model.
+
+## Layout
+
+The kind directory and entry-point filename are fixed:
+
+| Kind | Directory | Entry point |
+| --- | --- | --- |
+| Prompt | `.agentkit/tackle/prompts/` | `PROMPT.md` |
+| Persona | `.agentkit/tackle/personas/` | `PERSONA.md` |
+| Actor | `.agentkit/tackle/actors/` | `ACTOR.md` |
+
+A flat definition is a single markdown file whose stem is its name:
+
+```text
+.agentkit/tackle/prompts/review.md          -> /review
+.agentkit/tackle/personas/reviewer.md       -> reviewer
+```
+
+A package directory uses the entry point and may carry any number of resources:
+
+```text
+.agentkit/tackle/prompts/triage/
+├── PROMPT.md
+├── checklist.md
+└── examples/
+    └── incident.md
+```
+
+The body and frontmatter live in the entry point, exactly as in a flat definition. Every other file in the package is a resource. Resources are listed relative to the package directory, sorted for determinism, and the entry point is not repeated in that list.
+
+A flat and a directory definition with the same name in one kind directory is a load error naming both paths. A missing or misnamed entry point is a load error naming the package path. Built-in definitions remain embedded flat assets at the lowest precedence; a discovered definition replaces one of the same name and the override is surfaced.
+
+## Context variables
+
+Every definition body supports context variables in the `$` namespace:
+
+| Variable | Value |
+| --- | --- |
+| `{{ $.name }}` | The definition name |
+| `{{ $.dir }}` | The package directory, relative to the repository |
+
+```markdown
+Read `{{ $.dir }}/checklist.md` before you review.
+```
+
+`{{ $.dir }}` is empty for a flat definition. Bare names such as `{{ dir }}` remain declared parameters, so they never collide with the context namespace.
+
+For model-facing definitions, Tackle appends the sorted resource listing after substitution. A prompt or persona with resources therefore ends with the paths the model may read under `$.dir`; a definition without resources gets no listing. Actors carry no body and are unaffected.
+
+## Sourcing definitions
+
+The manifest at `.agentkit/tackle/definitions.toml` is the control point for sourcing. It declares sources and the definitions selected from each. It is **not** load-time input: the loader reads the repository tree alone, so the tree always loads even when the manifest or lock is absent.
+
+```toml
+[[source]]
+name = "team"
+kind = "git"
+
+[source.git]
+url = "https://example.com/definitions.git"
+ref = "v1"
+path = "tackle"
+
+[definitions.team]
+personas = ["reviewer"]
+prompts = ["triage"]
+```
+
+Every source declares `kind` explicitly. `kind = "git"` carries a `[source.git]` table with `url` and optional `ref` and `path`. `kind = "path"` carries a `[source.path]` table with `dir`, relative to the repository root, for authoring and testing locally:
+
+```toml
+[[source]]
+name = "local"
+kind = "path"
+
+[source.path]
+dir = "shared-definitions"
+
+[definitions.local]
+prompts = ["triage"]
+```
+
+The `url` field also accepts a PEP 508 `git+` URL; Tackle normalises it into `url`, `ref`, and `path`.
+
+A manifest may delegate with `[[extends]]`:
+
+```toml
+[[extends]]
+url = "https://example.com/company-definitions.git"
+ref = "v2"
+```
+
+Delegated manifests are fetched and union-merged. Duplicate definition names anywhere in the resolved set are an error, and no source may override another. Source and definition paths that escape their repository or source root are rejected.
+
+## Lock and integrity
+
+`.agentkit/tackle/definitions.lock` records each git source at an immutable commit and each vendored definition by a content hash. The hash covers the sorted package files, each as relative path, length, and bytes; a flat definition hashes as its bare file content.
+
+The lock provides integrity only. It carries no authority and never gates loading. Drift is reported explicitly:
+
+```bash
+tackle definitions verify
+```
+
+`verify` re-hashes each vendored package, reports any package whose files changed, and exits non-zero. A missing lock is an error naming `tackle definitions get`.
+
+## Workflow
+
+The `definitions` subcommand has the alias `def`, and `--project-dir` selects the repository root (defaulting to the current directory).
+
+```bash
+# Scaffold .agentkit/tackle/definitions.toml
+tackle definitions init
+
+# Select and unselect definitions from a declared source
+tackle def add team personas reviewer
+tackle def remove team personas reviewer
+
+# Resolve refs, vendor the selected definitions, and write the lock
+tackle def update
+
+# Reproduce the locked revisions exactly
+tackle def get
+
+# Report declared and vendored definitions with status
+tackle def list
+
+# Check the tree against the lock
+tackle def verify
+```
+
+`update` re-resolves refs and rewrites the lock. `get` fetches the locked commits and reproduces their contents. Both are the only network operations.
+
+Vendoring writes the entry point and every resource into `.agentkit/tackle/<kind>/<name>/`, replacing the previous package directory. A flat source definition is vendored as a package with its kind's entry point and no resources, so the tree has one shape regardless of how the source laid it out.
+
+Sourcing fails closed: an unreachable source, an unreadable manifest, or a failed write leaves the tree and lock unchanged. Once vendored, the files are ordinary repository files the model can read with its existing tools.
+
+## Trust
+
+Definitions are context, not host execution, and load without a prompt — launching Tackle in a repository already admits that content to the sandbox. The same applies to bounded Rhai scripts. Unbounded project-scope host execution, such as MCP servers, endpoints, and credential helpers, remains denied. See [Security model](./security).

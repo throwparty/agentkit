@@ -50,6 +50,54 @@ Options:
 - `--config-dir <CONFIG_DIR>` Override the user configuration directory (defaults to the platform config directory)
 - `--credential-helper <CREDENTIAL_HELPER>` Override the credential helper name (defaults to the configured helper, or `keychain`)
 
+## `definitions`
+
+Manage definition sources, selections, and vendoring. `def` is an alias.
+
+Options:
+
+- `--project-dir <PROJECT_DIR>` Repository root (defaults to the current directory)
+
+### `init`
+
+Scaffold `.agentkit/tackle/definitions.toml`.
+
+### `add`
+
+Select a definition from a declared source.
+
+Arguments:
+
+- `source` Source name from the manifest
+- `kind` `personas`, `actors`, or `prompts`
+- `name` Definition name
+
+### `remove`
+
+Remove a selected definition.
+
+Arguments:
+
+- `source` Source name from the manifest
+- `kind` `personas`, `actors`, or `prompts`
+- `name` Definition name
+
+### `get`
+
+Vendor the locked revisions.
+
+### `update`
+
+Re-resolve refs, re-vendor, and rewrite the lock.
+
+### `list`
+
+Report declared and vendored definitions with status.
+
+### `verify`
+
+Check vendored packages against the lock.
+
 ## `http`
 
 Serve the streamable HTTP transport
