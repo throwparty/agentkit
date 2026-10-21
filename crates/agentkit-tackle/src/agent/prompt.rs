@@ -159,19 +159,31 @@ pub(crate) async fn build_registry_and_system(
     let registry = Registry::build_with_client_tools(definitions, &mcp_tokens, client_tools)
         .unwrap_or_default();
     let tools = registry.model_tools();
-    let persona = definitions
-        .actors
-        .get(actor_name)
-        .and_then(|actor| definitions.personas.get(&actor.frontmatter.persona));
-
-    let mut system = persona
-        .map(|persona| persona.body.clone())
-        .unwrap_or_default();
+    let mut system = persona_body(definitions, actor_name);
     if !tools.is_empty() {
         system.push_str("\n\n");
         system.push_str(&registry.manifest());
     }
     (registry, tools, system)
+}
+
+/// The persona body with its context variables substituted and its
+/// resource listing appended — the same rendering prompts get.
+fn persona_body(definitions: &crate::definitions::Definitions, actor_name: &str) -> String {
+    let persona = definitions
+        .actors
+        .get(actor_name)
+        .and_then(|actor| definitions.personas.get(&actor.frontmatter.persona));
+    let Some(persona) = persona else {
+        return String::new();
+    };
+    crate::definitions::context::render_with_resources(
+        &persona.body,
+        &std::collections::BTreeMap::new(),
+        &persona.name,
+        persona.directory.as_deref(),
+        &persona.resources,
+    )
 }
 
 /// Expands a user-typed `/name` prompt into the model prompt; the stored
@@ -436,4 +448,72 @@ async fn finish_turn(
     }
 
     Ok(result.stop)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::definitions::{ActorMeta, Definition, Definitions, PersonaMeta};
+    use std::collections::BTreeMap;
+    use std::path::PathBuf;
+
+    fn definitions() -> Definitions {
+        let mut definitions = Definitions::default();
+        definitions.personas.insert(
+            "reviewer".to_owned(),
+            Definition {
+                name: "reviewer".to_owned(),
+                path: PathBuf::from(".agentkit/tackle/personas/reviewer/PERSONA.md"),
+                directory: Some(PathBuf::from(".agentkit/tackle/personas/reviewer")),
+                resources: vec!["checklist.md".to_owned()],
+                raw: String::new(),
+                frontmatter: PersonaMeta { description: None },
+                body: "Review as {{ $.name }} in {{ $.dir }}.".to_owned(),
+            },
+        );
+        definitions.actors.insert(
+            "worker".to_owned(),
+            Definition {
+                name: "worker".to_owned(),
+                path: PathBuf::from(".agentkit/tackle/actors/worker.md"),
+                directory: None,
+                resources: Vec::new(),
+                raw: String::new(),
+                frontmatter: ActorMeta {
+                    persona: "reviewer".to_owned(),
+                    model: None,
+                },
+                body: String::new(),
+            },
+        );
+        definitions
+    }
+
+    #[test]
+    fn persona_body_substitutes_and_lists_resources() {
+        let body = persona_body(&definitions(), "worker");
+        assert!(body.starts_with("Review as reviewer in .agentkit/tackle/personas/reviewer."));
+        assert!(body.ends_with("- checklist.md\n"), "{body}");
+    }
+
+    #[test]
+    fn an_actor_produces_no_persona_listing_by_itself() {
+        let mut definitions = Definitions::default();
+        definitions.actors.insert(
+            "bare".to_owned(),
+            Definition {
+                name: "bare".to_owned(),
+                path: PathBuf::from("/actors/bare.md"),
+                directory: None,
+                resources: Vec::new(),
+                raw: String::new(),
+                frontmatter: ActorMeta {
+                    persona: "missing".to_owned(),
+                    model: None,
+                },
+                body: String::new(),
+            },
+        );
+        assert!(persona_body(&definitions, "bare").is_empty());
+    }
 }

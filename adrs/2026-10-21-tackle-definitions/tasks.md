@@ -67,7 +67,7 @@ Append the resource listing to the expanded body of a prompt, after substitution
 | Depends On | T-004 |
 | References | resource-listing |
 
-### T-006: Context variables and listing for personas
+### T-006: [x] Context variables and listing for personas
 
 Substitute context variables into persona bodies and append the persona resource listing when the system prompt is assembled, sharing one implementation with prompt expansion so the two cannot diverge. Actors carry no body and are unaffected.
 
