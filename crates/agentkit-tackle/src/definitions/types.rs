@@ -44,8 +44,7 @@ pub struct Definition<T> {
     /// listing and the lock hash are deterministic. Always empty for a
     /// flat definition and for built-ins.
     pub resources: Vec<String>,
-    /// The raw entry-point contents — the unit hashed by TOFU trust
-    /// records.
+    /// The raw entry-point contents, before frontmatter parsing.
     pub raw: String,
     /// Parsed frontmatter.
     pub frontmatter: T,
@@ -141,52 +140,7 @@ pub struct Definitions {
     pub builtin_overrides: BTreeSet<String>,
 }
 
-impl Definitions {
-    /// Trust entries for every project-layer definition: relative path and
-    /// SHA-256 of the raw content.
-    pub fn project_trust_entries(&self, project_dir: &Path) -> BTreeMap<String, String> {
-        let mut entries = BTreeMap::new();
-        Self::collect_trust_entries(&self.personas, project_dir, &mut entries);
-        Self::collect_trust_entries(&self.actors, project_dir, &mut entries);
-        Self::collect_trust_entries(&self.prompts, project_dir, &mut entries);
-        entries
-    }
-
-    fn collect_trust_entries<T>(
-        map: &BTreeMap<String, Definition<T>>,
-        project_dir: &Path,
-        entries: &mut BTreeMap<String, String>,
-    ) {
-        for def in map.values() {
-            if let Ok(rel) = def.path.strip_prefix(project_dir) {
-                entries.insert(
-                    rel.to_string_lossy().to_string(),
-                    crate::config::trust::hash(&def.raw),
-                );
-            }
-        }
-    }
-
-    /// Drops project-layer definitions whose trust entries were refused.
-    pub fn retain_project(&mut self, project_dir: &Path, approved: &BTreeSet<String>) {
-        Self::retain_map(&mut self.personas, project_dir, approved);
-        Self::retain_map(&mut self.actors, project_dir, approved);
-        Self::retain_map(&mut self.prompts, project_dir, approved);
-    }
-
-    fn retain_map<T>(
-        map: &mut BTreeMap<String, Definition<T>>,
-        project_dir: &Path,
-        approved: &BTreeSet<String>,
-    ) {
-        map.retain(|_, def| {
-            match def.path.strip_prefix(project_dir) {
-                Ok(rel) => approved.contains(&rel.to_string_lossy().to_string()),
-                Err(_) => true, // not a project-layer definition
-            }
-        });
-    }
-}
+impl Definitions {}
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct PersonaMeta {

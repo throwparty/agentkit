@@ -112,12 +112,11 @@ pub struct TackleState {
 }
 
 /// The ungated project layer, held until the first session resolves
-/// trust: its config, the full definitions (project entries included,
-/// pruned from the active set), the project directory, and the trust
-/// record to extend on approval.
+/// trust: its config, the project directory, and the trust record to
+/// extend on approval. Definitions are not held here; they are repository
+/// content and are active from startup.
 pub struct PendingProject {
     pub config: crate::config::Config,
-    pub definitions: Definitions,
     pub project_dir: std::path::PathBuf,
     pub identity: String,
     pub trust_store: crate::config::trust::TrustStore,
@@ -208,13 +207,7 @@ impl TackleState {
         let Some(mut pending) = self.pending_project.lock().await.take() else {
             return;
         };
-        let mut entries =
-            crate::config::project_trust_entries(&pending.config, &pending.project_dir);
-        entries.extend(
-            pending
-                .definitions
-                .project_trust_entries(&pending.project_dir),
-        );
+        let entries = crate::config::project_trust_entries(&pending.config, &pending.project_dir);
         if !entries.is_empty() {
             let needed = pending
                 .trust_store
@@ -247,8 +240,6 @@ impl TackleState {
         let approved = pending.trust_store.approved(&pending.identity, &entries);
         let gated =
             crate::config::retain_project_entries(pending.config, &pending.project_dir, &approved);
-        let mut definitions = pending.definitions;
-        definitions.retain_project(&pending.project_dir, &approved);
 
         let base = self.config();
         let merged = base.config.clone().merge(gated.clone());
@@ -265,7 +256,6 @@ impl TackleState {
             .write()
             .expect("script sources lock poisoned") = Arc::new(sources);
         *self.config.write().expect("config lock poisoned") = Arc::new(loaded);
-        *self.definitions.write().expect("definitions lock poisoned") = Arc::new(definitions);
 
         // Connect the approved project servers into this connection's
         // pool (built from the user layer when the connection opened).

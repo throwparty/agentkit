@@ -89,11 +89,6 @@ async fn builtin_overrides_surface_in_the_seed() {
     std::fs::create_dir_all(project.join("actors")).unwrap();
     let actor = "+++\npersona = \"default\"\n+++\nCustom default actor.\n";
     std::fs::write(project.join("actors").join("default.md"), actor).unwrap();
-    let trust = format!(
-        "[\".\"]\n\"actors/default.md\" = \"{}\"\n",
-        agentkit_tackle::config::trust::hash(actor)
-    );
-    std::fs::write(cfg.join("trust.toml"), trust).unwrap();
     let agent = spawn_agent(dir.path());
 
     Client

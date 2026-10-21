@@ -101,46 +101,21 @@ fn builtin_registrations() -> Config {
     config
 }
 
-/// The trust entries for a project config's executable sections
-/// (`mcp_servers` and `scripts`): relative path and SHA-256.
-///
-/// For scripts the hash covers both the serialised registration *and* the
-/// script body it names. The body is executable and part of the trusted
-/// unit, so a changed body — not just a changed registration — must
-/// re-prompt; hashing the registration alone would let a trusted
-/// repository swap a script's contents silently.
-pub fn project_trust_entries(project: &Config, project_dir: &Path) -> BTreeMap<String, String> {
+/// The trust entries for a project config's unbounded host-execution
+/// surface (`mcp_servers`): relative path and SHA-256.
+pub fn project_trust_entries(project: &Config, _project_dir: &Path) -> BTreeMap<String, String> {
     let mut entries = BTreeMap::new();
     for (name, server) in &project.mcp_servers {
         let serialised = toml::to_string(server).unwrap_or_default();
         entries.insert(format!("mcp_servers/{name}"), trust::hash(&serialised));
     }
-    for (name, script) in &project.scripts {
-        let serialised = toml::to_string(script).unwrap_or_default();
-        let body = project_script_source(script, project_dir).unwrap_or_default();
-        entries.insert(
-            format!("scripts/{name}"),
-            trust::hash(&format!("{serialised}\u{0}{body}")),
-        );
-    }
     entries
 }
 
-/// Resolves a project script's body at trust time: a `builtin:` reference
-/// or a file under the project's `scripts/` directory. A missing or
-/// unreadable file hashes as empty, so its later appearance re-prompts.
-fn project_script_source(script: &ScriptConfig, project_dir: &Path) -> Option<String> {
-    if let Some(source) = crate::builtins::script_source(&script.file) {
-        return Some(source.to_owned());
-    }
-    std::fs::read_to_string(project_dir.join("scripts").join(&script.file)).ok()
-}
-
-/// Drops the executable project config entries whose trust entries were
-/// refused, and pins each retained project script to its project-layer
-/// file. The pin records the script's origin explicitly: resolution reads
-/// the approved file directly, so a user-layer file of the same name
-/// cannot shadow it, and a trusted project script is no longer dropped.
+/// Drops project MCP servers whose trust entries were refused, and pins
+/// every project script to its project-layer file. Scripts are bounded by
+/// the Rhai engine and load without consent; the pin records their origin
+/// so a user-layer file of the same name cannot shadow them.
 pub fn retain_project_entries(
     mut project: Config,
     project_dir: &Path,
@@ -149,9 +124,6 @@ pub fn retain_project_entries(
     project
         .mcp_servers
         .retain(|name, _| approved.contains(&format!("mcp_servers/{name}")));
-    project
-        .scripts
-        .retain(|name, _| approved.contains(&format!("scripts/{name}")));
     for script in project.scripts.values_mut() {
         // A `builtin:` reference is not a project file: leave it to the
         // built-in resolver.

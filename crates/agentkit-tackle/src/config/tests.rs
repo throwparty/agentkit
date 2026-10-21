@@ -239,7 +239,7 @@ fn approved_project_script_resolves_to_its_project_file() {
     )
     .unwrap();
     // A user-layer file of the same name must not shadow the project
-    // script: the pin selects the approved project file.
+    // script: the pin selects the project file.
     let user = dir.path().join("user");
     std::fs::create_dir_all(user.join("scripts")).unwrap();
     std::fs::write(user.join("scripts/deny.rhai"), "user shadow").unwrap();
@@ -247,8 +247,7 @@ fn approved_project_script_resolves_to_its_project_file() {
     let project_config: Config =
         toml::from_str("[scripts.deny]\nevents = [\"pre_tool_use\"]\nfile = \"deny.rhai\"\n")
             .unwrap();
-    let approved = BTreeSet::from(["scripts/deny".to_owned()]);
-    let retained = retain_project_entries(project_config, &project, &approved);
+    let retained = retain_project_entries(project_config, &project, &BTreeSet::new());
     let script = retained.scripts.get("deny").unwrap();
 
     let source = resolve_script_source("deny", &script.file, Some(&user)).unwrap();
@@ -256,18 +255,18 @@ fn approved_project_script_resolves_to_its_project_file() {
 }
 
 #[test]
-fn refused_project_script_is_dropped() {
+fn project_scripts_load_without_consent() {
     let dir = tempfile::tempdir().unwrap();
     let project = dir.path().join("project");
     let project_config: Config =
         toml::from_str("[scripts.deny]\nevents = [\"pre_tool_use\"]\nfile = \"deny.rhai\"\n")
             .unwrap();
     let retained = retain_project_entries(project_config, &project, &BTreeSet::new());
-    assert!(retained.scripts.is_empty());
+    assert!(retained.scripts.contains_key("deny"));
 }
 
 #[test]
-fn changed_project_script_body_re_prompts() {
+fn project_scripts_do_not_create_trust_entries() {
     let dir = tempfile::tempdir().unwrap();
     let project = dir.path().join("project");
     std::fs::create_dir_all(project.join("scripts")).unwrap();
@@ -279,18 +278,12 @@ fn changed_project_script_body_re_prompts() {
     let config: Config =
         toml::from_str("[scripts.deny]\nevents = [\"pre_tool_use\"]\nfile = \"deny.rhai\"\n")
             .unwrap();
+    assert!(project_trust_entries(&config, &project).is_empty());
 
-    let before = project_trust_entries(&config, &project);
-    // Same registration, changed body: the pin must move so the user
-    // re-consents before the new body runs.
     std::fs::write(
         project.join("scripts/deny.rhai"),
         "fn pre_tool_use(r) { () }",
     )
     .unwrap();
-    let after = project_trust_entries(&config, &project);
-    assert_ne!(before, after, "a changed script body must re-prompt");
-
-    // An unchanged body is stable across calls.
-    assert_eq!(after, project_trust_entries(&config, &project));
+    assert!(project_trust_entries(&config, &project).is_empty());
 }

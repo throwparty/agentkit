@@ -138,13 +138,6 @@ fn write_config(dir: &std::path::Path, endpoint_uri: &str) {
     .unwrap();
     let actor = "+++\npersona = \"worker\"\n+++\n";
     std::fs::write(project.join("actors").join("worker.md"), actor).unwrap();
-    let persona = format!("+++\ndescription = \"Test worker persona\"\n+++\n{WORKER_MARKER}\n");
-    let trust = format!(
-        "[\".\"]\n\"personas/worker.md\" = \"{}\"\n\"actors/worker.md\" = \"{}\"\n",
-        agentkit_tackle::config::trust::hash(&persona),
-        agentkit_tackle::config::trust::hash(actor),
-    );
-    std::fs::write(cfg.join("trust.toml"), trust).unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]

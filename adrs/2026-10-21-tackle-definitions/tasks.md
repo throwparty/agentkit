@@ -197,7 +197,7 @@ Implement verify: re-hash each vendored package and compare against the lock, re
 | Depends On | T-014,T-010 |
 | References | loader-independence,fail-closed |
 
-### T-016: Retire per-file definition trust
+### T-016: [x] Retire per-file definition trust
 
 Remove the per-path TOFU trust record for definitions now that they are repository-resident. Definition bodies and resources load without a prompt; bounded Rhai scripts also load because the engine limits are the consent.
 

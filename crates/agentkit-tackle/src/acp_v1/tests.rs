@@ -83,8 +83,8 @@ impl crate::permissions::PermissionRequester for ChoiceStub {
     }
 }
 
-/// A state with a pending project layer: one MCP server and one
-/// project persona, neither yet trusted.
+/// A state with a pending project layer: one MCP server awaiting consent
+/// and one project persona that loads immediately.
 async fn pending_project_state(dir: &std::path::Path) -> Arc<TackleState> {
     let project = dir.join(".agentkit/tackle");
     std::fs::create_dir_all(project.join("personas")).unwrap();
@@ -100,19 +100,16 @@ async fn pending_project_state(dir: &std::path::Path) -> Arc<TackleState> {
     .unwrap();
 
     let user_dir = dir.join("cfg");
-    let full = crate::definitions::discover(Some(&project)).unwrap();
-    let mut active = full.clone();
-    active.retain_project(&project, &std::collections::BTreeSet::new());
+    let definitions = crate::definitions::discover(Some(&project)).unwrap();
     let (loaded, project_config) =
         crate::config::load_layered_deferred(&user_dir, Some(&project)).unwrap();
 
     let db = Arc::new(crate::store::SessionStore::in_memory());
-    let state = Arc::new(TackleState::new(db, loaded, active));
+    let state = Arc::new(TackleState::new(db, loaded, definitions));
     let trust_store = crate::config::trust::TrustStore::load(dir.join("trust.toml")).unwrap();
     state
         .set_pending_project(PendingProject {
             config: project_config.unwrap_or_default(),
-            definitions: full,
             project_dir: project,
             identity: "test-remote".to_owned(),
             trust_store,
@@ -122,12 +119,13 @@ async fn pending_project_state(dir: &std::path::Path) -> Arc<TackleState> {
 }
 
 #[tokio::test]
-async fn project_layer_applies_only_after_consent() {
+async fn project_definitions_load_without_consent_while_mcp_waits() {
     let dir = tempfile::tempdir().unwrap();
     let state = pending_project_state(dir.path()).await;
-    // Before consent: neither project entry is active.
+    // Definitions are repository content: active before consent. The
+    // unbounded MCP server waits.
     assert!(!state.config().config.mcp_servers.contains_key("proj"));
-    assert!(!state.definitions().personas.contains_key("proj-persona"));
+    assert!(state.definitions().personas.contains_key("proj-persona"));
 
     state
         .resolve_pending_project(
@@ -142,7 +140,7 @@ async fn project_layer_applies_only_after_consent() {
 }
 
 #[tokio::test]
-async fn a_denied_project_layer_is_dropped() {
+async fn a_denied_mcp_server_is_dropped_but_definitions_remain() {
     let dir = tempfile::tempdir().unwrap();
     let state = pending_project_state(dir.path()).await;
     state
@@ -154,7 +152,7 @@ async fn a_denied_project_layer_is_dropped() {
         .await;
 
     assert!(!state.config().config.mcp_servers.contains_key("proj"));
-    assert!(!state.definitions().personas.contains_key("proj-persona"));
+    assert!(state.definitions().personas.contains_key("proj-persona"));
 }
 
 #[tokio::test]
