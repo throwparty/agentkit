@@ -551,3 +551,55 @@ mod direct_invocation {
         assert!(parse_direct("/!").is_none());
     }
 }
+
+#[test]
+fn context_variables_substitute_in_prompts() {
+    let (_, mut definition) = prompt_def(
+        "deploy",
+        default_prompt_meta(),
+        "name {{ $.name }} dir {{ $.dir }}",
+    );
+    definition.directory = Some(PathBuf::from(".agentkit/tackle/prompts/deploy"));
+    let registry = Registry::build(
+        &definitions_with(vec![("deploy".to_owned(), definition)]),
+        &[],
+    )
+    .unwrap();
+    assert_eq!(
+        registry.expand_user("deploy", "").unwrap(),
+        "name deploy dir .agentkit/tackle/prompts/deploy"
+    );
+}
+
+#[test]
+fn a_parameter_named_dir_does_not_collide_with_the_context_variable() {
+    let meta = PromptMeta {
+        parameters: vec!["dir".to_owned()],
+        ..default_prompt_meta()
+    };
+    let (_, mut definition) = prompt_def("deploy", meta, "param {{ dir }} context {{ $.dir }}");
+    definition.directory = Some(PathBuf::from(".agentkit/tackle/prompts/deploy"));
+    let registry = Registry::build(
+        &definitions_with(vec![("deploy".to_owned(), definition)]),
+        &[],
+    )
+    .unwrap();
+    assert_eq!(
+        registry.expand_user("deploy", "/tmp").unwrap(),
+        "param /tmp context .agentkit/tackle/prompts/deploy"
+    );
+}
+
+#[test]
+fn a_flat_definition_yields_an_empty_context_directory() {
+    let registry = Registry::build(
+        &definitions_with(vec![prompt_def(
+            "deploy",
+            default_prompt_meta(),
+            "dir={{ $.dir }}",
+        )]),
+        &[],
+    )
+    .unwrap();
+    assert_eq!(registry.expand_user("deploy", "").unwrap(), "dir=");
+}

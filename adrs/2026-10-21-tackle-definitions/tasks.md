@@ -41,7 +41,7 @@ Remove the user configuration layer for personas, actors, and prompts so definit
 | Depends On | T-002 |
 | References | location-discovery,built-in-definitions,backward-compatibility |
 
-### T-004: Context variable substitution
+### T-004: [x] Context variable substitution
 
 Add the $ namespace to prompt expansion. $.name is the definition name and $.dir is the repository-relative package directory. Invokable::Prompt carries the definition directory and resource listing so expand_user and expand_model substitute and append without reaching back into the definitions map. Bare parameter names remain the parameter form.
 
