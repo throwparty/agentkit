@@ -145,7 +145,7 @@ Resolve git sources through git2: clone or fetch the url, check out the requeste
 | Depends On | T-007 |
 | References | source-specifications,minimal-dependencies |
 
-### T-012: Path source resolution and vendoring
+### T-012: [x] Path source resolution and vendoring
 
 Resolve kind = path sources from the local filesystem and vendor selected definitions from both source kinds into the repository tree at .agentkit/tackle/<kind>/<name>/. Vendoring writes the entry point and all resources and reports the definition paths it produced.
 
