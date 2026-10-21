@@ -4,7 +4,7 @@ use super::client_tools::ClientTool;
 use super::direct::{DirectError, DirectInvocation};
 use super::invokable::Invokable;
 use super::name::{agent_name, prompt_name};
-use crate::definitions::Definitions;
+use crate::definitions::{context, Definitions};
 use crate::mcp::{ElicitationSink, McpPool, NamespacedTool};
 use agent_client_protocol::schema::v1::{
     AvailableCommand, AvailableCommandInput, UnstructuredCommandInput,
@@ -50,34 +50,6 @@ fn usage_for(name: &str, parameters: &[String]) -> String {
                 .join(" ")
         )
     }
-}
-
-/// Substitutes `{{ name }}` placeholders (inner whitespace tolerated)
-/// with the filled parameters' values; unknown placeholders are left
-/// as written.
-fn substitute(body: &str, filled: &BTreeMap<String, String>) -> String {
-    let mut out = String::with_capacity(body.len());
-    let mut rest = body;
-    while let Some(start) = rest.find("{{") {
-        out.push_str(&rest[..start]);
-        let after = &rest[start + 2..];
-        match after.find("}}") {
-            Some(end) => {
-                let key = after[..end].trim();
-                match filled.get(key) {
-                    Some(value) => out.push_str(value),
-                    None => out.push_str(&rest[start..start + 2 + end + 2]),
-                }
-                rest = &after[end + 2..];
-            }
-            None => {
-                out.push_str(&rest[start..]);
-                rest = "";
-            }
-        }
-    }
-    out.push_str(rest);
-    out
 }
 
 /// Fills the declared parameters positionally: each parameter takes the
@@ -138,6 +110,8 @@ impl Registry {
             name,
             parameters,
             body,
+            directory,
+            resources: _,
             user_invokable,
             ..
         } = invokable
@@ -150,7 +124,12 @@ impl Registry {
             });
         }
         let filled = fill_positional(name, parameters, arguments)?;
-        Ok(substitute(body, &filled))
+        Ok(context::render(
+            body,
+            &filled,
+            name.strip_prefix("prompt.").unwrap_or(name),
+            directory.as_deref(),
+        ))
     }
 
     /// A model-invokable prompt invoked as a tool: the arguments object
@@ -168,6 +147,8 @@ impl Registry {
             name,
             parameters,
             body,
+            directory,
+            resources: _,
             model_invokable,
             ..
         } = invokable
@@ -197,7 +178,12 @@ impl Registry {
                 return Err(ExpansionError::Arity { usage });
             }
         }
-        Ok(substitute(body, &filled))
+        Ok(context::render(
+            body,
+            &filled,
+            name.strip_prefix("prompt.").unwrap_or(name),
+            directory.as_deref(),
+        ))
     }
 }
 
@@ -255,6 +241,8 @@ impl Registry {
                     description: def.frontmatter.description.clone().unwrap_or_default(),
                     parameters: def.frontmatter.parameters.clone(),
                     body: def.body.clone(),
+                    directory: def.directory.clone(),
+                    resources: def.resources.clone(),
                     compaction: def.frontmatter.compaction,
                     user_invokable: def.frontmatter.user_invokable,
                     model_invokable: def.frontmatter.model_invokable,

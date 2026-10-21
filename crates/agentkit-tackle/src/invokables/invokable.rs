@@ -1,5 +1,7 @@
 //! The invokable: a namespaced, permission-gated operation with its visibility flags.
 
+use std::path::PathBuf;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Invokable {
     /// An MCP tool: user-invokable (direct invocation) and
@@ -19,6 +21,11 @@ pub enum Invokable {
         description: String,
         parameters: Vec<String>,
         body: String,
+        /// The package directory, repository relative; `None` for a flat
+        /// definition. Exposed to the body as `{{ $.dir }}`.
+        directory: Option<PathBuf>,
+        /// Resource paths relative to `directory`, sorted.
+        resources: Vec<String>,
         compaction: bool,
         user_invokable: bool,
         model_invokable: bool,
