@@ -55,7 +55,7 @@ yaml_serde = "0.10"
 
 [dev-dependencies]
 tempfile = "3"
-daggy = "0.8"
+daggy = "0.9"
 wiremock = "0.6.5"
 
 [package]
