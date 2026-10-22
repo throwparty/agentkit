@@ -21,10 +21,10 @@ rig-core = "0.42.0"
 reqwest = {version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"]}
 axum = "0.8"
 tokio-stream = {version = "0.1", features = ["sync"]}
-opentelemetry = {version = "0.32", features = ["trace"]}
-opentelemetry-otlp = {version = "0.32", features = ["http-proto", "reqwest-blocking-client", "trace"]}
-opentelemetry_sdk = {version = "0.32", features = ["trace", "testing", "rt-tokio"]}
-tracing-opentelemetry = "0.33"
+opentelemetry = {version = "0.33", features = ["trace"]}
+opentelemetry-otlp = {version = "0.33", features = ["http-proto", "reqwest-blocking-client", "trace"]}
+opentelemetry_sdk = {version = "0.33", features = ["trace", "testing", "rt-tokio"]}
+tracing-opentelemetry = "0.34"
 rmcp = {version = "3.2.0", features = [
   "client",
   "server",
