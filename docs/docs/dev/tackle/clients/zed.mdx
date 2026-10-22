@@ -1,0 +1,42 @@
+---
+sidebar_position: 1
+---
+
+# Zed
+
+[Zed](https://zed.dev/) tends to lead in ACP client development, so it's a good place to validate features. This page records what it advertises today, and how to build it with ACP v2 support. It reflects Zed `main` as of 2026-10-23.
+
+## Subagent sessions
+
+Zed does not advertise the `subagents` client capability over ACP v1. Its `initialize` request is built in `crates/agent_servers/src/acp/v1.rs` by `client_capabilities_for_agent`, which sets `fs`, `terminal`, `auth`, session config options, compaction, notices, and elicitation, and never `subagents`.
+
+Zed `main` has landed the client side of the [Subagent Sessions RFD](https://agentclientprotocol.com/rfds/subagents). It carries an `accepts_subagent_updates` flag read from `client_capabilities.subagents.is_some()`, and `apply_subagent_update` registers a child thread under its parent when an update arrives. The capability is still not advertised. A test named `client_capabilities_do_not_advertise_subagents` asserts that it is not, on the grounds that v1 subagent support is offered only behind the `acp-beta` flag.
+
+The practical consequence is that a v1 agent must not send `subagent_update` to Zed. Such an update is dropped, with a log line reading "Zed did not advertise the subagents capability".
+
+## The `acp-beta` flag
+
+`acp-beta` is a Zed feature flag (`crates/feature_flags/src/flags.rs`). It is a plain presence flag that overrides nothing, so `enabled_for_staff()` keeps its default of true and `enabled_for_all()` is false.
+
+In current `main` the flag selects the ACP v2 connection, falling back to v1 when negotiation fails. Subagents are part of the v2 baseline, so a v2 connection needs no capability for them.
+
+## Feature flags
+
+`FeatureFlagStore::try_flag_value()` resolves a flag in this order:
+
+1. `enabled_for_all()`, which wins outright and is not set here.
+2. A settings override, but only when `overrides_enabled()` is true.
+3. The staff or debug-build default.
+4. A server-delivered flag.
+
+So the ways to turn `acp-beta` on are:
+
+- **Staff** get it on by default, because `enabled_for_staff()` defaults to true.
+- **Debug builds** get it on by default, because `cfg!(debug_assertions)` is treated as staff.
+- **A settings override** sets `"feature_flags": { "acp-beta": "on" }` in `settings.json`. It is honored only when `overrides_enabled()` is true, which is `(debug build || staff) && !ZED_DISABLE_STAFF`. The settings UI writes this key through `FeatureFlagStore::set_override`.
+- **Zed's server** can enable it per user by announcing the flag (`update_server_flags`). This is the only route for a non-staff release user, since overrides are a staff-only affordance.
+- **`ZED_DISABLE_STAFF=1`** forces non-staff treatment, which is how the off state is tested.
+
+## Checking a build
+
+To confirm the behaviour for a given Zed build, look for `subagents` in `crates/agent_servers/src/acp/`. If `client_capabilities_for_agent` does not set it, the client will not accept v1 `subagent_update` notifications, and nested sessions fall back to parent representation.
