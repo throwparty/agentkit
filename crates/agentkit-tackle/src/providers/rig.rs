@@ -1,11 +1,14 @@
 //! Shared rig-core plumbing: conversions between tackle model types and rig types.
 
-use super::{ChatContent, ChatMessage, ChatRole};
-use rig_core::message::{AssistantContent, ImageMediaType, Message, MimeType, UserContent};
+use super::{ChatContent, ChatMessage, ChatRole, ModelError};
+use rig_core::message::{
+    AssistantContent, AssistantMessage, CallId, ImageMediaType, Message, MimeType, ToolName,
+    UserContent,
+};
 
-pub(super) fn to_rig_message(message: &ChatMessage) -> Message {
+pub(super) fn to_rig_message(message: &ChatMessage) -> Result<Message, ModelError> {
     match message.role {
-        ChatRole::User => Message::User {
+        ChatRole::User => Ok(Message::User {
             content: message
                 .content
                 .iter()
@@ -14,7 +17,7 @@ pub(super) fn to_rig_message(message: &ChatMessage) -> Message {
                     ChatContent::Image { url } => UserContent::image_url(url.clone(), None, None),
                 })
                 .collect(),
-        },
+        }),
         ChatRole::Assistant => {
             let mut content: Vec<AssistantContent> = message
                 .content
@@ -29,18 +32,22 @@ pub(super) fn to_rig_message(message: &ChatMessage) -> Message {
                     serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
                 content.push(AssistantContent::tool_call(
                     call.id.clone(),
-                    call.name.clone(),
+                    tool_name(&call.name)?,
                     arguments,
                 ));
             }
-            Message::Assistant { id: None, content }
+            Ok(Message::Assistant(AssistantMessage::new(content)))
         }
-        ChatRole::Tool => Message::tool_result(
-            message.tool_call_id.clone().unwrap_or_default(),
-            message.tool_name.clone().unwrap_or_default(),
+        ChatRole::Tool => Ok(Message::tool_result(
+            CallId::from_wire(message.tool_call_id.clone().unwrap_or_default()),
+            tool_name(message.tool_name.as_deref().unwrap_or_default())?,
             message.text(),
-        ),
+        )),
     }
+}
+
+fn tool_name(name: &str) -> Result<ToolName, ModelError> {
+    ToolName::new(name).map_err(|_| ModelError::Context(format!("empty tool name: {name:?}")))
 }
 
 /// Assistant image history only carries data URLs; rig's assistant image
@@ -57,9 +64,9 @@ pub(super) fn tool_calls_of(choice: &[AssistantContent]) -> Vec<super::ModelTool
         .iter()
         .filter_map(|content| match content {
             AssistantContent::ToolCall(call) => Some(super::ModelToolCall {
-                id: call.id.as_str().to_owned(),
-                name: call.function.name.clone(),
-                arguments: call.function.arguments.to_string(),
+                id: call.id.to_string(),
+                name: call.function.name.to_string(),
+                arguments: serde_json::Value::Object(call.function.arguments.clone()).to_string(),
             }),
             _ => None,
         })

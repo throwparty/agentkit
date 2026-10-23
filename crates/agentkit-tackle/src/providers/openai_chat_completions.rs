@@ -4,21 +4,18 @@ use super::rig::{to_rig_message, tool_calls_of};
 use super::{ModelError, ModelProvider, ModelRequest, ModelResponse, ModelUsage};
 use crate::config::Config;
 use crate::credentials::{credential_helper_name, resolve_credential};
-use rig_core::client::CompletionClient as _;
-use rig_core::completion::CompletionModel as _;
-use rig_core::message::{AssistantContent, Message};
+use rig_core::completion::{CompletionRequest, ToolDefinition};
+use rig_core::driver::Model;
+use rig_core::message::{AssistantContent, Message, ToolName};
 use rig_core::providers::openai;
+use rig_core::streaming::{Item, StreamEvent};
 use secrecy::ExposeSecret as _;
 
 /// The rig-backed provider: one endpoint, one wire format.
 pub struct RigProvider {
-    /// The chat-completions model: the completions client (not the
+    /// The chat-completions model: the chat client (not the
     /// responses-API default) provides this model type.
-    model: openai::completion::GenericCompletionModel,
-    /// The bare wire model name: the authority for the request body. A
-    /// ModelRequest may carry the endpoint-qualified address, which
-    /// never rides the wire.
-    model_name: String,
+    model: Model<openai::wire::Chat>,
 }
 
 impl RigProvider {
@@ -29,47 +26,35 @@ impl RigProvider {
         credential: &str,
         model: &str,
     ) -> Result<Self, ModelError> {
-        let client = openai::CompletionsClient::builder()
-            .api_key(credential.to_owned())
-            .base_url(base_url)
-            .build()
-            .map_err(|err| ModelError::Completion(err.to_string()))?;
+        let client = openai::OpenAIConfig::new(credential.to_owned())
+            .with_base_url(base_url)
+            .client();
         Ok(Self {
-            model: client.completion_model(model),
-            model_name: model.to_owned(),
+            model: client.chat(model),
         })
     }
 
-    fn completion(
-        &self,
-        request: ModelRequest,
-    ) -> rig_core::completion::CompletionRequestBuilder<openai::completion::CompletionModel> {
+    fn completion(&self, request: ModelRequest) -> Result<CompletionRequest, ModelError> {
         // The last message is the prompt; everything before is history;
-        // the system prompt rides the legacy preamble (still supported —
-        // the canonical alternative is a leading System message).
+        // the system prompt rides the preamble (a leading System message).
         let mut messages = request.messages.into_iter();
         let prompt = messages
             .next_back()
             .map(|message| to_rig_message(&message))
+            .transpose()?
             .unwrap_or_else(|| Message::user(""));
-        let mut builder = self
-            .model
-            .completion_request(prompt)
-            .messages(
-                messages
-                    .map(|message| to_rig_message(&message))
-                    .collect::<Vec<_>>(),
-            )
-            .preamble(request.system)
-            .model(self.model_name.clone());
+        let history = messages
+            .map(|message| to_rig_message(&message))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut builder = CompletionRequest::new(prompt)
+            .messages(history)
+            .preamble(request.system);
         for tool in request.tools {
-            builder = builder.tool(rig_core::completion::request::ToolDefinition {
-                name: tool.name,
-                description: tool.description,
-                parameters: tool.parameters,
-            });
+            let name = ToolName::new(tool.name)
+                .map_err(|_| ModelError::Context("empty tool name".to_owned()))?;
+            builder = builder.tool(ToolDefinition::new(name, tool.description, tool.parameters));
         }
-        builder
+        Ok(builder)
     }
 }
 
@@ -109,44 +94,23 @@ impl ModelProvider for RigProvider {
         on_thought_delta: &mut (dyn FnMut(&str) + Send),
     ) -> Result<ModelResponse, ModelError> {
         use futures::StreamExt as _;
-        use rig_core::streaming::StreamedAssistantContent;
 
-        let completion = self.completion(request);
-        let mut stream = completion
-            .stream()
-            .await
+        let completion = self.completion(request)?;
+        let mut stream = self
+            .model
+            .stream(completion)
             .map_err(|err| ModelError::Completion(err.to_string()))?;
         let mut text = String::new();
-        let mut usage = ModelUsage::default();
-        // Providers stream reasoning either as incremental deltas or as one
-        // complete block that supersedes them; track whether deltas flowed
-        // so a trailing complete block is not replayed on top of them.
-        let mut thoughts_flowed = false;
 
         while let Some(part) = stream.next().await {
             match part {
-                Ok(StreamedAssistantContent::Text(delta)) => {
-                    on_text_delta(&delta.text);
-                    text.push_str(&delta.text);
+                Ok(Item::Event(StreamEvent::Text { text: delta, .. })) => {
+                    on_text_delta(&delta);
+                    text.push_str(&delta);
                 }
-                Ok(StreamedAssistantContent::ReasoningDelta { reasoning, .. }) => {
-                    if !reasoning.is_empty() {
-                        thoughts_flowed = true;
-                        on_thought_delta(&reasoning);
-                    }
-                }
-                Ok(StreamedAssistantContent::Reasoning { reasoning, .. }) => {
-                    if !thoughts_flowed {
-                        for block in &reasoning.content {
-                            if let rig_core::completion::message::ReasoningContent::Text {
-                                text: thought,
-                                ..
-                            } = block
-                            {
-                                on_thought_delta(thought);
-                            }
-                        }
-                        thoughts_flowed = true;
+                Ok(Item::Event(StreamEvent::Reasoning { text: delta, .. })) => {
+                    if !delta.is_empty() {
+                        on_thought_delta(&delta);
                     }
                 }
                 Ok(_) => {} // tool calls land with the registry
@@ -163,8 +127,19 @@ impl ModelProvider for RigProvider {
             }
         }
 
+        let response = match stream.finish().await {
+            Ok(response) => response,
+            Err(err) => {
+                return Err(ModelError::StreamFailed {
+                    text_len: text.len(),
+                    text,
+                    error: err.to_string(),
+                });
+            }
+        };
+
         // The aggregated choice is authoritative for the final text.
-        let final_text = stream
+        let final_text = response
             .choice
             .iter()
             .filter_map(|content| match content {
@@ -176,15 +151,13 @@ impl ModelProvider for RigProvider {
         if !final_text.is_empty() {
             text = final_text;
         }
-        if let Some(terminal) = &stream.response {
-            usage = ModelUsage {
-                input_tokens: terminal.usage.input_tokens,
-                output_tokens: terminal.usage.output_tokens,
-            };
-        }
+        let usage = ModelUsage {
+            input_tokens: response.usage.input_tokens.unwrap_or(0),
+            output_tokens: response.usage.output_tokens.unwrap_or(0),
+        };
         Ok(ModelResponse {
             text,
-            tool_calls: tool_calls_of(&stream.choice),
+            tool_calls: tool_calls_of(&response.choice),
             usage,
         })
     }
