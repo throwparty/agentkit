@@ -14,6 +14,22 @@ Zed `main` has landed the client side of the [Subagent Sessions RFD](https://age
 
 The practical consequence is that a v1 agent must not send `subagent_update` to Zed. Such an update is dropped, with a log line reading "Zed did not advertise the subagents capability".
 
+## How Zed models a subagent
+
+Zed represents a subagent as its own `AcpThread`, created when the parent's `subagent_update` arrives (`crates/agent_servers/src/acp.rs`, `apply_subagent_update`). The child's notifications are applied to the child's thread and never reach the parent thread. That is the client-side form of the two-plane split a harness has to produce on the wire.
+
+The association the parent holds (`crates/acp_thread/src/subagents.rs`, `SubagentAssociation`) carries only the parent's `title`, `description`, and whether `cancel` is permitted. It deliberately does not carry work state: `state` is the child's activity, and it lives on the child's own thread.
+
+For v1, the parent-carried `state` snapshot is converted to the v2 `StateUpdate` shape through JSON, so unknown states and stop reasons survive the trip rather than being dropped. v1 `_meta` on the association is discarded, because v2 patches association metadata by top-level key instead.
+
+## Cost and usage
+
+Each thread stores its own usage. `AcpThread` holds `token_usage` and `cost` (`crates/acp_thread/src/acp_thread.rs:3932-3933`), both filled from that session's own `usage_update`. A subagent is an agent-owned thread of its own (`agent_owned`, line 3957) that the parent holds in a `subagents` map, and the client aggregates nothing from it. The subagent card in the parent thread shows a label, a status, an error, and a stop control, and no cost (`crates/agent_ui/src/conversation_view/subagent_card.rs`).
+
+So the client never adds a parent's cost to a child's. The RFD's rules match this: cost is optional, a parent's reported cost may include child work, a child's may overlap, and clients must not sum. There is no cost-scope field and no accounting negotiation, so a harness cannot express an exclusive breakdown even if it wanted to. A harness that wants the parent's figure to cover its children has to report it that way itself, because nothing downstream will do it.
+
+An idle state snapshot carries its own `usage` with input and output tokens, which `update_session_state` folds into the thread's token usage (lines 4569-4587). The child's foreground state is unconfirmed until the agent reports one, which is why `agent_owned` marks the activity unconfirmed (line 3959).
+
 ## The `acp-beta` flag
 
 `acp-beta` is a Zed feature flag (`crates/feature_flags/src/flags.rs`). It is a plain presence flag that overrides nothing, so `enabled_for_staff()` keeps its default of true and `enabled_for_all()` is false.
