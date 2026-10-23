@@ -1,0 +1,9 @@
+flowchart TD
+    Client["ACP client"] -->|"initialize protocolVersion"| Neg["version negotiation"]
+    Neg -->|"1"| V1["acp::v1"]
+    Neg -->|"2"| V2["acp::v2"]
+    V1 --> Common["acp::common"]
+    V2 --> Common
+    V1 -. "forbidden" .-> V2
+    V2 -. "forbidden" .-> V1
+    Common --> Core["agent / store / invokables / mcp"]
