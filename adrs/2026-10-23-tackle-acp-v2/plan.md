@@ -1,0 +1,208 @@
+# Tackle: ACP v2 Server Support — Implementation Plan
+
+## Approach
+
+Conformance-driven, in three phases. Phase 0 is the baseline: tackle is already fully ACP v1 conformant against the pinned acp-tck suite (just tackle conformance reports CONFORMANT with an empty MANDATORY baseline), so v1 conformance is a fixed reference rather than a goal. Phase 1 is the inert structural refactor — replace acp_v1 with acp::v1, lift protocol-neutral orchestration into acp::common, move transports to acp::transport, and introduce a version-negotiating entry point that routes to v1 only; its exit criterion is that the v1 acp-tck run still reports CONFORMANT, which is a stronger inertness proof than the unit suite alone. Phase 2 implements acp::v2 on the SDK's draft v2 builder and iterates against acp-tck --protocol-version 2 until it reports CONFORMANT; conformance is the primary acceptance signal, and manual or client testing does not begin until it passes. Phase 3 covers what the TCK does not — the in-process harness for behaviours outside its scope (the v1/v2 boundary, client-provided MCP server forwarding, the draft session/fork, compaction and notices gating, client-tooling absence) and then manual testing against Zed behind its acp-beta flag. Because the pinned SDK already implements the v2 baseline and the protocol router already performs version negotiation, no SDK work is required; the work is adaptation, orchestration, conformance, and documentation.
+
+Do not attempt to unify the v1 and v2 wire types. The two lifecycles differ enough (v1 holds the prompt response open for the whole turn; v2 responds on insertion and streams foreground state separately) that a shared abstraction over them would be leakier than the duplication it removes. Share only the decisions that must not diverge, and let each version render them.
+
+Prior art and known loss. The ACP organisation's own codex-acp adapter is a shipped, conformance-tested implementation that speaks v1 and unstable v2 from one process with per-connection negotiation and registers the draft session/fork; it supersedes OpenCode's closed v2 pull request as the architectural reference. The known regression is client tooling: v2 removes the client filesystem and terminal surface and directs clients to expose those capabilities as an MCP server, and no client is known to do so yet.
+
+## Architecture
+
+### Entry point and negotiation
+
+One entry point, selected per connection. acp::mod exposes run_acp_over(state, transport), built on Agent.protocol_router().with_v1(..).with_v2(..). The router reads the initial initialize request, selects the highest configured implementation compatible with the client's requested version, and forwards the connection; it emits -32022 with requested and supported itself when nothing is compatible. This satisfies version negotiation without hand-rolled dispatch. run_acp_over stays generic over the transport (ConnectTo<Agent>), so the stdio and HTTP entry points call it unchanged; only the per-connection setup that currently calls the v1 builder moves behind it. Because a single connection speaks exactly one version after initialize, each version module owns its connection end to end and there is no per-message branching.
+
+### Module layout
+
+The crate moves from src/acp_v1/ to a directory module. common and transport are new; v1 is the existing surface relocated; v2 is new.
+
+```text
+src/acp/
+├── mod.rs              # declares common/v1/v2/transport; run_acp_over (Agent.protocol_router)
+├── transport.rs        # run_stdio (from acp_v1/server.rs)
+├── http.rs             # axum HTTP transport (moved from acp_v1/http.rs)
+├── common/
+│   ├── mod.rs          # re-exports the shared surface
+│   ├── ids.rs          # store SessionId <-> wire SessionId mapping
+│   ├── connection.rs   # shared per-connection state: the MCP pool (config + client-forwarded)
+│   ├── dispatch.rs     # first user text -> Dispatch decision (Model | Fork | Direct | Mcp | Editor | Context | Compaction)
+│   ├── session.rs      # lease acquire/release, begin_prompt_turn, turn + user-message persistence, updated_at
+│   ├── commands.rs     # domain command catalogue; /mcp parsing applied to common::connection
+│   ├── config.rs       # actor/model resolution and config-option domain values
+│   ├── replay.rs       # turn-DAG walk -> ordered NeutralEvent stream
+│   ├── report.rs       # /context composition report assembly (reuses agent::context_report)
+│   └── messages.rs     # assistant-message persistence + neutral emission scaffolding
+├── v1/
+│   ├── mod.rs
+│   ├── server.rs       # v1 ConnectTo builder: handler registration + dispatch-ladder wiring
+│   ├── initialize.rs   # initialize + authenticate
+│   ├── capabilities.rs # v1 AgentCapabilities + UnstableFeature meta keys
+│   ├── negotiation.rs  # v1 per-connection state: unstable set, client fs/terminal caps, editor toggles, terminals
+│   ├── sessions.rs     # new/list/close/load/resume/delete/set_config
+│   ├── prompt.rs       # prompt handler: intercepts + model turn (pending-response)
+│   ├── sink.rs         # TurnSink -> v1 SessionNotification; usage_update; wire_kind
+│   ├── permission.rs   # v1 request_permission bridge
+│   ├── replay.rs       # NeutralEvent -> v1 notifications (session/load)
+│   ├── notices.rs      # v1 notice sink (capability-gated)
+│   ├── config_options.rs # domain options -> v1 configOptions
+│   ├── commands.rs     # v1 available_commands_update; /editor toggles
+│   ├── context.rs      # /context emission
+│   ├── client_tools.rs # client fs/terminal tools (v1-only)
+│   └── tests.rs
+└── v2/
+    ├── mod.rs
+    ├── server.rs       # v2 ConnectTo builder: handler registration + dispatch-ladder wiring
+    ├── initialize.rs   # initialize (v2 caps, required info) + auth/login + auth/logout
+    ├── capabilities.rs # v2 capabilities: object markers, session-nested groups
+    ├── negotiation.rs  # v2 per-connection state: elicitation modes; no editor toggles or terminals
+    ├── sessions.rs     # new/list/resume(replayFrom)/close/delete/set_config
+    ├── prompt.rs       # insertion response + spawned turn; dispatches via common
+    ├── foreground.rs   # per-session aggregate state machine (running/idle/requires_action) + stop reasons
+    ├── sink.rs         # TurnSink -> v2 SessionUpdate
+    ├── permission.rs   # v2 request_permission (required title, optional subject)
+    ├── replay.rs       # NeutralEvent -> v2 updates; replayFrom start
+    ├── notices.rs      # v2 notice + compaction updates (capability-free)
+    ├── config_options.rs # domain options -> v2 configOptions (configId + type discriminator)
+    ├── commands.rs     # v2 available_commands_update (input.type discriminator)
+    ├── context.rs      # /context emission
+    ├── fork.rs         # draft session/fork
+    └── tests.rs
+```
+
+### What is shared and what is duplicated
+
+common holds only decisions that must not diverge:
+
+| Responsibility | common | v1 | v2 |
+|---|---|---|---|
+| Command decision (dispatch) | yes | reuse | reuse |
+| Lease, turn and message persistence | yes | reuse | reuse |
+| MCP pool and /mcp handling | yes | reuse | reuse |
+| Config/actor resolution | yes | reuse | reuse |
+| Replay DAG walk (NeutralEvent) | yes | render | render |
+| Wire types and rendering | no | yes | yes |
+| Capability map | no | yes | yes |
+| Prompt lifecycle handler | no | pending-response | insert-then-stream |
+| Permission request shape | no | v1 shape | v2 shape |
+| Client fs/terminal tools | no | yes | absent (protocol removed) |
+| Fork | no | /fork prompt | session/fork + /fork |
+
+### v2 prompt lifecycle
+
+The v2 prompt handler is a structural variant, not a flag. On session/prompt it persists the user message through common::session, responds immediately with its messageId, then spawns the turn. Foreground work is tracked in v2::foreground, which owns the aggregate state and emits state_update transitions: running when work starts, requires_action while a permission request blocks it, and idle with a stop reason when it ends. A failure after insertion ends as an idle state_update with the error stop reason; a rejection before insertion stays a JSON-RPC error and emits no user-message update. Both versions call common::dispatch, so the slash-command ladder cannot diverge.
+
+### Event mapping
+
+The v2 TurnSink maps usage to usage_update, text_delta to agent_message_chunk, thought_delta to agent_thought_chunk, a new tool call to the first tool_call_update keyed by toolCallId, a terminal tool update to a patching tool_call_update, and session_info to session_info_update. Compaction and notices lose their client-capability gates and become unconditional v2 updates. v2 display-only terminals are not used: tackle executes no commands itself (MCP servers do), so there is no agent-owned terminal state to report.
+
+### Replay
+
+common::replay walks the turn DAG once and produces an ordered NeutralEvent stream (user/assistant/thought messages, tool calls and results, usage, compaction boundaries). v1::replay renders it for session/load; v2::replay renders it for session/resume with replayFrom start and then reports a current-state snapshot before the response. Retained user messages keep the messageId returned by session/prompt.
+
+### Conformance-driven validation
+
+The pinned acp-tck suite is the primary validation loop, not a final checkpoint, and v2 is developed against it rather than against hand-written expectations. Its opt-in v2 suite (--protocol-version 2) covers the v2 baseline: initialize and version negotiation, session/new, the prompt turn and state_update lifecycle with cancellation confirmed by a terminating cancelled idle update, session/request_permission, auth/login and auth/logout, config options, session/resume replay ordering, session list/close/delete and additionalDirectories, client-provided MCP server config, keyed upsert and patch semantics, open-enum emitter rules, and stdio transport hygiene. That is nearly the whole surface this ADR implements. Two runner changes are required in crates/agentkit-tackle/mod.just: parameterise the run by protocol version (it hardcodes --protocol-version 1 today) and key the baseline by version, so a v2 gap cannot hide behind the empty v1 baseline and the two suites cannot mask each other. Because acp-tck forces NOT CONFORMANT on a version mismatch, a passing v2 run proves the connection actually negotiated v2 rather than merely offering it. The deterministic test model is reused; the cancel sentinel is extended only if the v2 suite needs new behaviour.
+
+### Testing strategy, in order of authority
+
+First, conformance. just tackle conformance, run for each protocol version, is the acceptance gate. For v1 this is already true and the refactor must preserve it: the committed MANDATORY baseline is empty, so any regression surfaces as a new failure. For v2 the suite is run until CONFORMANT before anything else is attempted; a v2 failure is a work item, not a caveat.
+
+Second, the in-process harness and unit tests cover what the TCK does not. Unit: common::dispatch over first-user-text inputs with the v1 guardrails; common::replay ordering and compaction truncation; v1::capabilities and v2::capabilities shape; v1::sink and v2::sink event mapping including cost omission; v2::foreground state transitions and idempotent snapshots. Integration: the existing v1 suites remain the regression gate and must pass unchanged after the refactor (initialize, tool_turn, client_tools, fork, compaction, usage, context, config_options, first_run, restart_load, two_process, http, mcp_pool, agent_invocation, shutdown). New v2 suites cover the areas the TCK does not: the acp::v1/acp::v2 boundary (a v1 connection observes no v2 update and vice versa), client-provided MCP server forwarding with a model tool call through the permission pipeline, the draft session/fork and its /fork fallback, compaction and notices gating, and the first-turn absence report when a v2 client brings no MCP server. The arch-lint boundary runs with a negative fixture proving an acp::v1 to acp::v2 import fails the check.
+
+Third, and only once conformance and the harness pass, manual testing against Zed behind its acp-beta flag, the one deployed v2 client. Golden transcripts remain for behaviours the TCK does not cover; they are no longer the primary conformance instrument.
+
+
+```mermaid
+flowchart TD
+    Client["ACP client"] -->|"initialize protocolVersion"| Neg["version negotiation"]
+    Neg -->|"1"| V1["acp::v1"]
+    Neg -->|"2"| V2["acp::v2"]
+    V1 --> Common["acp::common"]
+    V2 --> Common
+    V1 -. "forbidden" .-> V2
+    V2 -. "forbidden" .-> V1
+    Common --> Core["agent / store / invokables / mcp"]
+
+```
+
+## Technologies
+
+| Technology | Role |
+|------------|------|
+| agent-client-protocol 2.2.0 | The pinned SDK already carries the full stable v2 schema and runtime behind the unstable_protocol_v2 feature, and session/fork behind unstable_session_fork. Agent.v2(), V2Builder, V2ConnectionTo, and the typed handlers cover every baseline method; AgentProtocolRouter performs version negotiation. No bump, fork, or patch. |
+| Existing axum + Lines transport | The HTTP and stdio paths already carry an arbitrary JSON-RPC line stream through the SDK's generic transport, so they carry whichever version the router selects with no change beyond calling the new entry point. |
+| tokio | The v2 respond-then-stream lifecycle runs the turn on a spawned task so the dispatch loop stays free to route client messages, as the v1 model turn already does. |
+| arch-lint | A declarative arch-lint.toml rule denies any import from acp::v1 into acp::v2 and the reverse, run as a CI gate. cargo-deny cannot express intra-crate module rules, so it does not cover this. |
+| ACP Test Compatibility Kit (acp-tck) | The protocol's conformance kit, pinned as a flake input and run in CI. It carries a v1 suite (the default) and an opt-in v2 suite (--protocol-version 2) covering the v2 baseline, and it is the primary v2 acceptance gate. It forces NOT CONFORMANT on a version mismatch, so a pass proves negotiation. |
+| tackle-test-model | The deterministic OpenAI-compatible fixture the runner starts so prompt turns are reproducible offline, with a cancel sentinel that holds the stream open for cancellation tests. Reused unchanged for v2 unless the v2 suite needs new behaviour. |
+| In-process ACP test harness | The existing v1 integration client extended to a v2 client, covering behaviours the TCK does not: the cross-version boundary, client-provided MCP server forwarding, fork, and gating. Secondary to conformance. |
+
+## Components
+
+### acp::common
+
+The shared, version-neutral orchestration that v1 and v2 both call
+
+ids (store<->wire id mapping), connection (the shared MCP pool), dispatch (first user text to a Dispatch decision), session (lease, begin_prompt_turn, turn and user-message persistence, updated_at), commands (domain command catalogue and /mcp), config (actor/model and config-option domain values), replay (DAG walk to NeutralEvent), report (/context assembly), messages (assistant-message persistence). Must not depend on acp::v1 or acp::v2.
+
+
+### acp::v1
+
+The existing v1 surface, relocated with no behaviour change
+
+server (ConnectTo builder and dispatch-ladder wiring), initialize, capabilities, negotiation, sessions, prompt (pending-response), sink, permission, replay, notices, config_options, commands, context, client_tools (v1-only), tests. Behaviour is preserved exactly, and v1 conformance is the regression gate.
+
+
+### acp::v2
+
+The new v2 surface
+
+server, initialize (with auth/login and auth/logout), capabilities (object markers, session-nested groups), negotiation, sessions (resume-based replay), prompt (insertion response plus spawned turn), foreground (aggregate state and stop reasons), sink, permission (title and subject), replay (replayFrom start), notices (capability-free compaction and notices), config_options (configId and type), commands (input.type), context, fork (draft session/fork), tests.
+
+
+### acp::transport
+
+Version-agnostic carriage of whichever version is selected
+
+transport.rs runs stdio through run_acp_over; http.rs is the axum JSON-RPC-over-POST and SSE transport moved from acp_v1/http.rs. Both call run_acp_over and are generic over the negotiated version, so the conformance suite drives the same binary the client would.
+
+
+### Version negotiation entry point
+
+Selects the version once, per connection
+
+run_acp_over in acp::mod wraps Agent.protocol_router() with both implementations. The router owns compatibility selection and the -32022 rejection, so no version-selection logic is written by hand.
+
+
+### Conformance runner and baseline
+
+The validation gate for both protocol versions
+
+crates/agentkit-tackle/mod.just drives the pinned acp-tck suite over stdio through the deterministic test model and diffs the report against a committed baseline via tackle-conformance-check. It gains a protocol-version parameter and a per-version baseline. The v1 baseline is empty today; the v2 baseline starts as the known-gap list and is burned down to empty before manual testing.
+
+
+### Documentation
+
+The per-version support matrix and per-client pages
+
+A support matrix in docs/docs/dev/tackle states v1 and v2 support per functionality area and marks draft-gated features, and records that v1 is acp-tck conformant while v2 is confirmed only by the TCK plus the in-process harness. clients/ gains a page per reviewed ACP v2 client describing how it exposes file and command tooling under v2. protocol.mdx is updated to cover both versions. The ecosystem research in research/acp-v2-ecosystem.md is the evidence base and is referenced from the client pages.
+
+
+### arch-lint configuration
+
+Machine-enforced module boundary
+
+arch-lint.toml declares the acp::common / acp::v1 / acp::v2 layering and the sibling prohibition, wired into the existing CI gate.
+
+
+## Data Flow
+
+initialize arrives on the connection; the protocol router selects v1 or v2 from protocolVersion and forwards the connection to that implementation. session/new connects any client-provided mcpServers through common::connection and returns the session with configOptions and availableCommands. A v2 session/prompt persists the user message, responds with its messageId, and spawns the turn; the turn streams agent_message_chunk and tool_call_update notifications while v2::foreground moves the session running and, when blocked on permission, requires_action; it ends with an idle state_update carrying the stop reason. session/resume with replayFrom start walks the DAG through common::replay, renders the NeutralEvent stream as v2 updates, and reports current state before responding. Under v1 the same decisions, persistence, and DAG walk are used, but the events are rendered against the v1 schema and the turn's stop reason rides the prompt response. Both versions are exercised end to end by the same acp-tck runner, selected by protocol version.
+
+
+## Deployment
+
+v2 is compiled and offered unconditionally; there is no compile-time or runtime gate. The ACP SDK's unstable_protocol_v2 and unstable_session_fork features are enabled in the crate. Both transports serve both versions, and one process can serve v1 and v2 connections concurrently. The acp-tck conformance jobs for both protocol versions run in CI alongside the existing suite, and manual testing is gated behind both passing. The only new dependency, arch-lint, is a development-time CI check and is not linked into the binary.
+
