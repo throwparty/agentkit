@@ -68,6 +68,7 @@
               cosign
               dbus
               goreleaser
+              mold
               nixfmt
               openssl
               otel-desktop-viewer
@@ -75,6 +76,7 @@
               prettier
               python3
               rustup
+              sccache
               shellcheck
               syft
               toml-sort
@@ -127,6 +129,7 @@
                 goreleaser
                 mdformat
                 mingwBinutils
+                mold
                 nixfmt
                 otel-desktop-viewer
                 pkg-config
@@ -134,6 +137,7 @@
                 python3
                 rustToolchain
                 rustup-wrapped
+                sccache
                 shellcheck
                 syft
                 toml-sort
