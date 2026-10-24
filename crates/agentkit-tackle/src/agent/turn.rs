@@ -698,27 +698,24 @@ mod tests {
     struct OneToolCall;
 
     impl ModelProvider for OneToolCall {
-        fn stream_completion(
+        async fn stream_completion(
             &self,
             _request: ModelRequest,
             _on_text_delta: &mut (dyn FnMut(&str) + Send),
             _on_thought_delta: &mut (dyn FnMut(&str) + Send),
-        ) -> impl std::future::Future<Output = Result<ModelResponse, crate::providers::ModelError>> + Send
-        {
-            async move {
-                Ok(ModelResponse {
-                    text: String::new(),
-                    tool_calls: vec![ModelToolCall {
-                        id: "call-1".to_owned(),
-                        name: "test.tool".to_owned(),
-                        arguments: "{}".to_owned(),
-                    }],
-                    usage: ModelUsage {
-                        input_tokens: 1,
-                        output_tokens: 0,
-                    },
-                })
-            }
+        ) -> Result<ModelResponse, crate::providers::ModelError> {
+            Ok(ModelResponse {
+                text: String::new(),
+                tool_calls: vec![ModelToolCall {
+                    id: "call-1".to_owned(),
+                    name: "test.tool".to_owned(),
+                    arguments: "{}".to_owned(),
+                }],
+                usage: ModelUsage {
+                    input_tokens: 1,
+                    output_tokens: 0,
+                },
+            })
         }
     }
 
@@ -763,10 +760,11 @@ mod tests {
         .unwrap();
 
         assert_eq!(outcome.stop, TurnStop::Cancelled);
-        let seen = seen.lock().unwrap();
-        assert_eq!(seen.len(), 1, "the terminal callback fired");
-        assert_eq!(seen[0], "call-1");
-        drop(seen);
+        {
+            let seen = seen.lock().unwrap();
+            assert_eq!(seen.len(), 1, "the terminal callback fired");
+            assert_eq!(seen[0], "call-1");
+        }
 
         let assembled = store.assemble_context(&session).await.unwrap();
         let result = assembled

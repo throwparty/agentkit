@@ -1,0 +1,22 @@
+---
+sidebar_position: 2
+---
+
+# VS Code
+
+VS Code has no native ACP support; ACP clients arrive as extensions. This page reflects the `formulahendry/vscode-acp` ("ACP Client") extension as reviewed on 2026-10-23.
+
+## Protocol version
+
+v1 only. The extension pins a v1-era `@agentclientprotocol/sdk` (`0.14.1`, moving to `0.21.1` in `0.2.0` on 2026-05-16). It does not negotiate ACP v2.
+
+## Tooling story
+
+The extension ships a `FileSystemHandler` and a `TerminalHandler`, and advertises `fs` and `terminal` in `initialize`. Under v1 those capabilities become tackle's `client.fs.*` and `client.terminal.*` tools.
+
+Under ACP v2 that surface is removed. Because this client is v1-only, the question does not arise today; if it gains v2 support it would need to forward an MCP server to retain editor-side tooling.
+
+## What tackle should account for
+
+- The client never negotiates v2, so it always takes the v1 path.
+- Its `fs` and `terminal` handlers are the source of the client-capability tools; no special-casing is needed beyond the normal capability check.

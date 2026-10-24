@@ -1,0 +1,20 @@
+---
+sidebar_position: 4
+---
+
+# Emacs
+
+Emacs support is community-provided by `agent-shell.el`. Reviewed 2026-10-23.
+
+## Protocol version
+
+v1 only. It advertises the v1 capability surface and does not negotiate ACP v2.
+
+## Tooling story
+
+It advertises `fs` only; it does not offer a terminal handler. Under v1 that becomes tackle's `client.fs.*` tools. ACP v2 removes the client `fs` surface, so a v2-capable Emacs client would need to forward an MCP server to keep editor-side file tooling.
+
+## What tackle should account for
+
+- The client always takes the v1 path.
+- No `client.terminal.*` tools exist for this client, because it advertises no terminal capability.
