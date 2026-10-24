@@ -780,6 +780,44 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn an_already_cancelled_turn_never_requests_the_model() {
+        let (store, session, turn) = turn_fixture().await;
+        let provider = TwoRounds(AtomicUsize::new(0));
+        let cancellation = CancellationToken::new();
+        cancellation.cancel();
+
+        let outcome = run_turn(
+            &provider,
+            &store,
+            &session,
+            &turn,
+            "assistant-1",
+            "openai/gpt-4o",
+            "system",
+            vec![ChatContent::text("hi")],
+            Vec::new(),
+            Vec::new(),
+            8,
+            "note",
+            cancellation,
+            |_: u64, _: u64, _: Option<f64>| {},
+            |_: &str| {},
+            |_: &str| {},
+            |_: u32, _: &str| {},
+            |_: &crate::providers::ModelToolCall| {},
+            crate::providers::ignore_tool_call,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(outcome.stop, TurnStop::Cancelled);
+        assert_eq!(
+            provider.0.load(Ordering::SeqCst),
+            0,
+            "a cancelled turn issues no model request"
+        );
+    }
     #[test]
     fn text_blocks_join() {
         let blocks = vec![

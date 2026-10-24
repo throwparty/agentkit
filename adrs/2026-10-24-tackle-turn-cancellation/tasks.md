@@ -54,7 +54,7 @@ In `acp_v1/prompt.rs`, create and register a token for the spawned model turn be
 | Depends On | T-001,T-002,T-003 |
 | References | session-cancel,cleanup-on-cancel,one-mechanism |
 
-### T-005: Cancelled stop reason and finalisation
+### T-005: [x] Cancelled stop reason and finalisation
 
 Map `TurnStop::Cancelled` to `StopReason::Cancelled` in the `run_model_turn_case` response match in `acp_v1/prompt.rs`. Confirm the cancelled path still reports session info, fires the detached hooks, releases the lease, and removes the registry entry.
 
