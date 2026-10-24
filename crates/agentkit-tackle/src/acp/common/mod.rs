@@ -5,4 +5,5 @@
 
 pub(crate) mod dispatch;
 pub mod messages;
+pub(crate) mod replay;
 pub mod session;

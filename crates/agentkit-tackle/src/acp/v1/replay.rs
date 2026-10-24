@@ -1,111 +1,93 @@
-//! Session replay: mapping stored messages to the notification sequence `session/load` sends.
+//! Session replay: rendering the shared neutral replay stream as the
+//! `session/load` notification sequence.
 
 use super::wire_kind;
+use crate::acp::common::replay::{walk, ReplayEvent};
 use agent_client_protocol::schema::v1::{SessionId, SessionNotification, SessionUpdate};
 
-/// Maps stored messages to replay notifications: user/assistant messages
-/// become message chunks (all blocks, sharing the stored message id —
-/// stable identity per logical message); tool calls replay as in-progress
-/// announcements, with their stored result applied as a completed/failed
-/// update; seeds replay as agent chunks; compaction summaries are skipped
-/// in stable v1 replay.
+/// Maps stored messages to replay notifications via the shared neutral walk:
+/// user/assistant messages become message chunks sharing the stored message id
+/// (stable identity per logical message); tool calls replay as in-progress
+/// announcements with their stored result applied as a completed/failed update;
+/// system messages replay as agent chunks; compaction summaries are skipped in
+/// stable v1 replay.
 pub(super) fn replay_updates(
     session_id: &SessionId,
     assembled: &[crate::store::AssembledMessage],
 ) -> Vec<SessionNotification> {
+    walk(assembled)
+        .into_iter()
+        .flat_map(|event| render(session_id, event))
+        .collect()
+}
+
+fn render(session_id: &SessionId, event: ReplayEvent) -> Vec<SessionNotification> {
     use agent_client_protocol::schema::v1::{
         ContentBlock, ContentChunk, MessageId, ToolCall, ToolCallContent, ToolCallStatus,
         ToolCallUpdate, ToolCallUpdateFields,
     };
-    use std::collections::HashSet;
 
     let mut updates = Vec::new();
-    let mut pending_calls: HashSet<String> = HashSet::new();
-    for assembled in assembled {
-        let message = &assembled.message;
-        let message_id = MessageId::new(message.id.clone());
-
-        // Tool messages carry raw JSON (arguments/results), not content
-        // blocks, so handle them before the block parser.
-        match message.role {
-            crate::store::Role::ToolCall => {
-                // Announce the call as it stood live: in progress until a
-                // matching result is replayed.
-                let name = message.tool_name.clone().unwrap_or_default();
-                let arguments: serde_json::Value =
-                    serde_json::from_str(&message.content).unwrap_or(serde_json::Value::Null);
-                updates.push(notification(
-                    session_id,
-                    SessionUpdate::ToolCall(
-                        ToolCall::new(
-                            message.id.clone(),
-                            crate::invokables::titles::tool_call_title(&name, &arguments),
-                        )
-                        .name(name.clone())
-                        .kind(wire_kind(crate::invokables::titles::tool_kind(&name)))
-                        .status(ToolCallStatus::InProgress)
-                        .raw_input(Some(arguments)),
-                    ),
-                ));
-                pending_calls.insert(message.id.clone());
-                continue;
-            }
-            crate::store::Role::ToolResult => {
-                // Pair on the stored call id; an orphan result has no call
-                // to update and is skipped.
-                let Some(call_id) = message.tool_call_id.clone() else {
-                    continue;
-                };
-                if !pending_calls.remove(&call_id) {
-                    continue;
-                }
-                let content: Vec<ToolCallContent> =
-                    match serde_json::from_str::<Vec<ContentBlock>>(&message.content) {
-                        Ok(blocks) => blocks.into_iter().map(ToolCallContent::from).collect(),
-                        Err(_) => Vec::new(),
-                    };
-                let status = if message.is_error == Some(true) {
-                    ToolCallStatus::Failed
-                } else {
-                    ToolCallStatus::Completed
-                };
-                let fields = ToolCallUpdateFields::new().status(status).content(content);
-                updates.push(notification(
-                    session_id,
-                    SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(call_id, fields)),
-                ));
-                continue;
-            }
-            _ => {}
+    match event {
+        ReplayEvent::ToolCall {
+            id,
+            name,
+            arguments,
+        } => {
+            updates.push(notification(
+                session_id,
+                SessionUpdate::ToolCall(
+                    ToolCall::new(
+                        id,
+                        crate::invokables::titles::tool_call_title(&name, &arguments),
+                    )
+                    .name(name.clone())
+                    .kind(wire_kind(crate::invokables::titles::tool_kind(&name)))
+                    .status(ToolCallStatus::InProgress)
+                    .raw_input(Some(arguments)),
+                ),
+            ));
         }
-
-        let blocks: Vec<ContentBlock> = match serde_json::from_str(&message.content) {
-            Ok(blocks) => blocks,
-            Err(_) => continue, // unparseable stored content: skip, never crash replay
-        };
-
-        match message.role {
-            crate::store::Role::User => {
-                for block in blocks {
-                    updates.push(notification(
-                        session_id,
-                        SessionUpdate::UserMessageChunk(
-                            ContentChunk::new(block).message_id(message_id.clone()),
-                        ),
-                    ));
-                }
+        ReplayEvent::ToolResult {
+            call_id,
+            is_error,
+            content_json,
+        } => {
+            let content: Vec<ToolCallContent> =
+                serde_json::from_str::<Vec<ContentBlock>>(&content_json)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(ToolCallContent::from)
+                    .collect();
+            let status = if is_error {
+                ToolCallStatus::Failed
+            } else {
+                ToolCallStatus::Completed
+            };
+            let fields = ToolCallUpdateFields::new().status(status).content(content);
+            updates.push(notification(
+                session_id,
+                SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(call_id, fields)),
+            ));
+        }
+        ReplayEvent::Message {
+            id,
+            is_user,
+            blocks_json,
+        } => {
+            let Ok(blocks) = serde_json::from_str::<Vec<ContentBlock>>(&blocks_json) else {
+                return updates; // unparseable stored content: never crash replay
+            };
+            let message_id = MessageId::new(id);
+            for block in blocks {
+                let chunk = ContentChunk::new(block).message_id(message_id.clone());
+                let update = if is_user {
+                    SessionUpdate::UserMessageChunk(chunk)
+                } else {
+                    SessionUpdate::AgentMessageChunk(chunk)
+                };
+                updates.push(notification(session_id, update));
             }
-            crate::store::Role::Assistant | crate::store::Role::System => {
-                for block in blocks {
-                    updates.push(notification(
-                        session_id,
-                        SessionUpdate::AgentMessageChunk(
-                            ContentChunk::new(block).message_id(message_id.clone()),
-                        ),
-                    ));
-                }
-            }
-            _ => {}
         }
     }
     updates

@@ -15,7 +15,7 @@ Parameterise the conformance runner in crates/agentkit-tackle/mod.just by protoc
 | Depends On |  |
 | References | conformance-runner-coverage,protocol-conformance |
 
-### T-002: Extract acp::common
+### T-002: [x] Extract acp::common
 
 Lift the protocol-neutral orchestration out of acp_v1 into a new acp::common module: ids, the shared MCP pool connection state, the version-neutral prompt dispatch decision, lease and prompt-turn persistence, the domain command catalogue, actor/model and config-option resolution, the replay DAG walk to a NeutralEvent stream, the /context report assembly, and assistant-message persistence. No behaviour change.
 
