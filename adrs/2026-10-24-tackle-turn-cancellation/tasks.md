@@ -119,7 +119,7 @@ Extend the existing in-process ACP integration harness with cancellation coverag
 | Depends On | T-005,T-006,T-007,T-008 |
 | References | transcript-coverage,no-updates-after-response,cancel-during-tool-call,connection-drops,nested-agent-loop |
 
-### T-010: Golden-transcript cancel coverage
+### T-010: [x] Golden-transcript cancel coverage
 
 Add transcript steps covering a cancelled turn and a close during a turn to `crates/agentkit-tackle/tests/acp_v1_conformance.rs` and `tests/transcripts`, keeping the existing subset-match semantics.
 
