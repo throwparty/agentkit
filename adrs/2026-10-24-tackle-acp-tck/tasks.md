@@ -54,7 +54,7 @@ When a request contains the value passed to --cancel-sentinel, respond with head
 | Depends On | T-003 |
 | References | cancellation-exercise,cancellation-exercised |
 
-### T-005: Test model tests
+### T-005: [x] Test model tests
 
 Add offline tests for tackle-test-model: the streaming reply shape for a normal request, the non-streaming reply, the held-open sentinel, and prompt cancellation. Keep them network-free.
 
