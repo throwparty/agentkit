@@ -37,7 +37,7 @@ fn text_chunk(message_id: &str, text: &str) -> ContentChunk {
     )
 }
 
-fn wire_kind(kind: crate::invokables::titles::ToolKind) -> WireKind {
+pub(super) fn wire_kind(kind: crate::invokables::titles::ToolKind) -> WireKind {
     use crate::invokables::titles::ToolKind;
     match kind {
         ToolKind::Read => WireKind::Read,

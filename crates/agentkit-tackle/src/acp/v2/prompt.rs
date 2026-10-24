@@ -9,7 +9,8 @@ use crate::agent::prompt::run_prompt_turn;
 use crate::agent::runtime::TurnRuntime;
 use crate::agent::TurnStop;
 use crate::invokables::client_tools::{ClientToolExecutor, Executed};
-use crate::permissions::{PermissionChoice, PermissionRequest, PermissionRequester};
+use std::future::Future;
+use std::pin::Pin;
 use crate::scripts::host::NoticeSink;
 use crate::state::TackleState;
 use crate::store::SessionId;
@@ -20,8 +21,6 @@ use agent_client_protocol::schema::v2::{
     UserMessage,
 };
 use agent_client_protocol::{Error, Responder, V2ConnectionTo};
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
 /// `session/prompt`: the insertion response is the user message id; the turn
@@ -103,7 +102,10 @@ pub(super) async fn handle_prompt(
         cancellation: cancellation.clone(),
         pool: negotiation.mcp_pool(),
         sink: Arc::new(super::sink::ConnectionTurnSink::new(cx.clone())),
-        requester: Arc::new(DenyRequester),
+        requester: Arc::new(super::permission::AcpPermissionRequester {
+            cx: cx.clone(),
+            session_id: wire_session.clone(),
+        }),
         executor: Arc::new(NoClientTools),
         tracker: negotiation.clone(),
         compaction_notices: Arc::new(NullNotices),
@@ -114,7 +116,7 @@ pub(super) async fn handle_prompt(
     let turn_cx = cx.clone();
     cx.spawn(async move {
         let _registration = registration;
-        send_state(
+        super::send_state(
             &turn_cx,
             &wire_session,
             StateUpdate::Running(RunningStateUpdate::new()),
@@ -138,33 +140,13 @@ pub(super) async fn handle_prompt(
             Err(_) if cancellation.is_cancelled() => StopReason::Cancelled,
             Err(_) => StopReason::Error(ErrorStopReason::new()),
         };
-        send_state(
+        super::send_state(
             &turn_cx,
             &wire_session,
             StateUpdate::Idle(IdleStateUpdate::new().stop_reason(Some(stop))),
         );
         Ok(())
     })
-}
-
-fn send_state(cx: &V2ConnectionTo<Client>, session: &agent_client_protocol::schema::v2::SessionId, state: StateUpdate) {
-    let _ = cx.send_notification(UpdateSessionNotification::new(
-        session.clone(),
-        SessionUpdate::StateUpdate(state),
-    ));
-}
-
-/// v2 carries no permission surface yet (it lands with the permission work);
-/// until then, foreground tools are declined.
-struct DenyRequester;
-
-impl PermissionRequester for DenyRequester {
-    fn request(
-        &self,
-        _request: PermissionRequest,
-    ) -> Pin<Box<dyn Future<Output = PermissionChoice> + Send + '_>> {
-        Box::pin(async { PermissionChoice::RejectAlways })
-    }
 }
 
 /// ACP v2 removed the client filesystem and terminal surface, so the catalog
