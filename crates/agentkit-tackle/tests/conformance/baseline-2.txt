@@ -1,18 +1,2 @@
 # MANDATORY acp-tck requirements expected to fail.
 # Known gaps, to be burned down. Regenerate with --seed after review.
-
-ACP-AUTH-202
-ACP-AUTH-206
-ACP-AUTH-207
-ACP-BATCH-201
-ACP-BATCH-202
-ACP-EXT-204
-ACP-INIT-203
-ACP-INIT-204
-ACP-INIT-205
-ACP-INIT-206
-ACP-INIT-207
-ACP-SCHEMA-001
-ACP-TRANSPORT-002
-ACP-TRANSPORT-201
-ACP-TRANSPORT-203

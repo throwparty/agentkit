@@ -210,7 +210,7 @@ Implement the draft session/fork surface, advertised under session.fork, creatin
 | Depends On | T-008 |
 | References | v2-session-fork |
 
-### T-017: v2 conformance burn-down
+### T-017: [x] v2 conformance burn-down
 
 Run just tackle conformance 2, triage the report, and fix failures until the v2 suite reports CONFORMANT: no MANDATORY failure or untested requirement, no advertised-capability failure, and no version-mismatch or auth block. Burn the v2 baseline down to empty, fixing rather than seeding unless a genuinely inapplicable requirement is documented.
 
