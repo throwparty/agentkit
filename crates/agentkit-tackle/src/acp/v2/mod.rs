@@ -5,6 +5,7 @@
 pub mod capabilities;
 pub mod commands;
 pub mod initialize;
+pub mod mcp;
 pub mod negotiation;
 pub mod notices;
 pub mod permission;

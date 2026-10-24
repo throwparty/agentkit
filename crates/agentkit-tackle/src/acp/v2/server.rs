@@ -5,9 +5,9 @@ use super::negotiation::ConnectionNegotiation;
 use crate::state::TackleState;
 use agent_client_protocol::role::acp::Client;
 use agent_client_protocol::schema::v2::{
-    CancelSessionNotification, CloseSessionRequest, DeleteSessionRequest, InitializeRequest,
-    ListSessionsRequest, LoginAuthRequest, LogoutAuthRequest, NewSessionRequest, PromptRequest,
-    ResumeSessionRequest, SetSessionConfigOptionRequest,
+    CancelSessionNotification, CloseSessionRequest, DeleteSessionRequest, ForkSessionRequest,
+    InitializeRequest, ListSessionsRequest, LoginAuthRequest, LogoutAuthRequest, NewSessionRequest,
+    PromptRequest, ResumeSessionRequest, SetSessionConfigOptionRequest,
 };
 use agent_client_protocol::{Agent, V2ConnectionTo};
 use std::sync::Arc;
@@ -52,10 +52,17 @@ pub(crate) fn agent(
         .on_receive_request(
             {
                 let state = state.clone();
+                let negotiation = negotiation.clone();
                 async move |request: NewSessionRequest,
                             responder,
                             _connection: V2ConnectionTo<Client>| {
-                    super::sessions::handle_new_session(state.clone(), request, responder).await
+                    super::sessions::handle_new_session(
+                        state.clone(),
+                        negotiation.clone(),
+                        request,
+                        responder,
+                    )
+                    .await
                 }
             },
             agent_client_protocol::on_receive_request!(),
@@ -106,11 +113,18 @@ pub(crate) fn agent(
         .on_receive_request(
             {
                 let state = state.clone();
+                let negotiation = negotiation.clone();
                 async move |request: ResumeSessionRequest,
                             responder,
                             connection: V2ConnectionTo<Client>| {
-                    super::sessions::handle_resume_session(state.clone(), connection, request, responder)
-                        .await
+                    super::sessions::handle_resume_session(
+                        state.clone(),
+                        negotiation.clone(),
+                        connection,
+                        request,
+                        responder,
+                    )
+                    .await
                 }
             },
             agent_client_protocol::on_receive_request!(),
@@ -140,6 +154,18 @@ pub(crate) fn agent(
                             responder,
                             _connection: V2ConnectionTo<Client>| {
                     super::sessions::handle_delete_session(state.clone(), request, responder).await
+                }
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            {
+                let state = state.clone();
+                async move |request: ForkSessionRequest,
+                            responder,
+                            connection: V2ConnectionTo<Client>| {
+                    super::sessions::handle_fork_session(state.clone(), connection, request, responder)
+                        .await
                 }
             },
             agent_client_protocol::on_receive_request!(),

@@ -5,6 +5,7 @@
 use crate::agent::config_options::{
     self, ConfigOption, ConfigOptionCategory, ConfigOptionKind, SelectOption,
 };
+use crate::agent::fork::{self, fork_access};
 use crate::agent::{script_loop, seed as first_run};
 use crate::content::timestamp;
 use crate::scripts::host::NoticeSink;
@@ -13,7 +14,8 @@ use crate::store::{ListFilter, Role, SessionId, SessionKind, TurnKind, TurnUsage
 use agent_client_protocol::role::acp::Client;
 use agent_client_protocol::schema::v2::{
     AbsolutePath, CloseSessionRequest, CloseSessionResponse, DeleteSessionRequest,
-    DeleteSessionResponse, IdleStateUpdate, ListSessionsRequest, ListSessionsResponse,
+    DeleteSessionResponse, ForkSessionRequest, ForkSessionResponse, IdleStateUpdate,
+    ListSessionsRequest, ListSessionsResponse,
     NewSessionRequest, NewSessionResponse, ReplayFrom, ResumeSessionRequest, ResumeSessionResponse,
     SessionConfigId, SessionConfigOption, SessionConfigOptionCategory, SessionConfigOptionValue,
     SessionConfigSelectOption, SessionConfigValueId, SessionInfo, SessionUpdate, SetSessionConfigOptionRequest,
@@ -65,6 +67,7 @@ impl NoticeSink for NullNotices {
 /// and ride the selectors on the response.
 pub(super) async fn handle_new_session(
     state: Arc<TackleState>,
+    negotiation: Arc<crate::acp::v2::negotiation::ConnectionNegotiation>,
     request: NewSessionRequest,
     responder: Responder<NewSessionResponse>,
 ) -> Result<(), Error> {
@@ -143,7 +146,9 @@ pub(super) async fn handle_new_session(
         NewSessionResponse::new(wire_session_id(&session.id))
             .config_options(wire_options(&selectors.options))
             .available_commands(super::commands::available_commands(&state)),
-    )
+    )?;
+    super::mcp::connect_forwarded_servers(&negotiation, &request.mcp_servers).await;
+    Ok(())
 }
 
 /// `session/list`: the stored sessions, filtered by the request's cwd and the
@@ -241,10 +246,12 @@ pub(super) async fn handle_delete_session(
 /// replay and precedes the response in every case.
 pub(super) async fn handle_resume_session(
     state: Arc<TackleState>,
+    negotiation: Arc<crate::acp::v2::negotiation::ConnectionNegotiation>,
     cx: V2ConnectionTo<Client>,
     request: ResumeSessionRequest,
     responder: Responder<ResumeSessionResponse>,
 ) -> Result<(), Error> {
+    super::mcp::connect_forwarded_servers(&negotiation, &request.mcp_servers).await;
     let session_id = store_session_id(&request.session_id);
     let session = state
         .db
@@ -282,6 +289,40 @@ pub(super) async fn handle_resume_session(
     let selectors = config_options::build(&state, &session).await;
     responder.respond(
         ResumeSessionResponse::new()
+            .config_options(wire_options(&selectors.options))
+            .available_commands(super::commands::available_commands(&state)),
+    )
+}
+
+/// `session/fork`: create a seeded fork, fire the `session_forked` scripts,
+/// and return the fork's id with selectors.
+pub(super) async fn handle_fork_session(
+    state: Arc<TackleState>,
+    cx: V2ConnectionTo<Client>,
+    request: ForkSessionRequest,
+    responder: Responder<ForkSessionResponse>,
+) -> Result<(), Error> {
+    let source = store_session_id(&request.session_id);
+    let access = fork_access(
+        &state,
+        Arc::new(super::notices::ConnectionNotices {
+            cx,
+            source: "fork",
+        }),
+    );
+    let fork = fork::create_fork(&state.db, &source)
+        .await
+        .map_err(|err| Error::internal_error().data(err.to_string()))?;
+    fork::fire_session_forked(
+        &state,
+        access,
+        &fork.id,
+        &source,
+        fork.fork_point_turn_id.as_ref(),
+    );
+    let selectors = config_options::build(&state, &fork).await;
+    responder.respond(
+        ForkSessionResponse::new(wire_session_id(&fork.id))
             .config_options(wire_options(&selectors.options))
             .available_commands(super::commands::available_commands(&state)),
     )

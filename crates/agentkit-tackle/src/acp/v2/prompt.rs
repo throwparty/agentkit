@@ -7,6 +7,7 @@ use crate::acp::common::dispatch::{decide, Dispatch};
 use crate::acp::common::messages::append_assistant_text;
 use crate::acp::common::session::{begin_prompt_turn, BeginError};
 use crate::agent::config_options::{effective_context_window, resolve_model_for, session_actor};
+use crate::agent::fork::{self, fork_access};
 use crate::agent::prompt::run_prompt_turn;
 use crate::agent::runtime::TurnRuntime;
 use crate::agent::{compaction, TurnStop};
@@ -140,6 +141,21 @@ pub(super) async fn handle_prompt(
             StateUpdate::Running(RunningStateUpdate::new()),
         );
         let outcome = match dispatch {
+            Dispatch::Fork => {
+                let result = run_fork(
+                    &state,
+                    &turn_cx,
+                    &wire_session,
+                    &store_session,
+                    &turn.id,
+                )
+                .await;
+                state.db.release_lease(&store_session, &owner).await.ok();
+                match result {
+                    Ok(()) => Ok(TurnStop::EndTurn),
+                    Err(err) => Err(err),
+                }
+            }
             Dispatch::Compaction => {
                 let result = run_compaction(
                     &state,
@@ -161,7 +177,13 @@ pub(super) async fn handle_prompt(
                     Err(err) => Err(err),
                 }
             }
-            _ => {
+            // Not yet ported to v2: these slash-command cases still go to the
+            // model. Listed explicitly so a new `Dispatch` variant is a
+            // compile error rather than silently falling through.
+            Dispatch::Model
+            | Dispatch::Direct(_)
+            | Dispatch::RuntimeCommand
+            | Dispatch::Context => {
                 run_prompt_turn(
                     state,
                     runtime,
@@ -205,6 +227,42 @@ impl ClientToolExecutor for NoClientTools {
     ) -> Pin<Box<dyn Future<Output = Result<Executed, String>> + Send + '_>> {
         Box::pin(async { Err("no client tools under ACP v2".to_owned()) })
     }
+}
+
+/// The `/fork` fallback: create the fork, seed it, and report the new
+/// session id in the parent turn.
+async fn run_fork(
+    state: &Arc<TackleState>,
+    cx: &V2ConnectionTo<Client>,
+    wire_session: &agent_client_protocol::schema::v2::SessionId,
+    store_session: &SessionId,
+    turn_id: &crate::store::TurnId,
+) -> Result<(), String> {
+    let access = fork_access(
+        state,
+        Arc::new(super::notices::ConnectionNotices {
+            cx: cx.clone(),
+            source: "fork",
+        }),
+    );
+    let fork = fork::run_fork(state, access, store_session)
+        .await
+        .map_err(|err| err.to_string())?;
+    let _ = fork::insert_fork_seed(&state.db, &fork.id, store_session).await;
+
+    let wire_fork_id = super::wire_session_id(&fork.id).to_string();
+    let report = fork::fork_report_message(&wire_fork_id, fork.fork_point_turn_id.as_ref());
+    let message = append_assistant_text(state, turn_id, &report)
+        .await
+        .map_err(|err| err.to_string())?;
+    let _ = cx.send_notification(UpdateSessionNotification::new(
+        wire_session.clone(),
+        SessionUpdate::AgentMessage(
+            AgentMessage::new(MessageId::new(message.id))
+                .content(vec![ContentBlock::Text(TextContent::new(report))]),
+        ),
+    ));
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
