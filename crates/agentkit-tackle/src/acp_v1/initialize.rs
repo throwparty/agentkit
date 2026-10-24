@@ -6,7 +6,8 @@ use super::negotiation::ConnectionNegotiation;
 use crate::agent::seed as first_run;
 use crate::state::TackleState;
 use agent_client_protocol::schema::v1::{
-    AuthMethod, AuthMethodAgent, AuthenticateResponse, InitializeRequest, InitializeResponse,
+    AuthMethod, AuthMethodAgent, AuthenticateResponse, Implementation, InitializeRequest,
+    InitializeResponse,
 };
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{Error, Responder};
@@ -25,8 +26,9 @@ pub(super) async fn handle_initialize(
     negotiation.capture(&request.client_capabilities);
     // Missing provider credentials surface as authMethods: the client
     // drives the ACP authenticate method.
-    let mut response =
-        InitializeResponse::new(ProtocolVersion::V1).agent_capabilities(state.capabilities());
+    let mut response = InitializeResponse::new(ProtocolVersion::V1)
+        .agent_capabilities(state.capabilities())
+        .agent_info(Implementation::new("tackle", env!("CARGO_PKG_VERSION")));
     if first_run::missing_credentials(&state) {
         response.auth_methods = vec![AuthMethod::Agent(
             AuthMethodAgent::new("credentials", "Set up model credentials").description(Some(
