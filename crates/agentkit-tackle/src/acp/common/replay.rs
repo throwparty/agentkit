@@ -66,7 +66,6 @@ pub(crate) fn walk(assembled: &[AssembledMessage]) -> Vec<ReplayEvent> {
                     blocks_json: message.content.clone(),
                 });
             }
-            _ => {}
         }
     }
     events

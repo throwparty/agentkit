@@ -10,7 +10,8 @@
 //! `x-acp-connection` header; subsequent POSTs pass
 //! `?connection=<id>`.
 
-use crate::acp::v1::{run_agent_over, ConnectionNegotiation, TackleState};
+use crate::acp::run_acp_over;
+use crate::acp::v1::{ConnectionNegotiation, TackleState};
 use axum::extract::{Query, State as AxumState};
 use axum::http::HeaderMap;
 use axum::response::sse::{Event as SseEvent, Sse};
@@ -107,7 +108,7 @@ fn spawn_connection(server: &HttpServerState, id: String) -> Arc<Connection> {
             ),
             pool,
         ));
-        let _ = run_agent_over(state_for_connection, negotiation, transport).await;
+        let _ = run_acp_over(state_for_connection, negotiation, transport).await;
     });
 
     // Hold the incoming sender open in the registry: dropped senders

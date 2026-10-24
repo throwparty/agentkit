@@ -41,7 +41,7 @@ Move the existing acp_v1 module to acp::v1 with no logic change, and move the st
 | Depends On | T-002 |
 | References | shared-core-boundary,v1-preservation |
 
-### T-004: Version-negotiating entry point
+### T-004: [x] Version-negotiating entry point
 
 Add run_acp_over in acp::mod, built on Agent.protocol_router(), for now configured with the v1 implementation only. The stdio and HTTP transports call it instead of the v1 builder. The router owns version selection and the -32022 rejection.
 
