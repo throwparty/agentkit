@@ -223,7 +223,7 @@ Run just tackle conformance 2, triage the report, and fix failures until the v2 
 | Depends On | T-007,T-008,T-009,T-010,T-011,T-012,T-013,T-014,T-015,T-016 |
 | References | v2-conformance-gate,v2-conformance,protocol-conformance |
 
-### T-018: In-process v2 harness and boundary guard
+### T-018: [x] In-process v2 harness and boundary guard
 
 Add a v2 client to the existing in-process ACP harness and tests asserting the v1/v2 boundary: a v1 connection never observes a v2 update and vice versa, and v2 sessions use the same store and leases as v1.
 
@@ -236,7 +236,7 @@ Add a v2 client to the existing in-process ACP harness and tests asserting the v
 | Depends On | T-007 |
 | References | testability,protocol-conformance,v1-preservation |
 
-### T-019: Harness coverage for TCK blind spots
+### T-019: [x] Harness coverage for TCK blind spots
 
 Cover the behaviours acp-tck does not: a v2 client forwarding an MCP server that exposes file or command tools, invoked by the model through the permission pipeline; the draft session/fork and its /fork fallback; compaction and notices gating; and the first-turn absence report when a v2 client brings no MCP server (the client-tooling loss).
 
