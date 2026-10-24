@@ -158,7 +158,7 @@ Add a reusable workflow (workflow_call) that runs just tackle conformance inside
 | Depends On | T-011 |
 | References | non-blocking-ci,report-artifact,ci-non-blocking,non-interference |
 
-### T-013: Document the conformance posture
+### T-013: [x] Document the conformance posture
 
 Add a short conformance section to docs/docs/dev/tackle/protocol.mdx: what acp-tck covers, that the check is non-blocking and baselined, how to run it locally, and that the in-repo golden-transcript suite remains the fast check.
 
