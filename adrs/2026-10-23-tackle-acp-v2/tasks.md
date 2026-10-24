@@ -145,7 +145,7 @@ Implement the v2 TurnSink mapping: text_delta to agent_message_chunk, thought_de
 | Depends On | T-010 |
 | References | v2-message-updates,v2-usage |
 
-### T-012: v2 tool calls
+### T-012: [x] v2 tool calls
 
 Report tool calls as tool_call_update upserts keyed by toolCallId, with the first update creating the call, streaming content through tool_call_content_chunk, and terminal status patches replacing accumulated content.
 
