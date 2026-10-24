@@ -28,7 +28,7 @@ Add src/bin/tackle-test-model.rs to agentkit-tackle with an axum server and clap
 | Depends On |  |
 | References | deterministic-test-model,no-product-cost |
 
-### T-003: Deterministic streaming completions
+### T-003: [x] Deterministic streaming completions
 
 Implement POST /v1/chat/completions in tackle-test-model: parse the request, derive the reply text and finish_reason solely from the request body, and stream an OpenAI-compatible SSE response with data deltas, a terminal usage chunk, and a non-streaming JSON shape when the request sets stream to false. No randomness, no clocks, no outbound network.
 
