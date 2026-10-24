@@ -1,7 +1,7 @@
 //! The agent loop and the core orchestration: running a prompt turn, direct
 //! invocation, tool-call execution, nested agents, fork, compaction, seed,
 //! and titling. The model seam itself lives in [`crate::providers`]; the RPC
-//! surface that drives this lives in [`crate::acp_v1`].
+//! surface that drives this lives in [`crate::acp::v1`].
 //!
 //! This module is declarations and re-exports only.
 

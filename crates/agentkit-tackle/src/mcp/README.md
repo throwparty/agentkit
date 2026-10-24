@@ -26,6 +26,6 @@ in `invokables`, which consumes `NamespacedTool` and calls
 
 - depends on: `config` (server declarations), `credentials` (helper
   resolution at spawn), `rmcp`
-- depended on by: `invokables` (tool catalogue and dispatch), `acp_v1`
+- depended on by: `invokables` (tool catalogue and dispatch), `acp::v1`
   (server status and elicitation forwarding), `cli::auth`
   (`{cred:IDENTITY}` discovery)

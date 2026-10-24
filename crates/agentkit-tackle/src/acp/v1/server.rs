@@ -1,7 +1,6 @@
-//! The ACP server: the stdio entry point and the per-connection handler builder.
+//! The ACP v1 server: the per-connection handler builder and dispatch.
 
-use super::client_tools;
-use super::commands::{connect_config_servers, editor_command, mcp_command};
+use super::commands::{editor_command, mcp_command};
 use super::negotiation::ConnectionNegotiation;
 use crate::agent::compaction;
 use crate::agent::config_options::session_actor;
@@ -9,20 +8,8 @@ use crate::state::TackleState;
 use agent_client_protocol::schema::v1::{
     InitializeRequest, LoadSessionRequest, NewSessionRequest, ResumeSessionRequest,
 };
-use agent_client_protocol::{Agent, Error, Stdio};
+use agent_client_protocol::{Agent, Error};
 use std::sync::Arc;
-
-pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result<()> {
-    let editor = client_tools::EditorToggles::from_config(&state.config().config);
-    let pool = connect_config_servers(&state).await;
-    let negotiation = Arc::new(ConnectionNegotiation::new(editor, pool));
-    // Ctrl-C/SIGTERM ends the transport cleanly: the connection is
-    // dropped and the caller reports a normal shutdown.
-    tokio::select! {
-        result = run_agent_over(state, negotiation, Stdio::new()) => result,
-        _ = crate::cli::wait_for_shutdown() => Ok(()),
-    }
-}
 
 pub(crate) async fn run_agent_over<T>(
     state: Arc<TackleState>,

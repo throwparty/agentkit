@@ -32,4 +32,4 @@ model's tool exposure are views over it.
 - depends on: `definitions` (prompts, actors), `mcp` (MCP tool
   descriptors and dispatch), `providers` (the tool-definition type),
   `agent_client_protocol` (command wire types)
-- depended on by: `acp_v1` (dispatch, titles, client-tool catalogue)
+- depended on by: `acp::v1` (dispatch, titles, client-tool catalogue)

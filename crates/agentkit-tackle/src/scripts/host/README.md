@@ -27,5 +27,5 @@ ambient runtime.
 ## Dependencies
 
 - depends on: `store` (the session engine), `agentkit-script`
-- depended on by: `scripts::engine` (registration), `acp_v1`
+- depended on by: `scripts::engine` (registration), `acp::v1`
   (dispatching script-driven model calls to the client)

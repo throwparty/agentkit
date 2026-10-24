@@ -25,4 +25,4 @@ v1 implements one wire format. A second format adds a sibling module and a
 - depends on: `config` (endpoints, auth), `credentials` (helper resolution),
   `rig-core`
 - depended on by: `agent` (the loop), `invokables` (tool definitions),
-  `acp_v1` (turn orchestration)
+  `acp::v1` (turn orchestration)

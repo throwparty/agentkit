@@ -23,5 +23,5 @@ the caller (the pipeline treats error or timeout as ask).
 
 - depends on: `agentkit-script` (the Rhai engine), `store` (host calls),
   `permissions` (PolicyScripts implements PolicyScript)
-- depended on by: `acp_v1` (behaviour orchestration), `permissions`
+- depended on by: `acp::v1` (behaviour orchestration), `permissions`
   (the policy source)

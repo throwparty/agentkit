@@ -28,5 +28,5 @@ trust-gated.
 
 - depends on: `trust` (self-contained), `toml`, `serde`
 - depended on by: `main` (startup), `providers` (endpoints/auth), `mcp`
-  (server declarations), `definitions` (trust hashing), `acp_v1` (session
+  (server declarations), `definitions` (trust hashing), `acp::v1` (session
   config options)

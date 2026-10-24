@@ -25,5 +25,5 @@ is no harness-side timeout and no headless auto-reject.
 ## Dependencies
 
 - depends on: `config::trust` (the consent prompt the pipeline bridges)
-- depended on by: `acp_v1` (the requester over the client connection),
+- depended on by: `acp::v1` (the requester over the client connection),
   `scripts` (the policy host implements `PolicyScript`)

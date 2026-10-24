@@ -198,7 +198,7 @@ impl crate::invokables::client_tools::TerminalTracker for ConnectionNegotiation 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::acp_v1::client_tools::EditorToggles;
+    use crate::acp::v1::client_tools::EditorToggles;
 
     fn negotiation() -> Arc<ConnectionNegotiation> {
         Arc::new(ConnectionNegotiation::new(
