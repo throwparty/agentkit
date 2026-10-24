@@ -10,7 +10,7 @@
 #     config fixture and the readiness probe both point here.
 #   cancel_sentinel — prompt text that makes the fixture hold the stream open,
 #     so acp-tck's cancellation requirements are exercised.
-#   fixture — committed tackle config and conformance inputs.
+#   fixture — committed tackle config, conformance inputs, and the baseline.
 #   artifacts — run output (pid, log, report) under the ignored target tree.
 
 set shell := ["bash", "-eux", "-o", "pipefail", "-c"]
@@ -28,7 +28,7 @@ list:
     just --list --justfile {{ source_directory() }}/mod.just
 
 build:
-    cargo build -p agentkit-tackle --bin agentkit-tackle --bin tackle-test-model
+    cargo build -p agentkit-tackle --bin agentkit-tackle --bin tackle-test-model --bin tackle-conformance-check
 
 start-test-model:
     #!/usr/bin/env bash
@@ -94,7 +94,9 @@ run-tck:
     #!/usr/bin/env bash
     set -euxo pipefail
     mkdir -p {{ artifacts }} {{ artifacts }}/workdir
+    rm -f {{ artifacts }}/report.json
     rm -f {{ artifacts }}/sessions.db {{ artifacts }}/sessions.db-wal {{ artifacts }}/sessions.db-shm
+    rc=0
     acp-tck \
         --protocol-version 1 \
         --timeout 30 \
@@ -103,13 +105,47 @@ run-tck:
         --agent-cwd "$PWD/{{ artifacts }}/workdir" \
         --cancel-prompt '{{ cancel_sentinel }}' \
         --report-json {{ artifacts }}/report.json \
-        -- "$PWD/target/debug/agentkit-tackle" stdio --config-dir '{{ fixture }}' --db-path "$PWD/{{ artifacts }}/sessions.db"
+        -- "$PWD/target/debug/agentkit-tackle" stdio --config-dir '{{ fixture }}' --db-path "$PWD/{{ artifacts }}/sessions.db" \
+        || rc=$?
+    case "$rc" in
+        0) ;;
+        1)
+            if [ ! -s {{ artifacts }}/report.json ]; then
+                echo "error: acp-tck exited 1 without writing a report; harness failure, not a conformance verdict" >&2
+                exit 1
+            fi
+            echo "acp-tck exited 1; report written, deferring to the baseline diff" >&2
+            ;;
+        *)
+            echo "error: acp-tck exited $rc; harness failure, not a conformance verdict" >&2
+            exit "$rc"
+            ;;
+    esac
+
+# Compare the latest report against the committed baseline.
+check-baseline:
+    #!/usr/bin/env bash
+    set -euxo pipefail
+    target/debug/tackle-conformance-check \
+        --report {{ artifacts }}/report.json \
+        --baseline '{{ fixture }}/baseline.txt'
+
+# Regenerate the baseline from the latest report after reviewing its failures.
+seed-baseline:
+    #!/usr/bin/env bash
+    set -euxo pipefail
+    target/debug/tackle-conformance-check \
+        --report {{ artifacts }}/report.json \
+        --baseline '{{ fixture }}/baseline.txt' \
+        --seed
 
 # Single entry point for developers and CI: build, run the suite, stop the fixture.
 conformance:
     #!/usr/bin/env bash
     set -euxo pipefail
     export TEST_MODEL_PID_FILE="{{ artifacts }}/test-model.$$.pid"
+    mkdir -p {{ artifacts }}
+    rm -f {{ artifacts }}/report.json
     trap 'just --justfile {{ source_directory() }}/mod.just stop-test-model' EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM
@@ -117,3 +153,4 @@ conformance:
     just --justfile {{ source_directory() }}/mod.just build
     just --justfile {{ source_directory() }}/mod.just start-test-model
     just --justfile {{ source_directory() }}/mod.just run-tck
+    just --justfile {{ source_directory() }}/mod.just check-baseline

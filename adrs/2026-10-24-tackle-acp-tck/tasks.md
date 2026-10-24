@@ -106,7 +106,7 @@ Make the runner fail fast with a precise error naming the port when the test mod
 | Depends On | T-007 |
 | References | endpoint-port-unavailable,bounded-runtime |
 
-### T-009: Baseline checker
+### T-009: [x] Baseline checker
 
 Add a stdlib python3 script under crates/agentkit-tackle/tests/conformance/ that reads the acp-tck JSON report, extracts every MANDATORY requirement whose status is not PASS, and diffs that set against the committed baseline. Exit non-zero only when a MANDATORY failure is absent from the baseline; report baseline ids that now pass and ids no longer present as drift; error with seeding guidance when the baseline file is absent. Never delete the report.
 

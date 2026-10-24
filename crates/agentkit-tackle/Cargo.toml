@@ -1,4 +1,8 @@
 [[bin]]
+name = "tackle-conformance-check"
+path = "src/bin/tackle-conformance-check.rs"
+
+[[bin]]
 name = "tackle-mcp-echo"
 path = "src/bin/tackle-mcp-echo.rs"
 
