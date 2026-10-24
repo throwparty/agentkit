@@ -18,6 +18,7 @@ use agent_client_protocol::schema::v1::{
 };
 use agent_client_protocol::{ConnectionTo, Error};
 use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 
 /// The ACP connection context for an agent-role connection.
 pub(super) type Cx = ConnectionTo<agent_client_protocol::Client>;
@@ -29,9 +30,11 @@ pub(super) fn turn_runtime(
     negotiation: &Arc<ConnectionNegotiation>,
     cx: &Cx,
     session_id: SessionId,
+    cancellation: CancellationToken,
 ) -> TurnRuntime {
     let cx = cx.clone();
     TurnRuntime {
+        cancellation,
         pool: negotiation.mcp_pool(),
         sink: Arc::new(ConnectionTurnSink::new(cx.clone())),
         requester: Arc::new(AcpPermissionRequester {

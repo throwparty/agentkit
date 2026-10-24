@@ -26,6 +26,7 @@ use agent_client_protocol::schema::v1::{
 };
 use agent_client_protocol::{Error, Responder};
 use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 
 /// The persisted state of a begun prompt turn, plus the lease heartbeat
 /// that must outlive it.
@@ -134,7 +135,7 @@ pub(super) async fn run_model_turn_case(
     blocks_json: String,
     responder: Responder<PromptResponse>,
 ) -> Result<(), Error> {
-    let runtime = turn_runtime(&negotiation, &cx, wire_session);
+    let runtime = turn_runtime(&negotiation, &cx, wire_session, CancellationToken::new());
     cx.spawn(async move {
         match run_prompt_turn(
             state,
@@ -240,7 +241,12 @@ pub(super) async fn run_direct_case(
     // would deadlock the dispatch loop on its own response. Run the whole
     // effect on a spawned task, like a model turn, and respond when it
     // completes.
-    let runtime = turn_runtime(&negotiation, &cx, wire_session.clone());
+    let runtime = turn_runtime(
+        &negotiation,
+        &cx,
+        wire_session.clone(),
+        CancellationToken::new(),
+    );
     cx.spawn(async move {
         match run_direct_invocation(
             state,

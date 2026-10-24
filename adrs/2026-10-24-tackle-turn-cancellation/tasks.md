@@ -15,7 +15,7 @@ Add `tokio-util` as a direct dependency in `crates/agentkit-tackle/Cargo.toml` w
 | Depends On |  |
 | References | single-primitive,no-new-dependency-tree,cleanup-on-cancel |
 
-### T-002: Thread the token into the turn
+### T-002: [x] Thread the token into the turn
 
 Add a `cancellation: CancellationToken` field to `TurnRuntime` in `agent/runtime.rs` and set it from the registered token in `acp_v1/support.rs::turn_runtime`. Thread it through `run_prompt_turn` to `run_turn_loop` and into `run_turn`. No behavioural change yet: the token is carried but not observed.
 
