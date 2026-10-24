@@ -78,7 +78,7 @@ pub trait NoticeSink: Send + Sync {
 
 /// A test-only dispatcher for scripts that prompt without a real model
 /// loop wired: the user message is already stored, so there is nothing
-/// left to do. Production wires [`crate::acp_v1::script_loop`] instead.
+/// left to do. Production wires [`crate::agent::script_loop`] instead.
 #[cfg(test)]
 pub struct LoopPendingDispatcher;
 

@@ -1,6 +1,6 @@
 //! Tackle: ACP-native agentic coding harness. Binary entrypoint.
 
-use agentkit_tackle::acp_v1::{self, TackleState};
+use agentkit_tackle::acp::{self, TackleState};
 use agentkit_tackle::store::SessionStore;
 use agentkit_tackle::{cli, config, definitions, telemetry};
 use clap::Parser;
@@ -113,7 +113,7 @@ async fn run(args: cli::Cli) -> ExitCode {
     // active.
     if let Some(project_config) = project_config {
         state
-            .set_pending_project(acp_v1::PendingProject {
+            .set_pending_project(acp::PendingProject {
                 config: project_config,
                 project_dir: project_config_dir.clone(),
                 identity,
@@ -123,7 +123,7 @@ async fn run(args: cli::Cli) -> ExitCode {
     }
 
     match bind {
-        None => match acp_v1::run_stdio(state).await {
+        None => match acp::run_stdio(state).await {
             Ok(()) => {
                 tracing::info!("shutdown complete");
                 ExitCode::SUCCESS
@@ -131,7 +131,7 @@ async fn run(args: cli::Cli) -> ExitCode {
             Err(err) => fail(err),
         },
         Some(bind) => {
-            match acp_v1::http::run_http(state.clone(), bind, http_port.unwrap_or(3811)).await {
+            match acp::http::run_http(state.clone(), bind, http_port.unwrap_or(3811)).await {
                 Ok(()) => {
                     tracing::info!("shutdown complete");
                     ExitCode::SUCCESS

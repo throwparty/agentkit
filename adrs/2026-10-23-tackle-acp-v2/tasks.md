@@ -28,7 +28,7 @@ Lift the protocol-neutral orchestration out of acp_v1 into a new acp::common mod
 | Depends On |  |
 | References | shared-core-boundary,protocol-neutral-core |
 
-### T-003: Relocate acp::v1 and acp::transport
+### T-003: [x] Relocate acp::v1 and acp::transport
 
 Move the existing acp_v1 module to acp::v1 with no logic change, and move the stdio and axum HTTP transports out of it into acp::transport so they are no longer version-scoped. Re-point every call site.
 

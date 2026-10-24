@@ -1,4 +1,4 @@
-//! acp_v1 unit tests: capability capture, per-connection state, project consent, lease heartbeat, and script loading.
+//! acp::v1 unit tests: capability capture, per-connection state, project consent, lease heartbeat, and script loading.
 
 use super::commands::editor_command;
 use super::*;

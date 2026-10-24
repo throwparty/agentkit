@@ -1,6 +1,6 @@
 //! Tackle: ACP-native agentic coding harness.
 
-pub mod acp_v1;
+pub mod acp;
 pub mod agent;
 pub mod builtins;
 pub mod cli;

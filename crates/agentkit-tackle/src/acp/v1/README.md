@@ -1,4 +1,4 @@
-# acp_v1
+# acp::v1
 
 The ACP v1 RPC surface: transport, request handlers, and the glue that
 maps the core's concepts to the wire protocol. `mod.rs` is declarations

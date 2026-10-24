@@ -24,4 +24,4 @@ behavioural prompt or the prompt's expansion template.
 - depends on: `config::trust` (content hashing for TOFU records),
   `builtins` (the default definitions registered at lowest precedence)
 - depended on by: `main` (startup discovery), `config` (project trust
-  entries), `invokables` (the registry), `acp_v1` (compaction prompts)
+  entries), `invokables` (the registry), `acp::v1` (compaction prompts)

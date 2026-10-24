@@ -32,5 +32,5 @@ walk.
 
 - depends on: `sqlx` (SQLite), `uuid`, `serde_json`
 - depended on by: `agent` (turn persistence), `providers` (test fixtures),
-  `scripts` (history search, fork, compaction recording), `acp_v1`
+  `scripts` (history search, fork, compaction recording), `acp::v1`
   (session lifecycle)

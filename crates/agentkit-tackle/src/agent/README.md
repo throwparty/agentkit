@@ -3,7 +3,7 @@
 The agent loop and the core orchestration: running a prompt turn, direct
 invocation, tool-call execution, nested agents, fork, compaction, seed,
 and titling. The model seam itself lives in [`crate::providers`]; the RPC
-surface that drives this lives in [`crate::acp_v1`].
+surface that drives this lives in [`crate::acp::v1`].
 
 ## What lives here
 
@@ -36,4 +36,4 @@ retry.rs        retry policy and provider-error classification
 
 - depends on: `providers`, `store`, `invokables`, `permissions`, `scripts`,
   `mcp`, `state`, `content`
-- depended on by: `acp_v1` (the RPC surface drives it)
+- depended on by: `acp::v1` (the RPC surface drives it)
