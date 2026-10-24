@@ -158,7 +158,7 @@ Report tool calls as tool_call_update upserts keyed by toolCallId, with the firs
 | Depends On | T-010 |
 | References | v2-tool-calls |
 
-### T-013: v2 permission requests
+### T-013: [x] v2 permission requests
 
 Implement v2 session/request_permission with a required title and optional subject (tool_call or command), routed through the existing permission pipeline, and report requires_action while foreground work is blocked and running when it resumes.
 

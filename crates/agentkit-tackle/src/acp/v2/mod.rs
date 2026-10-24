@@ -5,6 +5,7 @@
 pub mod capabilities;
 pub mod initialize;
 pub mod negotiation;
+pub mod permission;
 pub mod prompt;
 pub mod replay;
 pub mod server;
@@ -12,6 +13,20 @@ pub mod sessions;
 pub mod sink;
 
 pub(crate) use server::agent;
+
+/// Sends one foreground `state_update` for a session.
+pub(super) fn send_state(
+    cx: &agent_client_protocol::V2ConnectionTo<agent_client_protocol::role::acp::Client>,
+    session: &agent_client_protocol::schema::v2::SessionId,
+    state: agent_client_protocol::schema::v2::StateUpdate,
+) {
+    let _ = cx.send_notification(
+        agent_client_protocol::schema::v2::UpdateSessionNotification::new(
+            session.clone(),
+            agent_client_protocol::schema::v2::SessionUpdate::StateUpdate(state),
+        ),
+    );
+}
 
 /// The stored session id in v2 wire form.
 pub(super) fn wire_session_id(
