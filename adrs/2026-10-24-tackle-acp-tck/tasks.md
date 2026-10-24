@@ -80,7 +80,7 @@ Commit a tackle configuration fixture under crates/agentkit-tackle/tests/conform
 | Depends On | T-003 |
 | References | tackle-config-fixture |
 
-### T-007: Runner recipes and orchestration
+### T-007: [x] Runner recipes and orchestration
 
 Add crates/agentkit-tackle/mod.just with recipes to build the tackle and test model binaries, start the endpoint and record its pid, run the pinned acp-tck with --protocol-version 1 and explicit timeouts and --cancel-prompt set to the sentinel and --report-json to target/ and the tackle command 'agentkit-tackle stdio --config-dir <fixture>' after --, stop the endpoint, and one orchestration recipe that invokes them in order. Reference the crate as a module from the root justfile.
 
