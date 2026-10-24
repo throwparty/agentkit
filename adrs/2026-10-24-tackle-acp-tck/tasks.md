@@ -2,7 +2,7 @@
 
 ## Tasks
 
-### T-001: Pinned acp-tck toolchain
+### T-001: [x] Pinned acp-tck toolchain
 
 Add agentclientprotocol/acp-tck as a nix flake input in nix/flake.nix and package it with uv2nix so its Python environment resolves from the repository's committed uv.lock. Merge the package into the default dev shell and confirm the acp-tck CLI resolves; update nix/flake.lock.
 
