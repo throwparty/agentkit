@@ -1,14 +1,30 @@
 {
   description = "throwparty/agentkit";
   inputs = {
-    flake-utils.url = "github:numtide/flake-utils";
-    nixpkgs.url = "github:NixOS/nixpkgs/release-26.05";
-    rust-overlay = {
-      url = "github:oxalica/rust-overlay";
-      inputs.nixpkgs.follows = "nixpkgs";
+    # acp-tck is a plain source tree, not a flake; uv2nix resolves its
+    # committed uv.lock into a hermetic Python environment.
+    acp-tck = {
+      url = "github:agentclientprotocol/acp-tck";
+      flake = false;
     };
+    flake-utils.url = "github:numtide/flake-utils";
     naersk = {
       url = "github:nix-community/naersk";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    nixpkgs.url = "github:NixOS/nixpkgs/release-26.05";
+    pyproject-build-systems = {
+      url = "github:pyproject-nix/build-system-pkgs";
+      inputs.pyproject-nix.follows = "pyproject-nix";
+      inputs.uv2nix.follows = "uv2nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    pyproject-nix = {
+      url = "github:pyproject-nix/pyproject.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     throwparty = {
@@ -18,15 +34,24 @@
         nixpkgs.follows = "nixpkgs";
       };
     };
+    uv2nix = {
+      url = "github:pyproject-nix/uv2nix";
+      inputs.pyproject-nix.follows = "pyproject-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
   outputs =
     {
+      acp-tck,
       flake-utils,
-      nixpkgs,
-      rust-overlay,
       naersk,
-      throwparty,
+      nixpkgs,
+      pyproject-build-systems,
+      pyproject-nix,
+      rust-overlay,
       self,
+      throwparty,
+      uv2nix,
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
@@ -53,6 +78,23 @@
         };
         inherit (pkgs.lib) getExe getExe';
         mingwBinutils = pkgs.pkgsCross.mingwW64.buildPackages.binutils;
+        acpTck =
+          let
+            workspace = uv2nix.lib.workspace.loadWorkspace {
+              workspaceRoot = "${acp-tck}";
+            };
+            pythonSet =
+              (pkgs.callPackage pyproject-nix.build.packages {
+                python = pkgs.python314;
+              }).overrideScope
+                (
+                  pkgs.lib.composeManyExtensions [
+                    pyproject-build-systems.overlays.default
+                    (workspace.mkPyprojectOverlay { sourcePreference = "wheel"; })
+                  ]
+                );
+          in
+          pythonSet.mkVirtualEnv "acp-tck-env" workspace.deps.default;
       in
       {
         devShells.default =
@@ -120,6 +162,7 @@
             };
             rustShell = pkgs.mkShell {
               nativeBuildInputs = [
+                acpTck
                 bats
                 cargo-auditable
                 cargo-binstall
