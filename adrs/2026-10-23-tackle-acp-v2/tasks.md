@@ -119,7 +119,7 @@ Implement session/resume with replayFrom start: replay the full user-visible his
 | Depends On | T-008 |
 | References | v2-session-replay |
 
-### T-010: v2 foreground state and prompt lifecycle
+### T-010: [x] v2 foreground state and prompt lifecycle
 
 Implement the v2 session/prompt handler as an insertion-response variant: persist the user message, respond immediately with its messageId, spawn the turn, and drive a per-session foreground state machine that emits state_update transitions (running, requires_action, idle with stop reason). Failures after insertion end as idle(error); pre-insertion rejection stays a JSON-RPC error. Cancellation resolves to idle(cancelled).
 
