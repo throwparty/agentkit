@@ -12,20 +12,15 @@ use agent_client_protocol::schema::v1::{
 use agent_client_protocol::{Agent, Error};
 use std::sync::Arc;
 
-pub(crate) async fn run_agent_over<T>(
+/// Builds the configured v1 agent: one thin closure per ACP method, capturing
+/// the shared state and this connection's negotiation and lease-owner id. The
+/// caller connects it to a transport, or hands it to the version router.
+pub(crate) fn agent(
     state: Arc<TackleState>,
     negotiation: Arc<ConnectionNegotiation>,
-    transport: T,
-) -> agent_client_protocol::Result<()>
-where
-    T: agent_client_protocol::ConnectTo<agent_client_protocol::role::acp::Agent>,
-{
-    // The connection's lease-owner id: turns acquire it for their lifetime;
-    // released when the turn responds. Transport-neutral — stdio and HTTP
-    // connections both use this handler.
-    let owner = Arc::new(format!("conn-{}", uuid::Uuid::new_v4()));
-
-    let builder = Agent
+    owner: Arc<String>,
+) -> impl agent_client_protocol::ConnectTo<agent_client_protocol::role::acp::Client> {
+    Agent
         .builder()
         .name("tackle")
         .on_receive_request(
@@ -348,7 +343,5 @@ where
                 }
             },
             agent_client_protocol::on_receive_notification!(),
-        );
-
-    builder.connect_to(transport).await
+        )
 }

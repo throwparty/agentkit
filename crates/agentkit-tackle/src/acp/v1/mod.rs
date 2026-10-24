@@ -36,5 +36,5 @@ pub use capabilities::UnstableFeature;
 pub(crate) use commands::connect_config_servers;
 pub(crate) use config_options::{wire_notice, wire_option, wire_options};
 pub use negotiation::ConnectionNegotiation;
-pub(crate) use server::run_agent_over;
+pub(crate) use server::agent;
 pub(crate) use sink::{wire_kind, ConnectionTurnSink};

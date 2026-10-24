@@ -190,6 +190,11 @@ async fn session_load_on_an_empty_session_answers() {
             agentkit_tackle::agent_client_protocol::on_receive_notification!(),
         )
         .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
+            connection
+                .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+
             let created = connection
                 .send_request(NewSessionRequest::new(std::path::PathBuf::from("/work")))
                 .block_task()

@@ -13,3 +13,27 @@ pub mod v1;
 
 pub use transport::run_stdio;
 pub use v1::{PendingProject, TackleState};
+
+use agent_client_protocol::ConnectTo as _;
+use std::sync::Arc;
+
+/// Runs one connection through the version router: the initial `initialize`
+/// selects the protocol implementation, and the connection is forwarded to it.
+/// Only v1 is registered today; v2 is added once implemented.
+pub async fn run_acp_over<T>(
+    state: Arc<TackleState>,
+    negotiation: Arc<v1::ConnectionNegotiation>,
+    transport: T,
+) -> agent_client_protocol::Result<()>
+where
+    T: agent_client_protocol::ConnectTo<agent_client_protocol::role::acp::Agent>,
+{
+    // The connection's lease-owner id: turns acquire it for their lifetime;
+    // released when the turn responds.
+    let owner = Arc::new(format!("conn-{}", uuid::Uuid::new_v4()));
+    agent_client_protocol::Agent
+        .protocol_router()
+        .with_v1(v1::agent(state, negotiation, owner))
+        .connect_to(transport)
+        .await
+}
