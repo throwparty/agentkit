@@ -301,3 +301,16 @@ Add a support matrix to docs/docs/dev/tackle stating, per functionality area, wh
 | Depends On | T-017 |
 | References | per-version-support-matrix |
 
+### T-024: Clippy zero
+
+Bring cargo clippy -p agentkit-tackle --all-targets --all-features -- -D warnings to zero. The pre-existing failures are manual_async_fn and await_holding_lock in agent/turn.rs test code, which predate this ADR; fix them and any lints this ADR's work introduces, so the lint gate is green.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | cargo clippy -p agentkit-tackle --all-targets --all-features -- -D warnings exits clean, or every remaining lint is a documented false positive with a scoped allow; just lint is green. |
+| Complexity | 🟢 Low |
+| Effort | 1-2h |
+| Depends On | T-017 |
+| References | testability |
+

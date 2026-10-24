@@ -4,6 +4,7 @@ use super::commands::{editor_command, mcp_command};
 use super::negotiation::ConnectionNegotiation;
 use crate::agent::compaction;
 use crate::agent::config_options::session_actor;
+use crate::acp::common::dispatch::{decide, Dispatch};
 use crate::state::TackleState;
 use agent_client_protocol::schema::v1::{
     InitializeRequest, LoadSessionRequest, NewSessionRequest, ResumeSessionRequest,
@@ -130,75 +131,6 @@ where
                         })
                         .unwrap_or_default();
 
-                    // The /fork fallback for v1 clients: exact first-token
-                    // match on user-typed input. Creates the fork, seeds it,
-                    // fires the session_forked scripts, and reports the new
-                    // session id in the parent turn — no model request.
-                    if first_text.split_whitespace().next() == Some("/fork") {
-                        return super::prompt::run_fork_case(
-                            state.clone(),
-                            negotiation.clone(),
-                            cx.clone(),
-                            request.session_id.clone(),
-                            session_id.clone(),
-                            owner.clone(),
-                            turn.clone(),
-                            responder,
-                        )
-                        .await;
-                    }
-
-                    // `/!mcp.<server>.<tool> {json}` or
-                    // `/!client.<surface>.<method> {json}`: the user calls a
-                    // tool directly. No model request, and no permission
-                    // prompt — the call is the user's own keystroke, so the
-                    // pipeline has nothing to ask. The result is reported as
-                    // a tool call and stored in the turn.
-                    if let Some(input) = crate::invokables::parse_direct(&first_text) {
-                        return super::prompt::run_direct_case(
-                            state.clone(),
-                            negotiation.clone(),
-                            cx.clone(),
-                            request.session_id.clone(),
-                            session_id.clone(),
-                            owner.clone(),
-                            turn.id.clone(),
-                            input,
-                            responder,
-                        )
-                        .await;
-                    }
-
-                    // Runtime availability commands: `/mcp` and `/editor`
-                    // are handled before any model request. An unrecognised
-                    // subcommand yields no reply and falls through to
-                    // normal processing.
-                    if first_text == "/mcp"
-                        || first_text.starts_with("/mcp ")
-                        || first_text == "/editor"
-                        || first_text.starts_with("/editor ")
-                    {
-                        let reply = if first_text.starts_with("/editor") {
-                            editor_command(&negotiation, &first_text)
-                        } else {
-                            mcp_command(&negotiation, &first_text).await
-                        };
-                        if let Some(reply) = reply {
-                            return super::prompt::run_runtime_command_case(
-                                state.clone(),
-                                negotiation.clone(),
-                                cx.clone(),
-                                request.session_id.clone(),
-                                session_id.clone(),
-                                owner.clone(),
-                                turn.id.clone(),
-                                reply,
-                                responder,
-                            )
-                            .await;
-                        }
-                    }
-
                     // Resolve the actor for this session (compaction's event
                     // payload and the model turn both need it).
                     let session_row = state.db.get_session(&session_id).await.ok().flatten();
@@ -209,43 +141,110 @@ where
                         })
                         .unwrap_or_else(|| "default".into());
 
-                    // `/context`: an ephemeral composition report. Exact
-                    // first-token match with no arguments; the command turn
-                    // is deleted before the lease is released.
-                    if first_text == "/context" {
-                        return super::context::run_context_case(
-                            state.clone(),
-                            negotiation.clone(),
-                            cx.clone(),
-                            request.session_id.clone(),
-                            session_id.clone(),
-                            owner.clone(),
-                            turn.id.clone(),
-                            actor_name.clone(),
-                            session_row.clone(),
-                            responder,
-                        )
-                        .await;
-                    }
-
-                    // Compaction-tagged prompts: intercepted — the
-                    // compaction_requested script event fires instead of a
-                    // model turn in the main session.
-                    if compaction::is_compaction_command(&state.definitions(), &first_text) {
-                        return super::prompt::run_compaction_case(
-                            state.clone(),
-                            negotiation.clone(),
-                            cx.clone(),
-                            request.session_id.clone(),
-                            session_id.clone(),
-                            owner.clone(),
-                            turn.id.clone(),
-                            first_text.clone(),
-                            actor_name.clone(),
-                            session_row.clone(),
-                            responder,
-                        )
-                        .await;
+                    // Which prompt case applies is a protocol-neutral decision,
+                    // shared with v2 through acp::common.
+                    match decide(
+                        &first_text,
+                        compaction::is_compaction_command(&state.definitions(), &first_text),
+                    ) {
+                        // The /fork fallback for v1 clients: exact first-token
+                        // match on user-typed input. Creates the fork, seeds it,
+                        // fires the session_forked scripts, and reports the new
+                        // session id in the parent turn — no model request.
+                        Dispatch::Fork => {
+                            return super::prompt::run_fork_case(
+                                state.clone(),
+                                negotiation.clone(),
+                                cx.clone(),
+                                request.session_id.clone(),
+                                session_id.clone(),
+                                owner.clone(),
+                                turn.clone(),
+                                responder,
+                            )
+                            .await;
+                        }
+                        // `/!mcp.<server>.<tool> {json}` or
+                        // `/!client.<surface>.<method> {json}`: the user calls a
+                        // tool directly. No model request, and no permission
+                        // prompt — the call is the user's own keystroke, so the
+                        // pipeline has nothing to ask.
+                        Dispatch::Direct(input) => {
+                            return super::prompt::run_direct_case(
+                                state.clone(),
+                                negotiation.clone(),
+                                cx.clone(),
+                                request.session_id.clone(),
+                                session_id.clone(),
+                                owner.clone(),
+                                turn.id.clone(),
+                                input,
+                                responder,
+                            )
+                            .await;
+                        }
+                        // Runtime availability commands: `/mcp` and `/editor`.
+                        // An unrecognised subcommand yields no reply and falls
+                        // through to normal processing.
+                        Dispatch::RuntimeCommand => {
+                            let reply = if first_text.starts_with("/editor") {
+                                editor_command(&negotiation, &first_text)
+                            } else {
+                                mcp_command(&negotiation, &first_text).await
+                            };
+                            if let Some(reply) = reply {
+                                return super::prompt::run_runtime_command_case(
+                                    state.clone(),
+                                    negotiation.clone(),
+                                    cx.clone(),
+                                    request.session_id.clone(),
+                                    session_id.clone(),
+                                    owner.clone(),
+                                    turn.id.clone(),
+                                    reply,
+                                    responder,
+                                )
+                                .await;
+                            }
+                        }
+                        // `/context`: an ephemeral composition report. Exact
+                        // first-token match with no arguments; the command turn
+                        // is deleted before the lease is released.
+                        Dispatch::Context => {
+                            return super::context::run_context_case(
+                                state.clone(),
+                                negotiation.clone(),
+                                cx.clone(),
+                                request.session_id.clone(),
+                                session_id.clone(),
+                                owner.clone(),
+                                turn.id.clone(),
+                                actor_name.clone(),
+                                session_row.clone(),
+                                responder,
+                            )
+                            .await;
+                        }
+                        // Compaction-tagged prompts: intercepted — the
+                        // compaction_requested script event fires instead of a
+                        // model turn in the main session.
+                        Dispatch::Compaction => {
+                            return super::prompt::run_compaction_case(
+                                state.clone(),
+                                negotiation.clone(),
+                                cx.clone(),
+                                request.session_id.clone(),
+                                session_id.clone(),
+                                owner.clone(),
+                                turn.id.clone(),
+                                first_text.clone(),
+                                actor_name.clone(),
+                                session_row.clone(),
+                                responder,
+                            )
+                            .await;
+                        }
+                        Dispatch::Model => {}
                     }
 
                     // Nothing intercepted: run the model turn.
