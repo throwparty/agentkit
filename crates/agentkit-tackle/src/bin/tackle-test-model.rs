@@ -4,16 +4,18 @@
 //! and never reaches the network.
 
 use axum::Json;
+use axum::extract::State;
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use clap::Parser;
-use futures::stream;
+use futures::{StreamExt, stream};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::convert::Infallible;
 use std::net::IpAddr;
 use std::process::ExitCode;
+use std::time::Duration;
 
 /// The model name echoed when a request omits one.
 const DEFAULT_MODEL: &str = "tackle-test-model";
@@ -21,6 +23,9 @@ const DEFAULT_MODEL: &str = "tackle-test-model";
 const COMPLETION_ID: &str = "tackle-test-model-completion";
 /// The tool-call id used when the request requires a tool call. Fixed.
 const TOOL_CALL_ID: &str = "tackle-test-model-tool-call";
+/// How long a sentinel-held stream stays open before it is abandoned. The
+/// runner and acp-tck apply their own, shorter, watchdogs.
+const HOLD_TIMEOUT: Duration = Duration::from_secs(300);
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -101,13 +106,19 @@ async fn main() -> ExitCode {
         tracing::info!(sentinel = %sentinel, "cancel sentinel configured");
     }
 
-    run(args.bind, args.port).await
+    run(args.bind, args.port, args.cancel_sentinel).await
 }
 
-async fn run(bind: IpAddr, port: u16) -> ExitCode {
+#[derive(Clone)]
+struct AppState {
+    cancel_sentinel: Option<String>,
+}
+
+async fn run(bind: IpAddr, port: u16, cancel_sentinel: Option<String>) -> ExitCode {
     let app = axum::Router::new()
         .route("/healthz", get(|| async { axum::http::StatusCode::OK }))
-        .route("/v1/chat/completions", post(completions));
+        .route("/v1/chat/completions", post(completions))
+        .with_state(AppState { cancel_sentinel });
 
     let listener = match tokio::net::TcpListener::bind((bind, port)).await {
         Ok(listener) => listener,
@@ -134,11 +145,15 @@ async fn run(bind: IpAddr, port: u16) -> ExitCode {
     }
 }
 
-async fn completions(Json(request): Json<ChatRequest>) -> Response {
+async fn completions(State(state): State<AppState>, Json(request): Json<ChatRequest>) -> Response {
+    let model = request.model.as_deref().unwrap_or(DEFAULT_MODEL).to_owned();
+    if request.stream && is_held(&request, state.cancel_sentinel.as_deref()) {
+        return hold(model).into_response();
+    }
+
     let reply = reply_for(&request);
-    let model = request.model.as_deref().unwrap_or(DEFAULT_MODEL);
     if request.stream {
-        let payloads = sse_payloads(&reply, model);
+        let payloads = sse_payloads(&reply, &model);
         let events: Vec<Result<Event, Infallible>> = payloads
             .into_iter()
             .map(|payload| Ok(Event::default().data(payload)))
@@ -146,8 +161,33 @@ async fn completions(Json(request): Json<ChatRequest>) -> Response {
             .collect();
         Sse::new(stream::iter(events)).into_response()
     } else {
-        Json(completion_json(&reply, model)).into_response()
+        Json(completion_json(&reply, &model)).into_response()
     }
+}
+
+/// True when the sentinel is configured and appears in any message text.
+fn is_held(request: &ChatRequest, sentinel: Option<&str>) -> bool {
+    sentinel.is_some_and(|sentinel| {
+        request
+            .messages
+            .iter()
+            .any(|message| message.text().contains(sentinel))
+    })
+}
+
+/// Answers with one role chunk, then holds the connection open — emitting
+/// nothing further — until the client disconnects or the bounded timeout
+/// elapses. This keeps a tackle turn in flight for cancellation tests.
+fn hold(model: String) -> Sse<impl futures::Stream<Item = Result<Event, Infallible>>> {
+    let initial =
+        with_model(chunk(json!({ "role": "assistant" }), Value::Null), &model).to_string();
+    let events = stream::once(async move { Ok(Event::default().data(initial)) }).chain(
+        stream::once(async {
+            tokio::time::sleep(HOLD_TIMEOUT).await;
+        })
+        .filter_map(|()| std::future::ready(None)),
+    );
+    Sse::new(events)
 }
 
 /// Derives the entire reply — text, finish reason, and any tool call — from
@@ -325,6 +365,18 @@ mod tests {
 
     fn request(body: Value) -> ChatRequest {
         serde_json::from_value(body).unwrap()
+    }
+
+    #[test]
+    fn sentinel_is_detected_in_message_text() {
+        let request = request(json!({
+            "messages": [
+                { "role": "user", "content": "please hold this turn open" }
+            ]
+        }));
+        assert!(is_held(&request, Some("hold this turn")));
+        assert!(!is_held(&request, Some("absent")));
+        assert!(!is_held(&request, None));
     }
 
     #[test]

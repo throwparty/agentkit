@@ -41,7 +41,7 @@ Implement POST /v1/chat/completions in tackle-test-model: parse the request, der
 | Depends On | T-002 |
 | References | deterministic-test-model,offline-determinism |
 
-### T-004: Cancel sentinel held stream
+### T-004: [x] Cancel sentinel held stream
 
 When a request contains the value passed to --cancel-sentinel, respond with headers and one initial SSE chunk then hold the connection open emitting nothing until the client disconnects or a bounded timeout elapses, keeping a tackle turn in flight so acp-tck cancellation tests exercise session/cancel.
 
