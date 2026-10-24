@@ -173,3 +173,42 @@ async fn session_close_cancels_the_in_flight_prompt() {
         .await
         .expect("close during a turn");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cancel_request_resolves_the_prompt_as_cancelled() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(HangingModel)
+        .mount(&server)
+        .await;
+
+    let dir = tempfile::tempdir().unwrap();
+    write_config(dir.path(), &server.uri());
+    let agent = spawn_agent(dir.path());
+
+    Client
+        .builder()
+        .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
+            connection
+                .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            let session = connection
+                .send_request(NewSessionRequest::new(std::path::PathBuf::from("/work")))
+                .block_task()
+                .await?;
+
+            let prompt = connection.send_request(PromptRequest::new(
+                session.session_id.clone(),
+                vec![ContentBlock::Text(TextContent::new("hello".to_owned()))],
+            ));
+            // Sends `$/cancel_request` for the in-flight prompt without
+            // discarding its response.
+            prompt.cancel()?;
+            let response = prompt.block_task().await?;
+            assert_eq!(response.stop_reason, StopReason::Cancelled);
+            Ok(())
+        })
+        .await
+        .expect("cancel request resolves the prompt");
+}

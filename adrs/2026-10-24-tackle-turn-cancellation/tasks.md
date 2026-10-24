@@ -93,7 +93,7 @@ In `acp_v1/sessions.rs::handle_close_session`, cancel the session's token before
 | Depends On | T-004 |
 | References | close-cancels,idle-close |
 
-### T-008: $/cancel_request bridge
+### T-008: [x] $/cancel_request bridge
 
 In `acp_v1/prompt.rs::run_model_turn_case`, capture `responder.cancellation()` before the responder moves into the spawned task, and cancel the same token when that marker fires, bridging the SDK's per-request cancellation.
 
