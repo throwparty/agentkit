@@ -140,8 +140,25 @@ pub(super) async fn run_model_turn_case(
     // completion first, so any `session/cancel` that follows finds it.
     // The registration guard rides the spawned task, so the entry goes
     // away on every exit path.
+    let request_cancellation = responder.cancellation();
     let (cancellation, registration) = negotiation.register_cancellation(&store_session);
-    let runtime = turn_runtime(&negotiation, &cx, wire_session, cancellation);
+    let runtime = turn_runtime(
+        &negotiation,
+        &cx,
+        wire_session,
+        cancellation.clone(),
+    );
+    // Bridge `$/cancel_request`: the SDK marks the prompt request's
+    // cancellation before handlers run, so a watcher folds it into the
+    // same token the other signals cancel.
+    {
+        let cancellation = cancellation.clone();
+        cx.spawn(async move {
+            request_cancellation.cancelled().await;
+            cancellation.cancel();
+            Ok(())
+        })?;
+    }
     cx.spawn(async move {
         let _registration = registration;
         match run_prompt_turn(
