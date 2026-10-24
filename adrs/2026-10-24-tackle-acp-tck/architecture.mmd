@@ -1,0 +1,22 @@
+flowchart TD
+    runner["just tackle conformance<br/>(orchestration recipe)"]
+    endpoint["tackle-test-model<br/>(deterministic endpoint, localhost)"]
+    tck["acp-tck v1<br/>(pinned nix/uv2nix)"]
+    tackle["agentkit-tackle stdio<br/>(--config-dir fixture)"]
+    report["JSON report<br/>(target/)"]
+    checker["baseline checker<br/>(python3 stdlib)"]
+    baseline["committed baseline<br/>(tests/conformance/)"]
+    ci["CI job<br/>(continue-on-error)"]
+    upload["report artifact"]
+
+    runner -- "builds and starts" --> endpoint
+    runner -- "runs" --> tck
+    runner -- "checks" --> checker
+    tck -- "spawns per test (stdio)" --> tackle
+    tackle -- "chat-completions SSE" --> endpoint
+    tck -- "writes" --> report
+    checker -- "reads" --> report
+    checker -- "diffs" --> baseline
+    ci -- "invokes" --> runner
+    ci -- "uploads" --> report
+    report -- "artifact" --> upload
