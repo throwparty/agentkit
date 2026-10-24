@@ -1,0 +1,66 @@
+{
+  "tck_version": "test",
+  "protocol_version": 1,
+  "schema_revision": "0000000000000000000000000000000000000000",
+  "agent_command": ["agentkit-tackle", "stdio"],
+  "agent_info": null,
+  "agent_capabilities": {},
+  "started_at": "2026-01-01T00:00:00.000000+00:00",
+  "finished_at": "2026-01-01T00:00:01.000000+00:00",
+  "requirements": [
+    {
+      "id": "ACME-MAND-001",
+      "tier": "MANDATORY",
+      "capability": null,
+      "text": "A mandatory requirement that passes.",
+      "citation": "test",
+      "status": "PASS",
+      "tests": []
+    },
+    {
+      "id": "ACME-MAND-002",
+      "tier": "MANDATORY",
+      "capability": null,
+      "text": "A mandatory requirement that fails.",
+      "citation": "test",
+      "status": "FAIL",
+      "tests": []
+    },
+    {
+      "id": "ACME-MAND-003",
+      "tier": "MANDATORY",
+      "capability": null,
+      "text": "A mandatory requirement that was skipped.",
+      "citation": "test",
+      "status": "SKIPPED",
+      "tests": []
+    },
+    {
+      "id": "ACME-MAND-004",
+      "tier": "MANDATORY",
+      "capability": null,
+      "text": "A mandatory requirement that was not tested.",
+      "citation": "test",
+      "status": "NOT_TESTED",
+      "tests": []
+    },
+    {
+      "id": "ACME-CAP-001",
+      "tier": "CAPABILITY",
+      "capability": "test.capability",
+      "text": "A capability requirement that fails; it must not affect the exit code.",
+      "citation": "test",
+      "status": "FAIL",
+      "tests": []
+    }
+  ],
+  "verdict": {
+    "conformant": false,
+    "tier_counts": {
+      "MANDATORY": { "PASS": 1, "FAIL": 1, "SKIPPED": 1, "NOT_TESTED": 1 },
+      "CAPABILITY": { "PASS": 0, "FAIL": 1, "SKIPPED": 0, "NOT_TESTED": 0 }
+    },
+    "blocked_by_auth": false,
+    "blocked_by_version_mismatch": false
+  }
+}
