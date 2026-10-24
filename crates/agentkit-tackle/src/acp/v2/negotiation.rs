@@ -20,10 +20,16 @@ pub struct ConnectionNegotiation {
 impl ConnectionNegotiation {
     /// A fresh connection's state.
     pub fn new() -> Self {
+        Self::with_pool(Arc::new(tokio::sync::Mutex::new(McpPool::new())))
+    }
+
+    /// A connection's state over an existing pool, so configured servers are
+    /// shared with the other protocol version on the same transport.
+    pub fn with_pool(mcp_pool: Arc<tokio::sync::Mutex<McpPool>>) -> Self {
         Self {
             cancellations: Mutex::new(BTreeMap::new()),
             cancellation_seq: AtomicU64::new(0),
-            mcp_pool: Arc::new(tokio::sync::Mutex::new(McpPool::new())),
+            mcp_pool,
         }
     }
 

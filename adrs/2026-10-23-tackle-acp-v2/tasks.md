@@ -184,7 +184,7 @@ Implement available_commands_update with the v2 command input type discriminator
 | Depends On | T-010 |
 | References | v2-slash-commands,v2-notices,v2-compaction |
 
-### T-015: v2 MCP integration and elicitation
+### T-015: [x] v2 MCP integration and elicitation
 
 Connect client-provided mcpServers on session/new and session/resume through the shared MCP pool, advertise session.mcp stdio and http, and serve elicitation/create plus accept elicitation/complete when the client advertises a supported mode.
 
@@ -197,7 +197,7 @@ Connect client-provided mcpServers on session/new and session/resume through the
 | Depends On | T-008 |
 | References | v2-mcp,v2-elicitation |
 
-### T-016: v2 draft session/fork
+### T-016: [x] v2 draft session/fork
 
 Implement the draft session/fork surface, advertised under session.fork, creating a seeded fork titled from its parent and reporting it to the client, with the built-in /fork prompt retained as the fallback for clients that do not call it.
 
