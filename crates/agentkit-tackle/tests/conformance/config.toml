@@ -1,0 +1,13 @@
+# Deterministic endpoint for the acp-tck conformance run. The runner starts
+# tackle-test-model on this fixed loopback port before invoking acp-tck.
+# `gpt-4o-mini` resolves a 128k context window from the bundled models.dev
+# snapshot, so usage reporting is live. No secrets, no paths outside the repo.
+
+[defaults]
+model = "conformance/gpt-4o-mini"
+
+[endpoints.conformance]
+base_url = "http://127.0.0.1:45123/v1"
+wire_format = "openai-chat-completions"
+auth = "none"
+models = ["gpt-4o-mini"]
