@@ -237,12 +237,9 @@
                 pname = qualifiedBin;
                 version = "0.1.0";
                 src = ../.;
-                cargoBuildFlags = [
-                  "--package"
-                  qualifiedBin
-                  "--bin"
-                  qualifiedBin
-                ];
+                copyBinsFilter = ''
+                  select(.reason == "compiler-artifact" and .executable != null and .profile.test == false and .target.name == "${qualifiedBin}")
+                '';
                 nativeBuildInputs = with pkgs; [
                   pkg-config
                   dbus
