@@ -1,0 +1,48 @@
+# Rust
+
+## Experimental faster builds with mold and sccache
+
+:::tip
+
+`mold` and `sccache` are installed in the `default` development shell via the Nix flake.
+
+:::
+
+Add the following to `.envrc`:
+
+```shell
+_rust_bin="$(direnv_layout_dir)/rust-bin"
+mkdir -p "$_rust_bin"
+case ":$PATH:" in
+  *":$_rust_bin:"*) PATH="${PATH//"$_rust_bin":/}" ;;
+esac
+_cargo="$(command -v cargo)"
+_cc="$(command -v cc)"
+
+cat >"$_rust_bin/cargo" <<EOF
+#!/bin/sh
+if command -v systemd-run >/dev/null 2>&1 &&
+  systemd-run --user --scope --quiet true 2>/dev/null; then
+  exec systemd-run --user --scope --quiet --slice=background.slice -- "$_cargo" "\$@"
+fi
+exec "$_cargo" "\$@"
+EOF
+chmod +x "$_rust_bin/cargo"
+
+# Host-only linker driver: adds -fuse-ld=mold without touching RUSTFLAGS (so
+# cross-target builds are unaffected).
+cat >"$_rust_bin/cc-mold" <<EOF
+#!/bin/sh
+exec "$_cc" -fuse-ld=mold "\$@"
+EOF
+chmod +x "$_rust_bin/cc-mold"
+
+if command -v sccache >/dev/null 2>&1; then
+  export RUSTC_WRAPPER=sccache
+fi
+if command -v mold >/dev/null 2>&1; then
+  export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER="$_rust_bin/cc-mold"
+fi
+export CARGO_BUILD_JOBS=8
+export PATH="$_rust_bin:$PATH"
+```
