@@ -76,6 +76,20 @@
           cargo = rustToolchain;
           rustc = rustToolchain;
         };
+        # arch-lint is not in nixpkgs and ships no flake, so build the pinned
+        # upstream source with naersk. It enforces the ACP module boundary
+        # (acp::common / acp::v1 / acp::v2) declared in arch-lint.toml.
+        archLint = naersk'.buildPackage {
+          pname = "arch-lint";
+          version = "0.11.0";
+          src = pkgs.fetchFromGitHub {
+            owner = "ynishi";
+            repo = "arch-lint";
+            rev = "5023cf0a463c33fcd4fac0328847b349ee765b2b";
+            hash = "sha256-qpktpL2WInzweUFSWFwJMhe1e0W1av9N0pZ9qnoUsA0=";
+          };
+          cargoBuildOptions = opts: opts ++ [ "-p" "arch-lint-cli" ];
+        };
         inherit (pkgs.lib) getExe getExe';
         mingwBinutils = pkgs.pkgsCross.mingwW64.buildPackages.binutils;
         acpTck =
@@ -163,6 +177,7 @@
             rustShell = pkgs.mkShell {
               nativeBuildInputs = [
                 acpTck
+                archLint
                 bats
                 cargo-auditable
                 cargo-binstall

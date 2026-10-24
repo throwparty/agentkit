@@ -18,6 +18,7 @@ lint:
     just nix lint
     just workflows lint
     cargo clippy --all-targets --all-features -- -D warnings
+    arch-lint check
 
 test:
     just workflows test
