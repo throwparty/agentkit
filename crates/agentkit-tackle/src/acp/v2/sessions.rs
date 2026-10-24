@@ -13,13 +13,14 @@ use crate::state::TackleState;
 use crate::store::{ListFilter, Role, SessionId, SessionKind, TurnKind, TurnUsage};
 use agent_client_protocol::role::acp::Client;
 use agent_client_protocol::schema::v2::{
-    AbsolutePath, CloseSessionRequest, CloseSessionResponse, DeleteSessionRequest,
+    AbsolutePath, CloseSessionRequest, CloseSessionResponse, ContentBlock, DeleteSessionRequest,
     DeleteSessionResponse, ForkSessionRequest, ForkSessionResponse, IdleStateUpdate,
-    ListSessionsRequest, ListSessionsResponse,
-    NewSessionRequest, NewSessionResponse, ReplayFrom, ResumeSessionRequest, ResumeSessionResponse,
+    ListSessionsRequest, ListSessionsResponse, MessageId, NewSessionRequest, NewSessionResponse,
+    ReplayFrom, ResumeSessionRequest, ResumeSessionResponse,
     SessionConfigId, SessionConfigOption, SessionConfigOptionCategory, SessionConfigOptionValue,
-    SessionConfigSelectOption, SessionConfigValueId, SessionInfo, SessionUpdate, SetSessionConfigOptionRequest,
-    SetSessionConfigOptionResponse, StateUpdate, UpdateSessionNotification,
+    SessionConfigSelectOption, SessionConfigValueId, SessionInfo, SessionUpdate,
+    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, StateUpdate,
+    UpdateSessionNotification, UserMessage,
 };
 use agent_client_protocol::{Error, Responder, V2ConnectionTo};
 use std::sync::Arc;
@@ -68,6 +69,7 @@ impl NoticeSink for NullNotices {
 pub(super) async fn handle_new_session(
     state: Arc<TackleState>,
     negotiation: Arc<crate::acp::v2::negotiation::ConnectionNegotiation>,
+    cx: V2ConnectionTo<Client>,
     request: NewSessionRequest,
     responder: Responder<NewSessionResponse>,
 ) -> Result<(), Error> {
@@ -112,7 +114,7 @@ pub(super) async fn handle_new_session(
         )
         .await
         .map_err(|err| Error::internal_error().data(err.to_string()))?;
-    state
+    let seed_message = state
         .db
         .append_message(
             &seed_turn.id,
@@ -147,6 +149,18 @@ pub(super) async fn handle_new_session(
             .config_options(wire_options(&selectors.options))
             .available_commands(super::commands::available_commands(&state)),
     )?;
+    // The seed is stored as a user message; send it after the response (Zed
+    // drops updates that precede session/new) so a fresh session shows it
+    // without waiting for a replay.
+    let seed_blocks: Vec<ContentBlock> =
+        serde_json::from_str(&seed_message.content).unwrap_or_default();
+    cx.send_notification(UpdateSessionNotification::new(
+        wire_session_id(&session.id),
+        SessionUpdate::UserMessage(
+            UserMessage::new(MessageId::new(seed_message.id)).content(seed_blocks),
+        ),
+    ))
+    .map_err(|err| Error::internal_error().data(err.to_string()))?;
     super::mcp::connect_forwarded_servers(&negotiation, &request.mcp_servers).await;
     Ok(())
 }
