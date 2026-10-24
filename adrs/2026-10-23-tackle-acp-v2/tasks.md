@@ -93,7 +93,7 @@ Add acp::v2 with its ConnectTo builder, capability map (object support markers, 
 | Depends On | T-006 |
 | References | acp-v2-server,v2-initialization,v2-authentication,version-negotiation |
 
-### T-008: v2 session lifecycle and config options
+### T-008: [x] v2 session lifecycle and config options
 
 Implement session/new, session/list, session/close, session/delete, and session/set_config_option against the same store and ownership leases as v1, with optional mcpServers, cwd, and additionalDirectories, and configOptions carrying a configId and a type discriminator.
 

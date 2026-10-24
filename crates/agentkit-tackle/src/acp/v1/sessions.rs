@@ -437,7 +437,19 @@ pub(super) async fn handle_set_config(
     };
 
     // The refreshed selectors; the switch is effective the following turn.
-    let refreshed = config_options::build(&state, &session).await;
+    // Re-fetch so the reported current value reflects the switch.
+    let refreshed_session = if applied.is_ok() {
+        state
+            .db
+            .get_session(&session_id)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(session)
+    } else {
+        session
+    };
+    let refreshed = config_options::build(&state, &refreshed_session).await;
     match applied {
         Ok(()) => {
             let _ = cx.send_notification(SessionNotification::new(

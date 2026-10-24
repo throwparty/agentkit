@@ -10,4 +10,4 @@ model = "conformance/gpt-4o-mini"
 base_url = "http://127.0.0.1:45123/v1"
 wire_format = "openai-chat-completions"
 auth = "none"
-models = ["gpt-4o-mini"]
+models = ["gpt-4o-mini", "gpt-4o"]

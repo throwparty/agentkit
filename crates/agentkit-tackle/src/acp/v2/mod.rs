@@ -5,5 +5,6 @@
 pub mod capabilities;
 pub mod initialize;
 pub mod server;
+pub mod sessions;
 
 pub(crate) use server::agent;

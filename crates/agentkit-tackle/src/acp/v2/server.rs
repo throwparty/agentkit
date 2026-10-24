@@ -2,7 +2,10 @@
 //! registration.
 
 use crate::state::TackleState;
-use agent_client_protocol::schema::v2::{InitializeRequest, LoginAuthRequest, LogoutAuthRequest};
+use agent_client_protocol::schema::v2::{
+    CloseSessionRequest, DeleteSessionRequest, InitializeRequest, ListSessionsRequest,
+    LoginAuthRequest, LogoutAuthRequest, NewSessionRequest, SetSessionConfigOptionRequest,
+};
 use agent_client_protocol::role::acp::Client;
 use agent_client_protocol::{Agent, V2ConnectionTo};
 use std::sync::Arc;
@@ -39,6 +42,61 @@ pub(crate) fn agent(
                         responder,
                         _connection: V2ConnectionTo<Client>| {
                 super::initialize::handle_logout(request, responder)
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            {
+                let state = state.clone();
+                async move |request: NewSessionRequest,
+                            responder,
+                            _connection: V2ConnectionTo<Client>| {
+                    super::sessions::handle_new_session(state.clone(), request, responder).await
+                }
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            {
+                let state = state.clone();
+                async move |request: ListSessionsRequest,
+                            responder,
+                            _connection: V2ConnectionTo<Client>| {
+                    super::sessions::handle_list_sessions(state.clone(), request, responder).await
+                }
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            {
+                let state = state.clone();
+                async move |request: CloseSessionRequest,
+                            responder,
+                            _connection: V2ConnectionTo<Client>| {
+                    super::sessions::handle_close_session(state.clone(), request, responder).await
+                }
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            {
+                let state = state.clone();
+                async move |request: DeleteSessionRequest,
+                            responder,
+                            _connection: V2ConnectionTo<Client>| {
+                    super::sessions::handle_delete_session(state.clone(), request, responder).await
+                }
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            {
+                let state = state.clone();
+                async move |request: SetSessionConfigOptionRequest,
+                            responder,
+                            _connection: V2ConnectionTo<Client>| {
+                    super::sessions::handle_set_config(state.clone(), request, responder).await
+                }
             },
             agent_client_protocol::on_receive_request!(),
         )
