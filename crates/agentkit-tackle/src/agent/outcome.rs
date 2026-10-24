@@ -13,6 +13,10 @@ pub enum TurnStop {
     /// with the actionable overflow note instead of a model answer. The
     /// caller surfaces the context size and may auto-compact.
     ContextLength,
+    /// The turn was cancelled: `session/cancel`, `session/close`, or
+    /// `$/cancel_request` stopped it mid-flight. Partial output is
+    /// persisted; the caller answers with ACP's `cancelled` stop reason.
+    Cancelled,
 }
 
 #[derive(Debug, Clone, PartialEq)]

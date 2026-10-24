@@ -28,7 +28,7 @@ Add a `cancellation: CancellationToken` field to `TurnRuntime` in `agent/runtime
 | Depends On | T-001 |
 | References | single-primitive,one-mechanism |
 
-### T-003: Observe cancellation in the turn loop
+### T-003: [x] Observe cancellation in the turn loop
 
 In `agent/turn.rs::run_turn`, accumulate streamed text in a shared buffer (the `on_delta` closure appends to it as well as forwarding) and wrap the `provider.stream_completion` await in a biased `tokio::select!` against `token.cancelled()`. On cancel persist the buffered partial text under `message_id`, then return `TurnOutcome { stop: TurnStop::Cancelled }`. Check `token.is_cancelled()` at the top of each loop iteration and select the tool-call await, so a cancelled turn issues no further request. Add `TurnStop::Cancelled` in `agent/outcome.rs`.
 

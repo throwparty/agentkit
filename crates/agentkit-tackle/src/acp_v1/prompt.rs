@@ -155,6 +155,7 @@ pub(super) async fn run_model_turn_case(
                     StopReason::EndTurn
                 }
                 crate::agent::TurnStop::MaxTurnRequests => StopReason::MaxTurnRequests,
+                crate::agent::TurnStop::Cancelled => StopReason::Cancelled,
             })),
             Err(err) => responder.respond_with_error(Error::internal_error().data(err)),
         }

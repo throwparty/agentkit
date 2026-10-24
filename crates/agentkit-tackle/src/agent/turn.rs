@@ -21,6 +21,10 @@ pub enum TurnError {
     Store(#[from] StoreError),
 }
 
+/// The result text stored and streamed when a tool call is cancelled
+/// mid-flight, so its card never lingers as in-progress.
+pub(crate) const TOOL_CANCELLED_NOTE: &str = "Cancelled.";
+
 /// Runs one turn: persists the prompt turn (the user message) is the
 /// CALLER's job — this loop persists the assistant response(s).
 ///
@@ -46,11 +50,12 @@ pub async fn run_turn<P: ModelProvider>(
     tools: Vec<crate::providers::ToolDefinition>,
     max_requests: u32,
     context_length_note: &str,
-    _cancellation: CancellationToken,
+    cancellation: CancellationToken,
     mut on_usage: impl FnMut(u64, u64, Option<f64>) + Send,
     mut on_delta: impl FnMut(&str) + Send,
     mut on_thought: impl FnMut(&str) + Send,
     mut on_retry: impl FnMut(u32, &str) + Send,
+    mut on_tool_cancelled: impl FnMut(&crate::providers::ModelToolCall) + Send,
     mut on_tool_call: impl FnMut(
         crate::providers::ModelToolCall,
     ) -> std::pin::Pin<
@@ -70,6 +75,11 @@ pub async fn run_turn<P: ModelProvider>(
     let mut cost_known = db.session_usage(session_id).await?.cost_usd > 0.0;
 
     loop {
+        // A cancellation that lands between requests ends the turn without
+        // issuing another model request.
+        if cancellation.is_cancelled() {
+            return cancelled_outcome(db, session_id).await;
+        }
         request_count += 1;
         if request_count > max_requests {
             // The caller announces in the client before mapping this onto
@@ -95,16 +105,44 @@ pub async fn run_turn<P: ModelProvider>(
         } else {
             format!("{assistant_message_id}-r{request_count}")
         };
-        let mut text = String::new();
+        // The streamed text is buffered in a shared handle so the
+        // cancellation branch, which runs once the stream future is
+        // dropped, can persist whatever arrived before the cancel.
+        let partial = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let partial_for_delta = std::sync::Arc::clone(&partial);
         let mut deltas_flowed = false;
         let mut on_delta = |delta: &str| {
             deltas_flowed = true;
-            text.push_str(delta);
+            partial_for_delta
+                .lock()
+                .expect("partial poisoned")
+                .push_str(delta);
             on_delta(delta);
         };
-        let response = provider
-            .stream_completion(request, &mut on_delta, &mut on_thought)
-            .await;
+        // Cancellation wins over the stream: dropping the streamed-request
+        // future closes the model connection, and the partial output is
+        // persisted before the turn reports `Cancelled`.
+        let streamed = provider.stream_completion(request, &mut on_delta, &mut on_thought);
+        let response = tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => {
+                let text = partial.lock().expect("partial poisoned").clone();
+                if !text.is_empty() {
+                    db.append_message(
+                        turn_id,
+                        Role::Assistant,
+                        &serde_json::json!([{ "type": "text", "text": text }]).to_string(),
+                        None,
+                        None,
+                        None,
+                        Some(&message_id),
+                    )
+                    .await?;
+                }
+                return cancelled_outcome(db, session_id).await;
+            }
+            response = streamed => response,
+        };
         let response = match response {
             Ok(response) => response,
             // Context-length overflow: actionable, never retried, and
@@ -143,7 +181,9 @@ pub async fn run_turn<P: ModelProvider>(
                 on_retry(request_count, &error);
                 let delay = super::retry::retry_after_secs(&error)
                     .unwrap_or_else(|| super::retry::backoff(request_count));
-                tokio::time::sleep(delay).await;
+                if sleep_or_cancelled(delay, &cancellation).await {
+                    return cancelled_outcome(db, session_id).await;
+                }
                 continue;
             }
             // Mid-stream failure: the client already saw the deltas —
@@ -189,7 +229,9 @@ pub async fn run_turn<P: ModelProvider>(
                 on_retry(request_count, &text);
                 let delay = super::retry::retry_after_secs(&text)
                     .unwrap_or_else(|| super::retry::backoff(request_count));
-                tokio::time::sleep(delay).await;
+                if sleep_or_cancelled(delay, &cancellation).await {
+                    return cancelled_outcome(db, session_id).await;
+                }
                 continue;
             }
             Err(ModelError::Completion(text)) => {
@@ -271,7 +313,28 @@ pub async fn run_turn<P: ModelProvider>(
                     None,
                 )
                 .await?;
-            let outcome = on_tool_call(call.clone()).await;
+            let outcome = tokio::select! {
+                biased;
+                _ = cancellation.cancelled() => {
+                    // Cancelled mid-tool-call. Emit the terminal card update
+                    // and persist a terminal result so the card never stays
+                    // InProgress, live or on replay, then stop.
+                    on_tool_cancelled(&call);
+                    db.append_message(
+                        turn_id,
+                        Role::ToolResult,
+                        &serde_json::json!([{ "type": "text", "text": TOOL_CANCELLED_NOTE }])
+                            .to_string(),
+                        Some(&call.name),
+                        Some(&stored_call.id),
+                        Some(true),
+                        None,
+                    )
+                    .await?;
+                    return cancelled_outcome(db, session_id).await;
+                }
+                outcome = on_tool_call(call.clone()) => outcome,
+            };
             db.append_message(
                 turn_id,
                 Role::ToolResult,
@@ -288,6 +351,28 @@ pub async fn run_turn<P: ModelProvider>(
                 outcome.content,
             ));
         }
+    }
+}
+
+/// The cancelled terminal outcome, carrying the turn's usage so far.
+async fn cancelled_outcome(
+    db: &SessionStore,
+    session_id: &crate::store::SessionId,
+) -> Result<TurnOutcome, TurnError> {
+    Ok(TurnOutcome {
+        stop: TurnStop::Cancelled,
+        usage: db.session_usage(session_id).await?,
+    })
+}
+
+/// Sleeps for `delay` unless the turn is cancelled first; returns whether
+/// the turn was cancelled. Raced so a cancel during retry backoff stops the
+/// turn promptly rather than after the whole delay.
+async fn sleep_or_cancelled(delay: std::time::Duration, cancellation: &CancellationToken) -> bool {
+    tokio::select! {
+        biased;
+        _ = cancellation.cancelled() => true,
+        _ = tokio::time::sleep(delay) => false,
     }
 }
 
@@ -408,12 +493,12 @@ fn prompt_block_text(block: &serde_json::Value) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{prompt_parts, prompt_text, run_turn};
+    use super::{prompt_parts, prompt_text, run_turn, CancellationToken, TurnStop};
     use crate::providers::{
         ChatContent, ModelProvider, ModelRequest, ModelResponse, ModelToolCall, ModelUsage,
         ToolCallOutcome,
     };
-    use crate::store::{SessionKind, SessionStore, TurnKind};
+    use crate::store::{Role, SessionKind, SessionStore, TurnKind};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct TwoRounds(AtomicUsize);
@@ -496,6 +581,7 @@ mod tests {
             |_: &str| {},
             |_: &str| {},
             |_, _| {},
+            |_: &crate::providers::ModelToolCall| {},
             |_call| {
                 Box::pin(async {
                     ToolCallOutcome {
@@ -538,6 +624,7 @@ mod tests {
             |_: &str| {},
             |_: &str| {},
             |_, _| {},
+            |_: &crate::providers::ModelToolCall| {},
             crate::providers::ignore_tool_call,
         )
         .await
@@ -545,6 +632,152 @@ mod tests {
 
         assert_eq!(usage[0].2, None);
         assert_eq!(outcome.usage.cost_usd, 0.0);
+    }
+
+    /// Emits some text, cancels its own turn, then hangs — so the turn
+    /// loop takes the cancellation branch with a populated partial buffer.
+    struct CancelsAfterDelta(CancellationToken);
+
+    impl ModelProvider for CancelsAfterDelta {
+        fn stream_completion(
+            &self,
+            _request: ModelRequest,
+            on_text_delta: &mut (dyn FnMut(&str) + Send),
+            _on_thought_delta: &mut (dyn FnMut(&str) + Send),
+        ) -> impl std::future::Future<Output = Result<ModelResponse, crate::providers::ModelError>> + Send
+        {
+            on_text_delta("partial ");
+            on_text_delta("answer");
+            self.0.cancel();
+            std::future::pending::<Result<ModelResponse, crate::providers::ModelError>>()
+        }
+    }
+
+    #[tokio::test]
+    async fn cancellation_stops_the_turn_and_persists_partial_output() {
+        let (store, session, turn) = turn_fixture().await;
+        let cancellation = CancellationToken::new();
+        let outcome = run_turn(
+            &CancelsAfterDelta(cancellation.clone()),
+            &store,
+            &session,
+            &turn,
+            "assistant-1",
+            "openai/gpt-4o",
+            "system",
+            vec![ChatContent::text("hi")],
+            Vec::new(),
+            Vec::new(),
+            8,
+            "note",
+            cancellation,
+            |_: u64, _: u64, _: Option<f64>| {},
+            |_: &str| {},
+            |_: &str| {},
+            |_: u32, _: &str| {},
+            |_: &crate::providers::ModelToolCall| {},
+            crate::providers::ignore_tool_call,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(outcome.stop, TurnStop::Cancelled);
+        let assembled = store.assemble_context(&session).await.unwrap();
+        let persisted = assembled
+            .iter()
+            .find(|item| item.message.role == Role::Assistant)
+            .expect("the partial assistant message is persisted");
+        assert!(
+            crate::content::prompt_text_of(&persisted.message.content).contains("partial answer"),
+            "{}",
+            persisted.message.content
+        );
+    }
+
+    /// Returns one tool call, so the turn reaches tool execution.
+    struct OneToolCall;
+
+    impl ModelProvider for OneToolCall {
+        fn stream_completion(
+            &self,
+            _request: ModelRequest,
+            _on_text_delta: &mut (dyn FnMut(&str) + Send),
+            _on_thought_delta: &mut (dyn FnMut(&str) + Send),
+        ) -> impl std::future::Future<Output = Result<ModelResponse, crate::providers::ModelError>> + Send
+        {
+            async move {
+                Ok(ModelResponse {
+                    text: String::new(),
+                    tool_calls: vec![ModelToolCall {
+                        id: "call-1".to_owned(),
+                        name: "test.tool".to_owned(),
+                        arguments: "{}".to_owned(),
+                    }],
+                    usage: ModelUsage {
+                        input_tokens: 1,
+                        output_tokens: 0,
+                    },
+                })
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_tool_call_is_resolved_not_left_in_progress() {
+        let (store, session, turn) = turn_fixture().await;
+        let cancellation = CancellationToken::new();
+        let seen: std::sync::Arc<std::sync::Mutex<Vec<String>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen_for_cb = std::sync::Arc::clone(&seen);
+        let token_for_tool = cancellation.clone();
+
+        let outcome = run_turn(
+            &OneToolCall,
+            &store,
+            &session,
+            &turn,
+            "assistant-1",
+            "openai/gpt-4o",
+            "system",
+            vec![ChatContent::text("hi")],
+            Vec::new(),
+            Vec::new(),
+            8,
+            "note",
+            cancellation.clone(),
+            |_: u64, _: u64, _: Option<f64>| {},
+            |_: &str| {},
+            |_: &str| {},
+            |_: u32, _: &str| {},
+            move |call: &crate::providers::ModelToolCall| {
+                seen_for_cb.lock().unwrap().push(call.id.clone());
+            },
+            move |_call| {
+                // Cancel as the call future is built, so the biased cancel
+                // branch wins on the next poll.
+                token_for_tool.cancel();
+                Box::pin(std::future::pending::<ToolCallOutcome>())
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(outcome.stop, TurnStop::Cancelled);
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 1, "the terminal callback fired");
+        assert_eq!(seen[0], "call-1");
+        drop(seen);
+
+        let assembled = store.assemble_context(&session).await.unwrap();
+        let result = assembled
+            .iter()
+            .find(|item| item.message.role == Role::ToolResult)
+            .expect("a terminal tool result is stored");
+        assert!(
+            crate::content::prompt_text_of(&result.message.content).contains("Cancelled"),
+            "{}",
+            result.message.content
+        );
     }
 
     #[test]
