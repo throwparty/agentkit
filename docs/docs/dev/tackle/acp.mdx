@@ -58,3 +58,27 @@ The turn's terminal state rides the `session/prompt` response as an ACP `stopRea
 
 - **stdio** — the default, one connection per process.
 - **HTTP** — an axum-based transport sharing the same handler chain.
+
+## Conformance
+
+The upstream [Agent Client Protocol Test Compatibility Kit](https://github.com/agentclientprotocol/acp-tck) (`acp-tck`) is the external, requirement-level conformance suite for ACP v1. It launches tackle as a stdio subprocess and drives initialize, the session lifecycle, prompt turns, streaming, and cancellation, reporting each requirement as pass, fail, skipped, or not tested under an overall verdict. `acp-tck` is pinned as a Nix flake input and runs against a deterministic local test model, so the check needs no network, credentials, or model provider.
+
+The check is deliberately non-blocking and baselined. The MANDATORY failures in the report are compared against the committed baseline at `crates/agentkit-tackle/tests/conformance/baseline.txt`, which records the known gaps still to be burned down. A new MANDATORY failure makes the check exit non-zero, but the CI job is non-blocking and does not gate a pull request or the merge queue. Baseline ids that start passing, or that no longer appear in the report, are reported as drift and tolerated until the baseline is updated.
+
+Run the whole check locally from inside `nix develop`:
+
+```sh
+just tackle conformance
+```
+
+The recipe builds tackle and the test model, starts and stops the test model, runs the suite, writes `target/conformance/report.json`, and prints the verdict plus the baseline diff. To compare a report you already have without rerunning the suite, use `just tackle check-baseline`.
+
+To update the baseline, review the failures in the latest report and regenerate it:
+
+```sh
+just tackle seed-baseline
+```
+
+Then review the diff to `baseline.txt` and commit it. The seeded file reflects the current failures; confirm each new id is a gap you intend to tolerate, and drop ids whose requirements now pass.
+
+The in-repo golden-transcript suite (`cargo test -p agentkit-tackle acp_v1_conformance`) remains the fast, focused protocol regression check; `acp-tck` is additive and does not replace it. Tackle is not fully conformant today: the baseline records the current MANDATORY gaps.
