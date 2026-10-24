@@ -106,7 +106,7 @@ In `acp_v1/prompt.rs::run_model_turn_case`, capture `responder.cancellation()` b
 | Depends On | T-004 |
 | References | cancel-request,idempotent-cancellation,race-with-completion |
 
-### T-009: Cancellation integration tests
+### T-009: [x] Cancellation integration tests
 
 Extend the existing in-process ACP integration harness with cancellation coverage: cancel during a streamed turn, cancel during a tool call including an open permission request, close during a turn, and the cancellation race. Assert no content or tool-call update arrives after the cancelled response, the lease is released, and cancelling a turn stops a nested agent loop it spawned.
 
