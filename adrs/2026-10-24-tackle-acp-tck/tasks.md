@@ -93,7 +93,7 @@ Add crates/agentkit-tackle/mod.just with recipes to build the tackle and test mo
 | Depends On | T-001,T-005,T-006 |
 | References | conformance-run,runner-owns-the-endpoint,local-parity,bounded-runtime |
 
-### T-008: Port handling and cleanup
+### T-008: [x] Port handling and cleanup
 
 Make the runner fail fast with a precise error naming the port when the test model address is already bound, and guarantee the endpoint is stopped on every exit path so no orphan process survives a failed or interrupted run.
 
