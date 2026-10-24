@@ -67,7 +67,7 @@ Add arch-lint.toml declaring the acp::common / acp::v1 / acp::v2 layering and th
 | Depends On | T-003 |
 | References | module-boundary-enforcement,shared-core-boundary |
 
-### T-006: v1 conformance preservation gate
+### T-006: [x] v1 conformance preservation gate
 
 Run the v1 acp-tck suite after the refactor and confirm it still reports CONFORMANT with the empty MANDATORY baseline. Fix any regression the restructure introduced. This is the inertness proof for the refactor and the gate before v2 work begins.
 
