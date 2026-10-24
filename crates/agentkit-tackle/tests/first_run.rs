@@ -9,7 +9,10 @@ use agentkit_tackle::agent_client_protocol::schema::v1::{
     TextContent,
 };
 use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
-use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
+use agentkit_tackle::agent_client_protocol::schema::v2;
+use agentkit_tackle::agent_client_protocol::{
+    AcpAgent, Agent, Client, ConnectionTo, V2ConnectionTo,
+};
 use agentkit_tackle::store::{SessionStore, TurnKind};
 
 fn spawn_agent(dir: &std::path::Path) -> AcpAgent {
@@ -159,6 +162,58 @@ async fn missing_credentials_advertise_auth_methods() {
         })
         .await
         .expect("auth flow on missing credentials");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn v2_initialize_advertises_capabilities_and_auth_responds() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = dir.path().join("cfg");
+    std::fs::create_dir_all(&cfg).unwrap();
+    std::fs::write(
+        cfg.join("config.toml"),
+        "credential_helper = \"definitely-missing-helper\"\n\n\
+         [endpoints.primary]\nbase_url = \"http://localhost:1\"\nwire_format = \"openai-chat-completions\"\nauth = \"helper\"\n",
+    )
+    .unwrap();
+    let agent = spawn_agent(dir.path());
+
+    Client
+        .v2()
+        .connect_with(agent, |connection: V2ConnectionTo<Agent>| async move {
+            let response = connection
+                .send_request(v2::InitializeRequest::new(
+                    ProtocolVersion::V2,
+                    v2::Implementation::new("test-client", "1.0.0"),
+                ))
+                .block_task()
+                .await?;
+            assert_eq!(response.protocol_version, ProtocolVersion::V2);
+            assert_eq!(response.info.name, "tackle");
+            let session = response
+                .capabilities
+                .session
+                .expect("v2 advertises the session baseline");
+            assert!(
+                session.fork.is_some(),
+                "the draft fork marker is advertised"
+            );
+            assert!(
+                !response.auth_methods.is_empty(),
+                "missing credentials advertise authMethods"
+            );
+
+            connection
+                .send_request(v2::LoginAuthRequest::new("credentials"))
+                .block_task()
+                .await?;
+            connection
+                .send_request(v2::LogoutAuthRequest::new())
+                .block_task()
+                .await?;
+            Ok(())
+        })
+        .await
+        .expect("v2 initialize and auth");
 }
 
 #[test]

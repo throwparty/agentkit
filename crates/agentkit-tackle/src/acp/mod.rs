@@ -10,6 +10,7 @@ pub mod common;
 pub mod http;
 pub mod transport;
 pub mod v1;
+pub mod v2;
 
 pub use transport::run_stdio;
 pub use v1::{PendingProject, TackleState};
@@ -33,7 +34,8 @@ where
     let owner = Arc::new(format!("conn-{}", uuid::Uuid::new_v4()));
     agent_client_protocol::Agent
         .protocol_router()
-        .with_v1(v1::agent(state, negotiation, owner))
+        .with_v1(v1::agent(state.clone(), negotiation, owner))
+        .with_v2(v2::agent(state))
         .connect_to(transport)
         .await
 }
