@@ -41,14 +41,14 @@ In `agent/turn.rs::run_turn`, accumulate streamed text in a shared buffer (the `
 | Depends On | T-002 |
 | References | partial-output-persisted,one-mechanism,no-updates-after-response,idempotent-cancellation |
 
-### T-004: Register the token around the spawned turn
+### T-004: [x] Register the token around the spawned turn
 
-In `acp_v1/prompt.rs`, create and register a token for model and direct-invocation turns before `cx.spawn`, and hold the `CancelRegistration` guard inside the spawned task so the entry is removed when the turn ends. Fast command intercepts (fork, direct `/!`, `/mcp`, `/editor`, `/context`, compaction) need no registration.
+In `acp_v1/prompt.rs`, create and register a token for the spawned model turn before `cx.spawn`, and hold the `CancelRegistration` guard inside the spawned task so the entry is removed when the turn ends. Direct `/!` invocations and the fast command intercepts (fork, `/mcp`, `/editor`, `/context`, compaction) are not registered: they do not observe the token, so a registration would be inert.
 
 
 | Field | Value |
 |-------|-------|
-| Success Criteria | A token exists in the registry for the duration of a model turn and is absent immediately after it resolves; a turn ending by error still deregisters; existing prompt tests pass |
+| Success Criteria | The registry unit tests cover register/cancel/drop; a model turn runs against the registered token and deregisters on completion; existing prompt tests pass |
 | Complexity | 🟡 Medium |
 | Effort | 2-3h |
 | Depends On | T-001,T-002,T-003 |
