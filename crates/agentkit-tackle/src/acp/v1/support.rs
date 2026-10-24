@@ -16,7 +16,7 @@ use agent_client_protocol::schema::v1::{
     ContentBlock, ContentChunk, MessageId, SessionId, SessionInfoUpdate, SessionNotification,
     SessionUpdate, TextContent,
 };
-use agent_client_protocol::{ConnectionTo, Error};
+use agent_client_protocol::ConnectionTo;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
@@ -52,28 +52,7 @@ pub(super) fn turn_runtime(
     }
 }
 
-/// Persists a harness-authored assistant text message on a turn. Returns
-/// the stored message so the caller can reuse its id for the streaming
-/// chunk.
-pub(super) async fn append_assistant_text(
-    state: &TackleState,
-    turn_id: &crate::store::TurnId,
-    text: &str,
-) -> Result<crate::store::Message, Error> {
-    state
-        .db
-        .append_message(
-            turn_id,
-            crate::store::Role::Assistant,
-            &serde_json::json!([{ "type": "text", "text": text }]).to_string(),
-            None,
-            None,
-            None,
-            None,
-        )
-        .await
-        .map_err(|err| Error::internal_error().data(err.to_string()))
-}
+pub(super) use crate::acp::common::messages::append_assistant_text;
 
 /// Streams one `agent_message_chunk` carrying `text` under `message_id`.
 pub(super) fn send_agent_message_chunk(

@@ -16,9 +16,7 @@ use crate::agent::config_options::{effective_context_window, resolve_model_for};
 use crate::agent::direct::run_direct_invocation;
 use crate::agent::fork::{self, fork_access};
 use crate::agent::prompt::run_prompt_turn;
-use crate::state::{
-    store_session_id, wire_session_id, LeaseHeartbeat, TackleState, LEASE_TTL_SECS,
-};
+use crate::state::{store_session_id, wire_session_id, TackleState};
 use agent_client_protocol::schema::v1::{
     CompactionId, CompactionStatus, CompactionUpdate, ContentBlock, PromptRequest, PromptResponse,
     SessionId, SessionNotification, SessionUpdate, StopReason, TextContent, ToolCall, ToolCallId,
@@ -28,92 +26,19 @@ use agent_client_protocol::{Error, Responder};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
-/// The persisted state of a begun prompt turn, plus the lease heartbeat
-/// that must outlive it.
-pub(super) struct BegunTurn {
-    pub store_session: crate::store::SessionId,
-    pub turn: crate::store::Turn,
-    pub blocks_json: String,
-    pub heartbeat: LeaseHeartbeat,
-}
+pub(super) use crate::acp::common::session::{BeginError, BegunTurn};
 
-/// Why a prompt turn could not begin.
-pub(super) enum BeginError {
-    /// Another connection holds the session's turn lease.
-    Owned { holder: String },
-    /// The store failed while acquiring the lease or persisting the turn.
-    Store(String),
-}
-
-/// Acquires the one-turn-at-a-time lease and persists the prompt turn and
-/// its user message. The returned heartbeat must be held for the turn's
-/// lifetime; dropping it stops renewal.
+/// Acquires the one-turn-at-a-time lease and persists the prompt turn and its
+/// user message from a v1 prompt request. The returned heartbeat must be held
+/// for the turn's lifetime; dropping it stops renewal.
 pub(super) async fn begin_prompt_turn(
     state: &TackleState,
     request: &PromptRequest,
     owner: &str,
 ) -> Result<BegunTurn, BeginError> {
     let store_session = store_session_id(&request.session_id);
-    let acquired = state
-        .db
-        .acquire_lease(&store_session, owner, LEASE_TTL_SECS)
-        .await
-        .map_err(|err| BeginError::Store(err.to_string()))?;
-    if !acquired {
-        let holder = state
-            .db
-            .lease_holder(&store_session)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| "another connection".into());
-        return Err(BeginError::Owned { holder });
-    }
-    let heartbeat = LeaseHeartbeat::spawn(
-        Arc::clone(&state.db),
-        store_session.clone(),
-        owner.to_owned(),
-    );
-    // Persist the prompt turn + the user message (original content blocks,
-    // stored as the JSON block array).
     let blocks_json = serde_json::to_string(&request.prompt).unwrap_or_else(|_| "[]".to_owned());
-    let head = state
-        .db
-        .get_session(&store_session)
-        .await
-        .ok()
-        .flatten()
-        .and_then(|session| session.head_turn_id);
-    let turn = state
-        .db
-        .append_turn(
-            &store_session,
-            head.as_ref(),
-            crate::store::TurnKind::Interaction,
-            None,
-            crate::store::TurnUsage::default(),
-        )
-        .await
-        .map_err(|err| BeginError::Store(err.to_string()))?;
-    state
-        .db
-        .append_message(
-            &turn.id,
-            crate::store::Role::User,
-            &blocks_json,
-            None,
-            None,
-            None,
-            None,
-        )
-        .await
-        .map_err(|err| BeginError::Store(err.to_string()))?;
-    Ok(BegunTurn {
-        store_session,
-        turn,
-        blocks_json,
-        heartbeat,
-    })
+    crate::acp::common::session::begin_prompt_turn(state, store_session, blocks_json, owner).await
 }
 
 /// The model turn: long, and it awaits client messages
