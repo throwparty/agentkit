@@ -1,6 +1,6 @@
 # Tackle Turn Cancellation
 
-**Status:** draft  **Created:** 2026-10-24  **Author:** adrian
+**Status:** implemented  **Created:** 2026-10-24  **Author:** adrian
 
 Tackle (adrs/2026-09-17-tackle) is an ACP v1 agent harness. ACP v1 defines three inbound signals that stop an in-flight session/prompt: the session/cancel notification, the session/close request, and the protocol-level $/cancel_request notification, which the SDK records on the request's Responder before handlers run. The umbrella tackle specification already requires the behaviour — FR-003 states that session/close cancels ongoing work and releases the ownership lease — and docs/docs/dev/tackle/acp.mdx names cancelled among the turn's terminal stop reasons, but no implementation mechanism is specified.
 
