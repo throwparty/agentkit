@@ -5,17 +5,26 @@
 # tackle-test-model, a deterministic fixture process started here and stopped
 # afterwards.
 #
+# Every protocol version the suite supports has its own run and its own
+# committed baseline, so a gap in one version cannot hide behind the other:
+#   run-tck <version>        drives acp-tck at that protocol version
+#   check-baseline <version> diffs the report against baseline-<version>.txt
+#   seed-baseline <version>  regenerates that baseline after review
+#   conformance              runs and checks every version in `versions`
+#
 # Variables:
+#   versions — the protocol versions to run (space separated).
 #   test_model_bind/test_model_port — the address the fixture listens on; the
 #     config fixture and the readiness probe both point here.
 #   cancel_sentinel — prompt text that makes the fixture hold the stream open,
 #     so acp-tck's cancellation requirements are exercised.
-#   fixture — committed tackle config, conformance inputs, and the baseline.
-#   artifacts — run output (pid, log, report) under the ignored target tree.
+#   fixture — committed tackle config, conformance inputs, and the baselines.
+#   artifacts — run output (pid, log, reports) under the ignored target tree.
 
 set shell := ["bash", "-eux", "-o", "pipefail", "-c"]
 set working-directory := "../.."
 
+versions := "1 2"
 test_model_bind := "127.0.0.1"
 test_model_port := "45123"
 cancel_sentinel := "TACKLE-CONFORMANCE-CANCEL"
@@ -90,27 +99,28 @@ stop-test-model:
         fi
     fi
 
-run-tck:
+run-tck version:
     #!/usr/bin/env bash
     set -euxo pipefail
     mkdir -p {{ artifacts }} {{ artifacts }}/workdir
-    rm -f {{ artifacts }}/report.json
-    rm -f {{ artifacts }}/sessions.db {{ artifacts }}/sessions.db-wal {{ artifacts }}/sessions.db-shm
+    report={{ artifacts }}/report-{{ version }}.json
+    db={{ artifacts }}/sessions-{{ version }}.db
+    rm -f "$report" "$db" "$db-wal" "$db-shm"
     rc=0
     acp-tck \
-        --protocol-version 1 \
+        --protocol-version {{ version }} \
         --timeout 30 \
         --startup-timeout 30 \
         --test-timeout 120 \
         --agent-cwd "$PWD/{{ artifacts }}/workdir" \
         --cancel-prompt '{{ cancel_sentinel }}' \
-        --report-json {{ artifacts }}/report.json \
-        -- "$PWD/target/debug/agentkit-tackle" stdio --config-dir '{{ fixture }}' --db-path "$PWD/{{ artifacts }}/sessions.db" \
+        --report-json "$report" \
+        -- "$PWD/target/debug/agentkit-tackle" stdio --config-dir '{{ fixture }}' --db-path "$PWD/$db" \
         || rc=$?
     case "$rc" in
         0) ;;
         1)
-            if [ ! -s {{ artifacts }}/report.json ]; then
+            if [ ! -s "$report" ]; then
                 echo "error: acp-tck exited 1 without writing a report; harness failure, not a conformance verdict" >&2
                 exit 1
             fi
@@ -122,35 +132,42 @@ run-tck:
             ;;
     esac
 
-# Compare the latest report against the committed baseline.
-check-baseline:
+# Compare the latest report for a protocol version against its baseline.
+check-baseline version:
     #!/usr/bin/env bash
     set -euxo pipefail
     target/debug/tackle-conformance-check \
-        --report {{ artifacts }}/report.json \
-        --baseline '{{ fixture }}/baseline.txt'
+        --report {{ artifacts }}/report-{{ version }}.json \
+        --baseline '{{ fixture }}/baseline-{{ version }}.txt'
 
-# Regenerate the baseline from the latest report after reviewing its failures.
-seed-baseline:
+# Regenerate a version's baseline from the latest report after reviewing its failures.
+seed-baseline version:
     #!/usr/bin/env bash
     set -euxo pipefail
     target/debug/tackle-conformance-check \
-        --report {{ artifacts }}/report.json \
-        --baseline '{{ fixture }}/baseline.txt' \
+        --report {{ artifacts }}/report-{{ version }}.json \
+        --baseline '{{ fixture }}/baseline-{{ version }}.txt' \
         --seed
 
-# Single entry point for developers and CI: build, run the suite, stop the fixture.
+# Single entry point for developers and CI: build once, run and check every
+# protocol version against its own baseline, stop the fixture.
 conformance:
     #!/usr/bin/env bash
     set -euxo pipefail
     export TEST_MODEL_PID_FILE="{{ artifacts }}/test-model.$$.pid"
     mkdir -p {{ artifacts }}
-    rm -f {{ artifacts }}/report.json
+    rm -f {{ artifacts }}/report-*.json
     trap 'just --justfile {{ source_directory() }}/mod.just stop-test-model' EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM
     trap 'exit 129' HUP
     just --justfile {{ source_directory() }}/mod.just build
     just --justfile {{ source_directory() }}/mod.just start-test-model
-    just --justfile {{ source_directory() }}/mod.just run-tck
-    just --justfile {{ source_directory() }}/mod.just check-baseline
+    for version in {{ versions }}; do
+        just --justfile {{ source_directory() }}/mod.just run-tck "$version"
+    done
+    rc=0
+    for version in {{ versions }}; do
+        just --justfile {{ source_directory() }}/mod.just check-baseline "$version" || rc=$?
+    done
+    exit "$rc"
