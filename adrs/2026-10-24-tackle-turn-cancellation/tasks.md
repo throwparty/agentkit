@@ -2,7 +2,7 @@
 
 ## Tasks
 
-### T-001: Cancellation registry
+### T-001: [x] Cancellation registry
 
 Add `tokio-util` as a direct dependency in `crates/agentkit-tackle/Cargo.toml` with its `rt` feature. Add `cancellations: Mutex<BTreeMap<String, CancellationToken>>` to `ConnectionNegotiation` in `acp_v1/negotiation.rs`, plus `register(session) -> (CancellationToken, CancelRegistration)` and a `cancel(session)` lookup. `CancelRegistration` is a drop guard that removes the session's entry, so cleanup happens on every exit path.
 
