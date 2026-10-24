@@ -55,10 +55,11 @@ pub(crate) fn agent(
                 let negotiation = negotiation.clone();
                 async move |request: NewSessionRequest,
                             responder,
-                            _connection: V2ConnectionTo<Client>| {
+                            connection: V2ConnectionTo<Client>| {
                     super::sessions::handle_new_session(
                         state.clone(),
                         negotiation.clone(),
+                        connection,
                         request,
                         responder,
                     )
