@@ -80,7 +80,7 @@ Register an `on_receive_notification` handler for `CancelNotification` (`session
 | Depends On | T-004 |
 | References | session-cancel,cancel-after-completion,unknown-session |
 
-### T-007: session/close cancels the turn
+### T-007: [x] session/close cancels the turn
 
 In `acp_v1/sessions.rs::handle_close_session`, cancel the session's token before the existing close work (store close, grant clear, terminal release). The close request still returns its normal response.
 
