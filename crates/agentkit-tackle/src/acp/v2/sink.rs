@@ -35,14 +35,21 @@ fn text_chunk(message_id: &str, text: &str) -> ContentChunk {
     )
 }
 
+/// A usage update with the cumulative cost attached only when known.
+fn usage_update(used: u64, size: u64, cost: Option<f64>) -> UsageUpdate {
+    let update = UsageUpdate::new(used, size);
+    match cost {
+        Some(amount) => update.cost(Cost::new(amount, "USD")),
+        None => update,
+    }
+}
+
 impl TurnSink for ConnectionTurnSink {
     fn usage(&self, session: &SessionId, input_tokens: u64, context_size: u64, cost: Option<f64>) {
-        let update = UsageUpdate::new(input_tokens, context_size);
-        let update = match cost {
-            Some(amount) => update.cost(Cost::new(amount, "USD")),
-            None => update,
-        };
-        self.send(session, SessionUpdate::UsageUpdate(update));
+        self.send(
+            session,
+            SessionUpdate::UsageUpdate(usage_update(input_tokens, context_size, cost)),
+        );
     }
 
     fn text_delta(&self, session: &SessionId, message_id: &str, text: &str) {
@@ -80,5 +87,30 @@ impl TurnSink for ConnectionTurnSink {
                 SessionInfoUpdate::new().updated_at(updated_at.to_owned()),
             ),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cost_is_attached_only_when_known() {
+        let priced = usage_update(10, 100, Some(0.42));
+        let cost = priced.cost.expect("cost present");
+        assert_eq!(cost.amount, 0.42);
+        assert_eq!(cost.currency, "USD");
+
+        assert!(usage_update(10, 100, None).cost.is_none());
+    }
+
+    #[test]
+    fn chunks_carry_the_message_id() {
+        let chunk = text_chunk("message-1", "hello");
+        assert_eq!(chunk.message_id, MessageId::new("message-1"));
+        let ContentBlock::Text(text) = chunk.content else {
+            panic!("expected a text block");
+        };
+        assert_eq!(text.text, "hello");
     }
 }
