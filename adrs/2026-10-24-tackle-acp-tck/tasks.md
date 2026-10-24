@@ -145,7 +145,7 @@ Run the orchestration recipe once against current tackle, review the MANDATORY f
 | Depends On | T-007,T-009 |
 | References | baseline-diff,conformance-run-completes |
 
-### T-012: Non-blocking CI job
+### T-012: [x] Non-blocking CI job
 
 Add a reusable workflow (workflow_call) that runs just tackle conformance inside nix develop with continue-on-error, always uploads the JSON report as an artifact, and is invoked from pull-request.yaml on changes touching the tackle crate or the conformance inputs.
 

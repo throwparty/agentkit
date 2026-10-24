@@ -21,6 +21,7 @@ jobs:
       agentkit-cargo: ${{ steps.filter.outputs.agentkit-cargo }}
       docs: ${{ steps.filter.outputs.docs }}
       nix: ${{ steps.filter.outputs.nix }}
+      tackle-conformance: ${{ steps.filter.outputs.tackle-conformance }}
       workflows: ${{ steps.filter.outputs.workflows }}
       snapshot: ${{ steps.pr-body-check.outputs.matched }}
     steps:
@@ -50,6 +51,14 @@ jobs:
               - 'docs/**'
             nix:
               - 'nix/**'
+            tackle-conformance:
+              - 'crates/agentkit-tackle/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'nix/flake.nix'
+              - 'nix/flake.lock'
+              - 'justfile'
+              - '.github/workflows/tackle.conformance.yaml'
             workflows:
               - '.github/workflows/**'
 
@@ -63,6 +72,18 @@ jobs:
       actions: write # Called workflow uses it for cargo caches
       contents: read
     uses: $/.github/workflows/agentkit.build-and-test.yaml
+    secrets:
+      CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      CACHIX_SIGNING_KEY: ${{ secrets.CACHIX_SIGNING_KEY }}
+
+  conformance:
+    name: Tackle conformance
+    needs: changes
+    if: needs.changes.outputs.tackle-conformance == 'true'
+    permissions:
+      actions: write # Called workflow uses it for cargo caches
+      contents: read
+    uses: $/.github/workflows/tackle.conformance.yaml
     secrets:
       CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
       CACHIX_SIGNING_KEY: ${{ secrets.CACHIX_SIGNING_KEY }}

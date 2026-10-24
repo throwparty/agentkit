@@ -1,0 +1,61 @@
+name: "Tackle: conformance"
+
+on:
+  workflow_call:
+    secrets:
+      CACHIX_AUTH_TOKEN:
+        description: Cachix authentication token used to push built store paths
+        required: false
+      CACHIX_SIGNING_KEY:
+        description: Cachix signing key used to push built store paths
+        required: false
+
+concurrency:
+  group: tackle.conformance-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  conformance:
+    name: Conformance
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: nix develop ./nix --command bash -euo pipefail {0} # zizmor: ignore[misfeature]
+    permissions:
+      actions: write # To manage cargo caches
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Nix
+        uses: $/.github/actions/setup-nix
+        with:
+          push-name: ${{ vars.CACHIX_PUSH_CACHE }}
+          pull-names: ${{ vars.CACHIX_PULL_CACHES }}
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }} # zizmor: ignore[secrets-outside-env]
+          cachix-signing-key: ${{ secrets.CACHIX_SIGNING_KEY }} # zizmor: ignore[secrets-outside-env]
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Cache dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # ratchet:actions/cache@v6.1.0
+        with:
+          path: |
+            .cargo/registry
+            .cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Run conformance
+        id: conformance
+        continue-on-error: true
+        run: just tackle conformance
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # ratchet:actions/upload-artifact@v7.0.2
+        with:
+          name: tackle-conformance-report
+          path: target/conformance/report.json
+          if-no-files-found: warn
+          retention-days: 7
