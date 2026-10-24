@@ -4,7 +4,8 @@
 use crate::state::TackleState;
 use agent_client_protocol::schema::v2::{
     CloseSessionRequest, DeleteSessionRequest, InitializeRequest, ListSessionsRequest,
-    LoginAuthRequest, LogoutAuthRequest, NewSessionRequest, SetSessionConfigOptionRequest,
+    LoginAuthRequest, LogoutAuthRequest, NewSessionRequest, ResumeSessionRequest,
+    SetSessionConfigOptionRequest,
 };
 use agent_client_protocol::role::acp::Client;
 use agent_client_protocol::{Agent, V2ConnectionTo};
@@ -63,6 +64,18 @@ pub(crate) fn agent(
                             responder,
                             _connection: V2ConnectionTo<Client>| {
                     super::sessions::handle_list_sessions(state.clone(), request, responder).await
+                }
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            {
+                let state = state.clone();
+                async move |request: ResumeSessionRequest,
+                            responder,
+                            connection: V2ConnectionTo<Client>| {
+                    super::sessions::handle_resume_session(state.clone(), connection, request, responder)
+                        .await
                 }
             },
             agent_client_protocol::on_receive_request!(),
