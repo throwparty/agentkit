@@ -32,10 +32,11 @@ where
     // The connection's lease-owner id: turns acquire it for their lifetime;
     // released when the turn responds.
     let owner = Arc::new(format!("conn-{}", uuid::Uuid::new_v4()));
+    let v2_negotiation = Arc::new(v2::negotiation::ConnectionNegotiation::new());
     agent_client_protocol::Agent
         .protocol_router()
-        .with_v1(v1::agent(state.clone(), negotiation, owner))
-        .with_v2(v2::agent(state))
+        .with_v1(v1::agent(state.clone(), negotiation, owner.clone()))
+        .with_v2(v2::agent(state, v2_negotiation, owner))
         .connect_to(transport)
         .await
 }

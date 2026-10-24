@@ -22,14 +22,7 @@ use agent_client_protocol::schema::v2::{
 use agent_client_protocol::{Error, Responder, V2ConnectionTo};
 use std::sync::Arc;
 
-fn wire_session_id(id: &SessionId) -> agent_client_protocol::schema::v2::SessionId {
-    agent_client_protocol::schema::v2::SessionId::new(format!("sess_{id}"))
-}
-
-fn store_session_id(id: &agent_client_protocol::schema::v2::SessionId) -> String {
-    let raw = id.to_string();
-    raw.strip_prefix("sess_").unwrap_or(&raw).to_owned()
-}
+use super::{store_session_id, wire_session_id};
 
 /// Maps a domain config option onto the v2 wire type (object-valued kind with
 /// a `type` discriminator and a `configId`).
@@ -202,9 +195,13 @@ pub(super) async fn handle_list_sessions(
 /// `session/close`: close the session and drop its permission grants.
 pub(super) async fn handle_close_session(
     state: Arc<TackleState>,
+    negotiation: Arc<crate::acp::v2::negotiation::ConnectionNegotiation>,
     request: CloseSessionRequest,
     responder: Responder<CloseSessionResponse>,
 ) -> Result<(), Error> {
+    let store_session = store_session_id(&request.session_id);
+    negotiation.cancel(&store_session);
+    negotiation.wait_cancelled(&store_session).await;
     state
         .db
         .close_session(&store_session_id(&request.session_id))

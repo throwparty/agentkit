@@ -12,6 +12,8 @@ pub(crate) struct BegunTurn {
     pub turn: Turn,
     pub blocks_json: String,
     pub heartbeat: LeaseHeartbeat,
+    /// The persisted user message's id: the v2 acceptance receipt.
+    pub user_message_id: String,
 }
 
 /// Why a prompt turn could not begin.
@@ -70,7 +72,7 @@ pub(crate) async fn begin_prompt_turn(
         )
         .await
         .map_err(|err| BeginError::Store(err.to_string()))?;
-    state
+    let user_message = state
         .db
         .append_message(&turn.id, Role::User, &blocks_json, None, None, None, None)
         .await
@@ -80,5 +82,6 @@ pub(crate) async fn begin_prompt_turn(
         turn,
         blocks_json,
         heartbeat,
+        user_message_id: user_message.id,
     })
 }
