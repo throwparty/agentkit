@@ -10,6 +10,7 @@ use crate::mcp::McpPool;
 use crate::permissions::PermissionRequester;
 use crate::scripts::host::NoticeSink;
 use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 
 /// The runtime a turn is driven with. Constructed by the RPC layer from
 /// the live connection and passed into the orchestration.
@@ -25,4 +26,8 @@ pub struct TurnRuntime {
     pub titling_notices: Arc<dyn NoticeSink>,
     /// The client-capability tools the connection advertised and enabled.
     pub client_tools: Vec<ClientTool>,
+    /// The turn's cancellation signal: `session/cancel`, `session/close`,
+    /// and `$/cancel_request` all cancel this token, and the turn loop
+    /// stops when it fires.
+    pub cancellation: CancellationToken,
 }

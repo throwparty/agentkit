@@ -286,6 +286,7 @@ async fn run_turn_loop(
         tools,
         max_requests,
         &context_length_note,
+        runtime.cancellation.clone(),
         // usage cadence: a usage_update per model request,
         // skipped when the window is unknown (RFD guidance).
         {

@@ -12,6 +12,7 @@ use crate::state::TackleState;
 use agent_client_protocol::schema::v1::{PromptResponse, SessionId, StopReason};
 use agent_client_protocol::{Error, Responder};
 use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 
 /// Handles an exact `/context` prompt: no model request, no persisted
 /// message, and the prompt turn is deleted before the lease is released.
@@ -72,7 +73,7 @@ async fn build_reply(
     session_row: Option<&crate::store::Session>,
 ) -> Result<(String, String), String> {
     let (model_ref, window) = resolve_model_and_window(state, session_row).await?;
-    let runtime = turn_runtime(negotiation, cx, wire_session.clone());
+    let runtime = turn_runtime(negotiation, cx, wire_session.clone(), CancellationToken::new());
     let (_, tools, system) = build_registry_and_system(
         &state.definitions(),
         actor_name,

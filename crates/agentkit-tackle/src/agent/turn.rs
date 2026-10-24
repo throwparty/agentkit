@@ -11,6 +11,7 @@ use crate::providers::{
     ChatContent, ChatMessage, ChatRole, ModelError, ModelProvider, ModelRequest,
 };
 use crate::store::{Role, SessionStore, StoreError, TurnId};
+use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, thiserror::Error)]
 pub enum TurnError {
@@ -45,6 +46,7 @@ pub async fn run_turn<P: ModelProvider>(
     tools: Vec<crate::providers::ToolDefinition>,
     max_requests: u32,
     context_length_note: &str,
+    _cancellation: CancellationToken,
     mut on_usage: impl FnMut(u64, u64, Option<f64>) + Send,
     mut on_delta: impl FnMut(&str) + Send,
     mut on_thought: impl FnMut(&str) + Send,
@@ -489,6 +491,7 @@ mod tests {
             Vec::new(),
             8,
             "note",
+            tokio_util::sync::CancellationToken::new(),
             |input, output, cost| usage.push((input, output, cost)),
             |_: &str| {},
             |_: &str| {},
@@ -530,6 +533,7 @@ mod tests {
             Vec::new(),
             8,
             "note",
+            tokio_util::sync::CancellationToken::new(),
             |input, output, cost| usage.push((input, output, cost)),
             |_: &str| {},
             |_: &str| {},
