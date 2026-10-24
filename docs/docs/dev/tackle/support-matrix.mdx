@@ -1,0 +1,56 @@
+---
+sidebar_position: 4
+---
+
+# Protocol support matrix
+
+Tackle serves both ACP versions from one binary and negotiates per connection. This page records, per functionality area, whether the behaviour is supported under v1 and v2, and where the two diverge.
+
+**v2 is a draft.** Its schema is still `v2.0.0-alpha.x`, it is gated behind the SDK's `unstable_protocol_v2` feature, and its wire shape may change. Areas marked **draft** are part of that draft surface.
+
+## Matrix
+
+| Area | ACP v1 | ACP v2 | Notes |
+| --- | --- | --- | --- |
+| `initialize` negotiation | Yes | Yes | The router selects the version; an unsupported version is rejected with `-32022`. |
+| Capability advertisement | Flat markers | Object markers, nested under `session` | v2 requires `info` on both sides. |
+| `auth/login` / `auth/logout` | `authenticate` | `auth/login` / `auth/logout` | Advertised only when configured credentials are missing. |
+| `session/new`, `list`, `close`, `delete` | Yes | Yes | Same store and ownership leases. |
+| `additionalDirectories` | — | Yes | Persisted in session metadata and reported on `session/list`. |
+| Config options | `select` | `select` / `boolean`, `configId` + `type` discriminator | Same selectors underneath. |
+| `session/set_config_option` | Yes | Yes | Returns the complete post-change list. |
+| Prompt turn | Request/response with `stopReason` | Insertion response with `messageId`, then foreground state | v2 reports `running` / `requires_action` / `idle`. |
+| Cancellation | `session/cancel` | `session/cancel` | v2 ends `idle` with `stopReason: cancelled`. |
+| Message streaming | Chunks with `messageId` | Chunks and whole-message upserts with `messageId` | v2 patches by id (omit / null / replace). |
+| Tool calls | `tool_call` create + `tool_call_update` | `tool_call_update` upserts keyed by `toolCallId` | The first v2 update for an id is the create. |
+| Permissions | `session/request_permission` | `session/request_permission` with title + subject | v2 reports `requires_action` while blocked. |
+| Slash commands | `available_commands_update` | Response field / `available_commands_update`, text input discriminator | Dispatch decision shared in `acp::common`. |
+| Notices | Unstable-gated | Capability-free | v2 notices need no client capability. |
+| Compaction | Unstable-gated | Capability-free `compaction_update` | v2 carries `compactionId`, status, optional summary chunks. |
+| Session replay | `session/load` chunk replay | `session/resume` with `replayFrom: start` | v2 replays whole-message upserts preserving ids. |
+| Session fork | Unstable RFD + `/fork` fallback | Draft `session.fork` + `/fork` fallback | Advertised under `session.fork` in v2. |
+| Forwarded MCP servers | Yes | Yes | Both join the connection's shared MCP pool. |
+| Client fs/terminal tools | Yes (`client.*`) | **No** | See the parity gap below. |
+| Elicitation | Unstable RFD | Yes (when the client advertises a mode) | Never writes the grant store. |
+
+## Parity gaps
+
+### Client filesystem and terminal tools
+
+ACP v2 removes the client-provided `fs/*` and `terminal/*` surface. Under v1, tackle reflects those capabilities to the model as `client.fs.*` and `client.terminal.*` tools. Under v2 there is no equivalent: the model reaches files and commands through the harness's own tools and, where the client forwards one, through an MCP server. This is the one lossy difference between the versions; a v2 client that forwards no MCP server loses editor-side tooling entirely.
+
+### Draft markers
+
+- The `session.fork` marker and the `session/fork` method are draft-gated.
+- v2's state machine, keyed upserts, and capability-free notices/compaction are draft shapes.
+- v1's fork, compaction, and notices remain behind the client-advertised `_meta` capability keys.
+
+## Verifying
+
+Both versions run the same conformance runner, each against its own committed baseline:
+
+```sh
+just tackle conformance
+```
+
+Both baselines are empty; the v1 and v2 suites report `CONFORMANT`. Offline integration coverage for the v2 lifecycle, fork, and compaction lives in `crates/agentkit-tackle/tests/acp_v2.rs`.

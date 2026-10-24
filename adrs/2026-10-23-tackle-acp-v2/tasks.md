@@ -262,7 +262,7 @@ With both conformance suites green, validate manually against Zed behind its acp
 | Depends On | T-017,T-018 |
 | References | v2-conformance-gate,client-capability-review |
 
-### T-021: Client capability review
+### T-021: [x] Client capability review
 
 Review the ACP v2 client implementations, from primary sources, to establish how each replaces the removed filesystem and terminal surface: whether it forwards an MCP server, ships one, or not at all. The primary question is whether any client exposes editor capabilities as an MCP server. Record findings in research/acp-v2-ecosystem.md.
 
@@ -275,7 +275,7 @@ Review the ACP v2 client implementations, from primary sources, to establish how
 | Depends On |  |
 | References | client-capability-review |
 
-### T-022: Per-client documentation
+### T-022: [x] Per-client documentation
 
 Add a page per reviewed ACP v2 client under docs/docs/dev/tackle/clients/, recording advertised capabilities, whether it negotiates v2, how it exposes file and command tooling under v2, and any behaviour Tackle must account for. Extend the existing zed.mdx.
 
@@ -288,7 +288,7 @@ Add a page per reviewed ACP v2 client under docs/docs/dev/tackle/clients/, recor
 | Depends On | T-021 |
 | References | per-client-documentation |
 
-### T-023: Per-version support matrix
+### T-023: [x] Per-version support matrix
 
 Add a support matrix to docs/docs/dev/tackle stating, per functionality area, whether it is supported under ACP v1 and v2, marking draft-gated functionality, and recording the parity gaps including the client filesystem and terminal tools. Update protocol.mdx to cover both versions.
 
@@ -301,7 +301,7 @@ Add a support matrix to docs/docs/dev/tackle stating, per functionality area, wh
 | Depends On | T-017 |
 | References | per-version-support-matrix |
 
-### T-024: Clippy zero
+### T-024: [x] Clippy zero
 
 Bring cargo clippy -p agentkit-tackle --all-targets --all-features -- -D warnings to zero. The pre-existing failures are manual_async_fn and await_holding_lock in agent/turn.rs test code, which predate this ADR; fix them and any lints this ADR's work introduces, so the lint gate is green.
 

@@ -183,21 +183,23 @@ async fn v2_session_lifecycle_and_prompt_drive_a_turn() {
                 "the turn reaches a terminal idle: {reason:?}"
             );
 
-            let seen = seen.lock().unwrap();
-            assert!(
-                seen.iter()
-                    .any(|entry| matches!(entry, Seen::User(id) if id == &message_id)),
-                "the inserted user message echoes the accepted id"
-            );
-            assert!(
-                seen.iter().any(|entry| matches!(entry, Seen::Running)),
-                "running is reported before the idle"
-            );
-            assert!(
-                seen.iter()
-                    .any(|entry| matches!(entry, Seen::AgentText(text) if text == "ok")),
-                "the model text streams as an agent_message_chunk"
-            );
+            {
+                let seen = seen.lock().unwrap();
+                assert!(
+                    seen.iter()
+                        .any(|entry| matches!(entry, Seen::User(id) if id == &message_id)),
+                    "the inserted user message echoes the accepted id"
+                );
+                assert!(
+                    seen.iter().any(|entry| matches!(entry, Seen::Running)),
+                    "running is reported before the idle"
+                );
+                assert!(
+                    seen.iter()
+                        .any(|entry| matches!(entry, Seen::AgentText(text) if text == "ok")),
+                    "the model text streams as an agent_message_chunk"
+                );
+            }
 
             let listed = connection
                 .send_request(v2::ListSessionsRequest::new())

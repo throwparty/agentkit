@@ -6,6 +6,12 @@ sidebar_position: 1
 
 [Zed](https://zed.dev/) tends to lead in ACP client development, so it's a good place to validate features. This page records what it advertises today, and how to build it with ACP v2 support. It reflects Zed `main` as of 2026-10-23.
 
+## ACP v2
+
+Zed is the only editor with ACP v2 support, behind its `acp-beta` feature flag and falling back to v1 when v2 negotiation fails. It is not default-on for release users. On staff/debug builds the flag is on by default, so **removing an override does not disable it**; set `"feature_flags": { "acp-beta": "off" }` explicitly to force v1. A v2 connection needs no capability for subagents, since they are part of the v2 baseline.
+
+Under v2, Zed forwards the project's configured MCP servers to the agent and consumes the v2 surface: keyed message and tool-call upserts, foreground `state_update`s, capability-free notices and compaction, and `session/resume` replay. It does not expose editor filesystem or terminal capabilities as an MCP server, so a v2 connection that forwards no MCP server loses editor-side tooling.
+
 ## Subagent sessions
 
 Zed does not advertise the `subagents` client capability over ACP v1. Its `initialize` request is built in `crates/agent_servers/src/acp/v1.rs` by `client_capabilities_for_agent`, which sets `fs`, `terminal`, `auth`, session config options, compaction, notices, and elicitation, and never `subagents`.
@@ -56,3 +62,16 @@ So the ways to turn `acp-beta` on are:
 ## Checking a build
 
 To confirm the behaviour for a given Zed build, look for `subagents` in `crates/agent_servers/src/acp/`. If `client_capabilities_for_agent` does not set it, the client will not accept v1 `subagent_update` notifications, and nested sessions fall back to parent representation.
+
+## Session forking and titles
+
+Zed's ACP client has no session-fork handler: it never calls `session/fork`, and it does not create a thread from the `/fork` fallback's report. The fork is still created and stored; `/fork` reports its session id in the parent turn, and the fork can be opened from Zed's thread history/import via `session/list`. Do not expect a new thread to appear in the sidebar automatically.
+
+There are two different import flows, and only one is ACP:
+
+- **Thread History → Import** (or the "Looking for threads from external agents?" banner) opens the ACP import modal, which lists `session/list`. This is where forked sessions appear. Open Thread History with `ctrl-g` (`cmd-g` on macOS) while the Agent Panel sidebar is focused, or click the clock icon at the bottom of the sidebar. The import button is the download icon in the Thread History header.
+- **`agent: import threads from other channels`** imports threads from other Zed release channels. It never lists ACP sessions and shows only a count toast.
+
+ACP-imported sessions are saved with `archived: true` by design (`collect_importable_threads` in `crates/agent_ui/src/thread_import.rs`), so they appear in **Thread History**, not the active thread list or the agent panel's more menu.
+
+Titles are applied from `session_info_update` when the update carries a `title`. Tackle sends one after the titling script sets the title, so the thread name follows the conversation instead of staying on its default.

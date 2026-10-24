@@ -1,0 +1,22 @@
+---
+sidebar_position: 3
+---
+
+# Neovim
+
+Neovim has no native ACP support; community plugins provide it. Reviewed 2026-10-23: `olimorris/codecompanion.nvim`, `yetone/avante.nvim`, `carlos-algms/agentic.nvim`, and `hermes.nvim`.
+
+## Protocol version
+
+v1 only, on direct evidence. CodeCompanion documents "ACP Protocol Version 1"; the others pin v1-era SDKs or advertise v1-shaped capabilities.
+
+## Tooling story
+
+All reviewed plugins advertise `fs`; terminal support varies by plugin. Under v1 those become tackle's `client.*` tools through the normal capability check.
+
+ACP v2 removes the client `fs`/`terminal` surface, so a v2-capable Neovim client would have to forward an MCP server to keep editor-side tooling. None does today because none speaks v2.
+
+## What tackle should account for
+
+- These clients always take the v1 path.
+- Terminal capability is inconsistent between plugins; tackle already derives its `client.terminal.*` tools from what each client actually advertises.
