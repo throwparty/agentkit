@@ -132,7 +132,7 @@ Add transcript steps covering a cancelled turn and a close during a turn to `cra
 | Depends On | T-005,T-006 |
 | References | transcript-coverage,graceful-idle-close |
 
-### T-011: Conformance run and baseline reseed
+### T-011: [x] Conformance run and baseline reseed
 
 Ensure the deterministic test model exercises `$/cancel_request` if the current sentinel flow does not, run `just tackle conformance`, and confirm `ACP-CANCEL-001`, `ACP-CANCEL-002`, `ACP-CLOSE-002` and `ACP-JSONRPC-007` pass rather than skip. Reseed `crates/agentkit-tackle/tests/conformance/baseline.txt` with `just tackle seed-baseline` and review the diff.
 
