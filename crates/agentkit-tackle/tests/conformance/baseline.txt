@@ -1,0 +1,6 @@
+# MANDATORY acp-tck requirements expected to fail.
+# Known gaps, to be burned down. Regenerate with --seed after review.
+
+ACP-CANCEL-001
+ACP-CANCEL-002
+ACP-JSONRPC-007

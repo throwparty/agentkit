@@ -132,7 +132,7 @@ Add fixture-driven tests for the checker: known failure tolerated, new MANDATORY
 | Depends On | T-009 |
 | References | baseline-diff,baseline-drift-reported,new-failure-detected,baseline-absent,requirement-set-changes |
 
-### T-011: Seed the committed baseline
+### T-011: [x] Seed the committed baseline
 
 Run the orchestration recipe once against current tackle, review the MANDATORY failures, and commit them as the initial baseline file with a short comment that entries are known gaps to be burned down.
 
