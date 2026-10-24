@@ -141,7 +141,8 @@ pub(super) async fn handle_new_session(
 
     responder.respond(
         NewSessionResponse::new(wire_session_id(&session.id))
-            .config_options(wire_options(&selectors.options)),
+            .config_options(wire_options(&selectors.options))
+            .available_commands(super::commands::available_commands(&state)),
     )
 }
 
@@ -280,7 +281,9 @@ pub(super) async fn handle_resume_session(
 
     let selectors = config_options::build(&state, &session).await;
     responder.respond(
-        ResumeSessionResponse::new().config_options(wire_options(&selectors.options)),
+        ResumeSessionResponse::new()
+            .config_options(wire_options(&selectors.options))
+            .available_commands(super::commands::available_commands(&state)),
     )
 }
 

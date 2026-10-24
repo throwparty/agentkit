@@ -3,11 +3,13 @@
 //! a spawned task.
 
 use super::negotiation::ConnectionNegotiation;
+use crate::acp::common::dispatch::{decide, Dispatch};
+use crate::acp::common::messages::append_assistant_text;
 use crate::acp::common::session::{begin_prompt_turn, BeginError};
-use crate::agent::config_options::session_actor;
+use crate::agent::config_options::{effective_context_window, resolve_model_for, session_actor};
 use crate::agent::prompt::run_prompt_turn;
 use crate::agent::runtime::TurnRuntime;
-use crate::agent::TurnStop;
+use crate::agent::{compaction, TurnStop};
 use crate::invokables::client_tools::{ClientToolExecutor, Executed};
 use std::future::Future;
 use std::pin::Pin;
@@ -16,9 +18,10 @@ use crate::state::TackleState;
 use crate::store::SessionId;
 use agent_client_protocol::role::acp::Client;
 use agent_client_protocol::schema::v2::{
-    ContentBlock, ErrorStopReason, IdleStateUpdate, PromptRequest, PromptResponse,
-    RunningStateUpdate, SessionUpdate, StateUpdate, StopReason, UpdateSessionNotification,
-    UserMessage,
+    AgentMessage, CompactionId, CompactionStatus, CompactionUpdate, ContentBlock, Cost,
+    ErrorStopReason, IdleStateUpdate, MessageId, PromptRequest, PromptResponse,
+    RunningStateUpdate, SessionUpdate, StateUpdate, StopReason, TextContent,
+    UpdateSessionNotification, UsageUpdate, UserMessage,
 };
 use agent_client_protocol::{Error, Responder, V2ConnectionTo};
 use std::sync::Arc;
@@ -97,6 +100,15 @@ pub(super) async fn handle_prompt(
     ))
     .map_err(|err| Error::internal_error().data(err.to_string()))?;
 
+    let is_compaction =
+        compaction::is_compaction_command(&state.definitions(), &first_text);
+    let dispatch = decide(&first_text, is_compaction);
+    let context_size = session_row
+        .as_ref()
+        .and_then(|row| resolve_model_for(&state, row, None))
+        .and_then(|model| effective_context_window(&state, &model))
+        .unwrap_or(0);
+
     let wire_session = super::wire_session_id(&store_session);
     let runtime = TurnRuntime {
         cancellation: cancellation.clone(),
@@ -108,8 +120,14 @@ pub(super) async fn handle_prompt(
         }),
         executor: Arc::new(NoClientTools),
         tracker: negotiation.clone(),
-        compaction_notices: Arc::new(NullNotices),
-        titling_notices: Arc::new(NullNotices),
+        compaction_notices: Arc::new(super::notices::ConnectionNotices {
+            cx: cx.clone(),
+            source: "compaction",
+        }),
+        titling_notices: Arc::new(super::notices::ConnectionNotices {
+            cx: cx.clone(),
+            source: "titling",
+        }),
         client_tools: Vec::new(),
     };
 
@@ -121,18 +139,43 @@ pub(super) async fn handle_prompt(
             &wire_session,
             StateUpdate::Running(RunningStateUpdate::new()),
         );
-        let outcome = run_prompt_turn(
-            state,
-            runtime,
-            store_session,
-            turn,
-            actor_name,
-            session_row,
-            first_text,
-            blocks_json,
-            owner,
-        )
-        .await;
+        let outcome = match dispatch {
+            Dispatch::Compaction => {
+                let result = run_compaction(
+                    &state,
+                    &turn_cx,
+                    &wire_session,
+                    &store_session,
+                    &turn.id,
+                    &first_text,
+                    &actor_name,
+                    context_size,
+                )
+                .await;
+                // The model turn releases its lease in `run_prompt_turn`; the
+                // intercepted compaction path must do the same or the next
+                // prompt sees the session as actively owned.
+                state.db.release_lease(&store_session, &owner).await.ok();
+                match result {
+                    Ok(()) => Ok(TurnStop::EndTurn),
+                    Err(err) => Err(err),
+                }
+            }
+            _ => {
+                run_prompt_turn(
+                    state,
+                    runtime,
+                    store_session,
+                    turn,
+                    actor_name,
+                    session_row,
+                    first_text,
+                    blocks_json,
+                    owner,
+                )
+                .await
+            }
+        };
         let stop = match outcome {
             Ok(TurnStop::EndTurn | TurnStop::ContextLength) => StopReason::EndTurn,
             Ok(TurnStop::MaxTurnRequests) => StopReason::MaxTurnRequests,
@@ -164,8 +207,66 @@ impl ClientToolExecutor for NoClientTools {
     }
 }
 
-struct NullNotices;
-
-impl NoticeSink for NullNotices {
-    fn script_model_call(&self, _session: &SessionId) {}
+#[allow(clippy::too_many_arguments)]
+async fn run_compaction(
+    state: &Arc<TackleState>,
+    cx: &V2ConnectionTo<Client>,
+    wire_session: &agent_client_protocol::schema::v2::SessionId,
+    store_session: &SessionId,
+    turn_id: &crate::store::TurnId,
+    first_text: &str,
+    actor_name: &str,
+    context_size: u64,
+) -> Result<(), String> {
+    let notices: Arc<dyn NoticeSink> = Arc::new(super::notices::ConnectionNotices {
+        cx: cx.clone(),
+        source: "compaction",
+    });
+    let (before, after) = compaction::run_compaction(
+        state,
+        store_session,
+        turn_id,
+        actor_name,
+        context_size,
+        notices,
+    )
+    .await;
+    let note = compaction::announcement(first_text.trim_start_matches('/'), before, after);
+    let message = append_assistant_text(state, turn_id, &note)
+        .await
+        .map_err(|err| err.to_string())?;
+    let _ = cx.send_notification(UpdateSessionNotification::new(
+        wire_session.clone(),
+        SessionUpdate::AgentMessage(
+            AgentMessage::new(MessageId::new(message.id))
+                .content(vec![ContentBlock::Text(TextContent::new(note.clone()))]),
+        ),
+    ));
+    if context_size > 0 {
+        let session_usage = state
+            .db
+            .session_usage(store_session)
+            .await
+            .map_err(|err| err.to_string())?;
+        let cost = (session_usage.cost_usd > 0.0).then_some(session_usage.cost_usd);
+        let update = UsageUpdate::new(after, context_size);
+        let update = match cost {
+            Some(amount) => update.cost(Cost::new(amount, "USD")),
+            None => update,
+        };
+        let _ = cx.send_notification(UpdateSessionNotification::new(
+            wire_session.clone(),
+            SessionUpdate::UsageUpdate(update),
+        ));
+    }
+    let update = CompactionUpdate::new(
+        CompactionId::new(uuid::Uuid::new_v4().to_string()),
+        CompactionStatus::Completed,
+    )
+    .summary(vec![ContentBlock::Text(TextContent::new(note))]);
+    let _ = cx.send_notification(UpdateSessionNotification::new(
+        wire_session.clone(),
+        SessionUpdate::CompactionUpdate(update),
+    ));
+    Ok(())
 }

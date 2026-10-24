@@ -171,7 +171,7 @@ Implement v2 session/request_permission with a required title and optional subje
 | Depends On | T-010 |
 | References | v2-permission-requests |
 
-### T-014: v2 commands, notices and compaction
+### T-014: [x] v2 commands, notices and compaction
 
 Implement available_commands_update with the v2 command input type discriminator, capability-free notice updates, and capability-free compaction updates (compaction_update with compactionId and status, optional compaction_summary_chunk). Reuse the shared dispatch decision for the slash-command ladder.
 

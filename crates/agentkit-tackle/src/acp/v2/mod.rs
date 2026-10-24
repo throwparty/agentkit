@@ -3,8 +3,10 @@
 //! import the other.
 
 pub mod capabilities;
+pub mod commands;
 pub mod initialize;
 pub mod negotiation;
+pub mod notices;
 pub mod permission;
 pub mod prompt;
 pub mod replay;
