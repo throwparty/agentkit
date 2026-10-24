@@ -2,8 +2,8 @@
 //! resolves an in-flight `session/prompt` with `stopReason: cancelled`.
 
 use agentkit_tackle::agent_client_protocol::schema::v1::{
-    CancelNotification, ContentBlock, InitializeRequest, ListSessionsRequest, NewSessionRequest,
-    PromptRequest, StopReason, TextContent,
+    CancelNotification, CloseSessionRequest, ContentBlock, InitializeRequest, ListSessionsRequest,
+    NewSessionRequest, PromptRequest, StopReason, TextContent,
 };
 use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
@@ -120,4 +120,56 @@ async fn session_cancel_for_an_idle_session_is_a_noop() {
         })
         .await
         .expect("idle cancel is a no-op");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn session_close_cancels_the_in_flight_prompt() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(HangingModel)
+        .mount(&server)
+        .await;
+
+    let dir = tempfile::tempdir().unwrap();
+    write_config(dir.path(), &server.uri());
+    let agent = spawn_agent(dir.path());
+
+    Client
+        .builder()
+        .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
+            connection
+                .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            let session = connection
+                .send_request(NewSessionRequest::new(std::path::PathBuf::from("/work")))
+                .block_task()
+                .await?;
+            let session_id = session.session_id.clone();
+
+            let prompt = connection.send_request(PromptRequest::new(
+                session_id.clone(),
+                vec![ContentBlock::Text(TextContent::new("hello".to_owned()))],
+            ));
+            let close = connection.send_request(CloseSessionRequest::new(session_id.clone()));
+
+            let response = prompt.block_task().await?;
+            assert_eq!(response.stop_reason, StopReason::Cancelled);
+            close.block_task().await?;
+
+            let listed = connection
+                .send_request(ListSessionsRequest::new())
+                .block_task()
+                .await?;
+            assert!(
+                listed
+                    .sessions
+                    .iter()
+                    .any(|session| session.session_id == session_id),
+                "close keeps the session listable"
+            );
+            Ok(())
+        })
+        .await
+        .expect("close during a turn");
 }

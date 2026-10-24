@@ -261,6 +261,9 @@ pub(super) async fn handle_close_session(
     request: agent_client_protocol::schema::v1::CloseSessionRequest,
     responder: Responder<CloseSessionResponse>,
 ) -> Result<(), Error> {
+    // A close cancels the session's in-flight turn, as if `session/cancel`
+    // had been sent, before the session state is torn down.
+    negotiation.cancel(&store_session_id(&request.session_id));
     state
         .db
         .close_session(&store_session_id(&request.session_id))
