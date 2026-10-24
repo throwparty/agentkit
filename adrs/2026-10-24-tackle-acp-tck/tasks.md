@@ -67,7 +67,7 @@ Add offline tests for tackle-test-model: the streaming reply shape for a normal 
 | Depends On | T-003,T-004 |
 | References | deterministic-test-model,cancellation-exercise,offline-determinism |
 
-### T-006: Conformance config fixture
+### T-006: [x] Conformance config fixture
 
 Commit a tackle configuration fixture under crates/agentkit-tackle/tests/conformance/ whose endpoint base_url targets the test model's fixed localhost port with auth none and a model whose context window is known so usage reporting is live; it is passed via --config-dir by the runner.
 
