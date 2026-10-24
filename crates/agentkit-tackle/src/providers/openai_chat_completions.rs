@@ -611,6 +611,7 @@ mod tests {
             |delta: &str| deltas.push(delta.to_owned()),
             |_: &str| {},
             |_attempt: u32, _message: &str| {}, // no retry assertions here
+            |_: &crate::providers::ModelToolCall| {},
             crate::providers::ignore_tool_call,
         )
         .await
@@ -721,6 +722,7 @@ mod tests {
             |_: &str| {},
             |_: &str| {},
             |_: u32, _: &str| {},
+            |_: &crate::providers::ModelToolCall| {},
             crate::providers::ignore_tool_call,
         )
         .await
@@ -792,6 +794,7 @@ data: {not json}
             |_: &str| {},
             |_: &str| {},
             |_: u32, _: &str| {},
+            |_: &crate::providers::ModelToolCall| {},
             crate::providers::ignore_tool_call,
         )
         .await
@@ -839,6 +842,7 @@ data: {not json}
             |_: &str| {},
             |_: &str| {},
             |attempt: u32, _: &str| retries.push(attempt),
+            |_: &crate::providers::ModelToolCall| {},
             crate::providers::ignore_tool_call,
         )
         .await

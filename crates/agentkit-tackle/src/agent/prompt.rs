@@ -52,48 +52,55 @@ pub(crate) async fn run_prompt_turn(
         owner.as_ref().clone(),
     );
 
-    let (model_ref, size) = resolve_model_and_window(&state, session_row.as_ref()).await?;
-    let (registry, tools, system) = build_registry_and_system(
-        &state.definitions(),
-        &actor_name,
-        &runtime.pool,
-        &runtime.client_tools,
-    )
-    .await;
-    let prompt = expand_prompt(&first_text, &blocks_json, &registry)?;
-
-    let assembled = state
-        .db
-        .assemble_context(&session_id)
-        .await
-        .map_err(|err| err.to_string())?;
-    let prior = compaction::prior_messages(&assembled, &turn.id);
-
-    let provider =
-        provider_for(&model_ref, &state.config().config).map_err(|err| err.to_string())?;
-    let inputs = LoopInputs {
-        registry,
-        provider,
-        tools,
-        system,
-        prompt,
-        prior,
-        context_length_note: context_overflow_note(&state),
+    // Preparation awaits the MCP-pool lock and each server's `tools/list`
+    // (and model discovery); race it against the token so a cancel during
+    // setup still finalises through the common tail rather than hanging.
+    let prepared = tokio::select! {
+        biased;
+        _ = runtime.cancellation.cancelled() => None,
+        result = prepare_turn(
+            &state,
+            &runtime,
+            session_row.as_ref(),
+            &actor_name,
+            &session_id,
+            &turn.id,
+            &first_text,
+            &blocks_json,
+        ) => Some(result),
     };
-    let max_requests = state.config().config.turns.max_model_requests.unwrap_or(8);
-
-    let outcome = run_turn_loop(
-        inputs,
-        &state,
-        &runtime,
-        &session_id,
-        &turn.id,
-        &actor_name,
-        &model_ref,
-        size,
-        max_requests,
-    )
-    .await;
+    let (outcome, size) = match prepared {
+        None => {
+            let usage = state
+                .db
+                .session_usage(&session_id)
+                .await
+                .map_err(|err| err.to_string())?;
+            (
+                Ok(TurnOutcome {
+                    stop: TurnStop::Cancelled,
+                    usage,
+                }),
+                0,
+            )
+        }
+        Some(Err(err)) => return Err(err),
+        Some(Ok((inputs, model_ref, size, max_requests))) => (
+            run_turn_loop(
+                inputs,
+                &state,
+                &runtime,
+                &session_id,
+                &turn.id,
+                &actor_name,
+                &model_ref,
+                size,
+                max_requests,
+            )
+            .await,
+            size,
+        ),
+    };
 
     if let Ok(result) = &outcome {
         let _usage = crate::telemetry::usage_span(
@@ -119,6 +126,51 @@ pub(crate) async fn run_prompt_turn(
     state.db.release_lease(&session_id, &owner).await.ok();
 
     finish_turn(&state, sink.as_ref(), &session_id, size, outcome).await
+}
+
+/// Resolves the turn's model, tools, system prompt, prompt, and prior
+/// context. Split out so it can be raced against cancellation: every await
+/// here (model discovery, the MCP-pool lock, `tools/list`, context
+/// assembly) is a point a cancel must be able to interrupt.
+#[allow(clippy::too_many_arguments)]
+async fn prepare_turn(
+    state: &Arc<TackleState>,
+    runtime: &TurnRuntime,
+    session_row: Option<&Session>,
+    actor_name: &str,
+    session_id: &SessionId,
+    turn_id: &TurnId,
+    first_text: &str,
+    blocks_json: &str,
+) -> Result<(LoopInputs, String, u64, u32), String> {
+    let (model_ref, size) = resolve_model_and_window(state, session_row).await?;
+    let (registry, tools, system) = build_registry_and_system(
+        &state.definitions(),
+        actor_name,
+        &runtime.pool,
+        &runtime.client_tools,
+    )
+    .await;
+    let prompt = expand_prompt(first_text, blocks_json, &registry)?;
+    let assembled = state
+        .db
+        .assemble_context(session_id)
+        .await
+        .map_err(|err| err.to_string())?;
+    let prior = compaction::prior_messages(&assembled, turn_id);
+    let provider =
+        provider_for(&model_ref, &state.config().config).map_err(|err| err.to_string())?;
+    let inputs = LoopInputs {
+        registry,
+        provider,
+        tools,
+        system,
+        prompt,
+        prior,
+        context_length_note: context_overflow_note(state),
+    };
+    let max_requests = state.config().config.turns.max_model_requests.unwrap_or(8);
+    Ok((inputs, model_ref, size, max_requests))
 }
 
 /// Resolves the model through the shared chain — metadata, actor
@@ -319,6 +371,22 @@ async fn run_turn_loop(
             let sink = sink_for_retry;
             let session = sink_session.clone();
             move |attempt: u32, message: &str| sink.retry(&session, attempt, message)
+        },
+        // A cancelled tool call: resolve its card as failed so it never
+        // lingers in-progress.
+        {
+            let sink = Arc::clone(&sink);
+            let session = sink_session.clone();
+            move |call: &crate::providers::ModelToolCall| {
+                sink.tool_call_update(
+                    &session,
+                    crate::agent::sink::ToolCallUpdate {
+                        id: call.id.clone(),
+                        status: crate::agent::sink::ToolCallStatus::Failed,
+                        content: crate::agent::turn::TOOL_CANCELLED_NOTE.to_owned(),
+                    },
+                );
+            }
         },
         // Model tool calls: announce, run the permission
         // pipeline, execute via the registry, report the result

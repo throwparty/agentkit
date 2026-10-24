@@ -769,6 +769,7 @@ mod tests {
                 |delta: &str| streamed.push(delta.to_owned()),
                 |_: &str| {},
                 |_, _| {},
+                |_: &crate::providers::ModelToolCall| {},
                 crate::providers::ignore_tool_call,
             )
             .await
@@ -855,6 +856,7 @@ mod tests {
                 |delta: &str| streamed.push(delta.to_owned()),
                 |_: &str| {},
                 |_, _| {},
+                |_: &crate::providers::ModelToolCall| {},
                 crate::providers::ignore_tool_call,
             )
             .await
@@ -955,6 +957,7 @@ mod tests {
                 |_: &str| {},
                 |_: &str| {},
                 |_, _| {},
+                |_: &crate::providers::ModelToolCall| {},
                 crate::providers::ignore_tool_call,
             )
             .await
