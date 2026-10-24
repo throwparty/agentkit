@@ -106,7 +106,7 @@ Implement session/new, session/list, session/close, session/delete, and session/
 | Depends On | T-007 |
 | References | v2-session-lifecycle,v2-config-options |
 
-### T-009: v2 resume replay
+### T-009: [x] v2 resume replay
 
 Implement session/resume with replayFrom start: replay the full user-visible history as session/update notifications before the response, preserving retained user message ids, then report a current-state snapshot before the response. Reject unsupported cursors with -32602.
 

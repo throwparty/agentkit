@@ -10,14 +10,16 @@ use crate::content::timestamp;
 use crate::scripts::host::NoticeSink;
 use crate::state::TackleState;
 use crate::store::{ListFilter, Role, SessionId, SessionKind, TurnKind, TurnUsage};
+use agent_client_protocol::role::acp::Client;
 use agent_client_protocol::schema::v2::{
     AbsolutePath, CloseSessionRequest, CloseSessionResponse, DeleteSessionRequest,
-    DeleteSessionResponse, ListSessionsRequest, ListSessionsResponse, NewSessionRequest,
-    NewSessionResponse, SessionConfigId, SessionConfigOption, SessionConfigOptionCategory,
-    SessionConfigOptionValue, SessionConfigSelectOption, SessionConfigValueId, SessionInfo,
-    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
+    DeleteSessionResponse, IdleStateUpdate, ListSessionsRequest, ListSessionsResponse,
+    NewSessionRequest, NewSessionResponse, ReplayFrom, ResumeSessionRequest, ResumeSessionResponse,
+    SessionConfigId, SessionConfigOption, SessionConfigOptionCategory, SessionConfigOptionValue,
+    SessionConfigSelectOption, SessionConfigValueId, SessionInfo, SessionUpdate, SetSessionConfigOptionRequest,
+    SetSessionConfigOptionResponse, StateUpdate, UpdateSessionNotification,
 };
-use agent_client_protocol::{Error, Responder};
+use agent_client_protocol::{Error, Responder, V2ConnectionTo};
 use std::sync::Arc;
 
 fn wire_session_id(id: &SessionId) -> agent_client_protocol::schema::v2::SessionId {
@@ -233,6 +235,56 @@ pub(super) async fn handle_delete_session(
         .await
         .clear_session(&request.session_id.to_string());
     responder.respond(DeleteSessionResponse::new())
+}
+
+/// `session/resume`: reattach to a stored session. With `replayFrom: start`,
+/// the full user-visible history replays before the response; an unsupported
+/// cursor is rejected with `-32602`. A current-state snapshot follows any
+/// replay and precedes the response in every case.
+pub(super) async fn handle_resume_session(
+    state: Arc<TackleState>,
+    cx: V2ConnectionTo<Client>,
+    request: ResumeSessionRequest,
+    responder: Responder<ResumeSessionResponse>,
+) -> Result<(), Error> {
+    let session_id = store_session_id(&request.session_id);
+    let session = state
+        .db
+        .get_session(&session_id)
+        .await
+        .map_err(|err| Error::internal_error().data(err.to_string()))?
+        .ok_or_else(|| Error::internal_error().data("no such session".to_owned()))?;
+
+    match &request.replay_from {
+        Some(ReplayFrom::Start(_)) => {
+            let assembled = state
+                .db
+                .assemble_context(&session_id)
+                .await
+                .map_err(|err| Error::internal_error().data(err.to_string()))?;
+            for update in super::replay::replay_updates(&request.session_id, &assembled) {
+                cx.send_notification(update)
+                    .map_err(|err| Error::internal_error().data(err.to_string()))?;
+            }
+        }
+        None => {}
+        Some(_) => {
+            return responder.respond_with_error(
+                Error::invalid_params().data("unsupported replay cursor"),
+            );
+        }
+    }
+
+    cx.send_notification(UpdateSessionNotification::new(
+        request.session_id.clone(),
+        SessionUpdate::StateUpdate(StateUpdate::Idle(IdleStateUpdate::new())),
+    ))
+    .map_err(|err| Error::internal_error().data(err.to_string()))?;
+
+    let selectors = config_options::build(&state, &session).await;
+    responder.respond(
+        ResumeSessionResponse::new().config_options(wire_options(&selectors.options)),
+    )
 }
 
 /// `session/set_config_option`: apply a model or actor switch and return the

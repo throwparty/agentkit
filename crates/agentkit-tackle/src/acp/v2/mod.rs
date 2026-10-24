@@ -4,6 +4,7 @@
 
 pub mod capabilities;
 pub mod initialize;
+pub mod replay;
 pub mod server;
 pub mod sessions;
 
