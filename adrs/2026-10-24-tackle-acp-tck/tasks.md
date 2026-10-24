@@ -15,7 +15,7 @@ Add agentclientprotocol/acp-tck as a nix flake input in nix/flake.nix and packag
 | Depends On |  |
 | References | pinned-tck-toolchain,hermetic-pinning |
 
-### T-002: Test model bin scaffold
+### T-002: [x] Test model bin scaffold
 
 Add src/bin/tackle-test-model.rs to agentkit-tackle with an axum server and clap CLI: --bind (default 127.0.0.1) and --port plus --cancel-sentinel. Register the bin target in Cargo.toml beside tackle-mcp-echo. The process binds localhost only and writes diagnostics to stderr.
 
