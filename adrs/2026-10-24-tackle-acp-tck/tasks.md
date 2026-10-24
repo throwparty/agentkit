@@ -171,7 +171,7 @@ Add a short conformance section to docs/docs/dev/tackle/protocol.mdx: what acp-t
 | Depends On | T-007 |
 | References | transcript-suite-retained,non-blocking-ci |
 
-### T-014: End-to-end verification
+### T-014: [x] End-to-end verification
 
 Verify the whole feature: run the orchestration recipe with network disabled; run it twice and compare requirement statuses; run cargo test to confirm the golden-transcript suite still passes untouched; and confirm no release or nix artifact includes tackle-test-model.
 

@@ -1,6 +1,6 @@
 # Run acp-tck as a tackle conformance check
 
-**Status:** draft  **Created:** 2026-10-24  **Author:** adrian
+**Status:** implemented  **Created:** 2026-10-24  **Author:** adrian
 
 Tackle (adrs/2026-09-17-tackle) is an ACP v1 agent harness. Its NFR-006 requires strict ACP v1 stable compliance "verified by the conformance suite", which today is a single in-repo golden-transcript test (crates/agentkit-tackle/tests/acp_v1_conformance.rs) replaying one recorded lifecycle over raw JSON-RPC. The upstream Agent Client Protocol Test Compatibility Kit (acp-tck, https://github.com/agentclientprotocol/acp-tck) is an external, requirement-level conformance suite: it launches an agent as a stdio subprocess, drives the protocol, and reports each requirement as pass, fail, skipped, or not tested under a CONFORMANT or NOT CONFORMANT verdict. An audit of upstream usage found that acp-tck is run in CI only against deterministic, model-free fixture agents (the Rust SDK's testy and the Python SDK's echo_agent.py), that agent scorecards are diffed against a committed baseline rather than gated, and that no model-backed agent repository gates CI on the TCK; the MCP conformance suite follows the same known-failures-baseline pattern. Tackle needs a model endpoint to answer session/prompt at all, so an offline run needs a deterministic endpoint to exercise prompt and cancellation requirements without network, cost, or flake.
 
