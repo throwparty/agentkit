@@ -80,7 +80,7 @@ Run the v1 acp-tck suite after the refactor and confirm it still reports CONFORM
 | Depends On | T-001,T-004,T-005 |
 | References | v1-conformance-preserved,protocol-conformance,v1-preservation |
 
-### T-007: v2 module skeleton, capabilities and auth
+### T-007: [x] v2 module skeleton, capabilities and auth
 
 Add acp::v2 with its ConnectTo builder, capability map (object support markers, session-nested groups, required session baseline, session.fork marker), the v2 initialize response with required info, and auth/login plus auth/logout. Wire it into run_acp_over alongside v1.
 
