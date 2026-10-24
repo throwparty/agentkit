@@ -24,6 +24,7 @@ pub(super) async fn handle_initialize(
     responder: Responder<InitializeResponse>,
 ) -> Result<(), Error> {
     negotiation.capture(&request.client_capabilities);
+    tracing::info!(protocol = "v1", "ACP protocol negotiated");
     // Missing provider credentials surface as authMethods: the client
     // drives the ACP authenticate method.
     let mut response = InitializeResponse::new(ProtocolVersion::V1)

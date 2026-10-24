@@ -20,6 +20,7 @@ pub(super) async fn handle_initialize(
     _request: InitializeRequest,
     responder: Responder<InitializeResponse>,
 ) -> Result<(), Error> {
+    tracing::info!(protocol = "v2", "ACP protocol negotiated");
     let mut response = InitializeResponse::new(
         ProtocolVersion::V2,
         Implementation::new("tackle", env!("CARGO_PKG_VERSION")),
