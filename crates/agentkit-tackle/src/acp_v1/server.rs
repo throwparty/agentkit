@@ -347,6 +347,21 @@ where
                 }
             },
             agent_client_protocol::on_receive_request!(),
+        )
+        // `session/cancel` is a notification (no response). It cancels the
+        // session's in-flight turn, if any; an idle or unknown session is a
+        // no-op.
+        .on_receive_notification(
+            {
+                let negotiation = negotiation.clone();
+                async move |notification: agent_client_protocol::schema::v1::CancelNotification,
+                            _cx| {
+                    let store_session = crate::state::store_session_id(&notification.session_id);
+                    negotiation.cancel(&store_session);
+                    Ok(())
+                }
+            },
+            agent_client_protocol::on_receive_notification!(),
         );
 
     builder.connect_to(transport).await

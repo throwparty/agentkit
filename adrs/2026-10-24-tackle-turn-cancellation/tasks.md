@@ -67,7 +67,7 @@ Map `TurnStop::Cancelled` to `StopReason::Cancelled` in the `run_model_turn_case
 | Depends On | T-003,T-004 |
 | References | session-cancel,cleanup-on-cancel,no-updates-after-response |
 
-### T-006: session/cancel handler
+### T-006: [x] session/cancel handler
 
 Register an `on_receive_notification` handler for `CancelNotification` (`session/cancel`) in the `acp_v1/server.rs` builder. The handler resolves the store session id, looks up the token in the connection registry, and cancels it; unknown sessions are ignored.
 
