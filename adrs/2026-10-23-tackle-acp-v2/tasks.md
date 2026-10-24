@@ -132,7 +132,7 @@ Implement the v2 session/prompt handler as an insertion-response variant: persis
 | Depends On | T-008 |
 | References | v2-prompt-lifecycle,cancellation-works,protocol-conformance |
 
-### T-011: v2 sink: messages, thoughts, usage
+### T-011: [x] v2 sink: messages, thoughts, usage
 
 Implement the v2 TurnSink mapping: text_delta to agent_message_chunk, thought_delta to agent_thought_chunk, whole-message upserts with the omit/null/replace patch semantics, usage to usage_update with optional cumulative cost, and session_info to session_info_update. Every message update and chunk carries a required messageId.
 
