@@ -135,8 +135,15 @@ pub(super) async fn run_model_turn_case(
     blocks_json: String,
     responder: Responder<PromptResponse>,
 ) -> Result<(), Error> {
-    let runtime = turn_runtime(&negotiation, &cx, wire_session, CancellationToken::new());
+    // The turn's cancellation token is registered before the turn is
+    // spawned: the dispatch loop processes the prompt handler to
+    // completion first, so any `session/cancel` that follows finds it.
+    // The registration guard rides the spawned task, so the entry goes
+    // away on every exit path.
+    let (cancellation, registration) = negotiation.register_cancellation(&store_session);
+    let runtime = turn_runtime(&negotiation, &cx, wire_session, cancellation);
     cx.spawn(async move {
+        let _registration = registration;
         match run_prompt_turn(
             state,
             runtime,
