@@ -1,0 +1,34 @@
+# Architecture rules for the ACP module boundary.
+#
+# `acp::common` is the shared, protocol-neutral layer. `acp::v1` and `acp::v2`
+# are sibling wire surfaces: each may depend on `acp::common`, and neither may
+# depend on the other. See adrs/2026-10-23-tackle-acp-v2.
+
+preset = "minimal"
+
+[[scopes]]
+name = "acp-common"
+paths = ["crates/agentkit-tackle/src/acp/common/**"]
+
+[[scopes]]
+name = "acp-v1"
+paths = ["crates/agentkit-tackle/src/acp/v1/**"]
+
+[[scopes]]
+name = "acp-v2"
+paths = ["crates/agentkit-tackle/src/acp/v2/**"]
+
+[[deny-scope-dep]]
+from = "acp-v1"
+to = ["acp-v2"]
+message = "acp::v1 must not depend on acp::v2; share through acp::common."
+
+[[deny-scope-dep]]
+from = "acp-v2"
+to = ["acp-v1"]
+message = "acp::v2 must not depend on acp::v1; share through acp::common."
+
+# This gate enforces the ACP module boundary only; the built-in style rules are
+# not adopted here.
+[rules.no-unwrap-expect]
+enabled = false

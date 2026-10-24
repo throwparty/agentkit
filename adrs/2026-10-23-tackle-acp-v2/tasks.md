@@ -54,7 +54,7 @@ Add run_acp_over in acp::mod, built on Agent.protocol_router(), for now configur
 | Depends On | T-003 |
 | References | version-negotiation,shared-core-boundary |
 
-### T-005: arch-lint boundary gate
+### T-005: [x] arch-lint boundary gate
 
 Add arch-lint.toml declaring the acp::common / acp::v1 / acp::v2 layering and the sibling prohibition (acp::v1 and acp::v2 must not import each other), and wire it into the existing CI gate.
 
