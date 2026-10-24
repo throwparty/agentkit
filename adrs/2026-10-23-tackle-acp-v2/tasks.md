@@ -2,7 +2,7 @@
 
 ## Tasks
 
-### T-001: Conformance runner per-version baselines
+### T-001: [x] Conformance runner per-version baselines
 
 Parameterise the conformance runner in crates/agentkit-tackle/mod.just by protocol version (it hardcodes --protocol-version 1 today) and key the baseline by version so v1 and v2 have separate committed baselines. Rework tackle-conformance-check to take the version or a per-version baseline path. Wire the v2 run into the existing CI job.
 
