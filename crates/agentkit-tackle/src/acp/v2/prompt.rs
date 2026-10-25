@@ -51,20 +51,33 @@ pub(super) async fn handle_prompt(
         })
         .unwrap_or_default();
 
-    let begun = match begin_prompt_turn(&state, session_id.clone(), blocks_json, owner.as_str())
+    let begun = loop {
+        match begin_prompt_turn(
+            &state,
+            session_id.clone(),
+            blocks_json.clone(),
+            owner.as_str(),
+        )
         .await
-    {
-        Ok(begun) => begun,
-        Err(BeginError::Owned { holder }) => {
-            return responder.respond_with_error(Error::internal_error().data(
-                serde_json::json!({
-                    "error": "session-actively-owned",
-                    "owner": holder,
-                }),
-            ));
-        }
-        Err(BeginError::Store(err)) => {
-            return responder.respond_with_error(Error::internal_error().data(err));
+        {
+            Ok(begun) => break begun,
+            // v2 accepts a prompt before the previous turn ends, so the same
+            // connection can have its own turn in flight. Queue behind it
+            // rather than failing the new prompt.
+            Err(BeginError::Owned { holder }) if holder == owner.as_str() => {
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+            Err(BeginError::Owned { holder }) => {
+                return responder.respond_with_error(Error::internal_error().data(
+                    serde_json::json!({
+                        "error": "session-actively-owned",
+                        "owner": holder,
+                    }),
+                ));
+            }
+            Err(BeginError::Store(err)) => {
+                return responder.respond_with_error(Error::internal_error().data(err));
+            }
         }
     };
     let _heartbeat = begun.heartbeat;
