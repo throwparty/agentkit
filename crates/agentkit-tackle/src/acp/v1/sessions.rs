@@ -16,11 +16,11 @@ use crate::agent::{config_options, script_loop};
 use crate::content::timestamp;
 use crate::state::{store_session_id, wire_session_id, TackleState};
 use agent_client_protocol::schema::v1::{
-    CloseSessionResponse, ConfigOptionUpdate, DeleteSessionResponse, ForkSessionResponse,
-    ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, Meta, NewSessionRequest,
-    NewSessionResponse, ReleaseTerminalRequest, ResumeSessionRequest, ResumeSessionResponse,
-    SessionConfigOptionValue, SessionInfo, SessionNotification, SessionUpdate,
-    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, TerminalId,
+    CloseSessionResponse, ConfigOptionUpdate, ContentBlock, ContentChunk, DeleteSessionResponse,
+    ForkSessionResponse, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, MessageId,
+    Meta, NewSessionRequest, NewSessionResponse, ReleaseTerminalRequest, ResumeSessionRequest,
+    ResumeSessionResponse, SessionConfigOptionValue, SessionInfo, SessionNotification,
+    SessionUpdate, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, TerminalId,
 };
 use agent_client_protocol::{Error, Responder};
 use std::sync::Arc;
@@ -144,7 +144,7 @@ pub(super) async fn handle_new_session(
         )
         .await
         .map_err(|err| Error::internal_error().data(err.to_string()))?;
-    state
+    let seed_message = state
         .db
         .append_message(
             &seed_turn.id,
@@ -189,6 +189,18 @@ pub(super) async fn handle_new_session(
     // Zed drops session updates that arrive before the session/new response
     // registers the session (zed-industries/zed#60199) — advertise after.
     responder.respond(response)?;
+    // The seed is stored as a user message; announce it after the response
+    // (Zed drops updates that precede session/new) so a fresh session shows
+    // it without waiting for a replay.
+    if let Ok(blocks) = serde_json::from_str::<Vec<ContentBlock>>(&seed_message.content) {
+        for block in blocks {
+            let chunk = ContentChunk::new(block).message_id(MessageId::new(seed_message.id.clone()));
+            cx.send_notification(SessionNotification::new(
+                wire_id.clone(),
+                SessionUpdate::UserMessageChunk(chunk),
+            ))?;
+        }
+    }
     // Client-forwarded servers register and connect after the response, so
     // session/new returns immediately while their tools are in the
     // advertisement that follows and their status is known before the first
