@@ -245,3 +245,61 @@ fn configuration_errors_name_the_file_and_key() {
     assert!(stderr.contains("config.toml"), "{stderr}");
     assert!(stderr.contains("credential_helper"), "{stderr}");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_new_v1_session_announces_the_seed() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = spawn_agent(dir.path());
+    let seen: std::sync::Arc<std::sync::Mutex<Vec<String>>> = std::sync::Arc::default();
+    let handler = std::sync::Arc::clone(&seen);
+
+    Client
+        .builder()
+        .on_receive_notification(
+            async move |notification: agentkit_tackle::agent_client_protocol::schema::v1::SessionNotification,
+                        _cx| {
+                if let agentkit_tackle::agent_client_protocol::schema::v1::SessionUpdate::UserMessageChunk(
+                    chunk,
+                ) = &notification.update
+                {
+                    if let ContentBlock::Text(text) = &chunk.content {
+                        handler.lock().unwrap().push(text.text.clone());
+                    }
+                }
+                Ok(())
+            },
+            agentkit_tackle::agent_client_protocol::on_receive_notification!(),
+        )
+        .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
+            connection
+                .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            connection
+                .send_request(NewSessionRequest::new(std::path::PathBuf::from("/work")))
+                .block_task()
+                .await?;
+
+            let mut seeded = false;
+            for _ in 0..200 {
+                if seen
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|text| text.contains("built-in defaults"))
+                {
+                    seeded = true;
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+            assert!(
+                seeded,
+                "the seed is announced on session/new: {:?}",
+                seen.lock().unwrap()
+            );
+            Ok(())
+        })
+        .await
+        .expect("v1 seed announcement");
+}
