@@ -74,6 +74,10 @@ pub trait CompletionSink: Send + Sync {
 pub trait NoticeSink: Send + Sync {
     /// A script issued a model call for `session`.
     fn script_model_call(&self, session: &SessionId);
+
+    /// A script set the session's title. Default no-op for sinks without a
+    /// connection.
+    fn session_title(&self, _session: &SessionId, _title: &str) {}
 }
 
 /// A test-only dispatcher for scripts that prompt without a real model

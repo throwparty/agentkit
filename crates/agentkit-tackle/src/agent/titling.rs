@@ -104,8 +104,15 @@ pub fn fire_title_trigger_detached(
         if title.is_some_and(|title| !title.is_empty()) {
             return;
         }
+        let title_notices = Arc::clone(&notices);
         let access = script_loop::access(&state, window_size, notices);
         fire_title_trigger(&state, access, &session_id);
+        // The script writes the title to the store; surface it to the client.
+        if let Ok(Some(session)) = state.db.get_session(&session_id).await {
+            if !session.title.is_empty() {
+                title_notices.session_title(&session_id, &session.title);
+            }
+        }
     });
 }
 
