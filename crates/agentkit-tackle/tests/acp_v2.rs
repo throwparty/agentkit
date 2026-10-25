@@ -587,3 +587,48 @@ async fn v2_titling_surfaces_the_session_title() {
         .await
         .expect("v2 titling");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn v2_advertises_each_mcp_tool_as_a_direct_command() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ScriptedModel)
+        .mount(&server)
+        .await;
+    let mut config = model_config(&server.uri());
+    config.push_str(&format!(
+        "\n[mcp_servers.testfs]\ntransport = \"stdio\"\ncommand = {:?}\nargs = [\"--root\", {:?}]\n",
+        env!("CARGO_BIN_EXE_tackle-mcp-fs"),
+        dir.path(),
+    ));
+    let agent = spawn_agent(dir.path(), &config);
+
+    Client
+        .v2()
+        .connect_with(agent, |connection: V2ConnectionTo<Agent>| async move {
+            connection
+                .send_request(v2::InitializeRequest::new(
+                    ProtocolVersion::V2,
+                    v2::Implementation::new("test-client", "1.0.0"),
+                ))
+                .block_task()
+                .await?;
+            let created = connection
+                .send_request(v2::NewSessionRequest::new(std::env::current_dir().unwrap()))
+                .block_task()
+                .await?;
+            let names: Vec<&str> = created
+                .available_commands
+                .iter()
+                .map(|command| command.name.as_str())
+                .collect();
+            assert!(
+                names.contains(&"!mcp.testfs.read_file"),
+                "each MCP tool is advertised under its `!`-prefixed name: {names:?}"
+            );
+            Ok(())
+        })
+        .await
+        .expect("v2 per-tool commands");
+}

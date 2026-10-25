@@ -162,11 +162,18 @@ pub(crate) fn agent(
         .on_receive_request(
             {
                 let state = state.clone();
+                let negotiation = negotiation.clone();
                 async move |request: ForkSessionRequest,
                             responder,
                             connection: V2ConnectionTo<Client>| {
-                    super::sessions::handle_fork_session(state.clone(), connection, request, responder)
-                        .await
+                    super::sessions::handle_fork_session(
+                        state.clone(),
+                        negotiation.clone(),
+                        connection,
+                        request,
+                        responder,
+                    )
+                    .await
                 }
             },
             agent_client_protocol::on_receive_request!(),

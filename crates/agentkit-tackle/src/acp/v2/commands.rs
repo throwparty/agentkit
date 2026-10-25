@@ -1,18 +1,28 @@
-//! The v2 command surface: the registry view over the loaded definitions,
-//! rendered with v2's `type`-discriminated command input.
+//! The v2 command surface: the registry view over the loaded definitions and
+//! MCP tools, rendered with v2's `type`-discriminated command input.
 
+use super::negotiation::ConnectionNegotiation;
 use crate::state::TackleState;
 use agent_client_protocol::schema::v1::AvailableCommandInput;
 use agent_client_protocol::schema::v2::{
     AvailableCommand, AvailableCommandInput as WireInput, TextCommandInput,
 };
 
-/// The `available_commands` list for a session: the `!` prefix command plus
-/// every user-invokable prompt, mapped onto v2's text input shape.
-pub(super) fn available_commands(state: &TackleState) -> Vec<AvailableCommand> {
+/// The `available_commands` list for a session: the `!` prefix command, each
+/// MCP tool under its own `!`-prefixed name, and every user-invokable prompt,
+/// mapped onto v2's text input shape.
+pub(super) async fn available_commands(
+    state: &TackleState,
+    negotiation: &ConnectionNegotiation,
+) -> Vec<AvailableCommand> {
+    let pool = negotiation.mcp_pool();
+    let pool = pool.lock().await;
+    let mcp_tools = pool.list_tools().await;
+    drop(pool);
+
     let registry = match crate::invokables::Registry::build_with_client_tools(
         &state.definitions(),
-        &[],
+        &mcp_tools,
         &[],
     ) {
         Ok(registry) => registry,

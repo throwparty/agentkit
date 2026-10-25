@@ -13,10 +13,10 @@ use crate::state::TackleState;
 use crate::store::{ListFilter, Role, SessionId, SessionKind, TurnKind, TurnUsage};
 use agent_client_protocol::role::acp::Client;
 use agent_client_protocol::schema::v2::{
-    AbsolutePath, CloseSessionRequest, CloseSessionResponse, ContentBlock, DeleteSessionRequest,
-    DeleteSessionResponse, ForkSessionRequest, ForkSessionResponse, IdleStateUpdate,
-    ListSessionsRequest, ListSessionsResponse, MessageId, NewSessionRequest, NewSessionResponse,
-    ReplayFrom, ResumeSessionRequest, ResumeSessionResponse,
+    AbsolutePath, AvailableCommandsUpdate, CloseSessionRequest, CloseSessionResponse,
+    ContentBlock, DeleteSessionRequest, DeleteSessionResponse, ForkSessionRequest,
+    ForkSessionResponse, IdleStateUpdate, ListSessionsRequest, ListSessionsResponse, MessageId,
+    NewSessionRequest, NewSessionResponse, ReplayFrom, ResumeSessionRequest, ResumeSessionResponse,
     SessionConfigId, SessionConfigOption, SessionConfigOptionCategory, SessionConfigOptionValue,
     SessionConfigSelectOption, SessionConfigValueId, SessionInfo, SessionUpdate,
     SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, StateUpdate,
@@ -147,7 +147,7 @@ pub(super) async fn handle_new_session(
     responder.respond(
         NewSessionResponse::new(wire_session_id(&session.id))
             .config_options(wire_options(&selectors.options))
-            .available_commands(super::commands::available_commands(&state)),
+            .available_commands(super::commands::available_commands(&state, &negotiation).await),
     )?;
     // The seed is stored as a user message; send it after the response (Zed
     // drops updates that precede session/new) so a fresh session shows it
@@ -162,6 +162,14 @@ pub(super) async fn handle_new_session(
     ))
     .map_err(|err| Error::internal_error().data(err.to_string()))?;
     super::mcp::connect_forwarded_servers(&negotiation, &request.mcp_servers).await;
+    // Forwarded servers joined after the response; refresh the command list
+    // so their `!mcp.*` entries appear.
+    let commands = super::commands::available_commands(&state, &negotiation).await;
+    cx.send_notification(UpdateSessionNotification::new(
+        wire_session_id(&session.id),
+        SessionUpdate::AvailableCommandsUpdate(AvailableCommandsUpdate::new(commands)),
+    ))
+    .map_err(|err| Error::internal_error().data(err.to_string()))?;
     Ok(())
 }
 
@@ -304,7 +312,7 @@ pub(super) async fn handle_resume_session(
     responder.respond(
         ResumeSessionResponse::new()
             .config_options(wire_options(&selectors.options))
-            .available_commands(super::commands::available_commands(&state)),
+            .available_commands(super::commands::available_commands(&state, &negotiation).await),
     )
 }
 
@@ -312,6 +320,7 @@ pub(super) async fn handle_resume_session(
 /// and return the fork's id with selectors.
 pub(super) async fn handle_fork_session(
     state: Arc<TackleState>,
+    negotiation: Arc<crate::acp::v2::negotiation::ConnectionNegotiation>,
     cx: V2ConnectionTo<Client>,
     request: ForkSessionRequest,
     responder: Responder<ForkSessionResponse>,
@@ -338,7 +347,7 @@ pub(super) async fn handle_fork_session(
     responder.respond(
         ForkSessionResponse::new(wire_session_id(&fork.id))
             .config_options(wire_options(&selectors.options))
-            .available_commands(super::commands::available_commands(&state)),
+            .available_commands(super::commands::available_commands(&state, &negotiation).await),
     )
 }
 
