@@ -949,3 +949,91 @@ async fn v2_runtime_commands_answer_without_the_model() {
         .await
         .expect("v2 runtime commands");
 }
+
+struct SlowModel;
+
+impl Respond for SlowModel {
+    fn respond(&self, request: &Request) -> ResponseTemplate {
+        ScriptedModel.respond(request).set_delay(Duration::from_millis(150))
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn v2_concurrent_prompts_queue_instead_of_failing() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(SlowModel)
+        .mount(&server)
+        .await;
+    let agent = spawn_agent(dir.path(), &model_config(&server.uri()));
+    let seen: Arc<Mutex<Vec<Seen>>> = Arc::default();
+    let handler = Arc::clone(&seen);
+
+    Client
+        .v2()
+        .on_receive_notification(
+            async move |notification: v2::UpdateSessionNotification, _cx| {
+                if let v2::SessionUpdate::StateUpdate(v2::StateUpdate::Idle(idle)) =
+                    &notification.update
+                {
+                    handler
+                        .lock()
+                        .unwrap()
+                        .push(Seen::Idle(idle.stop_reason.clone()));
+                }
+                Ok(())
+            },
+            on_receive_notification!(),
+        )
+        .connect_with(agent, |connection: V2ConnectionTo<Agent>| async move {
+            connection
+                .send_request(v2::InitializeRequest::new(
+                    ProtocolVersion::V2,
+                    v2::Implementation::new("test-client", "1.0.0"),
+                ))
+                .block_task()
+                .await?;
+            let created = connection
+                .send_request(v2::NewSessionRequest::new(std::env::current_dir().unwrap()))
+                .block_task()
+                .await?;
+
+            // Both prompts are accepted; the second queues behind the first
+            // turn instead of returning session-actively-owned.
+            let first = connection
+                .send_request(v2::PromptRequest::new(
+                    created.session_id.clone(),
+                    vec![v2::ContentBlock::Text(v2::TextContent::new("one"))],
+                ))
+                .block_task()
+                .await?;
+            let second = connection
+                .send_request(v2::PromptRequest::new(
+                    created.session_id,
+                    vec![v2::ContentBlock::Text(v2::TextContent::new("two"))],
+                ))
+                .block_task()
+                .await?;
+            assert!(!first.message_id.0.is_empty());
+            assert!(!second.message_id.0.is_empty());
+
+            let mut idles = 0;
+            for _ in 0..400 {
+                idles = seen
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|entry| matches!(entry, Seen::Idle(_)))
+                    .count();
+                if idles >= 2 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            assert_eq!(idles, 2, "both queued turns reach idle: {:?}", seen.lock().unwrap());
+            Ok(())
+        })
+        .await
+        .expect("v2 concurrent prompts");
+}
