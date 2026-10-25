@@ -136,7 +136,7 @@ usage_update carries used and size, and the cumulative session cost when knowabl
 
 ### FR-014: v2 Slash Commands
 
-available_commands_update advertises the command list with the v2 command input type discriminator. The slash-command intercepts (/fork, /!, /mcp, /editor, /context, compaction) are dispatched identically to v1 through the shared acp::common layer.
+available_commands_update advertises the command list with the v2 command input type discriminator. The slash-command intercepts (/fork, /!, /mcp, /editor, /context, compaction) are dispatched identically to v1 through the shared acp::common layer. The shared decision only classifies the prompt; each version must implement the execution and rendering of every intercept, and an unported intercept must fail explicitly rather than fall through to the model.
 
 **Slug:** `v2-slash-commands`
 
@@ -317,6 +317,12 @@ acp-tck run with protocol version 2 against the tackle binary reports CONFORMANT
 After the refactor and the v2 work, acp-tck run with protocol version 1 still reports CONFORMANT with an empty MANDATORY baseline.
 
 **Slug:** `v1-conformance-preserved`
+
+### AC-013: Dispatch Parity
+
+Every Dispatch variant (Model, Fork, Direct, RuntimeCommand, Context, Compaction) is implemented under both v1 and v2. /! executes without a model request, /context and /mcp behave as in v1, /fork remains the fallback, and no variant falls through to the model. Each variant has a v2 integration test, and a new Dispatch variant fails compilation until both versions handle it.
+
+**Slug:** `dispatch-parity`
 
 ## Edge Cases
 

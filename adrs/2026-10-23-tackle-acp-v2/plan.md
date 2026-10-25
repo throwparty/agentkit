@@ -4,7 +4,7 @@
 
 Conformance-driven, in three phases. Phase 0 is the baseline: tackle is already fully ACP v1 conformant against the pinned acp-tck suite (just tackle conformance reports CONFORMANT with an empty MANDATORY baseline), so v1 conformance is a fixed reference rather than a goal. Phase 1 is the inert structural refactor — replace acp_v1 with acp::v1, lift protocol-neutral orchestration into acp::common, move transports to acp::transport, and introduce a version-negotiating entry point that routes to v1 only; its exit criterion is that the v1 acp-tck run still reports CONFORMANT, which is a stronger inertness proof than the unit suite alone. Phase 2 implements acp::v2 on the SDK's draft v2 builder and iterates against acp-tck --protocol-version 2 until it reports CONFORMANT; conformance is the primary acceptance signal, and manual or client testing does not begin until it passes. Phase 3 covers what the TCK does not — the in-process harness for behaviours outside its scope (the v1/v2 boundary, client-provided MCP server forwarding, the draft session/fork, compaction and notices gating, client-tooling absence) and then manual testing against Zed behind its acp-beta flag. Because the pinned SDK already implements the v2 baseline and the protocol router already performs version negotiation, no SDK work is required; the work is adaptation, orchestration, conformance, and documentation.
 
-Do not attempt to unify the v1 and v2 wire types. The two lifecycles differ enough (v1 holds the prompt response open for the whole turn; v2 responds on insertion and streams foreground state separately) that a shared abstraction over them would be leakier than the duplication it removes. Share only the decisions that must not diverge, and let each version render them.
+Do not attempt to unify the v1 and v2 wire types. The two lifecycles differ enough (v1 holds the prompt response open for the whole turn; v2 responds on insertion and streams foreground state separately) that a shared abstraction over them would be leakier than the duplication it removes. Share only the decisions that must not diverge, and let each version render them. Sharing a decision is not sharing its execution: every Dispatch variant is an explicit per-version obligation, tracked in the dispatch parity matrix and tested per variant.
 
 Prior art and known loss. The ACP organisation's own codex-acp adapter is a shipped, conformance-tested implementation that speaks v1 and unstable v2 from one process with per-connection negotiation and registers the draft session/fork; it supersedes OpenCode's closed v2 pull request as the architectural reference. The known regression is client tooling: v2 removes the client filesystem and terminal surface and directs clients to expose those capabilities as an MCP server, and no client is known to do so yet.
 
@@ -66,6 +66,7 @@ src/acp/
     ├── notices.rs      # v2 notice + compaction updates (capability-free)
     ├── config_options.rs # domain options -> v2 configOptions (configId + type discriminator)
     ├── commands.rs     # v2 available_commands_update (input.type discriminator)
+    ├── direct.rs       # /! direct invocation
     ├── context.rs      # /context emission
     ├── fork.rs         # draft session/fork
     └── tests.rs
@@ -88,10 +89,27 @@ common holds only decisions that must not diverge:
 | Permission request shape | no | v1 shape | v2 shape |
 | Client fs/terminal tools | no | yes | absent (protocol removed) |
 | Fork | no | /fork prompt | session/fork + /fork |
+| Direct invocation (/!) | no | execute | execute |
+| /context and /mcp | no | render | render |
 
 ### v2 prompt lifecycle
 
-The v2 prompt handler is a structural variant, not a flag. On session/prompt it persists the user message through common::session, responds immediately with its messageId, then spawns the turn. Foreground work is tracked in v2::foreground, which owns the aggregate state and emits state_update transitions: running when work starts, requires_action while a permission request blocks it, and idle with a stop reason when it ends. A failure after insertion ends as an idle state_update with the error stop reason; a rejection before insertion stays a JSON-RPC error and emits no user-message update. Both versions call common::dispatch, so the slash-command ladder cannot diverge.
+The v2 prompt handler is a structural variant, not a flag. On session/prompt it persists the user message through common::session, responds immediately with its messageId, then spawns the turn. Foreground work is tracked in v2::foreground, which owns the aggregate state and emits state_update transitions: running when work starts, requires_action while a permission request blocks it, and idle with a stop reason when it ends. A failure after insertion ends as an idle state_update with the error stop reason; a rejection before insertion stays a JSON-RPC error and emits no user-message update. Both versions call common::dispatch, but that shares only the classification: each version must implement the execution and rendering of every Dispatch variant. The v2 prompt handler is exhaustive over Dispatch, so a new variant fails compilation until it is handled, but exhaustiveness only forces acknowledgement. The dispatch parity matrix below is the acceptance checklist, and an unported variant must return an explicit error rather than falling through to the model.
+
+### Dispatch parity
+
+Every variant is a per-version obligation, not a shared implementation:
+
+| Dispatch variant | v1 | v2 |
+|---|---|---|
+| Model | model turn | model turn |
+| Fork | /fork prompt | session/fork + /fork prompt |
+| Direct | /! via prompt.rs | /! via prompt.rs (direct invocation) |
+| RuntimeCommand | /mcp, /editor | /mcp; /editor is v1-only |
+| Context | /context | /context |
+| Compaction | /compact | /compact |
+
+The shared `decide` function guarantees the same classification; it does not guarantee the same behaviour. The original v2 port missed Direct, Context, and RuntimeCommand because this distinction was not an acceptance criterion; the parity matrix and the per-variant tests exist to prevent a repeat.
 
 ### Event mapping
 
@@ -109,7 +127,7 @@ The pinned acp-tck suite is the primary validation loop, not a final checkpoint,
 
 First, conformance. just tackle conformance, run for each protocol version, is the acceptance gate. For v1 this is already true and the refactor must preserve it: the committed MANDATORY baseline is empty, so any regression surfaces as a new failure. For v2 the suite is run until CONFORMANT before anything else is attempted; a v2 failure is a work item, not a caveat.
 
-Second, the in-process harness and unit tests cover what the TCK does not. Unit: common::dispatch over first-user-text inputs with the v1 guardrails; common::replay ordering and compaction truncation; v1::capabilities and v2::capabilities shape; v1::sink and v2::sink event mapping including cost omission; v2::foreground state transitions and idempotent snapshots. Integration: the existing v1 suites remain the regression gate and must pass unchanged after the refactor (initialize, tool_turn, client_tools, fork, compaction, usage, context, config_options, first_run, restart_load, two_process, http, mcp_pool, agent_invocation, shutdown). New v2 suites cover the areas the TCK does not: the acp::v1/acp::v2 boundary (a v1 connection observes no v2 update and vice versa), client-provided MCP server forwarding with a model tool call through the permission pipeline, the draft session/fork and its /fork fallback, compaction and notices gating, and the first-turn absence report when a v2 client brings no MCP server. The arch-lint boundary runs with a negative fixture proving an acp::v1 to acp::v2 import fails the check.
+Second, the in-process harness and unit tests cover what the TCK does not. Unit: common::dispatch over first-user-text inputs with the v1 guardrails; common::replay ordering and compaction truncation; v1::capabilities and v2::capabilities shape; v1::sink and v2::sink event mapping including cost omission; v2::foreground state transitions and idempotent snapshots. Integration: the existing v1 suites remain the regression gate and must pass unchanged after the refactor (initialize, tool_turn, client_tools, fork, compaction, usage, context, config_options, first_run, restart_load, two_process, http, mcp_pool, agent_invocation, shutdown). New v2 suites cover the areas the TCK does not: the acp::v1/acp::v2 boundary (a v1 connection observes no v2 update and vice versa), client-provided MCP server forwarding with a model tool call through the permission pipeline, the draft session/fork and its /fork fallback, direct invocation (/!), /context, /mcp, compaction and notices gating, and the first-turn absence report when a v2 client brings no MCP server. Each Dispatch variant gets its own v2 integration test, and the command advertisement test asserts every MCP tool is offered as !mcp.<server>.<tool>. The arch-lint boundary runs with a negative fixture proving an acp::v1 to acp::v2 import fails the check.
 
 Third, and only once conformance and the harness pass, manual testing against Zed behind its acp-beta flag, the one deployed v2 client. Golden transcripts remain for behaviours the TCK does not cover; they are no longer the primary conformance instrument.
 
