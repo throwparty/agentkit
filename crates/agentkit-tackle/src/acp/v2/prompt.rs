@@ -177,13 +177,40 @@ pub(super) async fn handle_prompt(
                     Err(err) => Err(err),
                 }
             }
+            Dispatch::Direct(input) => {
+                let call_id = format!("direct-{}", uuid::Uuid::new_v4());
+                let arguments: serde_json::Value =
+                    serde_json::from_str(&input.arguments).unwrap_or(serde_json::Value::Null);
+                runtime.sink.tool_call(
+                    &store_session,
+                    crate::agent::sink::ToolCall {
+                        id: call_id.clone(),
+                        title: crate::invokables::titles::tool_call_title(
+                            &input.invokable,
+                            &arguments,
+                        ),
+                        name: input.invokable.clone(),
+                        kind: crate::invokables::titles::tool_kind(&input.invokable),
+                        status: crate::agent::sink::ToolCallStatus::InProgress,
+                        arguments,
+                    },
+                );
+                crate::agent::direct::run_direct_invocation(
+                    state,
+                    runtime,
+                    turn.id,
+                    store_session,
+                    owner,
+                    call_id,
+                    input,
+                )
+                .await
+                .map(|()| TurnStop::EndTurn)
+            }
             // Not yet ported to v2: these slash-command cases still go to the
             // model. Listed explicitly so a new `Dispatch` variant is a
             // compile error rather than silently falling through.
-            Dispatch::Model
-            | Dispatch::Direct(_)
-            | Dispatch::RuntimeCommand
-            | Dispatch::Context => {
+            Dispatch::Model | Dispatch::RuntimeCommand | Dispatch::Context => {
                 run_prompt_turn(
                     state,
                     runtime,

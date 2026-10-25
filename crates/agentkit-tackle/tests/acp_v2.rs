@@ -71,6 +71,7 @@ enum Seen {
     Idle(Option<v2::StopReason>),
     AgentText(String),
     Compaction(v2::CompactionStatus),
+    ToolText(String),
 }
 
 async fn wait_for_user_message(seen: &Arc<Mutex<Vec<Seen>>>) -> Option<String> {
@@ -631,4 +632,121 @@ async fn v2_advertises_each_mcp_tool_as_a_direct_command() {
         })
         .await
         .expect("v2 per-tool commands");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn v2_direct_tool_invocation_runs_without_the_model() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("README.md"), "hello from readme\n").unwrap();
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ScriptedModel)
+        .mount(&server)
+        .await;
+    let mut config = model_config(&server.uri());
+    config.push_str(&format!(
+        "\n[mcp_servers.testfs]\ntransport = \"stdio\"\ncommand = {:?}\nargs = [\"--root\", {:?}]\n",
+        env!("CARGO_BIN_EXE_tackle-mcp-fs"),
+        dir.path(),
+    ));
+    let agent = spawn_agent(dir.path(), &config);
+
+    let seen: Arc<Mutex<Vec<Seen>>> = Arc::default();
+    let handler = Arc::clone(&seen);
+
+    Client
+        .v2()
+        .on_receive_notification(
+            async move |notification: v2::UpdateSessionNotification, _cx| {
+                match &notification.update {
+                    v2::SessionUpdate::ToolCallUpdate(update) => {
+                        if let agentkit_tackle::agent_client_protocol::schema::MaybeUndefined::Value(
+                            content,
+                        ) = &update.content
+                        {
+                            for item in content {
+                                if let v2::ToolCallContent::Content(content) = item {
+                                    if let v2::ContentBlock::Text(text) = &content.content {
+                                        handler
+                                            .lock()
+                                            .unwrap()
+                                            .push(Seen::ToolText(text.text.clone()));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    v2::SessionUpdate::StateUpdate(v2::StateUpdate::Idle(idle)) => {
+                        handler
+                            .lock()
+                            .unwrap()
+                            .push(Seen::Idle(idle.stop_reason.clone()));
+                    }
+                    v2::SessionUpdate::AgentMessageChunk(chunk) => {
+                        if let v2::ContentBlock::Text(text) = &chunk.content {
+                            handler
+                                .lock()
+                                .unwrap()
+                                .push(Seen::AgentText(text.text.clone()));
+                        }
+                    }
+                    _ => {}
+                }
+                Ok(())
+            },
+            on_receive_notification!(),
+        )
+        .connect_with(agent, |connection: V2ConnectionTo<Agent>| async move {
+            connection
+                .send_request(v2::InitializeRequest::new(
+                    ProtocolVersion::V2,
+                    v2::Implementation::new("test-client", "1.0.0"),
+                ))
+                .block_task()
+                .await?;
+            let created = connection
+                .send_request(v2::NewSessionRequest::new(std::env::current_dir().unwrap()))
+                .block_task()
+                .await?;
+            connection
+                .send_request(v2::PromptRequest::new(
+                    created.session_id,
+                    vec![v2::ContentBlock::Text(v2::TextContent::new(
+                        "/!mcp.testfs.read_file {\"path\":\"README.md\"}",
+                    ))],
+                ))
+                .block_task()
+                .await?;
+
+            let mut read = false;
+            for _ in 0..200 {
+                if seen.lock().unwrap().iter().any(
+                    |entry| matches!(entry, Seen::ToolText(text) if text.contains("hello from readme")),
+                ) {
+                    read = true;
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            assert!(
+                read,
+                "the direct tool result is rendered: {:?}",
+                seen.lock().unwrap()
+            );
+            assert!(
+                matches!(wait_for_idle(&seen).await, Some(v2::StopReason::EndTurn)),
+                "the direct turn ends with idle"
+            );
+            assert!(
+                !seen
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|entry| matches!(entry, Seen::AgentText(text) if text == "ok")),
+                "the model is not invoked for a direct tool call"
+            );
+            Ok(())
+        })
+        .await
+        .expect("v2 direct invocation");
 }
