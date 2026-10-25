@@ -750,3 +750,202 @@ async fn v2_direct_tool_invocation_runs_without_the_model() {
         .await
         .expect("v2 direct invocation");
 }
+
+async fn wait_for_agent_text(seen: &Arc<Mutex<Vec<Seen>>>, needle: &str) -> bool {
+    for _ in 0..200 {
+        if seen.lock().unwrap().iter().any(
+            |entry| matches!(entry, Seen::AgentText(text) if text.contains(needle)),
+        ) {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    false
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn v2_context_command_returns_a_report() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ScriptedModel)
+        .mount(&server)
+        .await;
+    let agent = spawn_agent(dir.path(), &model_config(&server.uri()));
+    let seen: Arc<Mutex<Vec<Seen>>> = Arc::default();
+    let handler = Arc::clone(&seen);
+
+    Client
+        .v2()
+        .on_receive_notification(
+            async move |notification: v2::UpdateSessionNotification, _cx| {
+                match &notification.update {
+                    v2::SessionUpdate::AgentMessage(message) => {
+                        if let agentkit_tackle::agent_client_protocol::schema::MaybeUndefined::Value(
+                            blocks,
+                        ) = &message.content
+                        {
+                            for block in blocks {
+                                if let v2::ContentBlock::Text(text) = block {
+                                    handler
+                                        .lock()
+                                        .unwrap()
+                                        .push(Seen::AgentText(text.text.clone()));
+                                }
+                            }
+                        }
+                    }
+                    v2::SessionUpdate::StateUpdate(v2::StateUpdate::Idle(idle)) => {
+                        handler
+                            .lock()
+                            .unwrap()
+                            .push(Seen::Idle(idle.stop_reason.clone()));
+                    }
+                    _ => {}
+                }
+                Ok(())
+            },
+            on_receive_notification!(),
+        )
+        .connect_with(agent, |connection: V2ConnectionTo<Agent>| async move {
+            connection
+                .send_request(v2::InitializeRequest::new(
+                    ProtocolVersion::V2,
+                    v2::Implementation::new("test-client", "1.0.0"),
+                ))
+                .block_task()
+                .await?;
+            let created = connection
+                .send_request(v2::NewSessionRequest::new(std::env::current_dir().unwrap()))
+                .block_task()
+                .await?;
+            connection
+                .send_request(v2::PromptRequest::new(
+                    created.session_id,
+                    vec![v2::ContentBlock::Text(v2::TextContent::new("/context"))],
+                ))
+                .block_task()
+                .await?;
+            assert!(
+                wait_for_agent_text(&seen, "Context window:").await,
+                "the context report is rendered: {:?}",
+                seen.lock().unwrap()
+            );
+            assert!(
+                matches!(wait_for_idle(&seen).await, Some(v2::StopReason::EndTurn)),
+                "the context turn ends with idle"
+            );
+            Ok(())
+        })
+        .await
+        .expect("v2 /context");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn v2_runtime_commands_answer_without_the_model() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ScriptedModel)
+        .mount(&server)
+        .await;
+    let agent = spawn_agent(dir.path(), &model_config(&server.uri()));
+    let seen: Arc<Mutex<Vec<Seen>>> = Arc::default();
+    let handler = Arc::clone(&seen);
+
+    Client
+        .v2()
+        .on_receive_notification(
+            async move |notification: v2::UpdateSessionNotification, _cx| {
+                match &notification.update {
+                    v2::SessionUpdate::AgentMessage(message) => {
+                        if let agentkit_tackle::agent_client_protocol::schema::MaybeUndefined::Value(
+                            blocks,
+                        ) = &message.content
+                        {
+                            for block in blocks {
+                                if let v2::ContentBlock::Text(text) = block {
+                                    handler
+                                        .lock()
+                                        .unwrap()
+                                        .push(Seen::AgentText(text.text.clone()));
+                                }
+                            }
+                        }
+                    }
+                    v2::SessionUpdate::AgentMessageChunk(chunk) => {
+                        if let v2::ContentBlock::Text(text) = &chunk.content {
+                            handler
+                                .lock()
+                                .unwrap()
+                                .push(Seen::AgentText(text.text.clone()));
+                        }
+                    }
+                    v2::SessionUpdate::StateUpdate(v2::StateUpdate::Idle(idle)) => {
+                        handler
+                            .lock()
+                            .unwrap()
+                            .push(Seen::Idle(idle.stop_reason.clone()));
+                    }
+                    _ => {}
+                }
+                Ok(())
+            },
+            on_receive_notification!(),
+        )
+        .connect_with(agent, |connection: V2ConnectionTo<Agent>| async move {
+            connection
+                .send_request(v2::InitializeRequest::new(
+                    ProtocolVersion::V2,
+                    v2::Implementation::new("test-client", "1.0.0"),
+                ))
+                .block_task()
+                .await?;
+            let created = connection
+                .send_request(v2::NewSessionRequest::new(std::env::current_dir().unwrap()))
+                .block_task()
+                .await?;
+            connection
+                .send_request(v2::PromptRequest::new(
+                    created.session_id.clone(),
+                    vec![v2::ContentBlock::Text(v2::TextContent::new("/mcp status"))],
+                ))
+                .block_task()
+                .await?;
+            assert!(
+                wait_for_agent_text(&seen, "No MCP servers configured").await,
+                "the mcp status reply is rendered: {:?}",
+                seen.lock().unwrap()
+            );
+            assert!(
+                matches!(wait_for_idle(&seen).await, Some(v2::StopReason::EndTurn)),
+                "the mcp turn ends with idle"
+            );
+
+            connection
+                .send_request(v2::PromptRequest::new(
+                    created.session_id,
+                    vec![v2::ContentBlock::Text(v2::TextContent::new(
+                        "/editor fs true",
+                    ))],
+                ))
+                .block_task()
+                .await?;
+            assert!(
+                wait_for_agent_text(&seen, "not available under ACP v2").await,
+                "the editor reply is rendered: {:?}",
+                seen.lock().unwrap()
+            );
+            assert!(
+                !seen
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|entry| matches!(entry, Seen::AgentText(text) if text == "ok")),
+                "the model is not invoked for a runtime command"
+            );
+            Ok(())
+        })
+        .await
+        .expect("v2 runtime commands");
+}

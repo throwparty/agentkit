@@ -314,7 +314,7 @@ Bring cargo clippy -p agentkit-tackle --all-targets --all-features -- -D warning
 | Depends On | T-017 |
 | References | testability |
 
-### T-025: v2 dispatch parity: direct, context and runtime commands
+### T-025: [x] v2 dispatch parity: direct, context and runtime commands
 
 Complete the v2 slash-command ladder. Direct invocation (/!) is implemented and tested; /context and /mcp still fall through to the model. Implement them by reusing the v1 handlers through acp::common where possible, and make an unported Dispatch variant an explicit error rather than a model turn. Add a v2 integration test per Dispatch variant (Direct, Fork, Compaction, Context, RuntimeCommand) and assert the command advertisement offers each MCP tool as !mcp.<server>.<tool>.
 
