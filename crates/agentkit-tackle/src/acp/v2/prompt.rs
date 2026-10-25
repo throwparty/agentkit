@@ -7,8 +7,9 @@ use crate::acp::common::dispatch::{decide, Dispatch};
 use crate::acp::common::messages::append_assistant_text;
 use crate::acp::common::session::{begin_prompt_turn, BeginError};
 use crate::agent::config_options::{effective_context_window, resolve_model_for, session_actor};
+use crate::agent::context_report::{self, ReportInputs};
 use crate::agent::fork::{self, fork_access};
-use crate::agent::prompt::run_prompt_turn;
+use crate::agent::prompt::{build_registry_and_system, resolve_model_and_window, run_prompt_turn};
 use crate::agent::runtime::TurnRuntime;
 use crate::agent::{compaction, TurnStop};
 use crate::invokables::client_tools::{ClientToolExecutor, Executed};
@@ -19,8 +20,8 @@ use crate::state::TackleState;
 use crate::store::SessionId;
 use agent_client_protocol::role::acp::Client;
 use agent_client_protocol::schema::v2::{
-    AgentMessage, CompactionId, CompactionStatus, CompactionUpdate, ContentBlock, Cost,
-    ErrorStopReason, IdleStateUpdate, MessageId, PromptRequest, PromptResponse,
+    AgentMessage, AvailableCommandsUpdate, CompactionId, CompactionStatus, CompactionUpdate,
+    ContentBlock, Cost, ErrorStopReason, IdleStateUpdate, MessageId, PromptRequest, PromptResponse,
     RunningStateUpdate, SessionUpdate, StateUpdate, StopReason, TextContent,
     UpdateSessionNotification, UsageUpdate, UserMessage,
 };
@@ -207,10 +208,64 @@ pub(super) async fn handle_prompt(
                 .await
                 .map(|()| TurnStop::EndTurn)
             }
-            // Not yet ported to v2: these slash-command cases still go to the
-            // model. Listed explicitly so a new `Dispatch` variant is a
-            // compile error rather than silently falling through.
-            Dispatch::Model | Dispatch::RuntimeCommand | Dispatch::Context => {
+            Dispatch::Context => {
+                let result = run_context(
+                    &state,
+                    &turn_cx,
+                    &wire_session,
+                    &store_session,
+                    &turn.id,
+                    &actor_name,
+                    session_row.as_ref(),
+                    &runtime,
+                )
+                .await;
+                state.db.release_lease(&store_session, &owner).await.ok();
+                result.map(|()| TurnStop::EndTurn)
+            }
+            Dispatch::RuntimeCommand => {
+                let reply = if first_text.starts_with("/editor") {
+                    Some(
+                        "The /editor command is not available under ACP v2; there is no client \
+                         filesystem or terminal surface."
+                            .to_owned(),
+                    )
+                } else {
+                    super::commands::mcp_command(&negotiation, &first_text).await
+                };
+                match reply {
+                    Some(reply) => {
+                        let result = run_runtime_command(
+                            &state,
+                            &negotiation,
+                            &turn_cx,
+                            &wire_session,
+                            &turn.id,
+                            &reply,
+                        )
+                        .await;
+                        state.db.release_lease(&store_session, &owner).await.ok();
+                        result.map(|()| TurnStop::EndTurn)
+                    }
+                    None => {
+                        run_prompt_turn(
+                            state,
+                            runtime,
+                            store_session,
+                            turn,
+                            actor_name,
+                            session_row,
+                            first_text,
+                            blocks_json,
+                            owner,
+                        )
+                        .await
+                    }
+                }
+            }
+            // Only an ordinary prompt reaches the model. Every intercept is
+            // an explicit arm above; a new Dispatch variant fails compilation.
+            Dispatch::Model => {
                 run_prompt_turn(
                     state,
                     runtime,
@@ -254,6 +309,94 @@ impl ClientToolExecutor for NoClientTools {
     ) -> Pin<Box<dyn Future<Output = Result<Executed, String>> + Send + '_>> {
         Box::pin(async { Err("no client tools under ACP v2".to_owned()) })
     }
+}
+
+/// The ephemeral `/context` report: build the same system prompt, tool
+/// catalogue, and prior context a model turn would receive, send the estimate,
+/// and delete the command turn so it never enters the session.
+#[allow(clippy::too_many_arguments)]
+async fn run_context(
+    state: &Arc<TackleState>,
+    cx: &V2ConnectionTo<Client>,
+    wire_session: &agent_client_protocol::schema::v2::SessionId,
+    store_session: &SessionId,
+    turn_id: &crate::store::TurnId,
+    actor_name: &str,
+    session_row: Option<&crate::store::Session>,
+    runtime: &TurnRuntime,
+) -> Result<(), String> {
+    let (model_ref, window) = resolve_model_and_window(state, session_row).await?;
+    let (_, tools, system) = build_registry_and_system(
+        &state.definitions(),
+        actor_name,
+        &runtime.pool,
+        &runtime.client_tools,
+    )
+    .await;
+    let assembled = state
+        .db
+        .assemble_context(store_session)
+        .await
+        .map_err(|err| err.to_string())?;
+    let prior = compaction::prior_messages_tagged(&assembled, turn_id);
+    let usage = state
+        .db
+        .session_usage(store_session)
+        .await
+        .map_err(|err| err.to_string())?;
+    let cost_usd = (usage.cost_usd > 0.0).then_some(usage.cost_usd);
+    let text = context_report::render(&ReportInputs {
+        model: &model_ref,
+        system: &system,
+        tools: &tools,
+        prior: &prior,
+        window,
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        cost_usd,
+    });
+    let message_id = uuid::Uuid::new_v4().to_string();
+    let _ = cx.send_notification(UpdateSessionNotification::new(
+        wire_session.clone(),
+        SessionUpdate::AgentMessage(
+            AgentMessage::new(MessageId::new(message_id))
+                .content(vec![ContentBlock::Text(TextContent::new(text))]),
+        ),
+    ));
+    state
+        .db
+        .delete_turn(turn_id)
+        .await
+        .map_err(|err| err.to_string())?;
+    Ok(())
+}
+
+/// A `/mcp` or `/editor` reply: store it in the turn, send it, and republish
+/// the command list because the tool surface may have changed shape.
+async fn run_runtime_command(
+    state: &Arc<TackleState>,
+    negotiation: &Arc<ConnectionNegotiation>,
+    cx: &V2ConnectionTo<Client>,
+    wire_session: &agent_client_protocol::schema::v2::SessionId,
+    turn_id: &crate::store::TurnId,
+    reply: &str,
+) -> Result<(), String> {
+    let message = append_assistant_text(state, turn_id, reply)
+        .await
+        .map_err(|err| err.to_string())?;
+    let _ = cx.send_notification(UpdateSessionNotification::new(
+        wire_session.clone(),
+        SessionUpdate::AgentMessage(
+            AgentMessage::new(MessageId::new(message.id))
+                .content(vec![ContentBlock::Text(TextContent::new(reply.to_owned()))]),
+        ),
+    ));
+    let commands = super::commands::available_commands(state, negotiation).await;
+    let _ = cx.send_notification(UpdateSessionNotification::new(
+        wire_session.clone(),
+        SessionUpdate::AvailableCommandsUpdate(AvailableCommandsUpdate::new(commands)),
+    ));
+    Ok(())
 }
 
 /// The `/fork` fallback: create the fork, seed it, and report the new

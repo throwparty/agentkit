@@ -56,3 +56,67 @@ pub(super) async fn available_commands(
         })
         .collect()
 }
+
+/// One `/mcp status` line.
+pub(super) fn mcp_status_line(name: &str, status: &crate::mcp::ServerStatus, enabled: bool) -> String {
+    if !enabled {
+        return format!("{name}: disabled");
+    }
+    match status {
+        crate::mcp::ServerStatus::Connected => format!("{name}: connected"),
+        crate::mcp::ServerStatus::Failed { reason } => format!("{name}: failed ({reason})"),
+    }
+}
+
+/// Handles `/mcp <enable|disable|status> [server]`, returning the reply or
+/// `None` for a subcommand that is not ours so the caller can fall through.
+pub(super) async fn mcp_command(
+    negotiation: &ConnectionNegotiation,
+    first_text: &str,
+) -> Option<String> {
+    let mut parts = first_text.split_whitespace();
+    parts.next();
+    let (subcommand, argument) = match parts.next() {
+        None => return Some("Usage: /mcp <enable|disable|status> [server-name]".to_owned()),
+        Some(subcommand) => (subcommand, parts.next()),
+    };
+
+    let pool = negotiation.mcp_pool();
+    let mut pool = pool.lock().await;
+    match subcommand {
+        "enable" => Some(match argument {
+            None => "Usage: /mcp enable <server-name>".to_owned(),
+            Some(name) => match pool.enable_server(name).await {
+                Ok(()) if pool.is_connected(name) => format!("Enabled MCP server: {name}"),
+                Ok(()) => format!("Enabled MCP server: {name} (not connected)"),
+                Err(err) => format!("Failed to enable MCP server {name}: {err}"),
+            },
+        }),
+        "disable" => Some(match argument {
+            None => "Usage: /mcp disable <server-name>".to_owned(),
+            Some(name) => match pool.disable_server(name) {
+                Ok(()) => format!("Disabled MCP server: {name}"),
+                Err(err) => format!("Failed to disable MCP server {name}: {err}"),
+            },
+        }),
+        "status" => Some(match argument {
+            None => {
+                let statuses = pool.statuses();
+                if statuses.is_empty() {
+                    "No MCP servers configured".to_owned()
+                } else {
+                    statuses
+                        .iter()
+                        .map(|(name, (status, enabled))| mcp_status_line(name, status, *enabled))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                }
+            }
+            Some(name) => match pool.statuses().get(name) {
+                Some((status, enabled)) => mcp_status_line(name, status, *enabled),
+                None => format!("MCP server not found: {name}"),
+            },
+        }),
+        _ => None,
+    }
+}
