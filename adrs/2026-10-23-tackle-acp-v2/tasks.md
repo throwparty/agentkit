@@ -173,7 +173,7 @@ Implement v2 session/request_permission with a required title and optional subje
 
 ### T-014: [x] v2 commands, notices and compaction
 
-Implement available_commands_update with the v2 command input type discriminator, capability-free notice updates, and capability-free compaction updates (compaction_update with compactionId and status, optional compaction_summary_chunk). Reuse the shared dispatch decision for the slash-command ladder.
+Implement available_commands_update with the v2 command input type discriminator, capability-free notice updates, and capability-free compaction updates (compaction_update with compactionId and status, optional compaction_summary_chunk). Reuse the shared dispatch decision for the slash-command ladder. The shared decision only classifies; execution parity for every Dispatch variant is a separate obligation, tracked in T-025.
 
 
 | Field | Value |
@@ -313,4 +313,17 @@ Bring cargo clippy -p agentkit-tackle --all-targets --all-features -- -D warning
 | Effort | 1-2h |
 | Depends On | T-017 |
 | References | testability |
+
+### T-025: v2 dispatch parity: direct, context and runtime commands
+
+Complete the v2 slash-command ladder. Direct invocation (/!) is implemented and tested; /context and /mcp still fall through to the model. Implement them by reusing the v1 handlers through acp::common where possible, and make an unported Dispatch variant an explicit error rather than a model turn. Add a v2 integration test per Dispatch variant (Direct, Fork, Compaction, Context, RuntimeCommand) and assert the command advertisement offers each MCP tool as !mcp.<server>.<tool>.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | Every Dispatch variant is implemented under v2; /! executes without a model request; /context and /mcp behave as v1; /fork remains the fallback; no variant falls through to the model; each variant has a v2 integration test; the per-tool !mcp advertisement is tested. |
+| Complexity | 🟡 Medium |
+| Effort | 3-4h |
+| Depends On | T-014,T-016,T-017,T-019 |
+| References | v2-slash-commands,protocol-neutral-core |
 
