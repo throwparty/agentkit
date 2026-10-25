@@ -4,7 +4,7 @@ use super::capabilities::UnstableFeature;
 use super::negotiation::ConnectionNegotiation;
 use crate::state::wire_session_id;
 use agent_client_protocol::schema::v1::{
-    Notice, NoticeSeverity, SessionNotification, SessionUpdate,
+    Notice, NoticeSeverity, SessionInfoUpdate, SessionNotification, SessionUpdate,
 };
 
 /// The notice sink for a live connection: a script-driven model call
@@ -29,6 +29,13 @@ impl crate::scripts::host::NoticeSink for ConnectionNotices {
         let _ = self.cx.send_notification(SessionNotification::new(
             wire_session_id(session),
             SessionUpdate::Notice(notice),
+        ));
+    }
+
+    fn session_title(&self, session: &crate::store::SessionId, title: &str) {
+        let _ = self.cx.send_notification(SessionNotification::new(
+            wire_session_id(session),
+            SessionUpdate::SessionInfoUpdate(SessionInfoUpdate::new().title(title.to_owned())),
         ));
     }
 }

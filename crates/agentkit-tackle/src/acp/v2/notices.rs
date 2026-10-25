@@ -5,7 +5,7 @@ use crate::scripts::host::NoticeSink;
 use crate::store::SessionId;
 use agent_client_protocol::role::acp::Client;
 use agent_client_protocol::schema::v2::{
-    Notice, NoticeSeverity, SessionUpdate, UpdateSessionNotification,
+    Notice, NoticeSeverity, SessionInfoUpdate, SessionUpdate, UpdateSessionNotification,
 };
 use agent_client_protocol::V2ConnectionTo;
 
@@ -22,6 +22,13 @@ impl NoticeSink for ConnectionNotices {
                 NoticeSeverity::Info,
                 format!("Running a background model call ({})", self.source),
             )),
+        ));
+    }
+
+    fn session_title(&self, session: &SessionId, title: &str) {
+        let _ = self.cx.send_notification(UpdateSessionNotification::new(
+            super::wire_session_id(session),
+            SessionUpdate::SessionInfoUpdate(SessionInfoUpdate::new().title(title.to_owned())),
         ));
     }
 }

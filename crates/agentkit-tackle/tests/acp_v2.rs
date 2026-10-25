@@ -516,3 +516,74 @@ async fn v2_fork_prompt_is_intercepted_by_the_harness() {
         .await
         .expect("v2 /fork fallback");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn v2_titling_surfaces_the_session_title() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ScriptedModel)
+        .mount(&server)
+        .await;
+    let agent = spawn_agent(
+        dir.path(),
+        &model_config(&server.uri()).replace("enabled = false", "enabled = true"),
+    );
+
+    let titles: Arc<Mutex<Vec<String>>> = Arc::default();
+    let handler = Arc::clone(&titles);
+
+    Client
+        .v2()
+        .on_receive_notification(
+            async move |notification: v2::UpdateSessionNotification, _cx| {
+                if let v2::SessionUpdate::SessionInfoUpdate(update) = &notification.update {
+                    if let agentkit_tackle::agent_client_protocol::schema::MaybeUndefined::Value(
+                        title,
+                    ) = &update.title
+                    {
+                        handler.lock().unwrap().push(title.clone());
+                    }
+                }
+                Ok(())
+            },
+            on_receive_notification!(),
+        )
+        .connect_with(agent, |connection: V2ConnectionTo<Agent>| async move {
+            connection
+                .send_request(v2::InitializeRequest::new(
+                    ProtocolVersion::V2,
+                    v2::Implementation::new("test-client", "1.0.0"),
+                ))
+                .block_task()
+                .await?;
+            let created = connection
+                .send_request(v2::NewSessionRequest::new(std::env::current_dir().unwrap()))
+                .block_task()
+                .await?;
+            connection
+                .send_request(v2::PromptRequest::new(
+                    created.session_id,
+                    vec![v2::ContentBlock::Text(v2::TextContent::new("hello"))],
+                ))
+                .block_task()
+                .await?;
+
+            let mut titled = false;
+            for _ in 0..200 {
+                if titles.lock().unwrap().iter().any(|title| title == "ok") {
+                    titled = true;
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            assert!(
+                titled,
+                "the titling script's title reaches the client: {:?}",
+                titles.lock().unwrap()
+            );
+            Ok(())
+        })
+        .await
+        .expect("v2 titling");
+}
