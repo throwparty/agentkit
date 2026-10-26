@@ -40,6 +40,7 @@ impl CancellationRegistry {
                 CancellationEntry {
                     token: token.clone(),
                     id,
+                    finished: Arc::new(tokio::sync::Notify::new()),
                 },
             );
         let registration = CancelRegistration {
@@ -69,15 +70,22 @@ impl CancellationRegistry {
     pub(crate) async fn wait_cancelled(&self, session: &str) {
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
-            let present = self
-                .entries
-                .lock()
-                .expect("cancellation registry poisoned")
-                .contains_key(session);
-            if !present || tokio::time::Instant::now() >= deadline {
+            let finished = {
+                let entries = self.entries.lock().expect("cancellation registry poisoned");
+                entries.get(session).map(|entry| Arc::clone(&entry.finished))
+            };
+            let Some(finished) = finished else {
+                return;
+            };
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
                 return;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            // The turn's guard notifies when it removes the registration;
+            // a permit survives the race where it drops before we await.
+            if tokio::time::timeout(remaining, finished.notified()).await.is_err() {
+                return;
+            }
         }
     }
 }
@@ -91,6 +99,8 @@ impl Default for CancellationRegistry {
 struct CancellationEntry {
     token: CancellationToken,
     id: u64,
+    /// Wakes `wait_cancelled` when this registration is removed.
+    finished: Arc<tokio::sync::Notify>,
 }
 
 /// Removes a turn's registration when the turn ends, but only if the
@@ -103,13 +113,20 @@ pub(crate) struct CancelRegistration {
 
 impl Drop for CancelRegistration {
     fn drop(&mut self) {
-        let mut entries = self
-            .registry
-            .entries
-            .lock()
-            .expect("cancellation registry poisoned");
-        if entries.get(&self.session).map(|entry| entry.id) == Some(self.id) {
-            entries.remove(&self.session);
+        let removed = {
+            let mut entries = self
+                .registry
+                .entries
+                .lock()
+                .expect("cancellation registry poisoned");
+            if entries.get(&self.session).map(|entry| entry.id) == Some(self.id) {
+                entries.remove(&self.session)
+            } else {
+                None
+            }
+        };
+        if let Some(entry) = removed {
+            entry.finished.notify_waiters();
         }
     }
 }
@@ -155,6 +172,23 @@ mod tests {
         registry.cancel("sess-1");
         registry.cancel("sess-1");
         assert!(token.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn wait_cancelled_wakes_when_the_registration_drops() {
+        let registry = registry();
+        let (_token, registration) = registry.register("sess-1");
+        let waiter = tokio::spawn({
+            let registry = Arc::clone(&registry);
+            async move {
+                registry.wait_cancelled("sess-1").await;
+            }
+        });
+        drop(registration);
+        tokio::time::timeout(std::time::Duration::from_secs(1), waiter)
+            .await
+            .expect("the close waiter is woken by the guard drop")
+            .expect("waiter task");
     }
 
     #[test]
