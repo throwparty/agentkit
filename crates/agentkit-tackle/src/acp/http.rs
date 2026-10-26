@@ -218,9 +218,21 @@ async fn handle_events(
                 let rx = connection.outgoing.subscribe();
                 tokio_stream::wrappers::BroadcastStream::new(rx)
                     .filter_map(|line| {
-                        futures::future::ready(
-                            line.ok().map(|line| Ok(SseEvent::default().data(line))),
-                        )
+                        let event = match line {
+                            Ok(line) => Some(Ok(SseEvent::default().data(line))),
+                            Err(
+                                tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(
+                                    skipped,
+                                ),
+                            ) => {
+                                tracing::warn!(
+                                    skipped,
+                                    "HTTP SSE subscriber lagged; dropped notifications"
+                                );
+                                None
+                            }
+                        };
+                        futures::future::ready(event)
                     })
                     .boxed()
             }
