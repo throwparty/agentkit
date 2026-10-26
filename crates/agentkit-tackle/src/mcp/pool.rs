@@ -350,6 +350,27 @@ impl<S: ElicitationSink> McpPool<S> {
     /// status, never an error, so a broken forwarded server cannot fail
     /// session setup.
     pub async fn add_forwarded(&mut self, servers: Vec<(String, McpServerConfig)>) {
+        let throwaways = self.register_forwarded(servers);
+        let connecting = throwaways
+            .into_iter()
+            .map(|(name, config, mut one)| async move {
+                one.connect(&name, &config).await;
+                one
+            })
+            .collect::<Vec<_>>();
+        for connected in futures::future::join_all(connecting).await {
+            self.absorb(connected);
+        }
+    }
+
+    /// Registers forwarded servers and returns a throwaway pool per
+    /// server, so the handshakes can run concurrently and, for the ACP
+    /// path, outside this pool's lock.
+    fn register_forwarded(
+        &mut self,
+        servers: Vec<(String, McpServerConfig)>,
+    ) -> Vec<(String, McpServerConfig, Self)> {
+        let mut throwaways = Vec::new();
         for (name, config) in servers {
             if self.configs.contains_key(&name) {
                 self.shadowed.insert(name.clone());
@@ -359,7 +380,21 @@ impl<S: ElicitationSink> McpPool<S> {
             // registration, including a live config connection of the
             // same name.
             self.connections.remove(&name);
-            self.connect(&name, &config).await;
+            throwaways.push((name, config, self.empty_sibling()));
+        }
+        throwaways
+    }
+
+    /// An empty pool sharing this pool's sink and credential helper.
+    fn empty_sibling(&self) -> Self {
+        Self {
+            connections: BTreeMap::new(),
+            statuses: BTreeMap::new(),
+            enabled: BTreeMap::new(),
+            configs: BTreeMap::new(),
+            shadowed: BTreeSet::new(),
+            sink: Arc::clone(&self.sink),
+            credential_helper: self.credential_helper.clone(),
         }
     }
 
@@ -509,4 +544,34 @@ pub enum McpPoolError {
     UnknownServer(String),
     #[error("tool call failed: {0}")]
     Call(String),
+}
+
+/// Connects forwarded servers concurrently on throwaway pools and folds
+/// the results in, without holding `pool`'s lock during the handshakes.
+/// A slow or dead forwarded server therefore cannot serialise every other
+/// session's tool listing behind it.
+pub async fn connect_forwarded(
+    pool: Arc<tokio::sync::Mutex<McpPool>>,
+    servers: Vec<(String, McpServerConfig)>,
+) {
+    let throwaways = {
+        let mut pool = pool.lock().await;
+        pool.register_forwarded(servers)
+    };
+    if throwaways.is_empty() {
+        return;
+    }
+    let connected = futures::future::join_all(
+        throwaways
+            .into_iter()
+            .map(|(name, config, mut one)| async move {
+                one.connect(&name, &config).await;
+                one
+            }),
+    )
+    .await;
+    let mut pool = pool.lock().await;
+    for one in connected {
+        pool.absorb(one);
+    }
 }

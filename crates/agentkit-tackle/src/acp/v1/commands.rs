@@ -97,12 +97,7 @@ pub(super) async fn connect_forwarded_servers(
     if forwarded.is_empty() {
         return;
     }
-    negotiation
-        .mcp_pool()
-        .lock()
-        .await
-        .add_forwarded(forwarded)
-        .await;
+    crate::mcp::connect_forwarded(negotiation.mcp_pool(), forwarded).await;
 }
 
 /// The first-turn MCP report: a warning notice naming enabled
