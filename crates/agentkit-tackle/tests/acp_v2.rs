@@ -14,6 +14,16 @@ use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 
 struct ScriptedModel;
 
+/// Answers model discovery with no models, so the first prompt has
+/// nothing to resolve and fails after its user message is inserted.
+struct EmptyModels;
+
+impl Respond for EmptyModels {
+    fn respond(&self, _request: &Request) -> ResponseTemplate {
+        ResponseTemplate::new(200).set_body_json(serde_json::json!({ "data": [] }))
+    }
+}
+
 /// Holds every model request open, so a turn is in flight when close or
 /// delete lands.
 struct HangingModel;
@@ -1686,4 +1696,87 @@ async fn v2_initialize_advertises_capabilities_and_additional_directories() {
         })
         .await
         .expect("v2 capabilities and additional directories");
+}
+
+
+#[tokio::test(flavor = "multi_thread")]
+async fn v2_failure_after_insertion_keeps_the_message_and_reports_the_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(EmptyModels)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .respond_with(EmptyModels)
+        .mount(&server)
+        .await;
+    let config = format!(
+        "[endpoints.mock]\nbase_url = \"{}\"\nwire_format = \"openai-chat-completions\"\nauth = \"none\"\nmodels = []\n\n\
+         [scripts.titling]\nevents = [\"title_trigger\"]\nfile = \"builtin:titling.rhai\"\nenabled = false\n",
+        server.uri()
+    );
+    let agent = spawn_agent(dir.path(), &config);
+    let seen: Arc<Mutex<Vec<Seen>>> = Arc::default();
+    let handler = Arc::clone(&seen);
+
+    Client
+        .v2()
+        .on_receive_notification(
+            async move |notification: v2::UpdateSessionNotification, _cx| {
+                let mut seen = handler.lock().unwrap();
+                match &notification.update {
+                    v2::SessionUpdate::UserMessage(message) => {
+                        seen.push(Seen::User(message.message_id.to_string()));
+                    }
+                    v2::SessionUpdate::StateUpdate(v2::StateUpdate::Idle(idle)) => {
+                        seen.push(Seen::Idle(idle.stop_reason.clone()));
+                    }
+                    _ => {}
+                }
+                Ok(())
+            },
+            on_receive_notification!(),
+        )
+        .connect_with(agent, |connection: V2ConnectionTo<Agent>| async move {
+            connection
+                .send_request(v2::InitializeRequest::new(
+                    ProtocolVersion::V2,
+                    v2::Implementation::new("test-client", "1.0.0"),
+                ))
+                .block_task()
+                .await?;
+            let created = connection
+                .send_request(v2::NewSessionRequest::new(std::env::current_dir().unwrap()))
+                .block_task()
+                .await?;
+            let accepted = connection
+                .send_request(v2::PromptRequest::new(
+                    created.session_id,
+                    vec![v2::ContentBlock::Text(v2::TextContent::new("hello"))],
+                ))
+                .block_task()
+                .await?;
+            let message_id = accepted.message_id.to_string();
+            assert!(!message_id.is_empty());
+
+            let reason = wait_for_idle(&seen).await.expect("the turn reaches idle");
+            let v2::StopReason::Error(error) = reason else {
+                panic!("the failed turn reports error: {reason:?}");
+            };
+            assert!(
+                error.error.is_some(),
+                "the failure detail rides the stop reason: {error:?}"
+            );
+            assert!(
+                seen.lock().unwrap().iter().any(
+                    |entry| matches!(entry, Seen::User(id) if id == &message_id)
+                ),
+                "the inserted user message keeps its id: {:?}",
+                seen.lock().unwrap()
+            );
+            Ok(())
+        })
+        .await
+        .expect("v2 failure after insertion");
 }
