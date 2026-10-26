@@ -287,7 +287,7 @@ pub(super) async fn handle_close_session(
         .grants
         .lock()
         .await
-        .clear_session(&request.session_id.to_string());
+        .clear_session(&store_session_id(&request.session_id));
     // Release the terminals the harness created for this session: connection-
     // scoped and ephemeral, so best-effort and silent on failure.
     let terminals: Vec<String> = {
@@ -320,7 +320,7 @@ pub(super) async fn handle_delete_session(
         .grants
         .lock()
         .await
-        .clear_session(&request.session_id.to_string());
+        .clear_session(&store_session_id(&request.session_id));
     responder.respond(DeleteSessionResponse::new())
 }
 
