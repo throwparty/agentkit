@@ -1037,3 +1037,88 @@ async fn v2_concurrent_prompts_queue_instead_of_failing() {
         .await
         .expect("v2 concurrent prompts");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn v2_fork_is_seeded_and_replays_on_resume() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ScriptedModel)
+        .mount(&server)
+        .await;
+    let agent = spawn_agent(dir.path(), &model_config(&server.uri()));
+    let texts: Arc<Mutex<Vec<String>>> = Arc::default();
+    let handler = Arc::clone(&texts);
+
+    Client
+        .v2()
+        .on_receive_notification(
+            async move |notification: v2::UpdateSessionNotification, _cx| {
+                if let v2::SessionUpdate::UserMessage(message) = &notification.update {
+                    if let agentkit_tackle::agent_client_protocol::schema::MaybeUndefined::Value(
+                        blocks,
+                    ) = &message.content
+                    {
+                        for block in blocks {
+                            if let v2::ContentBlock::Text(text) = block {
+                                handler.lock().unwrap().push(text.text.clone());
+                            }
+                        }
+                    }
+                }
+                Ok(())
+            },
+            on_receive_notification!(),
+        )
+        .connect_with(agent, |connection: V2ConnectionTo<Agent>| async move {
+            connection
+                .send_request(v2::InitializeRequest::new(
+                    ProtocolVersion::V2,
+                    v2::Implementation::new("test-client", "1.0.0"),
+                ))
+                .block_task()
+                .await?;
+            let cwd = std::env::current_dir().unwrap();
+            let source = connection
+                .send_request(v2::NewSessionRequest::new(cwd.clone()))
+                .block_task()
+                .await?;
+            let fork = connection
+                .send_request(v2::ForkSessionRequest::new(
+                    source.session_id,
+                    cwd.clone(),
+                ))
+                .block_task()
+                .await?;
+
+            connection
+                .send_request(
+                    v2::ResumeSessionRequest::new(fork.session_id, cwd)
+                        .replay_from(v2::ReplayFrom::Start(v2::ReplayFromStart::new())),
+                )
+                .block_task()
+                .await?;
+
+            let mut seeded = false;
+            for _ in 0..200 {
+                if texts
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|text| text.contains("Forked from session"))
+                {
+                    seeded = true;
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            assert!(
+                seeded,
+                "the fork seed replays on resume: {:?}",
+                texts.lock().unwrap()
+            );
+            Ok(())
+        })
+        .await
+        .expect("v2 fork seed");
+}

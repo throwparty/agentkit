@@ -369,6 +369,7 @@ pub(super) async fn handle_fork_session(
         &source,
         fork.fork_point_turn_id.as_ref(),
     );
+    let _ = fork::insert_fork_seed(&state.db, &fork.id, &source).await;
     let selectors = config_options::build(&state, &fork).await;
     responder.respond(
         ForkSessionResponse::new(wire_session_id(&fork.id))
