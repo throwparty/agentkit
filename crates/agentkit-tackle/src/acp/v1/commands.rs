@@ -75,6 +75,11 @@ pub(super) fn forwarded_mcp_server(
             http.name.clone(),
             crate::config::McpServerConfig::Http {
                 url: http.url.clone(),
+                headers: http
+                    .headers
+                    .iter()
+                    .map(|header| (header.name.clone(), header.value.clone()))
+                    .collect(),
             },
         )),
         _ => None,

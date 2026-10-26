@@ -59,6 +59,7 @@ async fn mcp_pools_are_per_connection() {
         "only-a",
         crate::config::McpServerConfig::Http {
             url: "http://example.invalid".to_owned(),
+            headers: std::collections::BTreeMap::new(),
         },
     );
 

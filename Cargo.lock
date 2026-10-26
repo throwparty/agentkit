@@ -212,6 +212,7 @@ dependencies = [
  "daggy",
  "futures",
  "git2",
+ "http",
  "jiff",
  "opentelemetry",
  "opentelemetry-otlp",

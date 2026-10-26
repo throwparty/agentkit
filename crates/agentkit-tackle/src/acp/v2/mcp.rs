@@ -7,7 +7,7 @@ use agent_client_protocol::schema::v2::McpServer;
 
 /// Maps a v2 client-forwarded MCP server onto the pool's spawn configuration.
 /// SSE and ACP transports are not advertised, so those entries are skipped;
-/// HTTP headers are not modelled by the pool configuration and are dropped.
+/// HTTP headers are carried through to every request.
 fn forwarded_mcp_server(server: &McpServer) -> Option<(String, McpServerConfig)> {
     match server {
         McpServer::Stdio(stdio) => Some((
@@ -29,6 +29,11 @@ fn forwarded_mcp_server(server: &McpServer) -> Option<(String, McpServerConfig)>
             http.name.clone(),
             McpServerConfig::Http {
                 url: http.url.clone(),
+                headers: http
+                    .headers
+                    .iter()
+                    .map(|header| (header.name.clone(), header.value.clone()))
+                    .collect(),
             },
         )),
         _ => None,
@@ -55,7 +60,25 @@ pub(super) async fn connect_forwarded_servers(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::schema::v2::{EnvVariable, McpServerStdio};
+    use agent_client_protocol::schema::v2::{
+        EnvVariable, HttpHeader, McpServerHttp, McpServerStdio,
+    };
+
+    #[test]
+    fn forwarded_http_headers_are_carried() {
+        let server = McpServer::Http(
+            McpServerHttp::new("x", "https://example.com/mcp")
+                .headers(vec![HttpHeader::new("Authorization", "Bearer token")]),
+        );
+        let (_, config) = forwarded_mcp_server(&server).expect("http server");
+        let McpServerConfig::Http { headers, .. } = config else {
+            panic!("expected an http server");
+        };
+        assert_eq!(
+            headers.get("Authorization"),
+            Some(&"Bearer token".to_owned())
+        );
+    }
 
     #[test]
     fn forwarded_credential_markers_are_dropped() {

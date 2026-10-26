@@ -298,9 +298,23 @@ impl<S: ElicitationSink> McpPool<S> {
                         Err(reason) => Err(reason),
                     }
                 }
-                McpServerConfig::Http { url } => {
+                McpServerConfig::Http { url, headers } => {
+                    let custom_headers = headers
+                        .iter()
+                        .map(|(name, value)| {
+                            let name = http::HeaderName::from_bytes(name.as_bytes()).map_err(
+                                |err| format!("invalid header name `{name}`: {err}"),
+                            )?;
+                            let value = http::HeaderValue::from_str(value).map_err(|err| {
+                                format!("invalid value for header `{name}`: {err}")
+                            })?;
+                            Ok((name, value))
+                        })
+                        .collect::<Result<std::collections::HashMap<_, _>, String>>()?;
+                    let config = rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(url.clone())
+                        .custom_headers(custom_headers);
                     let transport =
-                        rmcp::transport::StreamableHttpClientTransport::from_uri(url.clone());
+                        rmcp::transport::StreamableHttpClientTransport::from_config(config);
                     match connect_timeout(rmcp::service::serve_client(handler, transport)).await {
                         Ok(initialised) => initialised.map_err(|err| err.to_string()),
                         Err(reason) => Err(reason),
