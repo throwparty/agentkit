@@ -73,7 +73,7 @@ pub(crate) async fn run_direct_invocation(
     sink.tool_call_update(
         &session_id,
         ToolCallUpdate {
-            id: call_id,
+            id: call_id.clone(),
             status: if is_error {
                 ToolCallStatus::Failed
             } else {
@@ -93,7 +93,7 @@ pub(crate) async fn run_direct_invocation(
             Some(&input.invokable),
             None,
             None,
-            None,
+            Some(&call_id),
         )
         .await
         .map_err(|err| err.to_string())?;

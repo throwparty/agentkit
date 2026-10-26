@@ -301,7 +301,15 @@ pub async fn run_turn<P: ModelProvider>(
             tool_calls: response.tool_calls.clone(),
             ..Default::default()
         });
-        for call in response.tool_calls {
+        for (index, call) in response.tool_calls.into_iter().enumerate() {
+            // The provider id is not guaranteed unique across turns, and
+            // the same id must address the live card and the replayed card.
+            let wire_id = format!("{turn_id}:{index}:{}", call.id);
+            let wire_call = crate::providers::ModelToolCall {
+                id: wire_id.clone(),
+                name: call.name.clone(),
+                arguments: call.arguments.clone(),
+            };
             let stored_call = db
                 .append_message(
                     turn_id,
@@ -310,16 +318,17 @@ pub async fn run_turn<P: ModelProvider>(
                     Some(&call.name),
                     None,
                     None,
-                    None,
+                    Some(&wire_id),
                 )
                 .await?;
+            let cancelled_call = wire_call.clone();
             let outcome = tokio::select! {
                 biased;
                 _ = cancellation.cancelled() => {
                     // Cancelled mid-tool-call. Emit the terminal card update
                     // and persist a terminal result so the card never stays
                     // InProgress, live or on replay, then stop.
-                    on_tool_cancelled(&call);
+                    on_tool_cancelled(&cancelled_call);
                     db.append_message(
                         turn_id,
                         Role::ToolResult,
@@ -333,7 +342,7 @@ pub async fn run_turn<P: ModelProvider>(
                     .await?;
                     return cancelled_outcome(db, session_id).await;
                 }
-                outcome = on_tool_call(call.clone()) => outcome,
+                outcome = on_tool_call(wire_call) => outcome,
             };
             db.append_message(
                 turn_id,
@@ -760,13 +769,22 @@ mod tests {
         .unwrap();
 
         assert_eq!(outcome.stop, TurnStop::Cancelled);
-        {
+        let seen_id = {
             let seen = seen.lock().unwrap();
             assert_eq!(seen.len(), 1, "the terminal callback fired");
-            assert_eq!(seen[0], "call-1");
-        }
+            assert!(seen[0].contains("call-1"), "{}", seen[0]);
+            seen[0].clone()
+        };
 
         let assembled = store.assemble_context(&session).await.unwrap();
+        let call = assembled
+            .iter()
+            .find(|item| item.message.role == Role::ToolCall)
+            .expect("the tool call is stored");
+        assert_eq!(
+            call.message.id, seen_id,
+            "the stored id is the live wire id"
+        );
         let result = assembled
             .iter()
             .find(|item| item.message.role == Role::ToolResult)
