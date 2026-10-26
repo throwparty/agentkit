@@ -338,3 +338,163 @@ fn unknown_connection_id_is_rejected() {
         "a stale id must not mint a new connection"
     );
 }
+
+/// A one-shot OpenAI-compatible fixture: model discovery plus a streamed
+/// `ok` completion. Runs on its own thread so the test can stay blocking.
+fn model_fixture() -> String {
+    use std::io::{Read as _, Write as _};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let mut stream = stream;
+            let mut head = [0u8; 4096];
+            let read = stream.read(&mut head).unwrap_or(0);
+            let request = String::from_utf8_lossy(&head[..read]);
+            if request.starts_with("GET ") {
+                let body = r#"{"data":[{"id":"gpt-4o-mini"}]}"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(response.as_bytes());
+            } else {
+                let lines = [
+                    r#"data: {"id":"c1","object":"chat.completion.chunk","created":0,"model":"m","choices":[{"index":0,"delta":{"role":"assistant"}}]}"#,
+                    r#"data: {"id":"c1","object":"chat.completion.chunk","created":0,"model":"m","choices":[{"index":0,"delta":{"content":"ok"}}]}"#,
+                    r#"data: {"id":"c1","object":"chat.completion.chunk","created":0,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#,
+                    "data: [DONE]",
+                ];
+                let body = lines.join("\n\n") + "\n";
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(response.as_bytes());
+            }
+        }
+    });
+    format!("http://{addr}/v1")
+}
+
+#[test]
+fn v2_prompt_streams_state_updates_over_http() {
+    use std::io::BufRead as _;
+    use std::sync::{Arc, Mutex};
+
+    let dir = tempfile::tempdir().unwrap();
+    let base_url = model_fixture();
+    std::fs::create_dir_all(dir.path().join("a")).unwrap();
+    std::fs::write(
+        dir.path().join("a").join("config.toml"),
+        format!(
+            "[endpoints.mock]\nbase_url = \"{base_url}\"\nwire_format = \"openai-chat-completions\"\nauth = \"none\"\nmodels = [\"gpt-4o-mini\"]\n\n\
+             [defaults]\nmodel = \"mock/gpt-4o-mini\"\n\n\
+             [scripts.titling]\nevents = [\"title_trigger\"]\nfile = \"builtin:titling.rhai\"\nenabled = false\n"
+        ),
+    )
+    .unwrap();
+    let agent = spawn_http_agent(dir.path(), "a");
+    wait_for_port(&agent);
+
+    let (response, connection) = rpc(
+        &agent,
+        None,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": 2,
+                "info": { "name": "test-client", "version": "1.0.0" },
+                "clientCapabilities": {}
+            }
+        }),
+    );
+    assert_eq!(response["result"]["protocolVersion"], 2, "{response}");
+    let connection = connection.expect("the v2 connection id");
+
+    let frames: Arc<Mutex<Vec<String>>> = Arc::default();
+    {
+        let frames = Arc::clone(&frames);
+        let url = format!(
+            "http://127.0.0.1:{}/events?connection={connection}",
+            agent.port
+        );
+        std::thread::spawn(move || {
+            let response = reqwest::blocking::Client::new().get(url).send().unwrap();
+            let mut reader = std::io::BufReader::new(response);
+            let mut line = String::new();
+            while reader.read_line(&mut line).unwrap_or(0) > 0 {
+                if let Some(data) = line.strip_prefix("data: ") {
+                    frames.lock().unwrap().push(data.trim().to_owned());
+                }
+                line.clear();
+            }
+        });
+    }
+
+    let (response, _) = rpc(
+        &agent,
+        Some(&connection),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "session/new",
+            "params": { "cwd": "/http-v2", "mcpServers": [] }
+        }),
+    );
+    let session_id = response["result"]["sessionId"]
+        .as_str()
+        .expect("v2 session id")
+        .to_owned();
+
+    let (response, _) = rpc(
+        &agent,
+        Some(&connection),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "session/prompt",
+            "params": {
+                "sessionId": session_id,
+                "prompt": [{ "type": "text", "text": "hello" }]
+            }
+        }),
+    );
+    let message_id = response["result"]["messageId"]
+        .as_str()
+        .expect("the insertion message id")
+        .to_owned();
+    assert!(!message_id.is_empty());
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let mut saw_running = false;
+    let mut saw_idle = false;
+    while std::time::Instant::now() < deadline && !(saw_running && saw_idle) {
+        let frames = frames.lock().unwrap().clone();
+        saw_running = frames.iter().any(|frame| {
+            frame.contains("\"sessionUpdate\":\"state_update\"")
+                && frame.contains("\"state\":\"running\"")
+        });
+        saw_idle = frames.iter().any(|frame| {
+            frame.contains("\"sessionUpdate\":\"state_update\"")
+                && frame.contains("\"state\":\"idle\"")
+                && frame.contains("\"stopReason\":\"end_turn\"")
+        });
+        if saw_running && saw_idle {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+    let frames = frames.lock().unwrap().clone();
+    assert!(saw_running, "running state over SSE: {frames:?}");
+    assert!(saw_idle, "idle state over SSE: {frames:?}");
+    assert!(
+        frames.iter().any(|frame| frame.contains(&message_id)),
+        "the user message id rides the SSE stream: {frames:?}"
+    );
+}
