@@ -103,21 +103,30 @@ fn spawn_connection(server: &HttpServerState, id: String) -> Arc<Connection> {
     let sink = agent_out_tx.sink_map_err(send_error_to_io);
     let transport = agent_client_protocol::Lines::new(sink, incoming_stream);
     let state_for_connection = Arc::clone(&server.state);
-    tokio::spawn(async move {
-        // The connection's own MCP pool: config servers plus anything the
-        // client forwards, so toggles and forwarded servers stay scoped
-        // to this connection.
-        let setup = ConnectionSetup::load(&state_for_connection).await;
-        let _ = run_acp_over(state_for_connection, setup, transport).await;
-    });
-
+    let connections = Arc::clone(&server.connections);
+    let task_id = id.clone();
     // Hold the incoming sender open in the registry: dropped senders
-    // close the agent connection.
+    // close the agent connection. Insert before spawning so a connection
+    // that dies immediately still removes its own entry.
     server
         .connections
         .lock()
         .unwrap()
         .insert(id, Arc::clone(&connection));
+    tokio::spawn(async move {
+        // The connection's own MCP pool: config servers plus anything the
+        // client forwards, so toggles and forwarded servers stay scoped
+        // to this connection.
+        let setup = ConnectionSetup::load(&state_for_connection).await;
+        if let Err(err) = run_acp_over(state_for_connection, setup, transport).await {
+            tracing::warn!(
+                connection = %task_id,
+                error = %err,
+                "HTTP ACP connection ended with an error"
+            );
+        }
+        connections.lock().unwrap().remove(&task_id);
+    });
     connection
 }
 
