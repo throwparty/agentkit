@@ -70,9 +70,14 @@ impl CancellationRegistry {
     pub(crate) async fn wait_cancelled(&self, session: &str) {
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
+            // Register the waiter while holding the entries lock: the
+            // guard's `notify_waiters` cannot fire between the lookup and
+            // the future's creation.
             let finished = {
                 let entries = self.entries.lock().expect("cancellation registry poisoned");
-                entries.get(session).map(|entry| Arc::clone(&entry.finished))
+                entries
+                    .get(session)
+                    .map(|entry| Arc::clone(&entry.finished).notified_owned())
             };
             let Some(finished) = finished else {
                 return;
@@ -81,9 +86,7 @@ impl CancellationRegistry {
             if remaining.is_zero() {
                 return;
             }
-            // The turn's guard notifies when it removes the registration;
-            // a permit survives the race where it drops before we await.
-            if tokio::time::timeout(remaining, finished.notified()).await.is_err() {
+            if tokio::time::timeout(remaining, finished).await.is_err() {
                 return;
             }
         }
