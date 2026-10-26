@@ -156,10 +156,17 @@ pub(crate) fn agent(
         .on_receive_request(
             {
                 let state = state.clone();
+                let negotiation = negotiation.clone();
                 async move |request: DeleteSessionRequest,
                             responder,
                             _connection: V2ConnectionTo<Client>| {
-                    super::sessions::handle_delete_session(state.clone(), request, responder).await
+                    super::sessions::handle_delete_session(
+                        state.clone(),
+                        negotiation.clone(),
+                        request,
+                        responder,
+                    )
+                    .await
                 }
             },
             agent_client_protocol::on_receive_request!(),

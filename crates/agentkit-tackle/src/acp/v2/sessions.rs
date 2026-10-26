@@ -277,19 +277,25 @@ pub(super) async fn handle_close_session(
 #[tracing::instrument(skip_all, fields(version = "v2", session = %request.session_id))]
 pub(super) async fn handle_delete_session(
     state: Arc<TackleState>,
+    negotiation: Arc<crate::acp::v2::negotiation::ConnectionNegotiation>,
     request: DeleteSessionRequest,
     responder: Responder<DeleteSessionResponse>,
 ) -> Result<(), Error> {
-    state
-        .db
-        .delete_session(&store_session_id(&request.session_id))
-        .await
-        .map_err(|err| Error::internal_error().data(err.to_string()))?;
-    state
-        .grants
-        .lock()
-        .await
-        .clear_session(&store_session_id(&request.session_id));
+    let store_session = store_session_id(&request.session_id);
+    // Delete follows close's discipline: stop the in-flight turn and wait
+    // for its terminal idle before soft-deleting, so a racing turn cannot
+    // keep appending to a deleted session.
+    negotiation.cancel(&store_session);
+    negotiation.wait_cancelled(&store_session).await;
+    if let Err(err) = state.db.delete_session(&store_session).await {
+        if let crate::store::StoreError::LeaseHeld { owner, .. } = &err {
+            return responder.respond_with_error(Error::internal_error().data(
+                serde_json::json!({ "error": "session-actively-owned", "owner": owner }),
+            ));
+        }
+        return responder.respond_with_error(Error::internal_error().data(err.to_string()));
+    }
+    state.grants.lock().await.clear_session(&store_session);
     responder.respond(DeleteSessionResponse::new())
 }
 
