@@ -405,7 +405,17 @@ async fn run_prompt_after_begin(
             Ok(TurnStop::MaxTurnRequests) => StopReason::MaxTurnRequests,
             Ok(TurnStop::Cancelled) => StopReason::Cancelled,
             Err(_) if cancellation.is_cancelled() => StopReason::Cancelled,
-            Err(_) => StopReason::Error(ErrorStopReason::new()),
+            Err(err) => {
+                tracing::warn!(
+                    version = "v2",
+                    session = %wire_session,
+                    error = %err,
+                    "v2 turn failed"
+                );
+                StopReason::Error(ErrorStopReason::new().error(
+                    agent_client_protocol::schema::v2::Error::internal_error().data(err),
+                ))
+            }
         };
         tracing::info!(
             version = "v2",
