@@ -49,7 +49,6 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Run conformance
         id: conformance
-        continue-on-error: true
         run: just tackle conformance
       - name: Upload report
         if: always()
