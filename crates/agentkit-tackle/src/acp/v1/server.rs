@@ -1,15 +1,11 @@
 //! The ACP v1 server: the per-connection handler builder and dispatch.
 
-use super::commands::{editor_command, mcp_command};
 use super::negotiation::ConnectionNegotiation;
-use crate::agent::compaction;
-use crate::agent::config_options::session_actor;
-use crate::acp::common::dispatch::{decide, Dispatch};
 use crate::state::TackleState;
 use agent_client_protocol::schema::v1::{
     InitializeRequest, LoadSessionRequest, NewSessionRequest, ResumeSessionRequest,
 };
-use agent_client_protocol::{Agent, Error};
+use agent_client_protocol::Agent;
 use std::sync::Arc;
 
 /// Builds the configured v1 agent: one thin closure per ACP method, capturing
@@ -89,172 +85,12 @@ pub(crate) fn agent(
                 async move |request: agent_client_protocol::schema::v1::PromptRequest,
                             responder,
                             cx| {
-                    use agent_client_protocol::schema::v1::ContentBlock;
-
-                    // The lease is the one-turn-at-a-time invariant, and the
-                    // prompt turn and its user message are persisted up front.
-                    let begun = match super::prompt::begin_prompt_turn(&state, &request, &owner)
-                        .await
-                    {
-                        Ok(begun) => begun,
-                        Err(super::prompt::BeginError::Owned { holder }) => {
-                            return responder.respond_with_error(Error::internal_error().data(
-                                serde_json::json!({
-                                    "error": "session-actively-owned",
-                                    "owner": holder,
-                                }),
-                            ));
-                        }
-                        Err(super::prompt::BeginError::Store(err)) => {
-                            return responder.respond_with_error(Error::internal_error().data(err));
-                        }
-                    };
-                    let _lease_heartbeat = begun.heartbeat;
-                    let session_id = begun.store_session;
-                    let turn = begun.turn;
-                    let blocks_json = begun.blocks_json;
-
-                    // The first user text drives slash-command dispatch; a
-                    // non-text first block yields the empty string and falls
-                    // through to the model turn.
-                    let first_text = request
-                        .prompt
-                        .first()
-                        .and_then(|block| match block {
-                            ContentBlock::Text(text) => Some(text.text.trim().to_owned()),
-                            _ => None,
-                        })
-                        .unwrap_or_default();
-
-                    // Resolve the actor for this session (compaction's event
-                    // payload and the model turn both need it).
-                    let session_row = state.db.get_session(&session_id).await.ok().flatten();
-                    let actor_name = session_row
-                        .as_ref()
-                        .map(|row| {
-                            session_actor(row, state.config().config.defaults.actor.as_deref())
-                        })
-                        .unwrap_or_else(|| "default".into());
-
-                    // Which prompt case applies is a protocol-neutral decision,
-                    // shared with v2 through acp::common.
-                    match decide(
-                        &first_text,
-                        compaction::is_compaction_command(&state.definitions(), &first_text),
-                    ) {
-                        // The /fork fallback for v1 clients: exact first-token
-                        // match on user-typed input. Creates the fork, seeds it,
-                        // fires the session_forked scripts, and reports the new
-                        // session id in the parent turn — no model request.
-                        Dispatch::Fork => {
-                            return super::prompt::run_fork_case(
-                                state.clone(),
-                                negotiation.clone(),
-                                cx.clone(),
-                                request.session_id.clone(),
-                                session_id.clone(),
-                                owner.clone(),
-                                turn.clone(),
-                                responder,
-                            )
-                            .await;
-                        }
-                        // `/!mcp.<server>.<tool> {json}` or
-                        // `/!client.<surface>.<method> {json}`: the user calls a
-                        // tool directly. No model request, and no permission
-                        // prompt — the call is the user's own keystroke, so the
-                        // pipeline has nothing to ask.
-                        Dispatch::Direct(input) => {
-                            return super::prompt::run_direct_case(
-                                state.clone(),
-                                negotiation.clone(),
-                                cx.clone(),
-                                request.session_id.clone(),
-                                session_id.clone(),
-                                owner.clone(),
-                                turn.id.clone(),
-                                input,
-                                responder,
-                            )
-                            .await;
-                        }
-                        // Runtime availability commands: `/mcp` and `/editor`.
-                        // An unrecognised subcommand yields no reply and falls
-                        // through to normal processing.
-                        Dispatch::RuntimeCommand => {
-                            let reply = if first_text.starts_with("/editor") {
-                                editor_command(&negotiation, &first_text)
-                            } else {
-                                mcp_command(&negotiation, &first_text).await
-                            };
-                            if let Some(reply) = reply {
-                                return super::prompt::run_runtime_command_case(
-                                    state.clone(),
-                                    negotiation.clone(),
-                                    cx.clone(),
-                                    request.session_id.clone(),
-                                    session_id.clone(),
-                                    owner.clone(),
-                                    turn.id.clone(),
-                                    reply,
-                                    responder,
-                                )
-                                .await;
-                            }
-                        }
-                        // `/context`: an ephemeral composition report. Exact
-                        // first-token match with no arguments; the command turn
-                        // is deleted before the lease is released.
-                        Dispatch::Context => {
-                            return super::context::run_context_case(
-                                state.clone(),
-                                negotiation.clone(),
-                                cx.clone(),
-                                request.session_id.clone(),
-                                session_id.clone(),
-                                owner.clone(),
-                                turn.id.clone(),
-                                actor_name.clone(),
-                                session_row.clone(),
-                                responder,
-                            )
-                            .await;
-                        }
-                        // Compaction-tagged prompts: intercepted — the
-                        // compaction_requested script event fires instead of a
-                        // model turn in the main session.
-                        Dispatch::Compaction => {
-                            return super::prompt::run_compaction_case(
-                                state.clone(),
-                                negotiation.clone(),
-                                cx.clone(),
-                                request.session_id.clone(),
-                                session_id.clone(),
-                                owner.clone(),
-                                turn.id.clone(),
-                                first_text.clone(),
-                                actor_name.clone(),
-                                session_row.clone(),
-                                responder,
-                            )
-                            .await;
-                        }
-                        Dispatch::Model => {}
-                    }
-
-                    // Nothing intercepted: run the model turn.
-                    super::prompt::run_model_turn_case(
+                    super::prompt::handle_prompt(
                         state.clone(),
                         negotiation.clone(),
-                        cx.clone(),
-                        request.session_id.clone(),
-                        session_id,
                         owner.clone(),
-                        turn,
-                        actor_name,
-                        session_row,
-                        first_text,
-                        blocks_json,
+                        cx,
+                        request,
                         responder,
                     )
                     .await
