@@ -46,3 +46,29 @@ pub(crate) fn decide(first_text: &str, is_compaction: bool) -> Dispatch {
     }
     Dispatch::Model
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exact_first_token_commands_are_classified() {
+        assert!(matches!(decide("/fork", false), Dispatch::Fork));
+        assert!(matches!(decide("/fork now", false), Dispatch::Fork));
+        assert!(matches!(decide("/forkfoo", false), Dispatch::Model));
+        assert!(matches!(decide("/!mcp.echo.echo {}", false), Dispatch::Direct(_)));
+        assert!(matches!(decide("/mcp status", false), Dispatch::RuntimeCommand));
+        assert!(matches!(decide("/editor fs true", false), Dispatch::RuntimeCommand));
+        assert!(matches!(decide("/context", false), Dispatch::Context));
+        assert!(matches!(decide("/compact", true), Dispatch::Compaction));
+        assert!(matches!(decide("/compact", false), Dispatch::Model));
+        assert!(matches!(decide("hello", false), Dispatch::Model));
+    }
+
+    #[test]
+    fn command_lookalikes_are_not_intercepted() {
+        assert!(matches!(decide("/contextx", false), Dispatch::Model));
+        assert!(matches!(decide("/mcpx", false), Dispatch::Model));
+        assert!(matches!(decide("look at /fork", false), Dispatch::Model));
+    }
+}

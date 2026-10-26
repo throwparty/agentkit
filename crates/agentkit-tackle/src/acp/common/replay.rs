@@ -70,3 +70,68 @@ pub(crate) fn walk(assembled: &[AssembledMessage]) -> Vec<ReplayEvent> {
     }
     events
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::{AssembledMessage, Message, Role, TurnKind};
+
+    fn stored(role: Role, content: &str) -> AssembledMessage {
+        AssembledMessage {
+            message: Message {
+                id: uuid::Uuid::new_v4().to_string(),
+                turn_id: "turn-1".to_owned(),
+                role,
+                content: content.to_owned(),
+                tool_name: None,
+                tool_call_id: None,
+                is_error: None,
+                position: 0,
+                created_at: 0,
+            },
+            turn_kind: TurnKind::Interaction,
+        }
+    }
+
+    #[test]
+    fn messages_keep_their_order_and_identity() {
+        let mut user = stored(Role::User, r#"[{"type":"text","text":"hi"}]"#);
+        user.message.id = "user-1".to_owned();
+        let mut assistant = stored(Role::Assistant, r#"[{"type":"text","text":"ok"}]"#);
+        assistant.message.id = "assistant-1".to_owned();
+        let events = walk(&[user, assistant]);
+        assert_eq!(events.len(), 2);
+        assert!(matches!(&events[0], ReplayEvent::Message { id, is_user: true, .. } if id == "user-1"));
+        assert!(matches!(&events[1], ReplayEvent::Message { id, is_user: false, .. } if id == "assistant-1"));
+    }
+
+    #[test]
+    fn a_result_pairs_with_its_call_and_orphans_are_dropped() {
+        let mut call = stored(Role::ToolCall, r#"{"path":"a"}"#);
+        call.message.id = "call-1".to_owned();
+        call.message.tool_name = Some("fs.read".to_owned());
+        let mut result = stored(Role::ToolResult, r#"[{"type":"text","text":"out"}]"#);
+        result.message.tool_call_id = Some("call-1".to_owned());
+        let orphan = {
+            let mut orphan = stored(Role::ToolResult, "[]");
+            orphan.message.tool_call_id = Some("missing".to_owned());
+            orphan
+        };
+        let events = walk(&[call, result, orphan]);
+        assert_eq!(events.len(), 2);
+        assert!(matches!(&events[0], ReplayEvent::ToolCall { id, .. } if id == "call-1"));
+        assert!(matches!(&events[1], ReplayEvent::ToolResult { call_id, .. } if call_id == "call-1"));
+    }
+
+    #[test]
+    fn a_duplicate_result_is_dropped() {
+        let mut call = stored(Role::ToolCall, "{}");
+        call.message.id = "call-1".to_owned();
+        let mut first = stored(Role::ToolResult, "[]");
+        first.message.tool_call_id = Some("call-1".to_owned());
+        let mut second = stored(Role::ToolResult, "[]");
+        second.message.tool_call_id = Some("call-1".to_owned());
+        let events = walk(&[call, first, second]);
+        assert_eq!(events.len(), 2);
+    }
+}
