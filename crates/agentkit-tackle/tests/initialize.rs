@@ -714,3 +714,26 @@ async fn forwarded_failures_are_reported_at_the_first_turn() {
         .await
         .unwrap();
 }
+
+/// An unsupported protocol version is answered with a supported one, never
+/// echoed verbatim: the router negotiates down to v1.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unsupported_protocol_version_is_negotiated_down() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = spawn_agent(dir.path());
+
+    Client
+        .builder()
+        .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
+            let unsupported: ProtocolVersion = serde_json::from_str("65535").unwrap();
+            let response = connection
+                .send_request(InitializeRequest::new(unsupported))
+                .block_task()
+                .await?;
+            assert_ne!(response.protocol_version.as_u16(), 65535);
+            assert_eq!(response.protocol_version, ProtocolVersion::V1);
+            Ok(())
+        })
+        .await
+        .expect("unsupported version negotiation");
+}
