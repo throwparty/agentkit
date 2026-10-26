@@ -59,6 +59,7 @@ pub(super) async fn connect_forwarded_servers(
         return;
     }
     crate::mcp::connect_forwarded(negotiation.mcp_pool(), forwarded).await;
+    negotiation.invalidate_commands().await;
 }
 
 #[cfg(test)]

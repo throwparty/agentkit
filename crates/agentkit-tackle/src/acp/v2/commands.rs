@@ -15,6 +15,9 @@ pub(super) async fn available_commands(
     state: &TackleState,
     negotiation: &ConnectionNegotiation,
 ) -> Vec<AvailableCommand> {
+    if let Some(cached) = negotiation.cached_commands().await {
+        return cached;
+    }
     let pool = negotiation.mcp_pool();
     let pool = pool.lock().await;
     let mcp_tools = pool.list_tools().await;
@@ -31,7 +34,7 @@ pub(super) async fn available_commands(
             crate::invokables::Registry::default()
         }
     };
-    registry
+    let commands: Vec<AvailableCommand> = registry
         .available_commands()
         .into_iter()
         // `/editor` toggles the v1 client-tool surface; v2 has none.
@@ -54,7 +57,9 @@ pub(super) async fn available_commands(
             }
             out
         })
-        .collect()
+        .collect();
+    negotiation.cache_commands(commands.clone()).await;
+    commands
 }
 
 /// One `/mcp status` line.
@@ -83,7 +88,7 @@ pub(super) async fn mcp_command(
 
     let pool = negotiation.mcp_pool();
     let mut pool = pool.lock().await;
-    match subcommand {
+    let result = match subcommand {
         "enable" => Some(match argument {
             None => "Usage: /mcp enable <server-name>".to_owned(),
             Some(name) => match pool.enable_server(name).await {
@@ -118,7 +123,12 @@ pub(super) async fn mcp_command(
             },
         }),
         _ => None,
+    };
+    drop(pool);
+    if matches!(subcommand, "enable" | "disable") && result.is_some() {
+        negotiation.invalidate_commands().await;
     }
+    result
 }
 
 /// The first-turn MCP status: shadowed or failed servers, or the absence of

@@ -6,6 +6,7 @@ use crate::acp::common::cancellation::{CancelRegistration, CancellationRegistry}
 use crate::invokables::client_tools::TerminalTracker;
 use crate::mcp::McpPool;
 use crate::store::SessionId;
+use agent_client_protocol::schema::v2::AvailableCommand;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
@@ -13,6 +14,8 @@ use tokio_util::sync::CancellationToken;
 pub struct ConnectionNegotiation {
     cancellations: Arc<CancellationRegistry>,
     mcp_pool: Arc<tokio::sync::Mutex<McpPool>>,
+    /// The rendered command list, cached until the pool changes.
+    commands: tokio::sync::Mutex<Option<Vec<AvailableCommand>>>,
 }
 
 impl ConnectionNegotiation {
@@ -27,12 +30,29 @@ impl ConnectionNegotiation {
         Self {
             cancellations: Arc::new(CancellationRegistry::new()),
             mcp_pool,
+            commands: tokio::sync::Mutex::new(None),
         }
     }
 
     /// The connection's MCP pool handle.
     pub fn mcp_pool(&self) -> Arc<tokio::sync::Mutex<McpPool>> {
         Arc::clone(&self.mcp_pool)
+    }
+
+    /// The cached command advertisement, if the pool has not changed since
+    /// it was rendered.
+    pub(super) async fn cached_commands(&self) -> Option<Vec<AvailableCommand>> {
+        self.commands.lock().await.clone()
+    }
+
+    /// Caches a rendered command advertisement for this connection.
+    pub(super) async fn cache_commands(&self, commands: Vec<AvailableCommand>) {
+        *self.commands.lock().await = Some(commands);
+    }
+
+    /// Drops the cached advertisement after a pool mutation.
+    pub(super) async fn invalidate_commands(&self) {
+        *self.commands.lock().await = None;
     }
 
     /// Registers a fresh cancellation token for a turn in flight on
