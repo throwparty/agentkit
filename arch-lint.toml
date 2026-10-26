@@ -21,10 +21,7 @@ paths = ["crates/agentkit-tackle/src/acp/v2/**"]
 
 [[scopes]]
 name = "acp-transport"
-paths = [
-  "crates/agentkit-tackle/src/acp/transport.rs",
-  "crates/agentkit-tackle/src/acp/http.rs",
-]
+paths = ["crates/agentkit-tackle/src/acp/transport/**"]
 
 [[deny-scope-dep]]
 from = "acp-v1"

@@ -7,12 +7,11 @@
 //! negotiates.
 
 pub mod common;
-pub mod http;
 pub mod router;
 pub mod transport;
 pub mod v1;
 pub mod v2;
 
-pub use transport::run_stdio;
+pub use transport::{run_http, run_stdio};
 pub(crate) use router::run_acp_over;
 pub use v1::{PendingProject, TackleState};

@@ -4,8 +4,8 @@
 //! transport is version-agnostic: it hands the connection to the negotiated
 //! implementation and carries whichever version results.
 
-use super::common::connection::ConnectionSetup;
-use super::run_acp_over;
+use crate::acp::common::connection::ConnectionSetup;
+use crate::acp::run_acp_over;
 use crate::state::TackleState;
 use agent_client_protocol::Lines;
 use futures::io::{AsyncBufReadExt as _, AsyncWriteExt as _};

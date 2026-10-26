@@ -11,7 +11,7 @@ mod.rs          module doc + re-exports (no logic)
 server.rs       the per-connection handler builder: one thin closure
                 per ACP method, delegating to the handler modules below.
                 The version-neutral stdio and HTTP transports live in
-                acp::transport and acp::http
+                acp::transport
 initialize.rs   the initialize and authenticate handlers
 sessions.rs     the session-lifecycle handlers (new, list, close,
                 delete, load, resume, set_config_option, fork)
