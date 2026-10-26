@@ -51,6 +51,9 @@ jobs:
       - name: Lint
         if: "!cancelled()"
         run: cargo clippy --locked --all-targets --all-features
+      - name: Check architecture boundary
+        if: "!cancelled()"
+        run: arch-lint check
       - name: Check
         if: "!cancelled()"
         run: cargo check --locked
