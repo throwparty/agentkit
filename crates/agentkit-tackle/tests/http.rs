@@ -316,3 +316,25 @@ fn non_loopback_bind_without_token_is_refused() {
         "the refusal names the required token flag: {stderr}"
     );
 }
+
+#[test]
+fn unknown_connection_id_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = spawn_http_agent(dir.path(), "a");
+    wait_for_port(&agent);
+
+    let response = reqwest::blocking::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/rpc?connection=stale",
+            agent.port
+        ))
+        .header("content-type", "application/json")
+        .body(initialize().to_string())
+        .send()
+        .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    assert!(
+        response.headers().get("x-acp-connection").is_none(),
+        "a stale id must not mint a new connection"
+    );
+}
