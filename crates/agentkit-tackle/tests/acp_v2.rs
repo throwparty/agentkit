@@ -942,6 +942,30 @@ async fn v2_runtime_commands_answer_without_the_model() {
                 "the mcp turn ends with idle"
             );
 
+            // An unknown /mcp subcommand is an explicit usage reply, never
+            // a fallthrough to a model turn.
+            seen.lock().unwrap().clear();
+            connection
+                .send_request(v2::PromptRequest::new(
+                    created.session_id.clone(),
+                    vec![v2::ContentBlock::Text(v2::TextContent::new("/mcp bogus"))],
+                ))
+                .block_task()
+                .await?;
+            assert!(
+                wait_for_agent_text(&seen, "Usage: /mcp <enable|disable|status>").await,
+                "the unknown subcommand answers with usage: {:?}",
+                seen.lock().unwrap()
+            );
+            assert!(
+                !seen
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|entry| matches!(entry, Seen::AgentText(text) if text == "ok")),
+                "an unknown /mcp subcommand never reaches the model"
+            );
+
             connection
                 .send_request(v2::PromptRequest::new(
                     created.session_id,

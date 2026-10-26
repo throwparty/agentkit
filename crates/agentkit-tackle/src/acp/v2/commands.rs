@@ -122,7 +122,7 @@ pub(super) async fn mcp_command(
                 None => format!("MCP server not found: {name}"),
             },
         }),
-        _ => None,
+        _ => Some("Usage: /mcp <enable|disable|status> [server-name]".to_owned()),
     };
     drop(pool);
     if matches!(subcommand, "enable" | "disable") && result.is_some() {
