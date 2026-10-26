@@ -453,6 +453,27 @@ impl ClientToolExecutor for NoClientTools {
     }
 }
 
+/// A whole-message upsert's content patch: omit it, clear it, or replace it.
+#[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)] // the patch surface supports omit/clear; the live path replaces
+pub(super) enum MessagePatch {
+    Omit,
+    Clear,
+    Replace(Vec<ContentBlock>),
+}
+
+/// Builds a v2 `agent_message` upsert with the requested patch semantics.
+fn message_upsert(message_id: MessageId, patch: MessagePatch) -> AgentMessage {
+    let message = AgentMessage::new(message_id);
+    match patch {
+        MessagePatch::Omit => message,
+        MessagePatch::Clear => {
+            message.content(agent_client_protocol::schema::MaybeUndefined::<Vec<ContentBlock>>::Null)
+        }
+        MessagePatch::Replace(blocks) => message.content(blocks),
+    }
+}
+
 /// Announces one whole agent message (the v2 upsert shape) under its id.
 fn announce_agent_message(
     cx: &V2ConnectionTo<Client>,
@@ -462,7 +483,7 @@ fn announce_agent_message(
 ) {
     let _ = cx.send_notification(UpdateSessionNotification::new(
         wire_session.clone(),
-        SessionUpdate::AgentMessage(AgentMessage::new(message_id).content(blocks)),
+        SessionUpdate::AgentMessage(message_upsert(message_id, MessagePatch::Replace(blocks))),
     ));
 }
 
@@ -649,4 +670,47 @@ async fn run_compaction(
         SessionUpdate::CompactionUpdate(update),
     ));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn update(patch: MessagePatch) -> serde_json::Value {
+        let notification = UpdateSessionNotification::new(
+            agent_client_protocol::schema::v2::SessionId::new("s"),
+            SessionUpdate::AgentMessage(message_upsert(MessageId::new("m"), patch)),
+        );
+        serde_json::to_value(notification).expect("serialises")
+    }
+
+    #[test]
+    fn an_omitted_content_patch_leaves_the_field_out() {
+        let update = update(MessagePatch::Omit);
+        assert!(
+            update["update"].get("content").is_none(),
+            "omit leaves content undefined: {update}"
+        );
+    }
+
+    #[test]
+    fn a_null_content_patch_clears_the_field() {
+        let update = update(MessagePatch::Clear);
+        assert!(
+            update["update"]["content"].is_null(),
+            "null clears content: {update}"
+        );
+    }
+
+    #[test]
+    fn a_replace_content_patch_carries_the_blocks() {
+        let update = update(MessagePatch::Replace(vec![ContentBlock::Text(
+            TextContent::new("replacement"),
+        )]));
+        assert_eq!(
+            update["update"]["content"][0]["text"],
+            "replacement",
+            "replace carries the new blocks: {update}"
+        );
+    }
 }
