@@ -83,8 +83,15 @@ fn titling_sources(state: &TackleState) -> Vec<(String, String)> {
         .collect()
 }
 
+/// Concurrent detached titling runs: each pins a blocking thread for a
+/// whole model round-trip, so a burst of finished turns must not spawn an
+/// unbounded number of them.
+static TITLING_PERMITS: std::sync::LazyLock<tokio::sync::Semaphore> =
+    std::sync::LazyLock::new(|| tokio::sync::Semaphore::new(4));
+
 /// Detached titling at turn end: only untitled sessions, failures
-/// silent, never blocking the response.
+/// silent, never blocking the response. The synchronous script/model call
+/// runs on the blocking pool behind a semaphore.
 pub fn fire_title_trigger_detached(
     state: Arc<TackleState>,
     session_id: SessionId,
@@ -104,9 +111,17 @@ pub fn fire_title_trigger_detached(
         if title.is_some_and(|title| !title.is_empty()) {
             return;
         }
+        let Ok(_permit) = TITLING_PERMITS.acquire().await else {
+            return;
+        };
         let title_notices = Arc::clone(&notices);
         let access = script_loop::access(&state, window_size, notices);
-        fire_title_trigger(&state, access, &session_id);
+        let fire_state = Arc::clone(&state);
+        let fire_session = session_id.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            fire_title_trigger(&fire_state, access, &fire_session);
+        })
+        .await;
         // The script writes the title to the store; surface it to the client.
         if let Ok(Some(session)) = state.db.get_session(&session_id).await {
             if !session.title.is_empty() {
