@@ -226,7 +226,11 @@ async fn handle_events(
             }
             None => futures::stream::empty().boxed(),
         };
-    Ok(Sse::new(stream))
+    Ok(Sse::new(stream).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(std::time::Duration::from_secs(15))
+            .text("keep-alive"),
+    ))
 }
 
 #[derive(Clone)]
