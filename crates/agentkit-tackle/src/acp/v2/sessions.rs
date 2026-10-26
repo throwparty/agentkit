@@ -16,7 +16,8 @@ use agent_client_protocol::schema::v2::{
     AbsolutePath, AvailableCommandsUpdate, CloseSessionRequest, CloseSessionResponse,
     ContentBlock, DeleteSessionRequest, DeleteSessionResponse, ForkSessionRequest,
     ForkSessionResponse, IdleStateUpdate, ListSessionsRequest, ListSessionsResponse, MessageId,
-    NewSessionRequest, NewSessionResponse, ReplayFrom, ResumeSessionRequest, ResumeSessionResponse,
+    NewSessionRequest, NewSessionResponse, Notice, NoticeSeverity, ReplayFrom, ResumeSessionRequest,
+    ResumeSessionResponse,
     SessionConfigId, SessionConfigOption, SessionConfigOptionCategory, SessionConfigOptionValue,
     SessionConfigSelectOption, SessionConfigValueId, SessionInfo, SessionUpdate,
     SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, StateUpdate,
@@ -196,6 +197,12 @@ pub(super) async fn handle_new_session(
         SessionUpdate::AvailableCommandsUpdate(AvailableCommandsUpdate::new(commands)),
     ))
     .map_err(|err| Error::internal_error().data(err.to_string()))?;
+    if let Some(text) = super::commands::mcp_status_notice(&negotiation).await {
+        let _ = cx.send_notification(UpdateSessionNotification::new(
+            wire_session_id(&session.id),
+            SessionUpdate::Notice(Notice::new(NoticeSeverity::Warning, text)),
+        ));
+    }
     Ok(())
 }
 

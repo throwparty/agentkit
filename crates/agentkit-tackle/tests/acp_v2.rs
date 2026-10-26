@@ -1122,3 +1122,63 @@ async fn v2_fork_is_seeded_and_replays_on_resume() {
         .await
         .expect("v2 fork seed");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn v2_reports_the_absence_of_mcp_tooling() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ScriptedModel)
+        .mount(&server)
+        .await;
+    let agent = spawn_agent(dir.path(), &model_config(&server.uri()));
+    let notices: Arc<Mutex<Vec<String>>> = Arc::default();
+    let handler = Arc::clone(&notices);
+
+    Client
+        .v2()
+        .on_receive_notification(
+            async move |notification: v2::UpdateSessionNotification, _cx| {
+                if let v2::SessionUpdate::Notice(notice) = &notification.update {
+                    handler.lock().unwrap().push(notice.title.clone());
+                }
+                Ok(())
+            },
+            on_receive_notification!(),
+        )
+        .connect_with(agent, |connection: V2ConnectionTo<Agent>| async move {
+            connection
+                .send_request(v2::InitializeRequest::new(
+                    ProtocolVersion::V2,
+                    v2::Implementation::new("test-client", "1.0.0"),
+                ))
+                .block_task()
+                .await?;
+            connection
+                .send_request(v2::NewSessionRequest::new(std::env::current_dir().unwrap()))
+                .block_task()
+                .await?;
+
+            let mut reported = false;
+            for _ in 0..200 {
+                if notices
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|text| text.contains("No MCP servers configured"))
+                {
+                    reported = true;
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            assert!(
+                reported,
+                "the missing tooling is reported: {:?}",
+                notices.lock().unwrap()
+            );
+            Ok(())
+        })
+        .await
+        .expect("v2 absence notice");
+}
