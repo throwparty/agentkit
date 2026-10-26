@@ -38,6 +38,11 @@ pub enum Commands {
         #[arg(long, default_value_t = 3811)]
         http_port: u16,
 
+        /// Bearer token required on `/rpc` and `/events`. Required when
+        /// binding a non-loopback interface.
+        #[arg(long)]
+        http_token: Option<String>,
+
         /// Override the session database location (defaults to the platform
         /// data directory).
         #[arg(long)]

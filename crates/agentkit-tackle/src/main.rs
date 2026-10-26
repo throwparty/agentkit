@@ -35,19 +35,21 @@ fn main() -> ExitCode {
 }
 
 async fn run(args: cli::Cli) -> ExitCode {
-    let (bind, http_port, db_override, config_override) = match &args.command {
+    let (bind, http_port, http_token, db_override, config_override) = match &args.command {
         cli::Commands::Stdio {
             db_path,
             config_dir,
-        } => (None, None, db_path.as_ref(), config_dir.as_ref()),
+        } => (None, None, None, db_path.as_ref(), config_dir.as_ref()),
         cli::Commands::Http {
             bind,
             http_port,
+            http_token,
             db_path,
             config_dir,
         } => (
             Some(bind.as_str()),
             Some(*http_port),
+            http_token.as_deref(),
             db_path.as_ref(),
             config_dir.as_ref(),
         ),
@@ -131,7 +133,14 @@ async fn run(args: cli::Cli) -> ExitCode {
             Err(err) => fail(err),
         },
         Some(bind) => {
-            match acp::http::run_http(state.clone(), bind, http_port.unwrap_or(3811)).await {
+            match acp::http::run_http(
+                state.clone(),
+                bind,
+                http_port.unwrap_or(3811),
+                http_token.map(str::to_owned),
+            )
+            .await
+            {
                 Ok(()) => {
                     tracing::info!("shutdown complete");
                     ExitCode::SUCCESS
