@@ -41,6 +41,13 @@ pub(super) async fn handle_prompt(
     let session_id = super::store_session_id(&request.session_id);
     let blocks_json =
         serde_json::to_string(&request.prompt).unwrap_or_else(|_| "[]".to_owned());
+    let request_cancellation = responder.cancellation();
+    if matches!(
+        futures::poll!(Box::pin(request_cancellation.cancelled())),
+        std::task::Poll::Ready(())
+    ) {
+        return responder.respond_with_error(Error::request_cancelled());
+    }
 
     match begin_prompt_turn(
         &state,
@@ -65,6 +72,12 @@ pub(super) async fn handle_prompt(
                 let deadline =
                     tokio::time::Instant::now() + std::time::Duration::from_secs(60);
                 loop {
+                    if matches!(
+                        futures::poll!(Box::pin(request_cancellation.cancelled())),
+                        std::task::Poll::Ready(())
+                    ) {
+                        return responder.respond_with_error(Error::request_cancelled());
+                    }
                     match begin_prompt_turn(
                         &state,
                         session_id.clone(),
