@@ -102,6 +102,32 @@ pub(super) async fn handle_new_session(
         .await
         .map_err(|err| Error::internal_error().data(err.to_string()))?;
 
+    // The project layer awaits trust: resolve consent on this connection (the
+    // first session does) before the seed and selectors read the effective
+    // configuration. Consent goes back to the client, so the resolution runs
+    // off the dispatch task; awaiting it here would deadlock on the
+    // connection's own response routing.
+    {
+        let state = Arc::clone(&state);
+        let cx = cx.clone();
+        let pool = negotiation.mcp_pool();
+        let trust_session = wire_session_id(&session.id);
+        let session_arg = trust_session.to_string();
+        let resolved = tokio::spawn(async move {
+            let requester = super::permission::AcpPermissionRequester {
+                cx,
+                session_id: trust_session,
+            };
+            state
+                .resolve_pending_project(Some(pool), &requester, &session_arg)
+                .await;
+        })
+        .await;
+        if let Err(err) = resolved {
+            tracing::error!("project trust resolution failed: {err}");
+        }
+    }
+
     let seed = first_run::first_run_seed(&state);
     let seed_turn = state
         .db
