@@ -47,6 +47,7 @@ jobs:
               - 'crates/**'
               - 'deny.toml'
               - '.goreleaser.yaml'
+              - 'arch-lint.toml'
             docs:
               - 'docs/**'
             nix:
@@ -58,6 +59,7 @@ jobs:
               - 'nix/flake.nix'
               - 'nix/flake.lock'
               - 'justfile'
+              - 'arch-lint.toml'
               - '.github/workflows/tackle.conformance.yaml'
             workflows:
               - '.github/workflows/**'
@@ -144,7 +146,7 @@ jobs:
 
   ready:
     name: Ready
-    needs: [test, docs, lint-workflows, lint-nix, release-snapshot]
+    needs: [test, docs, lint-workflows, lint-nix, release-snapshot, conformance]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     steps:
