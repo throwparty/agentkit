@@ -64,6 +64,9 @@ pub(super) fn forwarded_mcp_server(
                 env: stdio
                     .env
                     .iter()
+                    // A client-supplied env must never resolve a stored
+                    // credential marker; only user/project config may.
+                    .filter(|variable| !variable.value.contains("{cred:"))
                     .map(|variable| (variable.name.clone(), variable.value.clone()))
                     .collect(),
             },

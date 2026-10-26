@@ -18,6 +18,9 @@ fn forwarded_mcp_server(server: &McpServer) -> Option<(String, McpServerConfig)>
                 env: stdio
                     .env
                     .iter()
+                    // A client-supplied env must never resolve a stored
+                    // credential marker; only user/project config may.
+                    .filter(|variable| !variable.value.contains("{cred:"))
                     .map(|variable| (variable.name.clone(), variable.value.clone()))
                     .collect(),
             },
@@ -47,4 +50,26 @@ pub(super) async fn connect_forwarded_servers(
         .await
         .add_forwarded(forwarded)
         .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agent_client_protocol::schema::v2::{EnvVariable, McpServerStdio};
+
+    #[test]
+    fn forwarded_credential_markers_are_dropped() {
+        let server = McpServer::Stdio(
+            McpServerStdio::new("x", std::path::PathBuf::from("/bin/true")).env(vec![
+                EnvVariable::new("A", "{cred:secret}"),
+                EnvVariable::new("B", "plain"),
+            ]),
+        );
+        let (_, config) = forwarded_mcp_server(&server).expect("stdio server");
+        let McpServerConfig::Stdio { env, .. } = config else {
+            panic!("expected a stdio server");
+        };
+        assert!(!env.contains_key("A"));
+        assert_eq!(env.get("B"), Some(&"plain".to_owned()));
+    }
 }
