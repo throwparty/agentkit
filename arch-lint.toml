@@ -2,7 +2,8 @@
 #
 # `acp::common` is the shared, protocol-neutral layer. `acp::v1` and `acp::v2`
 # are sibling wire surfaces: each may depend on `acp::common`, and neither may
-# depend on the other. See adrs/2026-10-23-tackle-acp-v2.
+# depend on the other. The transports are version-neutral and may depend only
+# on `acp::common`. See adrs/2026-10-23-tackle-acp-v2.
 
 preset = "minimal"
 
@@ -18,6 +19,13 @@ paths = ["crates/agentkit-tackle/src/acp/v1/**"]
 name = "acp-v2"
 paths = ["crates/agentkit-tackle/src/acp/v2/**"]
 
+[[scopes]]
+name = "acp-transport"
+paths = [
+  "crates/agentkit-tackle/src/acp/transport.rs",
+  "crates/agentkit-tackle/src/acp/http.rs",
+]
+
 [[deny-scope-dep]]
 from = "acp-v1"
 to = ["acp-v2"]
@@ -27,6 +35,11 @@ message = "acp::v1 must not depend on acp::v2; share through acp::common."
 from = "acp-v2"
 to = ["acp-v1"]
 message = "acp::v2 must not depend on acp::v1; share through acp::common."
+
+[[deny-scope-dep]]
+from = "acp-transport"
+to = ["acp-v1", "acp-v2"]
+message = "The transport must not depend on a protocol version; reach shared state through acp::common."
 
 # This gate enforces the ACP module boundary only; the built-in style rules are
 # not adopted here.

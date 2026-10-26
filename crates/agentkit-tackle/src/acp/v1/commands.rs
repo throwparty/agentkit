@@ -2,7 +2,7 @@
 
 use super::client_tools;
 use super::negotiation::ConnectionNegotiation;
-use crate::mcp::{McpPool, ServerStatus};
+use crate::mcp::ServerStatus;
 use crate::state::TackleState;
 use agent_client_protocol::schema::v1::{
     AvailableCommandsUpdate, Notice, NoticeSeverity, SessionUpdate,
@@ -98,38 +98,6 @@ pub(super) async fn connect_forwarded_servers(
         .await
         .add_forwarded(forwarded)
         .await;
-}
-
-/// Builds a connection's MCP pool: every configured server is registered
-/// and connected concurrently, so a dead server is a status rather than a
-/// startup failure.
-pub(crate) async fn connect_config_servers(state: &TackleState) -> McpPool {
-    let helper = crate::credentials::credential_helper_name(&state.config().config);
-    let new_pool = || McpPool::new().with_credential_helper(helper.clone());
-    let mut pool = new_pool();
-    for (server_name, server_config) in &state.config().config.mcp_servers {
-        pool.register(server_name, server_config.clone());
-    }
-    let connecting = state
-        .config()
-        .config
-        .mcp_servers
-        .iter()
-        .map(|(server_name, server_config)| {
-            let server_name = server_name.clone();
-            let server_config = server_config.clone();
-            let mut one = new_pool();
-            one.register(&server_name, server_config.clone());
-            async move {
-                one.connect(&server_name, &server_config).await;
-                one
-            }
-        })
-        .collect::<Vec<_>>();
-    for connected in futures::future::join_all(connecting).await {
-        pool.absorb(connected);
-    }
-    pool
 }
 
 /// The first-turn MCP report: a warning notice naming enabled
