@@ -16,14 +16,14 @@ pub use transport::run_stdio;
 pub use v1::{PendingProject, TackleState};
 
 use agent_client_protocol::ConnectTo as _;
+use common::connection::ConnectionSetup;
 use std::sync::Arc;
 
 /// Runs one connection through the version router: the initial `initialize`
 /// selects the protocol implementation, and the connection is forwarded to it.
-/// Only v1 is registered today; v2 is added once implemented.
-pub async fn run_acp_over<T>(
+pub(crate) async fn run_acp_over<T>(
     state: Arc<TackleState>,
-    negotiation: Arc<v1::ConnectionNegotiation>,
+    setup: ConnectionSetup,
     transport: T,
 ) -> agent_client_protocol::Result<()>
 where
@@ -32,6 +32,13 @@ where
     // The connection's lease-owner id: turns acquire it for their lifetime;
     // released when the turn responds.
     let owner = Arc::new(format!("conn-{}", uuid::Uuid::new_v4()));
+    let negotiation = Arc::new(v1::ConnectionNegotiation::new(
+        v1::client_tools::EditorToggles {
+            fs: setup.editor_fs,
+            terminal: setup.editor_terminal,
+        },
+        setup.pool,
+    ));
     let v2_negotiation = Arc::new(v2::negotiation::ConnectionNegotiation::with_pool(
         negotiation.mcp_pool(),
     ));

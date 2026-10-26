@@ -4,8 +4,9 @@
 //! transport is version-agnostic: it hands the connection to the negotiated
 //! implementation and carries whichever version results.
 
+use super::common::connection::ConnectionSetup;
 use super::run_acp_over;
-use crate::acp::v1::{client_tools, connect_config_servers, ConnectionNegotiation, TackleState};
+use crate::state::TackleState;
 use agent_client_protocol::Lines;
 use futures::io::{AsyncBufReadExt as _, AsyncWriteExt as _};
 use futures::StreamExt as _;
@@ -19,9 +20,7 @@ use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt 
 /// `initialize` must be answered with `-32602`, and the router's rejection path
 /// only flushes when stdin reaches EOF, which a live client never does.
 pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result<()> {
-    let editor = client_tools::EditorToggles::from_config(&state.config().config);
-    let pool = connect_config_servers(&state).await;
-    let negotiation = Arc::new(ConnectionNegotiation::new(editor, pool));
+    let setup = ConnectionSetup::load(&state).await;
 
     let mut reader = futures::io::BufReader::new(tokio::io::stdin().compat());
     let stdout = tokio::io::stdout().compat_write();
@@ -56,7 +55,7 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
     )) as std::pin::Pin<Box<dyn futures::Sink<String, Error = std::io::Error> + Send>>;
 
     tokio::select! {
-        result = run_acp_over(state, negotiation, Lines::new(outgoing, incoming)) => result,
+        result = run_acp_over(state, setup, Lines::new(outgoing, incoming)) => result,
         _ = crate::cli::wait_for_shutdown() => Ok(()),
     }
 }

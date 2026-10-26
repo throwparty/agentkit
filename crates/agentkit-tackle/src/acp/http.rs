@@ -10,8 +10,9 @@
 //! `x-acp-connection` header; subsequent POSTs pass
 //! `?connection=<id>`.
 
+use crate::acp::common::connection::ConnectionSetup;
 use crate::acp::run_acp_over;
-use crate::acp::v1::{ConnectionNegotiation, TackleState};
+use crate::state::TackleState;
 use axum::extract::{Query, State as AxumState};
 use axum::http::HeaderMap;
 use axum::response::sse::{Event as SseEvent, Sse};
@@ -101,14 +102,8 @@ fn spawn_connection(server: &HttpServerState, id: String) -> Arc<Connection> {
         // The connection's own MCP pool: config servers plus anything the
         // client forwards, so toggles and forwarded servers stay scoped
         // to this connection.
-        let pool = crate::acp::v1::connect_config_servers(&state_for_connection).await;
-        let negotiation = Arc::new(ConnectionNegotiation::new(
-            crate::acp::v1::client_tools::EditorToggles::from_config(
-                &state_for_connection.config().config,
-            ),
-            pool,
-        ));
-        let _ = run_acp_over(state_for_connection, negotiation, transport).await;
+        let setup = ConnectionSetup::load(&state_for_connection).await;
+        let _ = run_acp_over(state_for_connection, setup, transport).await;
     });
 
     // Hold the incoming sender open in the registry: dropped senders

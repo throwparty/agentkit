@@ -33,7 +33,6 @@ mod tests;
 
 pub use crate::state::{PendingProject, TackleState};
 pub use capabilities::UnstableFeature;
-pub(crate) use commands::connect_config_servers;
 pub(crate) use config_options::{wire_notice, wire_option, wire_options};
 pub use negotiation::ConnectionNegotiation;
 pub(crate) use server::agent;
