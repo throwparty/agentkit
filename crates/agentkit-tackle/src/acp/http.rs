@@ -27,6 +27,11 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 /// connection's agent task ends with it.
 const CONNECTION_IDLE: std::time::Duration = std::time::Duration::from_secs(300);
 
+/// Concurrent connections per process. Each one owns an agent task and an
+/// MCP pool, so an unbounded open path would exhaust descriptors and child
+/// processes before the idle reaper runs.
+const MAX_CONNECTIONS: usize = 64;
+
 struct Connection {
     /// Client → agent lines (POST bodies).
     incoming: mpsc::Sender<String>,
@@ -174,18 +179,32 @@ async fn handle_rpc(
         .map(str::to_owned)
         .or_else(|| params.get("connection").cloned());
 
-    let (connection, new_id) =
-        match existing.and_then(|id| server.connections.lock().unwrap().get(&id).cloned()) {
-            Some(connection) => {
-                connection.touch();
-                (connection, None)
+    let (connection, new_id) = match existing {
+        Some(id) => {
+            let connection = server.connections.lock().unwrap().get(&id).cloned();
+            match connection {
+                Some(connection) => {
+                    connection.touch();
+                    (connection, None)
+                }
+                None => {
+                    return error_response(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        "unknown connection id",
+                    );
+                }
             }
-            None => {
-                let id = uuid::Uuid::new_v4().to_string();
-                let connection = spawn_connection(&server, id.clone());
-                (connection, Some(id))
+        }
+        None => {
+            let at_cap = server.connections.lock().unwrap().len() >= MAX_CONNECTIONS;
+            if at_cap {
+                return too_many_connections();
             }
-        };
+            let id = uuid::Uuid::new_v4().to_string();
+            let connection = spawn_connection(&server, id.clone());
+            (connection, Some(id))
+        }
+    };
 
     let response = dispatch_and_await(&connection, &body).await;
     let mut builder = axum::http::Response::builder()
@@ -277,14 +296,25 @@ fn authorised(headers: &HeaderMap, token: &Option<Arc<str>>) -> bool {
         .is_some_and(|value| value == token.as_ref())
 }
 
-fn unauthorised() -> axum::response::Response {
+fn error_response(status: axum::http::StatusCode, error: &str) -> axum::response::Response {
     axum::http::Response::builder()
-        .status(axum::http::StatusCode::UNAUTHORIZED)
+        .status(status)
         .header(axum::http::header::CONTENT_TYPE, "application/json")
         .body(axum::body::Body::from(
-            serde_json::json!({ "error": "unauthorized" }).to_string(),
+            serde_json::json!({ "error": error }).to_string(),
         ))
         .unwrap_or_else(|_| axum::response::Response::new(axum::body::Body::empty()))
+}
+
+fn unauthorised() -> axum::response::Response {
+    error_response(axum::http::StatusCode::UNAUTHORIZED, "unauthorized")
+}
+
+fn too_many_connections() -> axum::response::Response {
+    error_response(
+        axum::http::StatusCode::TOO_MANY_REQUESTS,
+        "too many connections",
+    )
 }
 
 fn send_error_to_io(_error: futures::channel::mpsc::SendError) -> std::io::Error {
