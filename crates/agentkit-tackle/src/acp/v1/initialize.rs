@@ -76,7 +76,22 @@ impl ElicitationSink for AcpElicitationSink {
             };
             match cx.send_request(request).block_task().await {
                 Ok(response) => match response.action {
-                    ElicitationAction::Accept(_) => ElicitationResponse::Accept,
+                    ElicitationAction::Accept(accept) => ElicitationResponse::Accept {
+                        content: accept.content.map(|values| {
+                            serde_json::Value::Object(
+                                values
+                                    .into_iter()
+                                    .map(|(key, value)| {
+                                        (
+                                            key,
+                                            serde_json::to_value(value)
+                                                .unwrap_or(serde_json::Value::Null),
+                                        )
+                                    })
+                                    .collect(),
+                            )
+                        }),
+                    },
                     ElicitationAction::Decline => ElicitationResponse::Decline,
                     _ => ElicitationResponse::Cancel,
                 },
