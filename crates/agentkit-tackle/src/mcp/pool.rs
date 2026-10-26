@@ -331,6 +331,11 @@ impl<S: ElicitationSink> McpPool<S> {
                     .insert(name.to_owned(), ServerStatus::Connected);
             }
             Err(reason) => {
+                tracing::warn!(
+                    server = %name,
+                    reason = %reason,
+                    "MCP server failed to connect"
+                );
                 self.statuses
                     .insert(name.to_owned(), ServerStatus::Failed { reason });
             }

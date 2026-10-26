@@ -45,7 +45,16 @@ pub(super) async fn connect_forwarded_servers(
     negotiation: &ConnectionNegotiation,
     servers: &[McpServer],
 ) {
-    let forwarded: Vec<_> = servers.iter().filter_map(forwarded_mcp_server).collect();
+    let mut forwarded = Vec::new();
+    for server in servers {
+        match forwarded_mcp_server(server) {
+            Some(entry) => forwarded.push(entry),
+            None => tracing::warn!(
+                version = "v2",
+                "forwarded MCP server uses an unsupported transport; skipped"
+            ),
+        }
+    }
     if forwarded.is_empty() {
         return;
     }

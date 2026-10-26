@@ -105,6 +105,11 @@ pub(crate) fn agent(
                 let negotiation = negotiation.clone();
                 async move |notification: CancelSessionNotification, _connection: V2ConnectionTo<Client>| {
                     let store_session = super::store_session_id(&notification.session_id);
+                    tracing::info!(
+                        version = "v2",
+                        session = %store_session,
+                        "cancelling the session's active turn"
+                    );
                     negotiation.cancel(&store_session);
                     Ok(())
                 }
