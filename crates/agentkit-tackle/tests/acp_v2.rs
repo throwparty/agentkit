@@ -211,9 +211,24 @@ async fn v2_session_lifecycle_and_prompt_drive_a_turn() {
                         .any(|entry| matches!(entry, Seen::User(id) if id == &message_id)),
                     "the inserted user message echoes the accepted id"
                 );
+                let running = seen
+                    .iter()
+                    .position(|entry| matches!(entry, Seen::Running))
+                    .expect("running is reported");
+                let idle = seen
+                    .iter()
+                    .position(|entry| matches!(entry, Seen::Idle(_)))
+                    .expect("the terminal idle is reported");
                 assert!(
-                    seen.iter().any(|entry| matches!(entry, Seen::Running)),
-                    "running is reported before the idle"
+                    running < idle,
+                    "running precedes the terminal idle: {seen:?}"
+                );
+                assert_eq!(
+                    seen.iter()
+                        .filter(|entry| matches!(entry, Seen::Idle(_)))
+                        .count(),
+                    1,
+                    "exactly one terminal idle: {seen:?}"
                 );
                 assert!(
                     seen.iter()
