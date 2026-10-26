@@ -1609,3 +1609,81 @@ async fn wait_for_idles(
     }
     seen.lock().unwrap().clone()
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn v2_initialize_advertises_capabilities_and_additional_directories() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ScriptedModel)
+        .mount(&server)
+        .await;
+    let agent = spawn_agent(dir.path(), &model_config(&server.uri()));
+
+    Client
+        .v2()
+        .connect_with(agent, |connection: V2ConnectionTo<Agent>| async move {
+            let init = connection
+                .send_request(v2::InitializeRequest::new(
+                    ProtocolVersion::V2,
+                    v2::Implementation::new("test-client", "1.0.0"),
+                ))
+                .block_task()
+                .await?;
+            let session = init
+                .capabilities
+                .session
+                .expect("the v2 session capability map");
+            assert!(
+                session
+                    .prompt
+                    .as_ref()
+                    .and_then(|prompt| prompt.image.as_ref())
+                    .is_some(),
+                "image prompts are advertised"
+            );
+            assert!(
+                session
+                    .prompt
+                    .as_ref()
+                    .and_then(|prompt| prompt.embedded_context.as_ref())
+                    .is_some(),
+                "embedded context is advertised"
+            );
+            let mcp = session.mcp.as_ref().expect("MCP capabilities");
+            assert!(mcp.stdio.is_some(), "stdio MCP");
+            assert!(mcp.http.is_some(), "HTTP MCP");
+            assert!(session.delete.is_some(), "session/delete");
+            assert!(
+                session.additional_directories.is_some(),
+                "additionalDirectories"
+            );
+            assert!(session.fork.is_some(), "session/fork");
+
+            let extra = std::path::PathBuf::from("/tmp/tackle-extra-root");
+            let created = connection
+                .send_request(
+                    v2::NewSessionRequest::new(std::env::current_dir().unwrap())
+                        .additional_directories(vec![extra.clone()]),
+                )
+                .block_task()
+                .await?;
+            let listed = connection
+                .send_request(v2::ListSessionsRequest::new())
+                .block_task()
+                .await?;
+            let info = listed
+                .sessions
+                .iter()
+                .find(|info| info.session_id == created.session_id)
+                .expect("the created session is listed");
+            assert_eq!(
+                info.additional_directories,
+                vec![v2::AbsolutePath::new(extra)],
+                "additional directories round-trip through session/list"
+            );
+            Ok(())
+        })
+        .await
+        .expect("v2 capabilities and additional directories");
+}
