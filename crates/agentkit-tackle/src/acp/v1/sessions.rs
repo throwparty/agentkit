@@ -10,8 +10,8 @@ use super::replay::replay_updates;
 use super::sink::usage_update;
 use super::support::{send_notices, Cx};
 use super::{wire_option, wire_options};
+use crate::acp::common::session as common_session;
 use crate::agent::fork::{self, fork_access};
-use crate::agent::seed as first_run;
 use crate::agent::{config_options, script_loop};
 use crate::content::timestamp;
 use crate::state::{store_session_id, wire_session_id, TackleState};
@@ -80,109 +80,45 @@ pub(super) async fn handle_new_session(
     request: NewSessionRequest,
     responder: Responder<NewSessionResponse>,
 ) -> Result<(), Error> {
-    // Default actor selection: [defaults].actor, else the built-in "default".
-    let actor = state
-        .config()
-        .config
-        .defaults
-        .actor
-        .clone()
-        .unwrap_or_else(|| "default".into());
-    let metadata = serde_json::json!({ "actor": actor }).to_string();
-    let session = state
-        .db
-        .create_session(
-            crate::store::SessionKind::Interactive,
-            &request.cwd.to_string_lossy(),
-            None,
-            None,
-            &metadata,
-        )
-        .await
-        .map_err(|err| Error::internal_error().data(err.to_string()))?;
     // MCP connections kick off asynchronously; session creation never blocks
     // on them. Client-forwarded servers (session/new's mcp_servers) register
     // and connect after the response, below.
-    //
+    let session = common_session::create_interactive(
+        &state,
+        &request.cwd.to_string_lossy(),
+        None,
+    )
+    .await
+    .map_err(|err| Error::internal_error().data(err))?;
     // The project layer awaits trust: resolve consent on this connection (the
     // first session does) before the seed and selectors read the effective
     // configuration.
-    {
-        // Consent goes back to the client, so the resolution must run off
-        // the dispatch task: awaiting the reply inside the handler would
-        // deadlock on the connection's own response routing.
-        let state = Arc::clone(&state);
-        let cx = cx.clone();
-        let pool = negotiation.mcp_pool();
-        let trust_session = wire_session_id(&session.id);
-        let session_arg = trust_session.to_string();
-        let resolved = tokio::spawn(async move {
-            let requester = AcpPermissionRequester {
-                cx,
-                session_id: trust_session,
-            };
-            state
-                .resolve_pending_project(Some(pool), &requester, &session_arg)
-                .await;
-        })
-        .await;
-        if let Err(err) = resolved {
-            tracing::error!("project trust resolution failed: {err}");
-        }
-    }
+    let requester = AcpPermissionRequester {
+        cx: cx.clone(),
+        session_id: wire_session_id(&session.id),
+    };
+    common_session::resolve_project_trust(
+        Arc::clone(&state),
+        negotiation.mcp_pool(),
+        requester,
+        wire_session_id(&session.id).to_string(),
+    )
+    .await;
     // The first-session seed: harness-authored static content documenting the
     // loaded configuration and the command syntaxes, on its own seed turn.
-    let seed = first_run::first_run_seed(&state);
-    let seed_turn = state
-        .db
-        .append_turn(
-            &session.id,
-            None,
-            crate::store::TurnKind::Seed,
-            None,
-            crate::store::TurnUsage::default(),
-        )
+    let seed_message = common_session::seed_first_turn(&state, &session)
         .await
-        .map_err(|err| Error::internal_error().data(err.to_string()))?;
-    let seed_message = state
-        .db
-        .append_message(
-            &seed_turn.id,
-            crate::store::Role::User,
-            &serde_json::json!([{ "type": "text", "text": seed }]).to_string(),
-            None,
-            None,
-            None,
-            None,
-        )
-        .await
-        .map_err(|err| Error::internal_error().data(err.to_string()))?;
+        .map_err(|err| Error::internal_error().data(err))?;
     // The selectors ride the response; degraded discovery surfaces as notices.
-    let mut selectors = config_options::build(&state, &session).await;
+    let selectors = common_session::build_selectors(&state, &session)
+        .await
+        .map_err(|err| Error::internal_error().data(err))?;
     send_notices(
         &cx,
         &negotiation,
         &wire_session_id(&session.id),
         &selectors.notices,
     );
-    // Seed the effective model into session metadata when unset: display and
-    // the first prompt agree without an explicit client switch.
-    if crate::store::session_model_free(&session).is_none() {
-        if let Some(model) =
-            config_options::resolve_model_for(&state, &session, selectors.first_model.as_deref())
-        {
-            state
-                .db
-                .set_model(&session.id, &model)
-                .await
-                .map_err(|err| Error::internal_error().data(err.to_string()))?;
-            // Refresh so the response's current matches the seeded metadata
-            // (the chain is pure; rebuild picks the same effective model).
-            if let Ok(Some(fresh)) = state.db.get_session(&session.id).await {
-                selectors = config_options::build(&state, &fresh).await;
-            }
-        }
-    }
     let wire_id = wire_session_id(&session.id);
     let response =
         NewSessionResponse::new(wire_id.clone()).config_options(wire_options(&selectors.options));

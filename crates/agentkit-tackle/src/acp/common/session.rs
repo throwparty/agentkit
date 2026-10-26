@@ -2,8 +2,11 @@
 //! modules. Nothing here depends on a protocol version's wire types: the user
 //! message arrives already serialised.
 
+use crate::agent::config_options::{self, Selectors};
+use crate::permissions::PermissionRequester;
 use crate::state::{LeaseHeartbeat, TackleState, LEASE_TTL_SECS};
-use crate::store::{Role, SessionId, Turn, TurnKind, TurnUsage};
+use crate::store::{Message, Role, Session, SessionId, SessionKind, Turn, TurnKind, TurnUsage};
+use std::sync::Arc;
 
 /// The persisted state of a begun prompt turn, plus the lease heartbeat that
 /// must outlive it.
@@ -95,4 +98,152 @@ pub(crate) async fn begin_prompt_turn(
         heartbeat,
         user_message_id: user_message.id,
     })
+}
+
+/// The session-creation metadata: the selected actor plus any
+/// version-specific keys (v2's `additionalDirectories`). Kept pure so the
+/// merge is testable without a store.
+pub(crate) fn session_metadata(
+    actor: Option<&str>,
+    extra: Option<serde_json::Value>,
+) -> String {
+    let mut metadata = serde_json::json!({
+        "actor": actor.unwrap_or("default"),
+    });
+    if let (Some(metadata), Some(extra)) = (
+        metadata.as_object_mut(),
+        extra.as_ref().and_then(serde_json::Value::as_object),
+    ) {
+        for (key, value) in extra {
+            metadata.insert(key.clone(), value.clone());
+        }
+    }
+    metadata.to_string()
+}
+
+/// Creates the interactive store session. Project trust, the first-run
+/// seed, and the selectors follow in [`resolve_project_trust`],
+/// [`seed_first_turn`], and [`build_selectors`].
+pub(crate) async fn create_interactive(
+    state: &TackleState,
+    cwd: &str,
+    extra_metadata: Option<serde_json::Value>,
+) -> Result<Session, String> {
+    let actor = state.config().config.defaults.actor.clone();
+    state
+        .db
+        .create_session(
+            SessionKind::Interactive,
+            cwd,
+            None,
+            None,
+            &session_metadata(actor.as_deref(), extra_metadata),
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Resolves pending project trust for a new session on the connection's
+/// MCP pool. Consent goes back to the client, so the resolution runs off
+/// the dispatch task; awaiting it here would deadlock on the connection's
+/// own response routing. The version supplies its own requester.
+pub(crate) async fn resolve_project_trust<R>(
+    state: Arc<TackleState>,
+    pool: Arc<tokio::sync::Mutex<crate::mcp::McpPool>>,
+    requester: R,
+    session_id: String,
+) where
+    R: PermissionRequester + 'static,
+{
+    let resolved = tokio::spawn(async move {
+        state
+            .resolve_pending_project(Some(pool), &requester, &session_id)
+            .await;
+    })
+    .await;
+    if let Err(err) = resolved {
+        tracing::error!("project trust resolution failed: {err}");
+    }
+}
+
+/// Appends the harness-authored first-run seed on its own seed turn and
+/// returns the stored message for the post-response announcement.
+pub(crate) async fn seed_first_turn(
+    state: &TackleState,
+    session: &Session,
+) -> Result<Message, String> {
+    let seed = crate::agent::seed::first_run_seed(state);
+    let seed_turn = state
+        .db
+        .append_turn(
+            &session.id,
+            None,
+            TurnKind::Seed,
+            None,
+            TurnUsage::default(),
+        )
+        .await
+        .map_err(|err| err.to_string())?;
+    state
+        .db
+        .append_message(
+            &seed_turn.id,
+            Role::User,
+            &serde_json::json!([{ "type": "text", "text": seed }]).to_string(),
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Builds the response selectors and seeds the effective model into the
+/// session metadata when unset, so display and the first prompt agree
+/// without an explicit client switch.
+pub(crate) async fn build_selectors(
+    state: &TackleState,
+    session: &Session,
+) -> Result<Selectors, String> {
+    let mut selectors = config_options::build(state, session).await;
+    if crate::store::session_model_free(session).is_none() {
+        if let Some(model) =
+            config_options::resolve_model_for(state, session, selectors.first_model.as_deref())
+        {
+            state
+                .db
+                .set_model(&session.id, &model)
+                .await
+                .map_err(|err| err.to_string())?;
+            if let Ok(Some(fresh)) = state.db.get_session(&session.id).await {
+                selectors = config_options::build(state, &fresh).await;
+            }
+        }
+    }
+    Ok(selectors)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn metadata_defaults_the_actor() {
+        let metadata: serde_json::Value =
+            serde_json::from_str(&session_metadata(None, None)).unwrap();
+        assert_eq!(metadata["actor"], "default");
+        assert!(metadata.get("additionalDirectories").is_none());
+    }
+
+    #[test]
+    fn metadata_merges_version_specific_keys() {
+        let metadata: serde_json::Value = serde_json::from_str(&session_metadata(
+            Some("summariser"),
+            Some(serde_json::json!({ "additionalDirectories": ["/tmp/one"] })),
+        ))
+        .unwrap();
+        assert_eq!(metadata["actor"], "summariser");
+        assert_eq!(metadata["additionalDirectories"][0], "/tmp/one");
+    }
 }
