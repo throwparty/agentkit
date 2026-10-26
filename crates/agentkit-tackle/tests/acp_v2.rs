@@ -14,6 +14,16 @@ use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 
 struct ScriptedModel;
 
+/// Holds every model request open, so a turn is in flight when close or
+/// delete lands.
+struct HangingModel;
+
+impl Respond for HangingModel {
+    fn respond(&self, _request: &Request) -> ResponseTemplate {
+        ResponseTemplate::new(200).set_delay(Duration::from_secs(120))
+    }
+}
+
 impl Respond for ScriptedModel {
     fn respond(&self, request: &Request) -> ResponseTemplate {
         let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap_or_default();
@@ -1471,4 +1481,131 @@ async fn v2_resume_replays_ordered_ids_and_rejects_unknown_cursors() {
         })
         .await
         .expect("v2 resume replay");
+}
+
+
+#[tokio::test(flavor = "multi_thread")]
+async fn v2_close_and_delete_cancel_in_flight_turns() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(HangingModel)
+        .mount(&server)
+        .await;
+    let agent = spawn_agent(dir.path(), &model_config(&server.uri()));
+    let seen: Arc<Mutex<Vec<Seen>>> = Arc::default();
+    let handler = Arc::clone(&seen);
+
+    Client
+        .v2()
+        .on_receive_notification(
+            async move |notification: v2::UpdateSessionNotification, _cx| {
+                if let v2::SessionUpdate::StateUpdate(v2::StateUpdate::Idle(idle)) =
+                    &notification.update
+                {
+                    handler
+                        .lock()
+                        .unwrap()
+                        .push(Seen::Idle(idle.stop_reason.clone()));
+                }
+                Ok(())
+            },
+            on_receive_notification!(),
+        )
+        .connect_with(agent, |connection: V2ConnectionTo<Agent>| async move {
+            connection
+                .send_request(v2::InitializeRequest::new(
+                    ProtocolVersion::V2,
+                    v2::Implementation::new("test-client", "1.0.0"),
+                ))
+                .block_task()
+                .await?;
+            let cwd = std::env::current_dir().unwrap();
+
+            // Close during a turn: cancelled idle, session still listable.
+            let closed = connection
+                .send_request(v2::NewSessionRequest::new(cwd.clone()))
+                .block_task()
+                .await?;
+            let prompt = connection.send_request(v2::PromptRequest::new(
+                closed.session_id.clone(),
+                vec![v2::ContentBlock::Text(v2::TextContent::new("hello"))],
+            ));
+            connection
+                .send_request(v2::CloseSessionRequest::new(closed.session_id.clone()))
+                .block_task()
+                .await?;
+            prompt.block_task().await?;
+            let idles = wait_for_idles(&seen, 1).await;
+            assert!(
+                matches!(idles.first(), Some(Seen::Idle(Some(v2::StopReason::Cancelled)))),
+                "close cancels the turn: {idles:?}"
+            );
+            let listed = connection
+                .send_request(v2::ListSessionsRequest::new())
+                .block_task()
+                .await?;
+            assert!(
+                listed
+                    .sessions
+                    .iter()
+                    .any(|session| session.session_id == closed.session_id),
+                "close keeps the session listable"
+            );
+
+            // Delete during a turn: cancelled idle, then not listable.
+            let deleted = connection
+                .send_request(v2::NewSessionRequest::new(cwd))
+                .block_task()
+                .await?;
+            let prompt = connection.send_request(v2::PromptRequest::new(
+                deleted.session_id.clone(),
+                vec![v2::ContentBlock::Text(v2::TextContent::new("hello"))],
+            ));
+            connection
+                .send_request(v2::DeleteSessionRequest::new(deleted.session_id.clone()))
+                .block_task()
+                .await?;
+            prompt.block_task().await?;
+            let idles = wait_for_idles(&seen, 2).await;
+            assert!(
+                matches!(idles.get(1), Some(Seen::Idle(Some(v2::StopReason::Cancelled)))),
+                "delete cancels the turn: {idles:?}"
+            );
+            let listed = connection
+                .send_request(v2::ListSessionsRequest::new())
+                .block_task()
+                .await?;
+            assert!(
+                !listed
+                    .sessions
+                    .iter()
+                    .any(|session| session.session_id == deleted.session_id),
+                "delete removes the session from the list"
+            );
+            Ok(())
+        })
+        .await
+        .expect("v2 close/delete");
+}
+
+async fn wait_for_idles(
+    seen: &Arc<Mutex<Vec<Seen>>>,
+    count: usize,
+) -> Vec<Seen> {
+    for _ in 0..400 {
+        {
+            let seen = seen.lock().unwrap();
+            let idles: Vec<Seen> = seen
+                .iter()
+                .filter(|entry| matches!(entry, Seen::Idle(_)))
+                .cloned()
+                .collect();
+            if idles.len() >= count {
+                return idles;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    seen.lock().unwrap().clone()
 }
