@@ -27,7 +27,7 @@ src/acp/
 │   ├── mod.rs          # re-exports the shared surface
 │   ├── ids.rs          # store SessionId <-> wire SessionId mapping
 │   ├── connection.rs   # shared per-connection state: the MCP pool (config + client-forwarded)
-│   ├── dispatch.rs     # first user text -> Dispatch decision (Model | Fork | Direct | Mcp | Editor | Context | Compaction)
+│   ├── dispatch.rs     # first user text -> Dispatch decision (Model | Fork | Direct | RuntimeCommand | Context | Compaction)
 │   ├── session.rs      # lease acquire/release, begin_prompt_turn, turn + user-message persistence, updated_at
 │   ├── commands.rs     # domain command catalogue; /mcp parsing applied to common::connection
 │   ├── config.rs       # actor/model resolution and config-option domain values
@@ -94,7 +94,7 @@ common holds only decisions that must not diverge:
 
 ### v2 prompt lifecycle
 
-The v2 prompt handler is a structural variant, not a flag. On session/prompt it persists the user message through common::session, responds immediately with its messageId, then spawns the turn. Foreground work is tracked in v2::foreground, which owns the aggregate state and emits state_update transitions: running when work starts, requires_action while a permission request blocks it, and idle with a stop reason when it ends. A failure after insertion ends as an idle state_update with the error stop reason; a rejection before insertion stays a JSON-RPC error and emits no user-message update. Both versions call common::dispatch, but that shares only the classification: each version must implement the execution and rendering of every Dispatch variant. The v2 prompt handler is exhaustive over Dispatch, so a new variant fails compilation until it is handled, but exhaustiveness only forces acknowledgement. The dispatch parity matrix below is the acceptance checklist, and an unported variant must return an explicit error rather than falling through to the model.
+The v2 prompt handler is a structural variant, not a flag. On session/prompt it persists the user message through common::session, responds immediately with its messageId, then spawns the turn. Foreground work is tracked by the v2 prompt handler, which emits state_update transitions: running when work starts, requires_action while a permission request blocks it, and idle with a stop reason when it ends. A failure after insertion ends as an idle state_update with the error stop reason; a rejection before insertion stays a JSON-RPC error and emits no user-message update. Both versions call common::dispatch, but that shares only the classification: each version must implement the execution and rendering of every Dispatch variant. The v2 prompt handler is exhaustive over Dispatch, so a new variant fails compilation until it is handled, but exhaustiveness only forces acknowledgement. The dispatch parity matrix below is the acceptance checklist, and an unported variant must return an explicit error rather than falling through to the model.
 
 ### Dispatch parity
 
@@ -109,7 +109,7 @@ Every variant is a per-version obligation, not a shared implementation:
 | Context | /context | /context |
 | Compaction | /compact | /compact |
 
-The shared `decide` function guarantees the same classification; it does not guarantee the same behaviour. The original v2 port missed Direct, Context, and RuntimeCommand because this distinction was not an acceptance criterion; the parity matrix and the per-variant tests exist to prevent a repeat.
+The shared `decide` function guarantees the same classification; it does not guarantee the same behaviour. The parity matrix and the per-variant tests keep the two renderings aligned as the surface evolves.
 
 ### Event mapping
 
@@ -127,7 +127,7 @@ The pinned acp-tck suite is the primary validation loop, not a final checkpoint,
 
 First, conformance. just tackle conformance, run for each protocol version, is the acceptance gate. For v1 this is already true and the refactor must preserve it: the committed MANDATORY baseline is empty, so any regression surfaces as a new failure. For v2 the suite is run until CONFORMANT before anything else is attempted; a v2 failure is a work item, not a caveat.
 
-Second, the in-process harness and unit tests cover what the TCK does not. Unit: common::dispatch over first-user-text inputs with the v1 guardrails; common::replay ordering and compaction truncation; v1::capabilities and v2::capabilities shape; v1::sink and v2::sink event mapping including cost omission; v2::foreground state transitions and idempotent snapshots. Integration: the existing v1 suites remain the regression gate and must pass unchanged after the refactor (initialize, tool_turn, client_tools, fork, compaction, usage, context, config_options, first_run, restart_load, two_process, http, mcp_pool, agent_invocation, shutdown). New v2 suites cover the areas the TCK does not: the acp::v1/acp::v2 boundary (a v1 connection observes no v2 update and vice versa), client-provided MCP server forwarding with a model tool call through the permission pipeline, the draft session/fork and its /fork fallback, direct invocation (/!), /context, /mcp, compaction and notices gating, and the first-turn absence report when a v2 client brings no MCP server. Each Dispatch variant gets its own v2 integration test, and the command advertisement test asserts every MCP tool is offered as !mcp.<server>.<tool>. The arch-lint boundary runs with a negative fixture proving an acp::v1 to acp::v2 import fails the check.
+Second, the in-process harness and unit tests cover what the TCK does not. Unit: common::dispatch over first-user-text inputs with the v1 guardrails; common::replay ordering and compaction truncation; v1::capabilities and v2::capabilities shape; v1::sink and v2::sink event mapping including cost omission; v2 prompt state transitions and idempotent snapshots. Integration: the existing v1 suites remain the regression gate and must pass unchanged after the refactor (initialize, tool_turn, client_tools, fork, compaction, usage, context, config_options, first_run, restart_load, two_process, http, mcp_pool, agent_invocation, shutdown). New v2 suites cover the areas the TCK does not: the acp::v1/acp::v2 boundary (a v1 connection observes no v2 update and vice versa), client-provided MCP server forwarding with a model tool call through the permission pipeline, the draft session/fork and its /fork fallback, direct invocation (/!), /context, /mcp, compaction and notices gating, and the first-turn absence report when a v2 client brings no MCP server. Each Dispatch variant gets its own v2 integration test, and the command advertisement test asserts every MCP tool is offered as !mcp.<server>.<tool>. The arch-lint boundary runs with a negative fixture proving an acp::v1 to acp::v2 import fails the check.
 
 Third, and only once conformance and the harness pass, manual testing against Zed behind its acp-beta flag, the one deployed v2 client. Golden transcripts remain for behaviours the TCK does not cover; they are no longer the primary conformance instrument.
 
@@ -149,7 +149,7 @@ flowchart TD
 
 | Technology | Role |
 |------------|------|
-| agent-client-protocol 2.2.0 | The pinned SDK already carries the full stable v2 schema and runtime behind the unstable_protocol_v2 feature, and session/fork behind unstable_session_fork. Agent.v2(), V2Builder, V2ConnectionTo, and the typed handlers cover every baseline method; AgentProtocolRouter performs version negotiation. No bump, fork, or patch. |
+| agent-client-protocol 3.5.0 | The pinned SDK already carries the full stable v2 schema and runtime behind the unstable_protocol_v2 feature, and session/fork behind unstable_session_fork. Agent.v2(), V2Builder, V2ConnectionTo, and the typed handlers cover every baseline method; AgentProtocolRouter performs version negotiation. No bump, fork, or patch. |
 | Existing axum + Lines transport | The HTTP and stdio paths already carry an arbitrary JSON-RPC line stream through the SDK's generic transport, so they carry whichever version the router selects with no change beyond calling the new entry point. |
 | tokio | The v2 respond-then-stream lifecycle runs the turn on a spawned task so the dispatch loop stays free to route client messages, as the v1 model turn already does. |
 | arch-lint | A declarative arch-lint.toml rule denies any import from acp::v1 into acp::v2 and the reverse, run as a CI gate. cargo-deny cannot express intra-crate module rules, so it does not cover this. |
@@ -163,7 +163,7 @@ flowchart TD
 
 The shared, version-neutral orchestration that v1 and v2 both call
 
-ids (store<->wire id mapping), connection (the shared MCP pool), dispatch (first user text to a Dispatch decision), session (lease, begin_prompt_turn, turn and user-message persistence, updated_at), commands (domain command catalogue and /mcp), config (actor/model and config-option domain values), replay (DAG walk to NeutralEvent), report (/context assembly), messages (assistant-message persistence). Must not depend on acp::v1 or acp::v2.
+cancellation (per-connection registry and completion wake-up), connection (MCP pool construction and editor seed), content (neutral stored blocks), dispatch (first user text to a Dispatch decision), messages (assistant-message persistence), replay (DAG walk to ReplayEvent), session (lease, begin_prompt_turn, first-run seed, selectors). Ids, config/actor resolution, and /context assembly live in state/agent; command parsing is per version. Must not depend on acp::v1 or acp::v2.
 
 
 ### acp::v1
@@ -177,7 +177,7 @@ server (ConnectTo builder and dispatch-ladder wiring), initialize, capabilities,
 
 The new v2 surface
 
-server, initialize (with auth/login and auth/logout), capabilities (object markers, session-nested groups), negotiation, sessions (resume-based replay), prompt (insertion response plus spawned turn), foreground (aggregate state and stop reasons), sink, permission (title and subject), replay (replayFrom start), notices (capability-free compaction and notices), config_options (configId and type), commands (input.type), context, fork (draft session/fork), tests.
+server, initialize (with auth/login and auth/logout), capabilities (object markers, session-nested groups), negotiation (cancellation, pool, command cache), sessions (resume-based replay, close/delete, fork), prompt (insertion response, spawned turn, foreground states), sink, permission (title and subject), replay (replayFrom start), notices (capability-free compaction and notices), commands (input.type and !mcp.* tools), mcp (forwarded servers and status).
 
 
 ### acp::transport
@@ -217,10 +217,15 @@ arch-lint.toml declares the acp::common / acp::v1 / acp::v2 layering and the sib
 
 ## Data Flow
 
-initialize arrives on the connection; the protocol router selects v1 or v2 from protocolVersion and forwards the connection to that implementation. session/new connects any client-provided mcpServers through common::connection and returns the session with configOptions and availableCommands. A v2 session/prompt persists the user message, responds with its messageId, and spawns the turn; the turn streams agent_message_chunk and tool_call_update notifications while v2::foreground moves the session running and, when blocked on permission, requires_action; it ends with an idle state_update carrying the stop reason. session/resume with replayFrom start walks the DAG through common::replay, renders the NeutralEvent stream as v2 updates, and reports current state before responding. Under v1 the same decisions, persistence, and DAG walk are used, but the events are rendered against the v1 schema and the turn's stop reason rides the prompt response. Both versions are exercised end to end by the same acp-tck runner, selected by protocol version.
+initialize arrives on the connection; the protocol router selects v1 or v2 from protocolVersion and forwards the connection to that implementation. session/new connects any client-provided mcpServers through common::connection and returns the session with configOptions and availableCommands. A v2 session/prompt persists the user message, responds with its messageId, and spawns the turn; the turn streams agent_message_chunk and tool_call_update notifications while the v2 prompt handler moves the session running and, when blocked on permission, requires_action; it ends with an idle state_update carrying the stop reason. session/resume with replayFrom start walks the DAG through common::replay, renders the NeutralEvent stream as v2 updates, and reports current state before responding. Under v1 the same decisions, persistence, and DAG walk are used, but the events are rendered against the v1 schema and the turn's stop reason rides the prompt response. Both versions are exercised end to end by the same acp-tck runner, selected by protocol version.
 
 
 ## Deployment
 
 v2 is compiled and offered unconditionally; there is no compile-time or runtime gate. The ACP SDK's unstable_protocol_v2 and unstable_session_fork features are enabled in the crate. Both transports serve both versions, and one process can serve v1 and v2 connections concurrently. The acp-tck conformance jobs for both protocol versions run in CI alongside the existing suite, and manual testing is gated behind both passing. The only new dependency, arch-lint, is a development-time CI check and is not linked into the binary.
 
+## Delivered deviations
+
+- `acp::common` delivered as cancellation, connection, content, dispatch, messages, replay, and session; ids/config/report stayed in state/agent and command parsing is per version.
+- Dispatch delivered as Model, Fork, Direct, RuntimeCommand, Context, and Compaction; `/mcp` and `/editor` share RuntimeCommand.
+- v2 delivered the state machine in prompt, direct/context/fork as prompt cases, config options in sessions, and forwarded MCP servers in mcp.
