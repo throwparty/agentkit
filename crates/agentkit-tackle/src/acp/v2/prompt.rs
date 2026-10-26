@@ -210,6 +210,9 @@ async fn run_prompt_after_begin(
 
     let turn_cx = cx.clone();
     cx.spawn(async move {
+        // The heartbeat must outlive the turn, not just this function; it
+        // returns as soon as the turn is spawned.
+        let _heartbeat = _heartbeat;
         let _registration = registration;
         super::send_state(
             &turn_cx,
