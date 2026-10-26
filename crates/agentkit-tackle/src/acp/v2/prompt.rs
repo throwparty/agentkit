@@ -242,6 +242,7 @@ async fn run_prompt_after_begin(
         requester: Arc::new(super::permission::AcpPermissionRequester {
             cx: cx.clone(),
             session_id: wire_session.clone(),
+            foreground: true,
         }),
         executor: Arc::new(NoClientTools),
         tracker: negotiation.clone(),

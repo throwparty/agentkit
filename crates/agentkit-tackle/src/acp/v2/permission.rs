@@ -19,6 +19,9 @@ use std::pin::Pin;
 pub(super) struct AcpPermissionRequester {
     pub cx: V2ConnectionTo<Client>,
     pub session_id: SessionId,
+    /// Whether this ask belongs to a running prompt turn. Setup consent
+    /// (project trust) has no foreground work to move.
+    pub foreground: bool,
 }
 
 fn option_id(choice: PermissionChoice) -> &'static str {
@@ -77,12 +80,15 @@ impl PermissionRequester for AcpPermissionRequester {
             .subject(RequestPermissionSubject::from(tool_call));
         let cx = self.cx.clone();
         let session_id = self.session_id.clone();
+        let foreground = self.foreground;
         Box::pin(async move {
-            super::send_state(
-                &cx,
-                &session_id,
-                StateUpdate::RequiresAction(RequiresActionStateUpdate::new()),
-            );
+            if foreground {
+                super::send_state(
+                    &cx,
+                    &session_id,
+                    StateUpdate::RequiresAction(RequiresActionStateUpdate::new()),
+                );
+            }
             let outcome = cx.send_request(acp_request).block_task().await;
             match outcome {
                 Ok(response) => match response.outcome {
@@ -93,7 +99,7 @@ impl PermissionRequester for AcpPermissionRequester {
                             .find(|(_, choice)| option_id(*choice) == id)
                             .map(|(_, choice)| *choice)
                             .unwrap_or(PermissionChoice::Cancelled);
-                        if choice != PermissionChoice::Cancelled {
+                        if foreground && choice != PermissionChoice::Cancelled {
                             super::send_state(
                                 &cx,
                                 &session_id,
