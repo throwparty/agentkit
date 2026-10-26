@@ -38,8 +38,16 @@ pub(super) async fn begin_prompt_turn(
     owner: &str,
 ) -> Result<BegunTurn, BeginError> {
     let store_session = store_session_id(&request.session_id);
-    let blocks_json = serde_json::to_string(&request.prompt).unwrap_or_else(|_| "[]".to_owned());
-    crate::acp::common::session::begin_prompt_turn(state, store_session, blocks_json, owner).await
+    let blocks = request
+        .prompt
+        .iter()
+        .map(|block| {
+            crate::acp::common::content::Block::from_value(
+                serde_json::to_value(block).unwrap_or(serde_json::Value::Null),
+            )
+        })
+        .collect();
+    crate::acp::common::session::begin_prompt_turn(state, store_session, blocks, owner).await
 }
 
 /// The model turn: long, and it awaits client messages

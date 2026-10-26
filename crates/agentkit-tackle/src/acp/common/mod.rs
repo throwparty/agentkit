@@ -5,6 +5,7 @@
 
 pub(crate) mod cancellation;
 pub(crate) mod connection;
+pub(crate) mod content;
 pub(crate) mod dispatch;
 pub mod messages;
 pub(crate) mod replay;

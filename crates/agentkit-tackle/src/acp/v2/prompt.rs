@@ -3,6 +3,7 @@
 //! a spawned task.
 
 use super::negotiation::ConnectionNegotiation;
+use crate::acp::common::content::Block;
 use crate::acp::common::dispatch::{decide, Dispatch};
 use crate::acp::common::messages::append_assistant_text;
 use crate::acp::common::session::{begin_prompt_turn, BeginError, BegunTurn};
@@ -40,8 +41,13 @@ pub(super) async fn handle_prompt(
     responder: Responder<PromptResponse>,
 ) -> Result<(), Error> {
     let session_id = super::store_session_id(&request.session_id);
-    let blocks_json =
-        serde_json::to_string(&request.prompt).unwrap_or_else(|_| "[]".to_owned());
+    let blocks: Vec<Block> = request
+        .prompt
+        .iter()
+        .map(|block| {
+            Block::from_value(serde_json::to_value(block).unwrap_or(serde_json::Value::Null))
+        })
+        .collect();
     let request_cancellation = responder.cancellation();
     if matches!(
         futures::poll!(Box::pin(request_cancellation.cancelled())),
@@ -53,7 +59,7 @@ pub(super) async fn handle_prompt(
     match begin_prompt_turn(
         &state,
         session_id.clone(),
-        blocks_json.clone(),
+        blocks.clone(),
         owner.as_str(),
     )
     .await
@@ -87,7 +93,7 @@ pub(super) async fn handle_prompt(
                     match begin_prompt_turn(
                         &state,
                         session_id.clone(),
-                        blocks_json.clone(),
+                        blocks.clone(),
                         owner.as_str(),
                     )
                     .await
