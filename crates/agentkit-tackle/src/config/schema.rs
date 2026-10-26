@@ -117,6 +117,9 @@ pub enum McpServerConfig {
     },
     Http {
         url: String,
+        /// Extra request headers, sent with every MCP request.
+        #[serde(default)]
+        headers: BTreeMap<String, String>,
     },
 }
 

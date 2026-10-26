@@ -25,6 +25,7 @@ agent-client-protocol = {version = "3.5.0", features = [
 clap = {version = "4", features = ["derive"]}
 futures = "0.3"
 git2 = "0.21"
+http = "1"
 jiff = {version = "0.2", features = ["serde"]}
 rig-core = {version = "0.44.0", features = ["reqwest"]}
 reqwest = {version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"]}

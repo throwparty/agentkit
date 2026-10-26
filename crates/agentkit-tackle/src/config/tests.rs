@@ -70,7 +70,29 @@ fn project_mcp_servers_are_ignored_while_user_entries_load() {
     .unwrap();
     assert!(!loaded.config.mcp_servers.contains_key("rogue"));
     match loaded.config.mcp_servers.get("tools") {
-        Some(McpServerConfig::Http { url }) => assert_eq!(url, "https://user.example.com"),
+        Some(McpServerConfig::Http { url, .. }) => assert_eq!(url, "https://user.example.com"),
+        other => panic!("unexpected server config: {other:?}"),
+    }
+}
+
+#[test]
+fn http_mcp_server_headers_parse() {
+    let dir = tempfile::tempdir().unwrap();
+    write_layer(
+        &dir.path().join("user"),
+        "[mcp_servers.tools]\n\
+         transport = \"http\"\n\
+         url = \"https://user.example.com\"\n\
+         \n\
+         [mcp_servers.tools.headers]\n\
+         Authorization = \"Bearer token\"\n",
+    );
+    let loaded = load_layered(&dir.path().join("user"), None, None).unwrap();
+    match loaded.config.mcp_servers.get("tools") {
+        Some(McpServerConfig::Http { headers, .. }) => assert_eq!(
+            headers.get("Authorization"),
+            Some(&"Bearer token".to_owned())
+        ),
         other => panic!("unexpected server config: {other:?}"),
     }
 }
