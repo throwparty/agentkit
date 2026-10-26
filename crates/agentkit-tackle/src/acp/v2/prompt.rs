@@ -447,6 +447,35 @@ impl ClientToolExecutor for NoClientTools {
     }
 }
 
+/// Announces one whole agent message (the v2 upsert shape) under its id.
+fn announce_agent_message(
+    cx: &V2ConnectionTo<Client>,
+    wire_session: &agent_client_protocol::schema::v2::SessionId,
+    message_id: MessageId,
+    blocks: Vec<ContentBlock>,
+) {
+    let _ = cx.send_notification(UpdateSessionNotification::new(
+        wire_session.clone(),
+        SessionUpdate::AgentMessage(AgentMessage::new(message_id).content(blocks)),
+    ));
+}
+
+/// Announces a stored assistant message, preserving its stored id and
+/// content blocks.
+fn announce_stored_message(
+    cx: &V2ConnectionTo<Client>,
+    wire_session: &agent_client_protocol::schema::v2::SessionId,
+    message: &crate::store::Message,
+) {
+    let blocks = serde_json::from_str::<Vec<ContentBlock>>(&message.content).unwrap_or_default();
+    announce_agent_message(
+        cx,
+        wire_session,
+        MessageId::new(message.id.clone()),
+        blocks,
+    );
+}
+
 /// The ephemeral `/context` report: build the same system prompt, tool
 /// catalogue, and prior context a model turn would receive, send the estimate,
 /// and delete the command turn so it never enters the session.
@@ -492,13 +521,12 @@ async fn run_context(
         cost_usd,
     });
     let message_id = uuid::Uuid::new_v4().to_string();
-    let _ = cx.send_notification(UpdateSessionNotification::new(
-        wire_session.clone(),
-        SessionUpdate::AgentMessage(
-            AgentMessage::new(MessageId::new(message_id))
-                .content(vec![ContentBlock::Text(TextContent::new(text))]),
-        ),
-    ));
+    announce_agent_message(
+        cx,
+        wire_session,
+        MessageId::new(message_id),
+        vec![ContentBlock::Text(TextContent::new(text))],
+    );
     state
         .db
         .delete_turn(turn_id)
@@ -520,13 +548,7 @@ async fn run_runtime_command(
     let message = append_assistant_text(state, turn_id, reply)
         .await
         .map_err(|err| err.to_string())?;
-    let _ = cx.send_notification(UpdateSessionNotification::new(
-        wire_session.clone(),
-        SessionUpdate::AgentMessage(
-            AgentMessage::new(MessageId::new(message.id))
-                .content(vec![ContentBlock::Text(TextContent::new(reply.to_owned()))]),
-        ),
-    ));
+    announce_stored_message(cx, wire_session, &message);
     let commands = super::commands::available_commands(state, negotiation).await;
     let _ = cx.send_notification(UpdateSessionNotification::new(
         wire_session.clone(),
@@ -561,13 +583,7 @@ async fn run_fork(
     let message = append_assistant_text(state, turn_id, &report)
         .await
         .map_err(|err| err.to_string())?;
-    let _ = cx.send_notification(UpdateSessionNotification::new(
-        wire_session.clone(),
-        SessionUpdate::AgentMessage(
-            AgentMessage::new(MessageId::new(message.id))
-                .content(vec![ContentBlock::Text(TextContent::new(report))]),
-        ),
-    ));
+    announce_stored_message(cx, wire_session, &message);
     Ok(())
 }
 
@@ -599,13 +615,7 @@ async fn run_compaction(
     let message = append_assistant_text(state, turn_id, &note)
         .await
         .map_err(|err| err.to_string())?;
-    let _ = cx.send_notification(UpdateSessionNotification::new(
-        wire_session.clone(),
-        SessionUpdate::AgentMessage(
-            AgentMessage::new(MessageId::new(message.id))
-                .content(vec![ContentBlock::Text(TextContent::new(note.clone()))]),
-        ),
-    ));
+    announce_stored_message(cx, wire_session, &message);
     if context_size > 0 {
         let session_usage = state
             .db
