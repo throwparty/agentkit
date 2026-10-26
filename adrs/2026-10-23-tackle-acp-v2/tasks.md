@@ -249,7 +249,7 @@ Cover the behaviours acp-tck does not: a v2 client forwarding an MCP server that
 | Depends On | T-009,T-015,T-016,T-018 |
 | References | client-tooling-via-mcp,v2-session-fork,v2-notices,v2-compaction,client-tooling-absent |
 
-### T-020: Manual validation against Zed
+### T-020: [x] Manual validation against Zed
 
 With both conformance suites green, validate manually against Zed behind its acp-beta flag: negotiate v2, complete a prompt turn with streamed output and a tool call, cancel a turn, resume a session, and observe the client-tooling absence. Record findings, including any client-specific behaviour to document.
 
