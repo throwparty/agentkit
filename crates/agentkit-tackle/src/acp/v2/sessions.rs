@@ -10,7 +10,7 @@ use crate::agent::{script_loop, seed as first_run};
 use crate::content::timestamp;
 use crate::scripts::host::NoticeSink;
 use crate::state::TackleState;
-use crate::store::{ListFilter, Role, SessionId, SessionKind, TurnKind, TurnUsage};
+use crate::store::{ListFilter, Role, SessionKind, TurnKind, TurnUsage};
 use agent_client_protocol::role::acp::Client;
 use agent_client_protocol::schema::v2::{
     AbsolutePath, AvailableCommandsUpdate, CloseSessionRequest, CloseSessionResponse,
@@ -18,7 +18,8 @@ use agent_client_protocol::schema::v2::{
     ForkSessionResponse, IdleStateUpdate, ListSessionsRequest, ListSessionsResponse, MessageId,
     NewSessionRequest, NewSessionResponse, Notice, NoticeSeverity, ReplayFrom, ResumeSessionRequest,
     ResumeSessionResponse,
-    SessionConfigId, SessionConfigOption, SessionConfigOptionCategory, SessionConfigOptionValue,
+    ConfigOptionUpdate, SessionConfigId, SessionConfigOption, SessionConfigOptionCategory,
+    SessionConfigOptionValue,
     SessionConfigSelectOption, SessionConfigValueId, SessionInfo, SessionUpdate,
     SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, StateUpdate,
     UpdateSessionNotification, UsageUpdate, UserMessage,
@@ -104,14 +105,6 @@ fn wire_option(option: &ConfigOption) -> SessionConfigOption {
 
 fn wire_options(options: &[ConfigOption]) -> Vec<SessionConfigOption> {
     options.iter().map(wire_option).collect()
-}
-
-/// A no-op notice sink: v2 notices are capability-free and land with the
-/// notice work, so the config-switch path does not emit one yet.
-struct NullNotices;
-
-impl NoticeSink for NullNotices {
-    fn script_model_call(&self, _session: &SessionId) {}
 }
 
 /// `session/new`: create the session in the shared store, seed the first turn,
@@ -459,6 +452,7 @@ pub(super) async fn handle_fork_session(
 /// refreshed selectors; the switch is effective the following turn.
 pub(super) async fn handle_set_config(
     state: Arc<TackleState>,
+    cx: V2ConnectionTo<Client>,
     request: SetSessionConfigOptionRequest,
     responder: Responder<SetSessionConfigOptionResponse>,
 ) -> Result<(), Error> {
@@ -470,14 +464,18 @@ pub(super) async fn handle_set_config(
         .map_err(|err| Error::internal_error().data(err.to_string()))?
         .ok_or_else(|| Error::internal_error().data("no such session".to_owned()))?;
 
+    let mut updates: Vec<config_options::Notice> = Vec::new();
     let applied = match &request.value {
         SessionConfigOptionValue::Id { value } => {
             let value = value.to_string();
             match request.config_id.0.as_ref() {
                 config_options::MODEL_SELECTOR_ID => {
-                    let notices: Arc<dyn NoticeSink> = Arc::new(NullNotices);
+                    let notices: Arc<dyn NoticeSink> =
+                        Arc::new(super::notices::ConnectionNotices {
+                            cx: cx.clone(),
+                            source: "config switch",
+                        });
                     let access = script_loop::access(&state, 0, Arc::clone(&notices));
-                    let mut updates: Vec<config_options::Notice> = Vec::new();
                     let mut notify = |notice: config_options::Notice| {
                         updates.push(notice);
                     };
@@ -516,11 +514,37 @@ pub(super) async fn handle_set_config(
     };
     let refreshed = config_options::build(&state, &refreshed_session).await;
     match applied {
-        Ok(()) => responder.respond(SetSessionConfigOptionResponse::new(wire_options(
-            &refreshed.options,
-        ))),
+        Ok(()) => {
+            for notice in &updates {
+                let _ = cx.send_notification(UpdateSessionNotification::new(
+                    request.session_id.clone(),
+                    SessionUpdate::Notice(wire_notice(notice)),
+                ));
+            }
+            let options = wire_options(&refreshed.options);
+            let _ = cx.send_notification(UpdateSessionNotification::new(
+                request.session_id.clone(),
+                SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(options.clone())),
+            ));
+            responder.respond(SetSessionConfigOptionResponse::new(options))
+        }
         Err(message) => responder.respond_with_error(
             Error::internal_error().data(serde_json::json!({ "error": message })),
         ),
     }
+}
+
+/// Maps a domain config-switch notice onto the v2 wire type.
+fn wire_notice(notice: &config_options::Notice) -> Notice {
+    let mut wire = Notice::new(
+        match notice.severity {
+            config_options::NoticeSeverity::Info => NoticeSeverity::Info,
+            config_options::NoticeSeverity::Warning => NoticeSeverity::Warning,
+        },
+        notice.message.clone(),
+    );
+    if let Some(description) = &notice.description {
+        wire = wire.description(Some(description.clone()));
+    }
+    wire
 }

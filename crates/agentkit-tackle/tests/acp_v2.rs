@@ -1235,3 +1235,94 @@ async fn v2_new_session_sends_a_usage_snapshot() {
         .await
         .expect("v2 usage snapshot");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn v2_set_config_option_announces_the_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ScriptedModel)
+        .mount(&server)
+        .await;
+    let agent = spawn_agent(dir.path(), &model_config(&server.uri()));
+    let updates: Arc<Mutex<Vec<Vec<v2::SessionConfigOption>>>> = Arc::default();
+    let handler = Arc::clone(&updates);
+
+    Client
+        .v2()
+        .on_receive_notification(
+            async move |notification: v2::UpdateSessionNotification, _cx| {
+                if let v2::SessionUpdate::ConfigOptionUpdate(update) = &notification.update {
+                    handler.lock().unwrap().push(update.config_options.clone());
+                }
+                Ok(())
+            },
+            on_receive_notification!(),
+        )
+        .connect_with(agent, |connection: V2ConnectionTo<Agent>| async move {
+            connection
+                .send_request(v2::InitializeRequest::new(
+                    ProtocolVersion::V2,
+                    v2::Implementation::new("test-client", "1.0.0"),
+                ))
+                .block_task()
+                .await?;
+            let created = connection
+                .send_request(v2::NewSessionRequest::new(std::env::current_dir().unwrap()))
+                .block_task()
+                .await?;
+            let actor = created
+                .config_options
+                .iter()
+                .find(|option| option.config_id.0.as_ref() == "actor")
+                .expect("an actor config option");
+            let (current, choices) = match &actor.kind {
+                v2::SessionConfigKind::Select(select) => {
+                    let v2::SessionConfigSelectOptions::Ungrouped(choices) = &select.options else {
+                        panic!("expected ungrouped actor choices");
+                    };
+                    (select.current_value.clone(), choices.clone())
+                }
+                _ => panic!("expected a select actor option"),
+            };
+            let alternative = choices
+                .iter()
+                .find(|choice| choice.value != current)
+                .expect("an alternative actor")
+                .value
+                .clone();
+
+            let response = connection
+                .send_request(v2::SetSessionConfigOptionRequest::new(
+                    created.session_id,
+                    "actor",
+                    v2::SessionConfigOptionValue::Id {
+                        value: alternative.clone(),
+                    },
+                ))
+                .block_task()
+                .await?;
+            let updated = response
+                .config_options
+                .iter()
+                .find(|option| option.config_id.0.as_ref() == "actor")
+                .expect("the refreshed actor option");
+            let v2::SessionConfigKind::Select(select) = &updated.kind else {
+                panic!("expected a select actor option");
+            };
+            assert_eq!(select.current_value, alternative);
+
+            let mut announced = false;
+            for _ in 0..200 {
+                if !updates.lock().unwrap().is_empty() {
+                    announced = true;
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            assert!(announced, "the config change is announced");
+            Ok(())
+        })
+        .await
+        .expect("v2 set config option");
+}
