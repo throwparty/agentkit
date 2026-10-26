@@ -138,7 +138,8 @@ check-baseline version:
     set -euxo pipefail
     target/debug/tackle-conformance-check \
         --report {{ artifacts }}/report-{{ version }}.json \
-        --baseline '{{ fixture }}/baseline-{{ version }}.txt'
+        --baseline '{{ fixture }}/baseline-{{ version }}.txt' \
+        --version {{ version }}
 
 # Regenerate a version's baseline from the latest report after reviewing its failures.
 seed-baseline version:
