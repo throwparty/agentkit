@@ -20,9 +20,13 @@ use std::sync::Arc;
 const GREP_LIMIT: usize = 200;
 /// The maximum file size `grep` reads.
 const GREP_MAX_FILE_BYTES: u64 = 1 << 20;
+/// The maximum file size `read_file` returns.
+const READ_MAX_FILE_BYTES: u64 = 1 << 20;
+/// The maximum directory depth the recursive walk traverses.
+const WALK_MAX_DEPTH: usize = 64;
 /// Directory names skipped by the recursive walk.
 const SKIPPED_DIRS: &[&str] = &[
-    ".git", ".hg", ".jj", ".svn", "target", "node_modules", ".direnv", ".cache",
+    ".cache", ".direnv", ".git", ".hg", ".jj", ".svn", "node_modules", "target",
 ];
 
 #[derive(Debug, Parser)]
@@ -67,6 +71,15 @@ impl FsServer {
         args: &serde_json::Map<String, serde_json::Value>,
     ) -> Result<String, String> {
         let path = self.resolve(args.get("path").and_then(|value| value.as_str()))?;
+        let metadata = std::fs::metadata(&path)
+            .map_err(|err| format!("{}: {err}", path.display()))?;
+        if metadata.len() > READ_MAX_FILE_BYTES {
+            return Err(format!(
+                "{}: file is too large ({} bytes)",
+                path.display(),
+                metadata.len()
+            ));
+        }
         let content =
             std::fs::read_to_string(&path).map_err(|err| format!("{}: {err}", path.display()))?;
         let offset = args
@@ -159,9 +172,20 @@ impl FsServer {
 }
 
 fn walk(path: &Path, visit: &mut dyn FnMut(&Path)) {
-    let Ok(metadata) = std::fs::metadata(path) else {
+    walk_depth(path, visit, 0);
+}
+
+fn walk_depth(path: &Path, visit: &mut dyn FnMut(&Path), depth: usize) {
+    if depth > WALK_MAX_DEPTH {
+        return;
+    }
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
         return;
     };
+    // Symlinks are skipped so the walk cannot escape --root or loop.
+    if metadata.file_type().is_symlink() {
+        return;
+    }
     if metadata.is_file() {
         visit(path);
         return;
@@ -181,7 +205,7 @@ fn walk(path: &Path, visit: &mut dyn FnMut(&Path)) {
         {
             continue;
         }
-        walk(&entry.path(), visit);
+        walk_depth(&entry.path(), visit, depth + 1);
     }
 }
 
@@ -286,6 +310,37 @@ mod tests {
         assert_eq!(server.read_file(&args).unwrap(), "hello\nworld\n");
         let listed = server.list_directory(&serde_json::Map::new()).unwrap();
         assert!(listed.contains("README.md"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinks_are_not_followed() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("secret"), "needle\n").unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("secret"),
+            dir.path().join("link"),
+        )
+        .unwrap();
+        let server = FsServer::new(dir.path().to_path_buf());
+        let args = serde_json::json!({ "pattern": "needle" });
+        let args = args.as_object().unwrap().clone();
+        assert_eq!(server.grep(&args).unwrap(), "");
+    }
+
+    #[test]
+    fn oversized_files_are_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("big"),
+            vec![b'x'; (READ_MAX_FILE_BYTES + 1) as usize],
+        )
+        .unwrap();
+        let server = FsServer::new(dir.path().to_path_buf());
+        let args = serde_json::json!({ "path": "big" });
+        let args = args.as_object().unwrap().clone();
+        assert!(server.read_file(&args).unwrap_err().contains("too large"));
     }
 
     #[test]
