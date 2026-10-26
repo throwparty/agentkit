@@ -30,6 +30,7 @@ use std::sync::Arc;
 
 /// `session/prompt`: the insertion response is the user message id; the turn
 /// runs detached, reporting `running` then a terminal `idle`.
+#[tracing::instrument(skip_all, fields(version = "v2", session = %request.session_id))]
 pub(super) async fn handle_prompt(
     state: Arc<TackleState>,
     negotiation: Arc<ConnectionNegotiation>,
@@ -68,6 +69,11 @@ pub(super) async fn handle_prompt(
             let negotiation = Arc::clone(&negotiation);
             let turn_cx = cx.clone();
             let owner = Arc::clone(&owner);
+            tracing::info!(
+                version = "v2",
+                session = %session_id,
+                "queued prompt waits for the active turn"
+            );
             cx.spawn(async move {
                 let deadline =
                     tokio::time::Instant::now() + std::time::Duration::from_secs(60);
@@ -100,6 +106,12 @@ pub(super) async fn handle_prompt(
                         }
                         Err(BeginError::Owned { holder }) if holder == owner.as_str() => {}
                         Err(BeginError::Owned { holder }) => {
+                            tracing::warn!(
+                                version = "v2",
+                                session = %session_id,
+                                holder = %holder,
+                                "prompt refused: session actively owned"
+                            );
                             return responder.respond_with_error(
                                 Error::internal_error().data(serde_json::json!({
                                     "error": "session-actively-owned",
@@ -113,6 +125,11 @@ pub(super) async fn handle_prompt(
                         }
                     }
                     if tokio::time::Instant::now() >= deadline {
+                        tracing::warn!(
+                            version = "v2",
+                            session = %session_id,
+                            "queued prompt timed out waiting for the active turn"
+                        );
                         return responder.respond_with_error(
                             Error::internal_error().data(serde_json::json!({
                                 "error": "session-busy",
@@ -126,6 +143,12 @@ pub(super) async fn handle_prompt(
             Ok(())
         }
         Err(BeginError::Owned { holder }) => {
+            tracing::warn!(
+                version = "v2",
+                session = %session_id,
+                holder = %holder,
+                "prompt refused: session actively owned"
+            );
             responder.respond_with_error(Error::internal_error().data(serde_json::json!({
                 "error": "session-actively-owned",
                 "owner": holder,
@@ -171,8 +194,14 @@ async fn run_prompt_after_begin(
     let (cancellation, registration) = negotiation.register_cancellation(&store_session);
     {
         let cancellation = cancellation.clone();
+        let cancel_session = store_session.clone();
         cx.spawn(async move {
             request_cancellation.cancelled().await;
+            tracing::info!(
+                version = "v2",
+                session = %cancel_session,
+                "prompt cancellation requested"
+            );
             cancellation.cancel();
             Ok(())
         })?;
@@ -378,6 +407,12 @@ async fn run_prompt_after_begin(
             Err(_) if cancellation.is_cancelled() => StopReason::Cancelled,
             Err(_) => StopReason::Error(ErrorStopReason::new()),
         };
+        tracing::info!(
+            version = "v2",
+            session = %wire_session,
+            outcome = ?stop,
+            "v2 turn finished"
+        );
         super::send_state(
             &turn_cx,
             &wire_session,

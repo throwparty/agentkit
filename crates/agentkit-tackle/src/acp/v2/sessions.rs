@@ -110,6 +110,7 @@ fn wire_options(options: &[ConfigOption]) -> Vec<SessionConfigOption> {
 
 /// `session/new`: create the session in the shared store, seed the first turn,
 /// and ride the selectors on the response.
+#[tracing::instrument(skip_all, fields(version = "v2", cwd = %request.cwd.0.display()))]
 pub(super) async fn handle_new_session(
     state: Arc<TackleState>,
     negotiation: Arc<crate::acp::v2::negotiation::ConnectionNegotiation>,
@@ -202,6 +203,7 @@ pub(super) async fn handle_new_session(
 
 /// `session/list`: the stored sessions, filtered by the request's cwd and the
 /// configured ephemeral policy.
+#[tracing::instrument(skip_all, fields(version = "v2"))]
 pub(super) async fn handle_list_sessions(
     state: Arc<TackleState>,
     request: ListSessionsRequest,
@@ -248,6 +250,7 @@ pub(super) async fn handle_list_sessions(
 }
 
 /// `session/close`: close the session and drop its permission grants.
+#[tracing::instrument(skip_all, fields(version = "v2", session = %request.session_id))]
 pub(super) async fn handle_close_session(
     state: Arc<TackleState>,
     negotiation: Arc<crate::acp::v2::negotiation::ConnectionNegotiation>,
@@ -271,6 +274,7 @@ pub(super) async fn handle_close_session(
 }
 
 /// `session/delete`: delete the session and drop its permission grants.
+#[tracing::instrument(skip_all, fields(version = "v2", session = %request.session_id))]
 pub(super) async fn handle_delete_session(
     state: Arc<TackleState>,
     request: DeleteSessionRequest,
@@ -293,6 +297,7 @@ pub(super) async fn handle_delete_session(
 /// the full user-visible history replays before the response; an unsupported
 /// cursor is rejected with `-32602`. A current-state snapshot follows any
 /// replay and precedes the response in every case.
+#[tracing::instrument(skip_all, fields(version = "v2", session = %request.session_id))]
 pub(super) async fn handle_resume_session(
     state: Arc<TackleState>,
     negotiation: Arc<crate::acp::v2::negotiation::ConnectionNegotiation>,
@@ -352,6 +357,7 @@ pub(super) async fn handle_resume_session(
 
 /// `session/fork`: create a seeded fork, fire the `session_forked` scripts,
 /// and return the fork's id with selectors.
+#[tracing::instrument(skip_all, fields(version = "v2", session = %request.session_id))]
 pub(super) async fn handle_fork_session(
     state: Arc<TackleState>,
     negotiation: Arc<crate::acp::v2::negotiation::ConnectionNegotiation>,
@@ -395,6 +401,7 @@ pub(super) async fn handle_fork_session(
 
 /// `session/set_config_option`: apply a model or actor switch and return the
 /// refreshed selectors; the switch is effective the following turn.
+#[tracing::instrument(skip_all, fields(version = "v2", session = %request.session_id))]
 pub(super) async fn handle_set_config(
     state: Arc<TackleState>,
     cx: V2ConnectionTo<Client>,
