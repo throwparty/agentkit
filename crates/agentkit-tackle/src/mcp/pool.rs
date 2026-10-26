@@ -316,55 +316,14 @@ impl McpPool {
             sink: Arc::clone(&self.sink),
             server: name.to_owned(),
         };
-        let result: Result<RunningService<RoleClient, ForwardingHandler>, String> = async {
-            match config {
-                McpServerConfig::Stdio { command, args, env } => {
-                    let mut cmd = Command::new(command);
-                    configure_stdio_spawn(&mut cmd, command, args, env, &self.credential_helper)
-                        .map_err(|err| err.to_string())?;
-                    let (transport, stderr) = rmcp::transport::TokioChildProcess::builder(cmd)
-                        .stderr(std::process::Stdio::piped())
-                        .spawn()
-                        .map_err(|err| err.to_string())?;
-                    if let Some(stderr) = stderr {
-                        let name = name.to_owned();
-                        tokio::spawn(async move {
-                            let mut cap =
-                                StderrRateCap::new(STDERR_RELAY_MAX_LINES, STDERR_RELAY_WINDOW);
-                            let mut out = tokio::io::stderr();
-                            let _ = relay_stderr(&name, stderr, &mut out, &mut cap).await;
-                        });
-                    }
-                    match connect_timeout(rmcp::service::serve_client(handler, transport)).await {
-                        Ok(initialised) => initialised.map_err(|err| err.to_string()),
-                        Err(reason) => Err(reason),
-                    }
-                }
-                McpServerConfig::Http { url, headers } => {
-                    let custom_headers = headers
-                        .iter()
-                        .map(|(name, value)| {
-                            let name = http::HeaderName::from_bytes(name.as_bytes()).map_err(
-                                |err| format!("invalid header name `{name}`: {err}"),
-                            )?;
-                            let value = http::HeaderValue::from_str(value).map_err(|err| {
-                                format!("invalid value for header `{name}`: {err}")
-                            })?;
-                            Ok((name, value))
-                        })
-                        .collect::<Result<std::collections::HashMap<_, _>, String>>()?;
-                    let config = rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(url.clone())
-                        .custom_headers(custom_headers);
-                    let transport =
-                        rmcp::transport::StreamableHttpClientTransport::from_config(config);
-                    match connect_timeout(rmcp::service::serve_client(handler, transport)).await {
-                        Ok(initialised) => initialised.map_err(|err| err.to_string()),
-                        Err(reason) => Err(reason),
-                    }
-                }
+        let result: Result<RunningService<RoleClient, ForwardingHandler>, String> = match config {
+            McpServerConfig::Stdio { command, args, env } => {
+                self.connect_stdio(handler, name, command, args, env).await
             }
-        }
-        .await;
+            McpServerConfig::Http { url, headers } => {
+                self.connect_http(handler, url, headers).await
+            }
+        };
         match result {
             Ok(peer) => {
                 self.connections
@@ -381,6 +340,63 @@ impl McpPool {
                 self.statuses
                     .insert(name.to_owned(), ServerStatus::Failed { reason });
             }
+        }
+    }
+
+    /// Spawns a stdio MCP server and completes its initialize handshake.
+    async fn connect_stdio(
+        &self,
+        handler: ForwardingHandler,
+        name: &str,
+        command: &str,
+        args: &[String],
+        env: &BTreeMap<String, String>,
+    ) -> Result<RunningService<RoleClient, ForwardingHandler>, String> {
+        let mut cmd = Command::new(command);
+        configure_stdio_spawn(&mut cmd, command, args, env, &self.credential_helper)
+            .map_err(|err| err.to_string())?;
+        let (transport, stderr) = rmcp::transport::TokioChildProcess::builder(cmd)
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|err| err.to_string())?;
+        if let Some(stderr) = stderr {
+            let name = name.to_owned();
+            tokio::spawn(async move {
+                let mut cap = StderrRateCap::new(STDERR_RELAY_MAX_LINES, STDERR_RELAY_WINDOW);
+                let mut out = tokio::io::stderr();
+                let _ = relay_stderr(&name, stderr, &mut out, &mut cap).await;
+            });
+        }
+        match connect_timeout(rmcp::service::serve_client(handler, transport)).await {
+            Ok(initialised) => initialised.map_err(|err| err.to_string()),
+            Err(reason) => Err(reason),
+        }
+    }
+
+    /// Builds an HTTP MCP transport with the configured headers and
+    /// completes its initialize handshake.
+    async fn connect_http(
+        &self,
+        handler: ForwardingHandler,
+        url: &str,
+        headers: &BTreeMap<String, String>,
+    ) -> Result<RunningService<RoleClient, ForwardingHandler>, String> {
+        let custom_headers = headers
+            .iter()
+            .map(|(name, value)| {
+                let name = http::HeaderName::from_bytes(name.as_bytes())
+                    .map_err(|err| format!("invalid header name `{name}`: {err}"))?;
+                let value = http::HeaderValue::from_str(value)
+                    .map_err(|err| format!("invalid value for header `{name}`: {err}"))?;
+                Ok((name, value))
+            })
+            .collect::<Result<std::collections::HashMap<_, _>, String>>()?;
+        let config = rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(url.to_owned())
+            .custom_headers(custom_headers);
+        let transport = rmcp::transport::StreamableHttpClientTransport::from_config(config);
+        match connect_timeout(rmcp::service::serve_client(handler, transport)).await {
+            Ok(initialised) => initialised.map_err(|err| err.to_string()),
+            Err(reason) => Err(reason),
         }
     }
 
