@@ -137,6 +137,7 @@ pub(super) async fn handle_new_session(
     let requester = super::permission::AcpPermissionRequester {
         cx: cx.clone(),
         session_id: wire_session_id(&session.id),
+        foreground: false,
     };
     common_session::resolve_project_trust(
         Arc::clone(&state),
