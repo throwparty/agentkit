@@ -17,11 +17,11 @@ Tackle serves both ACP versions from one binary and negotiates per connection. T
 | `auth/login` / `auth/logout` | `authenticate` | `auth/login` / `auth/logout` | Advertised only when configured credentials are missing. |
 | `session/new`, `list`, `close`, `delete` | Yes | Yes | Same store and ownership leases. |
 | `additionalDirectories` | — | Yes | Persisted in session metadata and reported on `session/list`. |
-| Config options | `select` | `select` / `boolean`, `configId` + `type` discriminator | Same selectors underneath. |
+| Config options | `select` | `select`, `configId` + `type` discriminator | Same selectors underneath; v2 boolean options are not implemented. |
 | `session/set_config_option` | Yes | Yes | Returns the complete post-change list. |
 | Prompt turn | Request/response with `stopReason` | Insertion response with `messageId`, then foreground state | v2 reports `running` / `requires_action` / `idle`. |
 | Cancellation | `session/cancel` | `session/cancel` | v2 ends `idle` with `stopReason: cancelled`. |
-| Message streaming | Chunks with `messageId` | Chunks and whole-message upserts with `messageId` | v2 patches by id (omit / null / replace). |
+| Message streaming | Chunks with `messageId` | Chunks live, whole-message upserts on replay | v2 preserves ids; patch fields (omit / null / replace) are client-applied. |
 | Tool calls | `tool_call` create + `tool_call_update` | `tool_call_update` upserts keyed by `toolCallId` | The first v2 update for an id is the create. |
 | Permissions | `session/request_permission` | `session/request_permission` with title + subject | v2 reports `requires_action` while blocked. |
 | Slash commands | `available_commands_update` | Response field / `available_commands_update`, text input discriminator | Dispatch decision shared in `acp::common`. |

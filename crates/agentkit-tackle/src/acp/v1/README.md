@@ -8,9 +8,10 @@ and re-exports only; the orchestration lives in `crate::agent`.
 
 ```
 mod.rs          module doc + re-exports (no logic)
-server.rs       run_stdio and the per-connection handler builder
-                (run_agent_over): one thin closure per ACP method,
-                delegating to the handler modules below
+server.rs       the per-connection handler builder: one thin closure
+                per ACP method, delegating to the handler modules below.
+                The version-neutral stdio and HTTP transports live in
+                acp::transport and acp::http
 initialize.rs   the initialize and authenticate handlers
 sessions.rs     the session-lifecycle handlers (new, list, close,
                 delete, load, resume, set_config_option, fork)
@@ -31,7 +32,6 @@ permission.rs   AcpPermissionRequester (the request_permission bridge)
 sink.rs         ConnectionTurnSink (TurnSink → session/update)
 client_tools.rs client-capability capture, the catalogue for a
                 connection, and the ClientToolExecutor implementation
-http.rs         the HTTP transport
 tests.rs        capability capture, per-connection state, project consent
 ```
 
