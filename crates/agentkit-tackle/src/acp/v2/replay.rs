@@ -25,6 +25,15 @@ pub(super) fn replay_updates(
         .collect()
 }
 
+fn wire_block(block: &crate::acp::common::content::Block) -> ContentBlock {
+    match serde_json::from_value(block.to_value()) {
+        Ok(block) => block,
+        Err(_) => ContentBlock::Text(agent_client_protocol::schema::v2::TextContent::new(
+            block.as_text().unwrap_or("[unsupported content]"),
+        )),
+    }
+}
+
 fn render(session_id: &SessionId, event: ReplayEvent) -> Vec<UpdateSessionNotification> {
     let update = match event {
         ReplayEvent::ToolCall {
@@ -42,14 +51,12 @@ fn render(session_id: &SessionId, event: ReplayEvent) -> Vec<UpdateSessionNotifi
         ReplayEvent::ToolResult {
             call_id,
             is_error,
-            content_json,
+            content,
         } => {
-            let content: Vec<ToolCallContent> =
-                serde_json::from_str::<Vec<ContentBlock>>(&content_json)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|block| ToolCallContent::Content(Box::new(Content::new(block))))
-                    .collect();
+            let content: Vec<ToolCallContent> = content
+                .iter()
+                .map(|block| ToolCallContent::Content(Box::new(Content::new(wire_block(block)))))
+                .collect();
             let status = if is_error {
                 ToolCallStatus::Failed
             } else {
@@ -64,12 +71,10 @@ fn render(session_id: &SessionId, event: ReplayEvent) -> Vec<UpdateSessionNotifi
         ReplayEvent::Message {
             id,
             is_user,
-            blocks_json,
+            blocks,
         } => {
-            let Ok(blocks) = serde_json::from_str::<Vec<ContentBlock>>(&blocks_json) else {
-                return Vec::new();
-            };
             let message_id = MessageId::new(id);
+            let blocks: Vec<ContentBlock> = blocks.iter().map(wire_block).collect();
             if is_user {
                 SessionUpdate::UserMessage(UserMessage::new(message_id).content(blocks))
             } else {

@@ -1,5 +1,6 @@
 //! Turn-DAG replay walk producing version-neutral events.
 
+use super::content::{self, Block};
 use crate::store::{AssembledMessage, Role};
 use std::collections::HashSet;
 
@@ -15,14 +16,14 @@ pub(crate) enum ReplayEvent {
     ToolResult {
         call_id: String,
         is_error: bool,
-        content_json: String,
+        content: Vec<Block>,
     },
     /// A user, assistant, or system message. `is_user` selects the wire chunk
     /// kind; the rest is the stored content-block JSON.
     Message {
         id: String,
         is_user: bool,
-        blocks_json: String,
+        blocks: Vec<Block>,
     },
 }
 
@@ -56,14 +57,14 @@ pub(crate) fn walk(assembled: &[AssembledMessage]) -> Vec<ReplayEvent> {
                 events.push(ReplayEvent::ToolResult {
                     call_id,
                     is_error: message.is_error == Some(true),
-                    content_json: message.content.clone(),
+                    content: content::decode(&message.content),
                 });
             }
             Role::User | Role::Assistant | Role::System => {
                 events.push(ReplayEvent::Message {
                     id: message.id.clone(),
                     is_user: matches!(message.role, Role::User),
-                    blocks_json: message.content.clone(),
+                    blocks: content::decode(&message.content),
                 });
             }
         }

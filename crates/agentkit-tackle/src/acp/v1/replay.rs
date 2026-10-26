@@ -21,10 +21,20 @@ pub(super) fn replay_updates(
         .collect()
 }
 
+fn wire_block(block: &crate::acp::common::content::Block) -> agent_client_protocol::schema::v1::ContentBlock {
+    use agent_client_protocol::schema::v1::{ContentBlock, TextContent};
+    match serde_json::from_value(block.to_value()) {
+        Ok(block) => block,
+        Err(_) => ContentBlock::Text(TextContent::new(
+            block.as_text().unwrap_or("[unsupported content]"),
+        )),
+    }
+}
+
 fn render(session_id: &SessionId, event: ReplayEvent) -> Vec<SessionNotification> {
     use agent_client_protocol::schema::v1::{
-        ContentBlock, ContentChunk, MessageId, ToolCall, ToolCallContent, ToolCallStatus,
-        ToolCallUpdate, ToolCallUpdateFields,
+        ContentChunk, MessageId, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate,
+        ToolCallUpdateFields,
     };
 
     let mut updates = Vec::new();
@@ -51,14 +61,10 @@ fn render(session_id: &SessionId, event: ReplayEvent) -> Vec<SessionNotification
         ReplayEvent::ToolResult {
             call_id,
             is_error,
-            content_json,
+            content,
         } => {
             let content: Vec<ToolCallContent> =
-                serde_json::from_str::<Vec<ContentBlock>>(&content_json)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(ToolCallContent::from)
-                    .collect();
+                content.iter().map(|block| ToolCallContent::from(wire_block(block))).collect();
             let status = if is_error {
                 ToolCallStatus::Failed
             } else {
@@ -73,14 +79,11 @@ fn render(session_id: &SessionId, event: ReplayEvent) -> Vec<SessionNotification
         ReplayEvent::Message {
             id,
             is_user,
-            blocks_json,
+            blocks,
         } => {
-            let Ok(blocks) = serde_json::from_str::<Vec<ContentBlock>>(&blocks_json) else {
-                return updates; // unparseable stored content: never crash replay
-            };
             let message_id = MessageId::new(id);
             for block in blocks {
-                let chunk = ContentChunk::new(block).message_id(message_id.clone());
+                let chunk = ContentChunk::new(wire_block(&block)).message_id(message_id.clone());
                 let update = if is_user {
                     SessionUpdate::UserMessageChunk(chunk)
                 } else {

@@ -2,6 +2,7 @@
 //! modules. Nothing here depends on a protocol version's wire types: the user
 //! message arrives already serialised.
 
+use super::content::{self, Block};
 use crate::agent::config_options::{self, Selectors};
 use crate::permissions::PermissionRequester;
 use crate::state::{LeaseHeartbeat, TackleState, LEASE_TTL_SECS};
@@ -34,9 +35,10 @@ pub(crate) enum BeginError {
 pub(crate) async fn begin_prompt_turn(
     state: &TackleState,
     store_session: SessionId,
-    blocks_json: String,
+    blocks: Vec<Block>,
     owner: &str,
 ) -> Result<BegunTurn, BeginError> {
+    let blocks_json = content::encode(&blocks);
     let acquired = {
         let mut acquired = false;
         for _ in 0..4 {
@@ -173,6 +175,7 @@ pub(crate) async fn seed_first_turn(
     session: &Session,
 ) -> Result<Message, String> {
     let seed = crate::agent::seed::first_run_seed(state);
+    let blocks = [Block::text(seed)];
     let seed_turn = state
         .db
         .append_turn(
@@ -189,7 +192,7 @@ pub(crate) async fn seed_first_turn(
         .append_message(
             &seed_turn.id,
             Role::User,
-            &serde_json::json!([{ "type": "text", "text": seed }]).to_string(),
+            &content::encode(&blocks),
             None,
             None,
             None,

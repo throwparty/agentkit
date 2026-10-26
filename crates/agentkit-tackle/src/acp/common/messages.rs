@@ -1,5 +1,6 @@
 //! Harness-authored message persistence shared by the version modules.
 
+use super::content::{self, Block};
 use crate::state::TackleState;
 use crate::store::{Message, Role, TurnId};
 use agent_client_protocol::Error;
@@ -16,7 +17,7 @@ pub(crate) async fn append_assistant_text(
         .append_message(
             turn_id,
             Role::Assistant,
-            &serde_json::json!([{ "type": "text", "text": text }]).to_string(),
+            &content::encode(&[Block::text(text)]),
             None,
             None,
             None,
