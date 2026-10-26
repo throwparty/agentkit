@@ -120,3 +120,34 @@ pub(super) async fn mcp_command(
         _ => None,
     }
 }
+
+/// The first-turn MCP status: shadowed or failed servers, or the absence of
+/// any server (which under v2 also means no client filesystem/terminal
+/// tooling). `None` when everything is healthy and at least one server exists.
+pub(super) async fn mcp_status_notice(negotiation: &ConnectionNegotiation) -> Option<String> {
+    let pool = negotiation.mcp_pool();
+    let pool = pool.lock().await;
+    let mut problems: Vec<String> = pool
+        .shadowed_servers()
+        .into_iter()
+        .map(|name| format!("{name} (shadowed by a client-declared server)"))
+        .collect();
+    for (name, (status, enabled)) in pool.statuses() {
+        if !enabled {
+            continue;
+        }
+        if let crate::mcp::ServerStatus::Failed { reason } = status {
+            problems.push(format!("{name} ({reason})"));
+        }
+    }
+    if !problems.is_empty() {
+        return Some(format!("MCP server problems: {}", problems.join("; ")));
+    }
+    if pool.statuses().is_empty() {
+        return Some(
+            "No MCP servers configured; file and command tooling is unavailable under ACP v2."
+                .to_owned(),
+        );
+    }
+    None
+}
