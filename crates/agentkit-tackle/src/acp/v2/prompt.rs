@@ -5,7 +5,7 @@
 use super::negotiation::ConnectionNegotiation;
 use crate::acp::common::dispatch::{decide, Dispatch};
 use crate::acp::common::messages::append_assistant_text;
-use crate::acp::common::session::{begin_prompt_turn, BeginError};
+use crate::acp::common::session::{begin_prompt_turn, BeginError, BegunTurn};
 use crate::agent::config_options::{effective_context_window, resolve_model_for, session_actor};
 use crate::agent::context_report::{self, ReportInputs};
 use crate::agent::fork::{self, fork_access};
@@ -39,9 +39,101 @@ pub(super) async fn handle_prompt(
     responder: Responder<PromptResponse>,
 ) -> Result<(), Error> {
     let session_id = super::store_session_id(&request.session_id);
-    let prompt_blocks = request.prompt.clone();
     let blocks_json =
         serde_json::to_string(&request.prompt).unwrap_or_else(|_| "[]".to_owned());
+
+    match begin_prompt_turn(
+        &state,
+        session_id.clone(),
+        blocks_json.clone(),
+        owner.as_str(),
+    )
+    .await
+    {
+        Ok(begun) => {
+            run_prompt_after_begin(state, negotiation, cx, owner, request, responder, begun).await
+        }
+        Err(BeginError::Owned { holder }) if holder == owner.as_str() => {
+            // v2 accepts a prompt before the previous turn ends. Wait for
+            // this connection's active turn to finish on a spawned task, so
+            // the dispatch loop stays free to route its permission replies.
+            let state = Arc::clone(&state);
+            let negotiation = Arc::clone(&negotiation);
+            let turn_cx = cx.clone();
+            let owner = Arc::clone(&owner);
+            cx.spawn(async move {
+                let deadline =
+                    tokio::time::Instant::now() + std::time::Duration::from_secs(60);
+                loop {
+                    match begin_prompt_turn(
+                        &state,
+                        session_id.clone(),
+                        blocks_json.clone(),
+                        owner.as_str(),
+                    )
+                    .await
+                    {
+                        Ok(begun) => {
+                            return run_prompt_after_begin(
+                                state,
+                                negotiation,
+                                turn_cx,
+                                owner,
+                                request,
+                                responder,
+                                begun,
+                            )
+                            .await
+                        }
+                        Err(BeginError::Owned { holder }) if holder == owner.as_str() => {}
+                        Err(BeginError::Owned { holder }) => {
+                            return responder.respond_with_error(
+                                Error::internal_error().data(serde_json::json!({
+                                    "error": "session-actively-owned",
+                                    "owner": holder,
+                                })),
+                            )
+                        }
+                        Err(BeginError::Store(err)) => {
+                            return responder
+                                .respond_with_error(Error::internal_error().data(err))
+                        }
+                    }
+                    if tokio::time::Instant::now() >= deadline {
+                        return responder.respond_with_error(
+                            Error::internal_error().data(serde_json::json!({
+                                "error": "session-busy",
+                                "reason": "timed out waiting for the active turn",
+                            })),
+                        );
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                }
+            })?;
+            Ok(())
+        }
+        Err(BeginError::Owned { holder }) => {
+            responder.respond_with_error(Error::internal_error().data(serde_json::json!({
+                "error": "session-actively-owned",
+                "owner": holder,
+            })))
+        }
+        Err(BeginError::Store(err)) => {
+            responder.respond_with_error(Error::internal_error().data(err))
+        }
+    }
+}
+
+async fn run_prompt_after_begin(
+    state: Arc<TackleState>,
+    negotiation: Arc<ConnectionNegotiation>,
+    cx: V2ConnectionTo<Client>,
+    owner: Arc<String>,
+    request: PromptRequest,
+    responder: Responder<PromptResponse>,
+    begun: BegunTurn,
+) -> Result<(), Error> {
+    let prompt_blocks = request.prompt.clone();
     let first_text = request
         .prompt
         .iter()
@@ -50,36 +142,6 @@ pub(super) async fn handle_prompt(
             _ => None,
         })
         .unwrap_or_default();
-
-    let begun = loop {
-        match begin_prompt_turn(
-            &state,
-            session_id.clone(),
-            blocks_json.clone(),
-            owner.as_str(),
-        )
-        .await
-        {
-            Ok(begun) => break begun,
-            // v2 accepts a prompt before the previous turn ends, so the same
-            // connection can have its own turn in flight. Queue behind it
-            // rather than failing the new prompt.
-            Err(BeginError::Owned { holder }) if holder == owner.as_str() => {
-                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-            }
-            Err(BeginError::Owned { holder }) => {
-                return responder.respond_with_error(Error::internal_error().data(
-                    serde_json::json!({
-                        "error": "session-actively-owned",
-                        "owner": holder,
-                    }),
-                ));
-            }
-            Err(BeginError::Store(err)) => {
-                return responder.respond_with_error(Error::internal_error().data(err));
-            }
-        }
-    };
     let _heartbeat = begun.heartbeat;
     let user_message_id = begun.user_message_id;
     let turn = begun.turn;

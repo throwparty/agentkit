@@ -34,20 +34,31 @@ pub(crate) async fn begin_prompt_turn(
     blocks_json: String,
     owner: &str,
 ) -> Result<BegunTurn, BeginError> {
-    let acquired = state
-        .db
-        .acquire_lease(&store_session, owner, LEASE_TTL_SECS)
-        .await
-        .map_err(|err| BeginError::Store(err.to_string()))?;
+    let acquired = {
+        let mut acquired = false;
+        for _ in 0..4 {
+            acquired = state
+                .db
+                .acquire_lease(&store_session, owner, LEASE_TTL_SECS)
+                .await
+                .map_err(|err| BeginError::Store(err.to_string()))?;
+            if acquired {
+                break;
+            }
+            // The lease can be released between the failed acquire and the
+            // holder lookup; retry instead of reporting a phantom owner.
+            match state.db.lease_holder(&store_session).await {
+                Ok(Some(holder)) => return Err(BeginError::Owned { holder }),
+                Ok(None) => tokio::task::yield_now().await,
+                Err(err) => return Err(BeginError::Store(err.to_string())),
+            }
+        }
+        acquired
+    };
     if !acquired {
-        let holder = state
-            .db
-            .lease_holder(&store_session)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| "another connection".into());
-        return Err(BeginError::Owned { holder });
+        return Err(BeginError::Owned {
+            holder: "another connection".into(),
+        });
     }
     let heartbeat = LeaseHeartbeat::spawn(
         std::sync::Arc::clone(&state.db),
