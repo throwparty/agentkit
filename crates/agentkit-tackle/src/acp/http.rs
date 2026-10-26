@@ -165,6 +165,9 @@ async fn handle_rpc(
     Query(params): Query<HashMap<String, String>>,
     body: String,
 ) -> axum::response::Response {
+    if !authorised(&headers, &server.token) {
+        return unauthorised();
+    }
     let existing = headers
         .get("x-acp-connection")
         .and_then(|value| value.to_str().ok())
@@ -199,8 +202,13 @@ async fn handle_rpc(
 
 async fn handle_events(
     AxumState(server): AxumState<HttpServerState>,
+    headers: HeaderMap,
     Query(params): Query<HashMap<String, String>>,
-) -> Sse<impl futures::Stream<Item = Result<SseEvent, std::convert::Infallible>>> {
+) -> Result<Sse<impl futures::Stream<Item = Result<SseEvent, std::convert::Infallible>>>, axum::http::StatusCode>
+{
+    if !authorised(&headers, &server.token) {
+        return Err(axum::http::StatusCode::UNAUTHORIZED);
+    }
     let stream: futures::stream::BoxStream<'static, Result<SseEvent, std::convert::Infallible>> =
         match params
             .get("connection")
@@ -218,13 +226,49 @@ async fn handle_events(
             }
             None => futures::stream::empty().boxed(),
         };
-    Sse::new(stream)
+    Ok(Sse::new(stream))
 }
 
 #[derive(Clone)]
 struct HttpServerState {
     state: Arc<TackleState>,
     connections: Arc<Mutex<HashMap<String, Arc<Connection>>>>,
+    /// The bearer token required on `/rpc` and `/events`; `None` on a
+    /// loopback bind, where the OS isolates the listener.
+    token: Option<Arc<str>>,
+}
+
+/// Whether a bind address is loopback-only. A hostname other than
+/// `localhost` is not assumed loopback.
+fn is_loopback(bind: &str) -> bool {
+    bind.eq_ignore_ascii_case("localhost")
+        || bind
+            .parse::<std::net::IpAddr>()
+            .map(|address| address.is_loopback())
+            .unwrap_or(false)
+}
+
+/// Whether a request carries the configured bearer token. With no token
+/// configured (a loopback bind) every request is authorised.
+fn authorised(headers: &HeaderMap, token: &Option<Arc<str>>) -> bool {
+    let Some(token) = token else {
+        return true;
+    };
+    headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .is_some_and(|value| value == token.as_ref())
+}
+
+fn unauthorised() -> axum::response::Response {
+    axum::http::Response::builder()
+        .status(axum::http::StatusCode::UNAUTHORIZED)
+        .header(axum::http::header::CONTENT_TYPE, "application/json")
+        .body(axum::body::Body::from(
+            serde_json::json!({ "error": "unauthorized" }).to_string(),
+        ))
+        .unwrap_or_else(|_| axum::response::Response::new(axum::body::Body::empty()))
 }
 
 fn send_error_to_io(_error: futures::channel::mpsc::SendError) -> std::io::Error {
@@ -237,10 +281,18 @@ pub async fn run_http(
     state: Arc<TackleState>,
     bind: &str,
     port: u16,
+    token: Option<String>,
 ) -> agent_client_protocol::Result<()> {
+    if token.is_none() && !is_loopback(bind) {
+        return Err(agent_client_protocol::Error::internal_error().data(format!(
+            "refusing to bind {bind} without --http-token"
+        )));
+    }
+    let token: Option<Arc<str>> = token.map(Arc::from);
     let server_state = HttpServerState {
         state,
         connections: Arc::new(Mutex::new(HashMap::new())),
+        token,
     };
 
     // The idle reaper: connections without POSTs for CONNECTION_IDLE
@@ -286,4 +338,20 @@ pub async fn run_http(
         .with_graceful_shutdown(crate::cli::wait_for_shutdown())
         .await
         .map_err(|err| agent_client_protocol::Error::internal_error().data(err.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loopback_binds_are_recognised() {
+        assert!(is_loopback("127.0.0.1"));
+        assert!(is_loopback("127.0.0.53"));
+        assert!(is_loopback("::1"));
+        assert!(is_loopback("localhost"));
+        assert!(!is_loopback("0.0.0.0"));
+        assert!(!is_loopback("::"));
+        assert!(!is_loopback("example.com"));
+    }
 }

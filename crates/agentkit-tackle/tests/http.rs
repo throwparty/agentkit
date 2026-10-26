@@ -8,6 +8,7 @@ use std::process::{Child, Command, Stdio};
 struct HttpAgent {
     child: Child,
     port: u16,
+    token: Option<String>,
 }
 
 impl Drop for HttpAgent {
@@ -23,6 +24,14 @@ impl Drop for HttpAgent {
 static SPAWN: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn spawn_http_agent(dir: &std::path::Path, name: &str) -> HttpAgent {
+    spawn_http_agent_with_token(dir, name, None)
+}
+
+fn spawn_http_agent_with_token(
+    dir: &std::path::Path,
+    name: &str,
+    token: Option<&str>,
+) -> HttpAgent {
     let _spawn = SPAWN.lock().unwrap_or_else(|poison| poison.into_inner());
     std::fs::create_dir_all(dir.join(name)).unwrap();
     // Pick a free port by binding one first.
@@ -30,23 +39,31 @@ fn spawn_http_agent(dir: &std::path::Path, name: &str) -> HttpAgent {
     let port = listener.local_addr().unwrap().port();
     drop(listener);
 
-    let child = Command::new(env!("CARGO_BIN_EXE_agentkit-tackle"))
-        .args([
-            "http",
-            "--bind",
-            "127.0.0.1",
-            "--http-port",
-            &port.to_string(),
-            "--config-dir",
-            dir.join(name).to_str().unwrap(),
-            "--db-path",
-            dir.join("sessions.db").to_str().unwrap(),
-        ])
+    let mut command = Command::new(env!("CARGO_BIN_EXE_agentkit-tackle"));
+    command.args([
+        "http",
+        "--bind",
+        "127.0.0.1",
+        "--http-port",
+        &port.to_string(),
+        "--config-dir",
+        dir.join(name).to_str().unwrap(),
+        "--db-path",
+        dir.join("sessions.db").to_str().unwrap(),
+    ]);
+    if let Some(token) = token {
+        command.arg("--http-token").arg(token);
+    }
+    let child = command
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .unwrap();
-    let mut agent = HttpAgent { child, port };
+    let mut agent = HttpAgent {
+        child,
+        port,
+        token: token.map(str::to_owned),
+    };
     wait_for_port(&agent);
     // A stolen port surfaces as the child exiting immediately (the
     // readiness probe may have reached the thief instead).
@@ -70,12 +87,13 @@ fn rpc(
         ),
         None => format!("http://127.0.0.1:{}/rpc", agent.port),
     };
-    let response = reqwest::blocking::Client::new()
+    let mut request = reqwest::blocking::Client::new()
         .post(url)
-        .header("content-type", "application/json")
-        .body(message.to_string())
-        .send()
-        .unwrap();
+        .header("content-type", "application/json");
+    if let Some(token) = &agent.token {
+        request = request.header("authorization", format!("Bearer {token}"));
+    }
+    let response = request.body(message.to_string()).send().unwrap();
     let header = response
         .headers()
         .get("x-acp-connection")
@@ -248,4 +266,53 @@ fn multiple_concurrent_connections_are_served() {
     );
     let sessions = response["result"]["sessions"].as_array().unwrap();
     assert_eq!(sessions.len(), 2);
+}
+
+#[test]
+fn http_token_is_required_when_configured() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = spawn_http_agent_with_token(dir.path(), "a", Some("secret"));
+    wait_for_port(&agent);
+
+    // An unauthenticated POST is refused before it can mint a connection.
+    let response = reqwest::blocking::Client::new()
+        .post(format!("http://127.0.0.1:{}/rpc", agent.port))
+        .header("content-type", "application/json")
+        .body(initialize().to_string())
+        .send()
+        .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+    // The configured bearer token opens the connection.
+    let (response, connection) = rpc(&agent, None, initialize());
+    assert_eq!(response["result"]["protocolVersion"], 1, "{response}");
+    assert!(connection.is_some(), "an authorised initialize gets a connection id");
+}
+
+#[test]
+fn non_loopback_bind_without_token_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("a")).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_agentkit-tackle"))
+        .args([
+            "http",
+            "--bind",
+            "0.0.0.0",
+            "--http-port",
+            "0",
+            "--config-dir",
+            dir.path().join("a").to_str().unwrap(),
+            "--db-path",
+            dir.path().join("sessions.db").to_str().unwrap(),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "the bind must be refused");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("http-token"),
+        "the refusal names the required token flag: {stderr}"
+    );
 }
