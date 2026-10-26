@@ -133,7 +133,7 @@ async fn run(args: cli::Cli) -> ExitCode {
             Err(err) => fail(err),
         },
         Some(bind) => {
-            match acp::http::run_http(
+            match acp::run_http(
                 state.clone(),
                 bind,
                 http_port.unwrap_or(3811),
