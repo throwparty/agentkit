@@ -1326,3 +1326,149 @@ async fn v2_set_config_option_announces_the_change() {
         .await
         .expect("v2 set config option");
 }
+
+#[derive(Debug, Clone, PartialEq)]
+enum ReplaySeen {
+    User(String),
+    AgentChunk(String),
+    Agent(String),
+    Idle,
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn v2_resume_replays_ordered_ids_and_rejects_unknown_cursors() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ScriptedModel)
+        .mount(&server)
+        .await;
+    let agent = spawn_agent(dir.path(), &model_config(&server.uri()));
+    let seen: Arc<Mutex<Vec<ReplaySeen>>> = Arc::default();
+    let handler = Arc::clone(&seen);
+
+    Client
+        .v2()
+        .on_receive_notification(
+            async move |notification: v2::UpdateSessionNotification, _cx| {
+                let mut seen = handler.lock().unwrap();
+                match &notification.update {
+                    v2::SessionUpdate::UserMessage(message) => {
+                        seen.push(ReplaySeen::User(message.message_id.to_string()));
+                    }
+                    v2::SessionUpdate::AgentMessageChunk(chunk) => {
+                        seen.push(ReplaySeen::AgentChunk(chunk.message_id.to_string()));
+                    }
+                    v2::SessionUpdate::AgentMessage(message) => {
+                        seen.push(ReplaySeen::Agent(message.message_id.to_string()));
+                    }
+                    v2::SessionUpdate::StateUpdate(v2::StateUpdate::Idle(_)) => {
+                        seen.push(ReplaySeen::Idle);
+                    }
+                    _ => {}
+                }
+                Ok(())
+            },
+            on_receive_notification!(),
+        )
+        .connect_with(agent, |connection: V2ConnectionTo<Agent>| async move {
+            connection
+                .send_request(v2::InitializeRequest::new(
+                    ProtocolVersion::V2,
+                    v2::Implementation::new("test-client", "1.0.0"),
+                ))
+                .block_task()
+                .await?;
+            let cwd = std::env::current_dir().unwrap();
+            let created = connection
+                .send_request(v2::NewSessionRequest::new(cwd.clone()))
+                .block_task()
+                .await?;
+
+            let seed_id = {
+                let mut found = None;
+                for _ in 0..200 {
+                    if let Some(ReplaySeen::User(id)) = seen.lock().unwrap().first().cloned() {
+                        found = Some(id);
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(25)).await;
+                }
+                found.expect("the first-run seed is announced")
+            };
+
+            let accepted = connection
+                .send_request(v2::PromptRequest::new(
+                    created.session_id.clone(),
+                    vec![v2::ContentBlock::Text(v2::TextContent::new("hello"))],
+                ))
+                .block_task()
+                .await?;
+            let prompt_id = accepted.message_id.to_string();
+            for _ in 0..200 {
+                if seen.lock().unwrap().contains(&ReplaySeen::Idle) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            let assistant_id = seen
+                .lock()
+                .unwrap()
+                .iter()
+                .rev()
+                .find_map(|entry| match entry {
+                    ReplaySeen::AgentChunk(id) => Some(id.clone()),
+                    _ => None,
+                })
+                .expect("the assistant message streams");
+
+            seen.lock().unwrap().clear();
+            connection
+                .send_request(
+                    v2::ResumeSessionRequest::new(created.session_id.clone(), cwd.clone())
+                        .replay_from(v2::ReplayFrom::Start(v2::ReplayFromStart::new())),
+                )
+                .block_task()
+                .await?;
+            for _ in 0..200 {
+                if seen.lock().unwrap().contains(&ReplaySeen::Idle) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            assert_eq!(
+                *seen.lock().unwrap(),
+                vec![
+                    ReplaySeen::User(seed_id),
+                    ReplaySeen::User(prompt_id),
+                    ReplaySeen::Agent(assistant_id),
+                    ReplaySeen::Idle,
+                ],
+                "replay preserves order, stored ids, and ends with the idle snapshot"
+            );
+
+            let error = match connection
+                .send_request(
+                    v2::ResumeSessionRequest::new(created.session_id, cwd).replay_from(
+                        v2::ReplayFrom::Other(v2::OtherReplayFrom::new(
+                            "_unsupported",
+                            Default::default(),
+                        )),
+                    ),
+                )
+                .block_task()
+                .await
+            {
+                Ok(_) => panic!("an unsupported replay cursor must be rejected"),
+                Err(error) => error,
+            };
+            assert_eq!(
+                i32::from(error.code),
+                -32602,
+                "unsupported cursors are invalid params: {error:?}"
+            );
+            Ok(())
+        })
+        .await
+        .expect("v2 resume replay");
+}
