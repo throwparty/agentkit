@@ -31,7 +31,7 @@ Tackle serves both ACP versions from one binary and negotiates per connection. T
 | Session fork | Unstable RFD + `/fork` fallback | Draft `session.fork` + `/fork` fallback | Advertised under `session.fork` in v2. |
 | Forwarded MCP servers | Yes | Yes | Both join the connection's shared MCP pool. |
 | Client fs/terminal tools | Yes (`client.*`) | **No** | See the parity gap below. |
-| Elicitation | Not wired | Not wired | The MCP pool's fail-closed sink declines every elicitation; the ACP bridge is a known gap (FR-018), and no elicitation ever writes the grant store. |
+| Elicitation | Yes (when the client advertises a mode) | Yes (when the client advertises a mode) | MCP elicitations become ACP `elicitation/create` requests; accept / decline / cancel map back, and no elicitation ever writes the grant store. |
 
 ## Parity gaps
 

@@ -56,7 +56,7 @@ A client such as Zed forwards its own configured MCP servers in the session requ
 
 ## Requests to the client
 
-- **`session/request_permission`** — the ask fallback. No timeout is imposed; cancellation is the only non-selection outcome. MCP elicitations are currently declined by the pool's fail-closed sink rather than forwarded over ACP.
+- **`session/request_permission`** — the ask fallback. No timeout is imposed; cancellation is the only non-selection outcome. MCP elicitations are forwarded as `elicitation/create` when the client advertises a mode and never write the grant store.
 - **Client-capability RPCs** — the `client.*` tool calls above.
 - **`fs/*` and `terminal/*`** — only ever as a consequence of a model tool call or a direct invocation.
 

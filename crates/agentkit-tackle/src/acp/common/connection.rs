@@ -5,8 +5,9 @@
 //! version router runs. The transports see only this type; how a version
 //! stores the state is its own business.
 
-use crate::mcp::McpPool;
+use crate::mcp::{DynamicElicitationSink, ElicitationSink, McpPool};
 use crate::state::TackleState;
+use std::sync::Arc;
 
 /// The version-neutral inputs a new connection needs.
 pub(crate) struct ConnectionSetup {
@@ -17,6 +18,9 @@ pub(crate) struct ConnectionSetup {
     /// The connection's MCP pool: configured servers plus anything the
     /// client forwards later.
     pub(crate) pool: McpPool,
+    /// The pool's elicitation sink handle. `initialize` points it at the
+    /// negotiated connection when the client advertises a mode.
+    pub(crate) elicitation: Arc<DynamicElicitationSink>,
 }
 
 impl ConnectionSetup {
@@ -24,10 +28,12 @@ impl ConnectionSetup {
     /// configuration.
     pub(crate) async fn load(state: &TackleState) -> Self {
         let client_tools = state.config().config.client_tools.clone().unwrap_or_default();
+        let elicitation = Arc::new(DynamicElicitationSink::default());
         Self {
             editor_fs: client_tools.fs_enabled,
             editor_terminal: client_tools.terminal_enabled,
-            pool: connect_config_servers(state).await,
+            pool: connect_config_servers(state, Arc::clone(&elicitation)).await,
+            elicitation,
         }
     }
 }
@@ -35,9 +41,15 @@ impl ConnectionSetup {
 /// A connection's configured MCP servers, connected concurrently. Each
 /// server connects on a throwaway pool, then the settled pools are
 /// absorbed into one, so a slow server never blocks another.
-async fn connect_config_servers(state: &TackleState) -> McpPool {
+async fn connect_config_servers(
+    state: &TackleState,
+    elicitation: Arc<DynamicElicitationSink>,
+) -> McpPool {
     let helper = crate::credentials::credential_helper_name(&state.config().config);
-    let new_pool = || McpPool::new().with_credential_helper(helper.clone());
+    let new_pool = || {
+        McpPool::with_sink(Arc::clone(&elicitation) as Arc<dyn ElicitationSink>)
+            .with_credential_helper(helper.clone())
+    };
     let mut pool = new_pool();
     for (server_name, server_config) in &state.config().config.mcp_servers {
         pool.register(server_name, server_config.clone());

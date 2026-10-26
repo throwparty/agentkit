@@ -44,8 +44,18 @@ where
     ));
     agent_client_protocol::Agent
         .protocol_router()
-        .with_v1(v1::agent(state.clone(), negotiation, owner.clone()))
-        .with_v2(v2::agent(state, v2_negotiation, owner))
+        .with_v1(v1::agent(
+            state.clone(),
+            negotiation,
+            owner.clone(),
+            setup.elicitation.clone(),
+        ))
+        .with_v2(v2::agent(
+            state,
+            v2_negotiation,
+            owner,
+            setup.elicitation,
+        ))
         .connect_to(transport)
         .await
 }

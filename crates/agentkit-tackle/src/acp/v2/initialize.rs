@@ -3,13 +3,19 @@
 //! advertisement.
 
 use crate::agent::seed as first_run;
+use crate::mcp::{DynamicElicitationSink, Elicitation, ElicitationResponse, ElicitationSink};
 use crate::state::TackleState;
+use agent_client_protocol::role::acp::Client;
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v2::{
-    AuthMethod, AuthMethodAgent, Implementation, InitializeRequest, InitializeResponse,
-    LoginAuthRequest, LoginAuthResponse, LogoutAuthRequest, LogoutAuthResponse,
+    AuthMethod, AuthMethodAgent, CreateElicitationRequest, ElicitationAction, ElicitationFormMode,
+    ElicitationId, ElicitationMode, ElicitationRequestScope, ElicitationSchema, ElicitationScope,
+    ElicitationUrlMode, Implementation, InitializeRequest, InitializeResponse, LoginAuthRequest,
+    LoginAuthResponse, LogoutAuthRequest, LogoutAuthResponse,
 };
-use agent_client_protocol::{Error, Responder};
+use agent_client_protocol::{Error, Responder, V2ConnectionTo};
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 /// `initialize`: respond with the v2 protocol version, the required
@@ -17,10 +23,15 @@ use std::sync::Arc;
 /// when provider credentials are missing.
 pub(super) async fn handle_initialize(
     state: Arc<TackleState>,
-    _request: InitializeRequest,
+    elicitation: Arc<DynamicElicitationSink>,
+    cx: V2ConnectionTo<Client>,
+    request: InitializeRequest,
     responder: Responder<InitializeResponse>,
 ) -> Result<(), Error> {
     tracing::info!(protocol = "v2", "ACP protocol negotiated");
+    if request.capabilities.elicitation.is_some() {
+        elicitation.set(Arc::new(AcpElicitationSink { cx }));
+    }
     let mut response = InitializeResponse::new(
         ProtocolVersion::V2,
         Implementation::new("tackle", env!("CARGO_PKG_VERSION")),
@@ -52,4 +63,51 @@ pub(super) fn handle_logout(
     responder: Responder<LogoutAuthResponse>,
 ) -> Result<(), Error> {
     responder.respond(LogoutAuthResponse::new())
+}
+
+/// The v2 `elicitation/create` bridge: MCP elicitations become ACP requests
+/// to the client. An unsupported schema or a transport error declines
+/// (fail-closed); a cancelled request maps to cancel.
+struct AcpElicitationSink {
+    cx: V2ConnectionTo<Client>,
+}
+
+impl ElicitationSink for AcpElicitationSink {
+    fn elicit(
+        &self,
+        elicitation: Elicitation,
+    ) -> Pin<Box<dyn Future<Output = ElicitationResponse> + Send + '_>> {
+        let cx = self.cx.clone();
+        Box::pin(async move {
+            let Some(request) = elicitation_request(elicitation) else {
+                return ElicitationResponse::Decline;
+            };
+            match cx.send_request(request).block_task().await {
+                Ok(response) => match response.action {
+                    ElicitationAction::Accept(_) => ElicitationResponse::Accept,
+                    ElicitationAction::Decline => ElicitationResponse::Decline,
+                    _ => ElicitationResponse::Cancel,
+                },
+                Err(_) => ElicitationResponse::Decline,
+            }
+        })
+    }
+}
+
+fn elicitation_request(elicitation: Elicitation) -> Option<CreateElicitationRequest> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let scope = ElicitationScope::Request(ElicitationRequestScope::new(id.clone()));
+    let mode = match (elicitation.url, elicitation.requested_schema) {
+        (Some(url), _) => ElicitationMode::Url(ElicitationUrlMode::new(
+            scope,
+            ElicitationId::new(id),
+            url,
+        )),
+        (None, Some(schema)) => {
+            let schema: ElicitationSchema = serde_json::from_value(schema).ok()?;
+            ElicitationMode::Form(ElicitationFormMode::new(scope, schema))
+        }
+        _ => return None,
+    };
+    Some(CreateElicitationRequest::new(mode, elicitation.message))
 }

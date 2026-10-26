@@ -15,6 +15,7 @@ pub(crate) fn agent(
     state: Arc<TackleState>,
     negotiation: Arc<ConnectionNegotiation>,
     owner: Arc<String>,
+    elicitation: Arc<crate::mcp::DynamicElicitationSink>,
 ) -> impl agent_client_protocol::ConnectTo<agent_client_protocol::role::acp::Client> {
     Agent
         .builder()
@@ -23,9 +24,17 @@ pub(crate) fn agent(
             {
                 let state = state.clone();
                 let negotiation = negotiation.clone();
-                async move |request: InitializeRequest, responder, _cx| {
-                    super::initialize::handle_initialize(state.clone(), negotiation.clone(), request, responder)
-                        .await
+                let elicitation = elicitation.clone();
+                async move |request: InitializeRequest, responder, cx| {
+                    super::initialize::handle_initialize(
+                        state.clone(),
+                        negotiation.clone(),
+                        elicitation.clone(),
+                        cx,
+                        request,
+                        responder,
+                    )
+                    .await
                 }
             },
             agent_client_protocol::on_receive_request!(),

@@ -248,9 +248,14 @@ struct RecordingSink {
 }
 
 impl ElicitationSink for RecordingSink {
-    async fn elicit(&self, elicitation: Elicitation) -> ElicitationResponse {
+    fn elicit(
+        &self,
+        elicitation: Elicitation,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = ElicitationResponse> + Send + '_>,
+    > {
         self.received.lock().unwrap().push(elicitation);
-        self.response
+        Box::pin(async move { self.response })
     }
 }
 
@@ -265,7 +270,7 @@ async fn elicitations_surface_with_origin_and_never_touch_grants() {
         received: Arc::clone(&received),
         response: ElicitationResponse::Decline,
     };
-    let mut pool = McpPool::with_sink(sink);
+    let mut pool = McpPool::with_sink(Arc::new(sink));
     pool.connect("echo", &echo_server_config()).await;
     assert_eq!(
         pool.statuses().get("echo"),
@@ -297,10 +302,10 @@ async fn elicitations_surface_with_origin_and_never_touch_grants() {
 async fn elicitation_cancellation_and_the_fail_closed_default() {
     // A cancelled permission response surfaces as an elicit cancel.
     let received = Arc::new(Mutex::new(Vec::new()));
-    let mut pool = McpPool::with_sink(RecordingSink {
+    let mut pool = McpPool::with_sink(Arc::new(RecordingSink {
         received: Arc::clone(&received),
         response: ElicitationResponse::Cancel,
-    });
+    }));
     pool.connect("echo", &echo_server_config()).await;
     let result = pool
         .call_tool("echo", "elicit", serde_json::json!({}))

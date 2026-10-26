@@ -85,7 +85,45 @@ pub trait ElicitationSink: Send + Sync + 'static {
     fn elicit(
         &self,
         elicitation: Elicitation,
-    ) -> impl std::future::Future<Output = ElicitationResponse> + Send;
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = ElicitationResponse> + Send + '_>,
+    >;
+}
+
+/// A sink that starts fail-closed and can be pointed at the negotiated
+/// connection's ACP bridge once `initialize` reveals the client's
+/// elicitation capabilities.
+#[derive(Default)]
+pub struct DynamicElicitationSink {
+    inner: std::sync::Mutex<Option<Arc<dyn ElicitationSink>>>,
+}
+
+impl DynamicElicitationSink {
+    /// Routes subsequent elicitations to `sink`.
+    pub fn set(&self, sink: Arc<dyn ElicitationSink>) {
+        *self.inner.lock().expect("elicitation sink poisoned") = Some(sink);
+    }
+}
+
+impl ElicitationSink for DynamicElicitationSink {
+    fn elicit(
+        &self,
+        elicitation: Elicitation,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = ElicitationResponse> + Send + '_>,
+    > {
+        let inner = self
+            .inner
+            .lock()
+            .expect("elicitation sink poisoned")
+            .clone();
+        Box::pin(async move {
+            match inner {
+                Some(sink) => sink.elicit(elicitation).await,
+                None => ElicitationResponse::Decline,
+            }
+        })
+    }
 }
 
 /// The fail-closed default: every elicitation is declined when no
@@ -94,20 +132,25 @@ pub trait ElicitationSink: Send + Sync + 'static {
 pub struct AutoDecline;
 
 impl ElicitationSink for AutoDecline {
-    async fn elicit(&self, _elicitation: Elicitation) -> ElicitationResponse {
-        ElicitationResponse::Decline
+    fn elicit(
+        &self,
+        _elicitation: Elicitation,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = ElicitationResponse> + Send + '_>,
+    > {
+        Box::pin(async { ElicitationResponse::Decline })
     }
 }
 
 /// The pool's client handler: advertises elicitation support and
 /// forwards every elicitation to the sink, attributed to its server.
 #[derive(Clone)]
-pub(crate) struct ForwardingHandler<S: ElicitationSink> {
-    sink: Arc<S>,
+pub(crate) struct ForwardingHandler {
+    sink: Arc<dyn ElicitationSink>,
     server: String,
 }
 
-impl<S: ElicitationSink> ClientHandler for ForwardingHandler<S> {
+impl ClientHandler for ForwardingHandler {
     fn get_info(&self) -> ClientConfig {
         let capabilities = ClientCapabilities::builder().enable_elicitation().build();
         ClientConfig::new(
@@ -152,8 +195,8 @@ impl<S: ElicitationSink> ClientHandler for ForwardingHandler<S> {
         })
     }
 }
-pub struct McpPool<S: ElicitationSink = AutoDecline> {
-    connections: BTreeMap<String, Connection<S>>,
+pub struct McpPool {
+    connections: BTreeMap<String, Connection>,
     statuses: BTreeMap<String, ServerStatus>,
     pub enabled: BTreeMap<String, bool>,
     /// The registered servers' spawn configuration, by name. Held so
@@ -164,38 +207,37 @@ pub struct McpPool<S: ElicitationSink = AutoDecline> {
     /// the same name (the client-declared server wins). Reported
     /// at the first turn.
     shadowed: BTreeSet<String>,
-    sink: Arc<S>,
+    sink: Arc<dyn ElicitationSink>,
     /// The helper that resolves `{cred:IDENTITY}` env markers at spawn.
     credential_helper: String,
 }
 
-struct Connection<S: ElicitationSink> {
-    peer: RunningService<RoleClient, ForwardingHandler<S>>,
+struct Connection {
+    peer: RunningService<RoleClient, ForwardingHandler>,
 }
 
-impl Default for McpPool<AutoDecline> {
+impl Default for McpPool {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl McpPool<AutoDecline> {
+impl McpPool {
     /// An empty pool with the fail-closed auto-decline sink.
     pub fn new() -> Self {
-        Self::with_sink(AutoDecline)
+        Self::with_sink(Arc::new(AutoDecline))
     }
-}
 
-impl<S: ElicitationSink> McpPool<S> {
-    /// An empty pool forwarding elicitations to `sink`.
-    pub fn with_sink(sink: S) -> Self {
+    /// An empty pool forwarding elicitations to `sink`. The sink can be a
+    /// dynamic handle the ACP layer points at the negotiated connection.
+    pub fn with_sink(sink: Arc<dyn ElicitationSink>) -> Self {
         Self {
             connections: BTreeMap::new(),
             statuses: BTreeMap::new(),
             enabled: BTreeMap::new(),
             configs: BTreeMap::new(),
             shadowed: BTreeSet::new(),
-            sink: Arc::new(sink),
+            sink,
             credential_helper: crate::credentials::DEFAULT_CREDENTIAL_HELPER.to_owned(),
         }
     }
@@ -274,7 +316,7 @@ impl<S: ElicitationSink> McpPool<S> {
             sink: Arc::clone(&self.sink),
             server: name.to_owned(),
         };
-        let result: Result<RunningService<RoleClient, ForwardingHandler<S>>, String> = async {
+        let result: Result<RunningService<RoleClient, ForwardingHandler>, String> = async {
             match config {
                 McpServerConfig::Stdio { command, args, env } => {
                     let mut cmd = Command::new(command);

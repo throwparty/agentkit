@@ -23,8 +23,9 @@ mod stderr;
 mod tests;
 
 pub use pool::{
-    connect_forwarded, AutoDecline, Elicitation, ElicitationResponse, ElicitationSink, McpPool,
-    McpPoolError, NamespacedTool, ServerStatus, ToolResult, TOOL_RESULT_LIMIT,
+    connect_forwarded, AutoDecline, DynamicElicitationSink, Elicitation, ElicitationResponse,
+    ElicitationSink, McpPool, McpPoolError, NamespacedTool, ServerStatus, ToolResult,
+    TOOL_RESULT_LIMIT,
 };
 pub use spawn::{
     configure_stdio_spawn, credential_marker_identity, ConfigureCommand, EnvValueError,

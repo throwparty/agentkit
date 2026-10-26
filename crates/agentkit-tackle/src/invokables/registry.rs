@@ -5,7 +5,7 @@ use super::direct::{DirectError, DirectInvocation};
 use super::invokable::Invokable;
 use super::name::{agent_name, prompt_name};
 use crate::definitions::{context, Definitions};
-use crate::mcp::{ElicitationSink, McpPool, NamespacedTool};
+use crate::mcp::{McpPool, NamespacedTool};
 use agent_client_protocol::schema::v1::{
     AvailableCommand, AvailableCommandInput, UnstructuredCommandInput,
 };
@@ -446,9 +446,9 @@ impl Registry {
     /// original size recorded; storage keeps the full content. Client
     /// capability tools take the equivalent path in the ACP layer, which
     /// owns the connection their requests travel over.
-    pub async fn execute_direct<S: ElicitationSink>(
+    pub async fn execute_direct(
         &self,
-        pool: &McpPool<S>,
+        pool: &McpPool,
         input: &DirectInvocation,
     ) -> Result<crate::mcp::ToolResult, DirectError> {
         let invokable = self
@@ -477,9 +477,9 @@ impl Registry {
     /// (nested loops and the connection's client tools), so anything else
     /// reaching here is a caller error, reported without naming a
     /// category this layer cannot execute.
-    pub async fn execute_model<S: ElicitationSink>(
+    pub async fn execute_model(
         &self,
-        pool: &McpPool<S>,
+        pool: &McpPool,
         name: &str,
         arguments: &serde_json::Value,
     ) -> Result<String, String> {
