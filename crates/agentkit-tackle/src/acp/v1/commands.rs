@@ -203,7 +203,7 @@ pub(super) async fn mcp_command(
                 None => format!("MCP server not found: {name}"),
             },
         }),
-        _ => None,
+        _ => Some("Usage: /mcp <enable|disable|status> [server-name]".to_owned()),
     }
 }
 
