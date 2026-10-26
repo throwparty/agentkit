@@ -183,8 +183,9 @@ pub(crate) fn agent(
                 let state = state.clone();
                 async move |request: SetSessionConfigOptionRequest,
                             responder,
-                            _connection: V2ConnectionTo<Client>| {
-                    super::sessions::handle_set_config(state.clone(), request, responder).await
+                            connection: V2ConnectionTo<Client>| {
+                    super::sessions::handle_set_config(state.clone(), connection, request, responder)
+                        .await
                 }
             },
             agent_client_protocol::on_receive_request!(),
