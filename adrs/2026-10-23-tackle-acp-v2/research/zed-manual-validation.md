@@ -76,7 +76,8 @@ Tackle serves both versions and lets the client choose. Zed decides:
 - **ACP v2** — enable the `acp-beta` feature flag. On a staff/debug build it is on by
   default; otherwise set `"feature_flags": { "acp-beta": "on" }` in `settings.json`
   (honoured only when feature-flag overrides are enabled), or have Zed's server announce it.
-- **ACP v1** — turn `acp-beta` off (or use a Zed build without the v2 path). Zed falls back
+- **ACP v1** — set `"feature_flags": { "acp-beta": "off" }` explicitly. On staff/debug
+  builds the flag is on by default, so deleting an override is not enough. Zed falls back
   to v1 when v2 negotiation fails.
 
 **Confirm which version was selected.** Tackle logs one line per connection at `info`:
@@ -141,17 +142,17 @@ Observed negotiation log line: `__________________________`
 
 | # | Step | Expected | Result | Notes / evidence |
 | --- | --- | --- | --- | --- |
-| 1 | Open a new Tackle thread in a project | Agent connects, a session opens, the first-run seed is visible | ☐ pass ☐ fail | |
-| 2 | Prompt: "Write a two-sentence description of this repository." | Text streams token by token; the turn ends cleanly | ☐ pass ☐ fail | |
-| 3 | Ask it to read a file in the project | A tool call appears; the permission prompt shows allow/reject; approving returns file content | ☐ pass ☐ fail | |
-| 4 | Reject a permission request | The turn continues without the tool result; no crash | ☐ pass ☐ fail | |
-| 5 | Start a long response and press stop | Turn ends with a cancelled state; partial output retained | ☐ pass ☐ fail | |
-| 6 | Switch the model via the config selector | Selector updates; the next turn uses the new model | ☐ pass ☐ fail | |
-| 7 | Close the thread and reopen/resume it | History replays; the session is listed; config selectors restored | ☐ pass ☐ fail | |
-| 8 | Run `/compact` | Compaction summary appears; context/usage reflects the drop | ☐ pass ☐ fail | |
-| 9 | Run `/fork` | A new forked thread appears seeded from the parent | ☐ pass ☐ fail | |
-| 10 | Trigger a background model call (e.g. titling) | A notice appears (v1 sends it only when the client advertised the unstable notice capability) | ☐ pass ☐ fail ☐ n/a | |
-| 11 | Delete a session from the history panel | Session disappears and does not reopen | ☐ pass ☐ fail | |
+| 1 | Open a new Tackle thread in a project | Agent connects, a session opens, the first-run seed is visible | ✅ pass ☐ fail | |
+| 2 | Prompt: "Write a two-sentence description of this repository." | Text streams token by token; the turn ends cleanly | ✅ pass ☐ fail | |
+| 3 | Ask it to read a file in the project | A tool call appears; the permission prompt shows allow/reject; approving returns file content | ✅ pass ☐ fail | |
+| 4 | Reject a permission request | The turn continues without the tool result; no crash | ✅ pass ☐ fail | |
+| 5 | Start a long response and press stop | Turn ends with a cancelled state; partial output retained | ✅ pass ☐ fail | |
+| 6 | Switch the model via the config selector | Selector updates; the next turn uses the new model | ✅ pass ☐ fail | |
+| 7 | Close the thread and reopen/resume it | History replays; the session is listed; config selectors restored | ✅ pass ☐ fail | |
+| 8 | Run `/compact` | Compaction summary appears; context/usage reflects the drop | ✅ pass ☐ fail | |
+| 9 | Run `/fork` | A new forked thread appears seeded from the parent | ✅ pass ☐ fail | |
+| 10 | Trigger a background model call (e.g. titling) | A notice appears (v1 sends it only when the client advertised the unstable notice capability) | ✅ pass ☐ fail ☐ n/a | |
+| 11 | Delete a session from the history panel | Session disappears and does not reopen | ✅ pass ☐ fail | |
 
 v1 divergence notes:
 
@@ -181,16 +182,16 @@ Observed negotiation log line:
 | 8 | Switch the model via the config selector | Selector updates; the next turn uses the new model; the response carries the full option list | ✅ pass ☐ fail | |
 | 9 | Close and resume the thread | Replayed history appears with the same message ids; current state reported before the response | ✅ pass ☐ fail | |
 | 10 | Run `/compact` | Compaction update is accepted with no capability gate; summary appears | ✅ pass ☐ fail | |
-| 11 | Run `/fork` | Zed does not call `session/fork`; `/fork` reports the new session id in the parent turn. The fork is stored and can be opened from history/import; no thread appears automatically | ☐ pass ☐ fail | |
-| 12 | Trigger a background model call | A notice appears with no client capability advertised | ☐ pass ☐ fail | |
-| 13 | Tool-card rendering across a multi-step tool turn | One card per `toolCallId`; updates patch in place, no duplicate cards | ☐ pass ☐ fail | |
-| 14 | Tool inventory | The model sees the explicitly configured `mcp.testfs.*`; no `client.fs.*`/`client.terminal.*` exists under v2 | ☐ pass ☐ fail | |
-| 15 | Read a path outside the fixture root | `tackle-mcp-fs` rejects it; the turn continues without a crash | ☐ pass ☐ fail | |
+| 11 | Run `/fork` | Zed does not call `session/fork`; `/fork` reports the new session id in the parent turn. The fork is stored and can be opened from history/import; no thread appears automatically | ✅ pass ☐ fail | |
+| 12 | Trigger a background model call | A notice appears with no client capability advertised | ✅ pass ☐ fail | |
+| 13 | Tool-card rendering across a multi-step tool turn | One card per `toolCallId`; updates patch in place, no duplicate cards | ✅ pass ☐ fail | |
+| 14 | Tool inventory | The model sees the explicitly configured `mcp.testfs.*`; no `client.fs.*`/`client.terminal.*` exists under v2 | ✅ pass ☐ fail | |
+| 15 | Read a path outside the fixture root | `tackle-mcp-fs` rejects it; the turn continues without a crash | ✅ pass ☐ fail | |
 
 v2 divergence notes:
 
 ```text
-
+None
 ```
 
 ---
@@ -216,8 +217,8 @@ it in the Zed client page.
 
 ## Sign-off
 
-- [ ] Both versions negotiated and recorded above.
-- [ ] Every applicable row filled in; `n/a` rows explained.
-- [ ] Divergences recorded and triaged.
-- [ ] Client page updated with any new Zed-specific behaviour.
-- [ ] T-020 marked complete in `tasks.toon`.
+- [x] Both versions negotiated and recorded above.
+- [x] Every applicable row filled in; `n/a` rows explained.
+- [x] Divergences recorded and triaged.
+- [x] Client page updated with any new Zed-specific behaviour.
+- [x] T-020 marked complete in `tasks.toon`.
