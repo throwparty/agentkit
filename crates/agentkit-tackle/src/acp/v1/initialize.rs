@@ -8,7 +8,7 @@ use crate::agent::seed as first_run;
 use crate::mcp::{DynamicElicitationSink, Elicitation, ElicitationResponse, ElicitationSink};
 use crate::state::TackleState;
 use agent_client_protocol::schema::v1::{
-    AuthMethod, AuthMethodAgent, AuthenticateResponse, CreateElicitationRequest, ElicitationAction,
+    AuthMethod, AuthMethodAgent, AuthenticateResponse, CreateElicitationRequest, ElicitationAction, ElicitationCapabilities,
     ElicitationFormMode, ElicitationId, ElicitationMode, ElicitationRequestScope, ElicitationSchema,
     ElicitationScope, ElicitationUrlMode, Implementation, InitializeRequest, InitializeResponse,
 };
@@ -31,8 +31,8 @@ pub(super) async fn handle_initialize(
     responder: Responder<InitializeResponse>,
 ) -> Result<(), Error> {
     negotiation.capture(&request.client_capabilities);
-    if request.client_capabilities.elicitation.is_some() {
-        elicitation.set(Arc::new(AcpElicitationSink { cx }));
+    if let Some(modes) = request.client_capabilities.elicitation.clone() {
+        elicitation.set(Arc::new(AcpElicitationSink { modes, cx }));
     }
     tracing::info!(protocol = "v1", "ACP protocol negotiated");
     // Missing provider credentials surface as authMethods: the client
@@ -61,6 +61,7 @@ pub(super) fn handle_authenticate(responder: Responder<AuthenticateResponse>) ->
 /// to the client. An unsupported schema or a transport error declines
 /// (fail-closed); a cancelled request maps to cancel.
 struct AcpElicitationSink {
+    modes: ElicitationCapabilities,
     cx: Cx,
 }
 
@@ -71,7 +72,7 @@ impl ElicitationSink for AcpElicitationSink {
     ) -> Pin<Box<dyn Future<Output = ElicitationResponse> + Send + '_>> {
         let cx = self.cx.clone();
         Box::pin(async move {
-            let Some(request) = elicitation_request(elicitation) else {
+            let Some(request) = elicitation_request(elicitation, &self.modes) else {
                 return ElicitationResponse::Decline;
             };
             match cx.send_request(request).block_task().await {
@@ -101,20 +102,81 @@ impl ElicitationSink for AcpElicitationSink {
     }
 }
 
-fn elicitation_request(elicitation: Elicitation) -> Option<CreateElicitationRequest> {
+fn elicitation_request(
+    elicitation: Elicitation,
+    modes: &ElicitationCapabilities,
+) -> Option<CreateElicitationRequest> {
     let id = uuid::Uuid::new_v4().to_string();
     let scope = ElicitationScope::Request(ElicitationRequestScope::new(id.clone()));
     let mode = match (elicitation.url, elicitation.requested_schema) {
-        (Some(url), _) => ElicitationMode::Url(ElicitationUrlMode::new(
+        (Some(url), _) if modes.supports_url() => ElicitationMode::Url(ElicitationUrlMode::new(
             scope,
             ElicitationId::new(id),
             url,
         )),
-        (None, Some(schema)) => {
+        (None, Some(schema)) if modes.supports_form() => {
             let schema: ElicitationSchema = serde_json::from_value(schema).ok()?;
             ElicitationMode::Form(ElicitationFormMode::new(scope, schema))
         }
         _ => return None,
     };
     Some(CreateElicitationRequest::new(mode, elicitation.message))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agent_client_protocol::schema::v1::{
+        ElicitationFormCapabilities, ElicitationUrlCapabilities,
+    };
+
+    fn form_request() -> Elicitation {
+        Elicitation {
+            server: "echo".to_owned(),
+            message: "Name".to_owned(),
+            requested_schema: Some(serde_json::json!({
+                "type": "object",
+                "properties": { "name": { "type": "string" } },
+                "required": ["name"],
+            })),
+            url: None,
+        }
+    }
+
+    fn url_request() -> Elicitation {
+        Elicitation {
+            server: "echo".to_owned(),
+            message: "Open".to_owned(),
+            requested_schema: None,
+            url: Some("https://example.com".to_owned()),
+        }
+    }
+
+    #[test]
+    fn url_is_declined_when_only_form_is_advertised() {
+        let modes = ElicitationCapabilities::new().form(ElicitationFormCapabilities::default());
+        assert!(elicitation_request(url_request(), &modes).is_none());
+    }
+
+    #[test]
+    fn form_is_declined_when_only_url_is_advertised() {
+        let modes = ElicitationCapabilities::new().url(ElicitationUrlCapabilities::default());
+        assert!(elicitation_request(form_request(), &modes).is_none());
+    }
+
+    #[test]
+    fn empty_capabilities_decline_both_modes() {
+        let modes = ElicitationCapabilities::new();
+        assert!(elicitation_request(form_request(), &modes).is_none());
+        assert!(elicitation_request(url_request(), &modes).is_none());
+    }
+
+    #[test]
+    fn advertised_modes_are_honoured() {
+        let both = ElicitationCapabilities::new()
+            .form(ElicitationFormCapabilities::default())
+            .url(ElicitationUrlCapabilities::default());
+        assert!(elicitation_request(form_request(), &both).is_some());
+        assert!(elicitation_request(url_request(), &both).is_some());
+    }
 }
