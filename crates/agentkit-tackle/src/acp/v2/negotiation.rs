@@ -2,18 +2,16 @@
 //! carries no client filesystem/terminal surface, so there is no capability
 //! capture here and the terminal tracker is inert.
 
+use crate::acp::common::cancellation::{CancelRegistration, CancellationRegistry};
 use crate::invokables::client_tools::TerminalTracker;
 use crate::mcp::McpPool;
 use crate::store::SessionId;
-use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 /// Per-connection v2 state, captured when the connection opens.
 pub struct ConnectionNegotiation {
-    cancellations: Mutex<BTreeMap<String, CancellationEntry>>,
-    cancellation_seq: AtomicU64,
+    cancellations: Arc<CancellationRegistry>,
     mcp_pool: Arc<tokio::sync::Mutex<McpPool>>,
 }
 
@@ -27,8 +25,7 @@ impl ConnectionNegotiation {
     /// shared with the other protocol version on the same transport.
     pub fn with_pool(mcp_pool: Arc<tokio::sync::Mutex<McpPool>>) -> Self {
         Self {
-            cancellations: Mutex::new(BTreeMap::new()),
-            cancellation_seq: AtomicU64::new(0),
+            cancellations: Arc::new(CancellationRegistry::new()),
             mcp_pool,
         }
     }
@@ -44,54 +41,18 @@ impl ConnectionNegotiation {
         self: &Arc<Self>,
         session: &str,
     ) -> (CancellationToken, CancelRegistration) {
-        let token = CancellationToken::new();
-        let id = self.cancellation_seq.fetch_add(1, Ordering::Relaxed);
-        self.cancellations
-            .lock()
-            .expect("negotiation poisoned")
-            .insert(
-                session.to_owned(),
-                CancellationEntry {
-                    token: token.clone(),
-                    id,
-                },
-            );
-        let registration = CancelRegistration {
-            negotiation: Arc::clone(self),
-            session: session.to_owned(),
-            id,
-        };
-        (token, registration)
+        self.cancellations.register(session)
     }
 
     /// Waits (briefly) for a cancelled turn to finish emitting its terminal
     /// idle, so `session/close` can order its response after it.
     pub(super) async fn wait_cancelled(&self, session: &str) {
-        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-        loop {
-            let present = self
-                .cancellations
-                .lock()
-                .expect("negotiation poisoned")
-                .contains_key(session);
-            if !present || tokio::time::Instant::now() >= deadline {
-                return;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
+        self.cancellations.wait_cancelled(session).await;
     }
 
     /// Cancels the turn in flight on `session`, if any.
     pub(super) fn cancel(&self, session: &str) {
-        let token = self
-            .cancellations
-            .lock()
-            .expect("negotiation poisoned")
-            .get(session)
-            .map(|entry| entry.token.clone());
-        if let Some(token) = token {
-            token.cancel();
-        }
+        self.cancellations.cancel(session);
     }
 }
 
@@ -105,28 +66,3 @@ impl TerminalTracker for ConnectionNegotiation {
     fn track(&self, _session: &SessionId, _created: Option<String>, _finished: Option<String>) {}
 }
 
-struct CancellationEntry {
-    token: CancellationToken,
-    id: u64,
-}
-
-/// Removes a turn's cancellation registration when the turn ends, but only if
-/// the registry still holds this registration.
-pub(super) struct CancelRegistration {
-    negotiation: Arc<ConnectionNegotiation>,
-    session: String,
-    id: u64,
-}
-
-impl Drop for CancelRegistration {
-    fn drop(&mut self) {
-        let mut cancellations = self
-            .negotiation
-            .cancellations
-            .lock()
-            .expect("negotiation poisoned");
-        if cancellations.get(&self.session).map(|entry| entry.id) == Some(self.id) {
-            cancellations.remove(&self.session);
-        }
-    }
-}
