@@ -1,12 +1,14 @@
 //! Diff an acp-tck JSON report against the committed conformance baseline.
 //!
 //! `just tackle conformance` writes a JSON report at a fixed path. This
-//! binary reads it, extracts every MANDATORY requirement whose status is not
-//! PASS, and diffs that set against the committed baseline.
+//! binary reads it, extracts every MANDATORY requirement that failed, and
+//! diffs that set against the committed baseline.
 //!
-//! The exit status is non-zero only when a MANDATORY failure is absent from
-//! the baseline. A NOT CONFORMANT verdict on its own is never a failure;
-//! baseline ids that now pass or that no longer appear in the report are
+//! The exit status is non-zero when a MANDATORY failure is absent from the
+//! baseline, when the report negotiated a different protocol version than the
+//! one under test, when the verdict is blocked by a version mismatch or
+//! authentication, when the verdict is NOT CONFORMANT, or when an advertised
+//! capability failed. Baseline ids that now pass or that no longer appear are
 //! reported as drift and tolerated. The report is read-only here.
 
 use clap::Parser;
@@ -31,11 +33,17 @@ struct Args {
     /// Write the baseline from this report's current MANDATORY failures.
     #[arg(long)]
     seed: bool,
+
+    /// Assert the report negotiated this protocol version.
+    #[arg(long)]
+    version: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
 struct Report {
     requirements: Vec<Requirement>,
+    #[serde(default)]
+    protocol_version: u64,
     #[serde(default)]
     verdict: Verdict,
 }
@@ -51,6 +59,10 @@ struct Requirement {
 struct Verdict {
     #[serde(default)]
     conformant: bool,
+    #[serde(default)]
+    blocked_by_version_mismatch: bool,
+    #[serde(default)]
+    blocked_by_auth: bool,
     #[serde(default)]
     tier_counts: BTreeMap<String, BTreeMap<String, u64>>,
 }
@@ -107,6 +119,45 @@ fn run(args: Args) -> Result<u8, String> {
         }
     }
 
+    // The verdict and its blocking signals are acceptance criteria, not
+    // advisory: a run that negotiated the wrong version, was auth-blocked,
+    // or failed an advertised capability must not pass just because its
+    // MANDATORY failures are baselined.
+    if let Some(expected) = args.version {
+        if report.protocol_version != expected {
+            eprintln!(
+                "\nprotocol version mismatch: report negotiated {}, expected {expected}",
+                report.protocol_version
+            );
+            return Ok(EXIT_NEW_FAILURE);
+        }
+    }
+    if report.verdict.blocked_by_version_mismatch {
+        eprintln!("\nverdict is blocked by a version mismatch");
+        return Ok(EXIT_NEW_FAILURE);
+    }
+    if report.verdict.blocked_by_auth {
+        eprintln!("\nverdict is blocked by authentication");
+        return Ok(EXIT_NEW_FAILURE);
+    }
+    if !report.verdict.conformant {
+        eprintln!("\nverdict is NOT CONFORMANT");
+        return Ok(EXIT_NEW_FAILURE);
+    }
+    let capability_failures: BTreeSet<&String> = report
+        .requirements
+        .iter()
+        .filter(|requirement| requirement.tier == "CAPABILITY" && requirement.status == "FAIL")
+        .map(|requirement| &requirement.id)
+        .collect();
+    if !capability_failures.is_empty() {
+        eprintln!("\nadvertised-capability failures:");
+        for id in &capability_failures {
+            eprintln!("  {id}");
+        }
+        return Ok(EXIT_NEW_FAILURE);
+    }
+
     if !new_failures.is_empty() {
         eprintln!("\nnew MANDATORY failures absent from the baseline:");
         for id in &new_failures {
@@ -151,7 +202,7 @@ fn mandatory_failures(report: &Report) -> BTreeSet<String> {
     report
         .requirements
         .iter()
-        .filter(|requirement| requirement.tier == "MANDATORY" && requirement.status != "PASS")
+        .filter(|requirement| requirement.tier == "MANDATORY" && requirement.status == "FAIL")
         .map(|requirement| requirement.id.clone())
         .collect()
 }

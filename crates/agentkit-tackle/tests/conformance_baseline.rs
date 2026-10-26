@@ -52,12 +52,54 @@ fn write_baseline(directory: &Path, ids: &BTreeSet<String>) -> PathBuf {
     path
 }
 
+/// Writes a temp copy of a fixture that is CONFORMANT and has no failing
+/// advertised capabilities, so the MANDATORY-baseline branches are reachable.
+fn conformant_report(name: &str, directory: &Path) -> PathBuf {
+    let mut report = load_report(name);
+    report["verdict"]["conformant"] = Value::Bool(true);
+    for requirement in report["requirements"]
+        .as_array_mut()
+        .expect("requirements array")
+    {
+        if requirement["tier"] == "CAPABILITY" && requirement["status"] == "FAIL" {
+            requirement["status"] = Value::String("PASS".to_owned());
+        }
+    }
+    let path = directory.join("conformant.json");
+    std::fs::write(&path, serde_json::to_string(&report).expect("serialize report"))
+        .expect("write report");
+    path
+}
+
+/// Writes a temp copy that is CONFORMANT but still has the fixture's
+/// advertised-capability failure.
+fn conformant_report_with_capability_failure(name: &str, directory: &Path) -> PathBuf {
+    let mut report = load_report(name);
+    report["verdict"]["conformant"] = Value::Bool(true);
+    let path = directory.join("capability-failure.json");
+    std::fs::write(&path, serde_json::to_string(&report).expect("serialize report"))
+        .expect("write report");
+    path
+}
+
 fn run_checker(report: &Path, baseline: &Path) -> Output {
     Command::new(CHECKER)
         .arg("--report")
         .arg(report)
         .arg("--baseline")
         .arg(baseline)
+        .output()
+        .expect("run checker")
+}
+
+fn run_checker_version(report: &Path, baseline: &Path, version: u64) -> Output {
+    Command::new(CHECKER)
+        .arg("--report")
+        .arg(report)
+        .arg("--baseline")
+        .arg(baseline)
+        .arg("--version")
+        .arg(version.to_string())
         .output()
         .expect("run checker")
 }
@@ -87,66 +129,67 @@ fn exit_code(output: &Output) -> i32 {
 
 #[test]
 fn known_failures_are_tolerated() {
-    let report = load_report("report_minimal.json");
-    let failures = ids_with_status(&report, "MANDATORY", None);
     let dir = tempfile::tempdir().expect("tempdir");
+    let report = conformant_report("report_minimal.json", dir.path());
+    let failures = ids_with_status(&load_report("report_minimal.json"), "MANDATORY", Some("FAIL"));
     let baseline = write_baseline(dir.path(), &failures);
 
-    let output = run_checker(&report_path("report_minimal.json"), &baseline);
+    let output = run_checker(&report, &baseline);
     assert_eq!(exit_code(&output), 0, "{}", stderr(&output));
     assert!(stdout(&output).contains("no new MANDATORY failures"));
 }
 
 #[test]
-fn not_conformant_verdict_alone_does_not_fail() {
+fn not_conformant_verdict_fails() {
     let report = load_report("report_minimal.json");
     assert_eq!(report["verdict"]["conformant"].as_bool(), Some(false));
-    let failures = ids_with_status(&report, "MANDATORY", None);
+    let failures = ids_with_status(&report, "MANDATORY", Some("FAIL"));
     let dir = tempfile::tempdir().expect("tempdir");
     let baseline = write_baseline(dir.path(), &failures);
 
     let output = run_checker(&report_path("report_minimal.json"), &baseline);
-    assert_eq!(exit_code(&output), 0, "{}", stderr(&output));
-    assert!(stdout(&output).contains("verdict: NOT CONFORMANT"));
+    assert_eq!(exit_code(&output), 1, "{}", stderr(&output));
+    assert!(stderr(&output).contains("NOT CONFORMANT"));
 }
 
 #[test]
 fn new_mandatory_failure_is_detected() {
-    let report = load_report("report_minimal.json");
-    let mut failures = ids_with_status(&report, "MANDATORY", None);
-    let missing = "ACME-MAND-003";
-    assert!(failures.remove(missing));
     let dir = tempfile::tempdir().expect("tempdir");
+    let report = conformant_report("report_minimal.json", dir.path());
+    let mut failures = ids_with_status(&load_report("report_minimal.json"), "MANDATORY", Some("FAIL"));
+    let missing = "ACME-MAND-002";
+    assert!(failures.remove(missing));
     let baseline = write_baseline(dir.path(), &failures);
 
-    let output = run_checker(&report_path("report_minimal.json"), &baseline);
+    let output = run_checker(&report, &baseline);
     assert_eq!(exit_code(&output), 1);
     assert!(stderr(&output).contains(missing));
 }
 
 #[test]
-fn capability_failure_does_not_fail() {
-    let report = load_report("report_minimal.json");
-    assert!(ids_with_status(&report, "CAPABILITY", Some("FAIL")).contains("ACME-CAP-001"));
-    let failures = ids_with_status(&report, "MANDATORY", None);
+fn capability_failure_fails() {
     let dir = tempfile::tempdir().expect("tempdir");
+    let report = conformant_report_with_capability_failure("report_minimal.json", dir.path());
+    assert!(ids_with_status(&load_report("report_minimal.json"), "CAPABILITY", Some("FAIL"))
+        .contains("ACME-CAP-001"));
+    let failures = ids_with_status(&load_report("report_minimal.json"), "MANDATORY", Some("FAIL"));
     let baseline = write_baseline(dir.path(), &failures);
 
-    let output = run_checker(&report_path("report_minimal.json"), &baseline);
-    assert_eq!(exit_code(&output), 0, "{}", stderr(&output));
+    let output = run_checker(&report, &baseline);
+    assert_eq!(exit_code(&output), 1, "{}", stderr(&output));
+    assert!(stderr(&output).contains("advertised-capability"));
 }
 
 #[test]
 fn now_passing_baseline_id_is_reported_as_drift() {
-    let report = load_report("report_minimal.json");
-    let passing = "ACME-MAND-001";
-    assert!(ids_with_status(&report, "MANDATORY", Some("PASS")).contains(passing));
-    let mut baseline_ids = ids_with_status(&report, "MANDATORY", None);
-    baseline_ids.insert(passing.to_owned());
     let dir = tempfile::tempdir().expect("tempdir");
+    let report = conformant_report("report_minimal.json", dir.path());
+    let passing = "ACME-MAND-001";
+    let mut baseline_ids = ids_with_status(&load_report("report_minimal.json"), "MANDATORY", Some("FAIL"));
+    baseline_ids.insert(passing.to_owned());
     let baseline = write_baseline(dir.path(), &baseline_ids);
 
-    let output = run_checker(&report_path("report_minimal.json"), &baseline);
+    let output = run_checker(&report, &baseline);
     assert_eq!(exit_code(&output), 0, "{}", stderr(&output));
     assert!(stdout(&output).contains("now pass"));
     assert!(stdout(&output).contains(passing));
@@ -154,25 +197,67 @@ fn now_passing_baseline_id_is_reported_as_drift() {
 
 #[test]
 fn stale_baseline_id_is_reported_and_tolerated() {
-    let report = load_report("report_minimal.json");
-    let stale = "ACME-GONE-999";
-    let mut baseline_ids = ids_with_status(&report, "MANDATORY", None);
-    baseline_ids.insert(stale.to_owned());
     let dir = tempfile::tempdir().expect("tempdir");
+    let report = conformant_report("report_minimal.json", dir.path());
+    let stale = "ACME-GONE-999";
+    let mut baseline_ids = ids_with_status(&load_report("report_minimal.json"), "MANDATORY", Some("FAIL"));
+    baseline_ids.insert(stale.to_owned());
     let baseline = write_baseline(dir.path(), &baseline_ids);
 
-    let output = run_checker(&report_path("report_minimal.json"), &baseline);
+    let output = run_checker(&report, &baseline);
     assert_eq!(exit_code(&output), 0, "{}", stderr(&output));
     assert!(stdout(&output).contains("no longer in the report"));
     assert!(stdout(&output).contains(stale));
 }
 
 #[test]
+fn version_mismatch_fails() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let report = conformant_report("report_minimal.json", dir.path());
+    let baseline = write_baseline(dir.path(), &BTreeSet::new());
+
+    let output = run_checker_version(&report, &baseline, 2);
+    assert_eq!(exit_code(&output), 1, "{}", stderr(&output));
+    assert!(stderr(&output).contains("protocol version mismatch"));
+}
+
+#[test]
+fn blocked_by_version_mismatch_fails() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let report = conformant_report("report_minimal.json", dir.path());
+    let mut value: Value =
+        serde_json::from_str(&std::fs::read_to_string(&report).unwrap()).unwrap();
+    value["verdict"]["blocked_by_version_mismatch"] = Value::Bool(true);
+    std::fs::write(&report, serde_json::to_string(&value).unwrap()).unwrap();
+    let baseline = write_baseline(dir.path(), &BTreeSet::new());
+
+    let output = run_checker(&report, &baseline);
+    assert_eq!(exit_code(&output), 1, "{}", stderr(&output));
+    assert!(stderr(&output).contains("version mismatch"));
+}
+
+#[test]
+fn blocked_by_auth_fails() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let report = conformant_report("report_minimal.json", dir.path());
+    let mut value: Value =
+        serde_json::from_str(&std::fs::read_to_string(&report).unwrap()).unwrap();
+    value["verdict"]["blocked_by_auth"] = Value::Bool(true);
+    std::fs::write(&report, serde_json::to_string(&value).unwrap()).unwrap();
+    let baseline = write_baseline(dir.path(), &BTreeSet::new());
+
+    let output = run_checker(&report, &baseline);
+    assert_eq!(exit_code(&output), 1, "{}", stderr(&output));
+    assert!(stderr(&output).contains("authentication"));
+}
+
+#[test]
 fn missing_baseline_errors_with_seeding_guidance() {
     let dir = tempfile::tempdir().expect("tempdir");
+    let report = conformant_report("report_minimal.json", dir.path());
     let baseline = dir.path().join("absent.txt");
 
-    let output = run_checker(&report_path("report_minimal.json"), &baseline);
+    let output = run_checker(&report, &baseline);
     assert_eq!(exit_code(&output), 2);
     assert!(stderr(&output).contains("baseline not found"));
     assert!(stderr(&output).contains("--seed"));
@@ -194,7 +279,7 @@ fn missing_requirements_field_is_an_input_error() {
 #[test]
 fn seed_writes_the_current_failures() {
     let report = load_report("report_minimal.json");
-    let failures = ids_with_status(&report, "MANDATORY", None);
+    let failures = ids_with_status(&report, "MANDATORY", Some("FAIL"));
     let dir = tempfile::tempdir().expect("tempdir");
     let baseline = dir.path().join("seeded.txt");
 
@@ -213,16 +298,16 @@ fn seed_writes_the_current_failures() {
 
 #[test]
 fn real_report_known_failures_are_tolerated() {
-    let report = load_report("report.json");
-    let failures = ids_with_status(&report, "MANDATORY", None);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let report = conformant_report("report.json", dir.path());
+    let failures = ids_with_status(&load_report("report.json"), "MANDATORY", Some("FAIL"));
     assert!(
         !failures.is_empty(),
         "fixture should carry known MANDATORY gaps"
     );
-    let dir = tempfile::tempdir().expect("tempdir");
     let baseline = write_baseline(dir.path(), &failures);
 
-    let output = run_checker(&report_path("report.json"), &baseline);
+    let output = run_checker(&report, &baseline);
     assert_eq!(exit_code(&output), 0, "{}", stderr(&output));
     assert!(stdout(&output).contains("no new MANDATORY failures"));
 }
