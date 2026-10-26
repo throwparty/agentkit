@@ -2,7 +2,7 @@
 
 **Status:** draft  **Created:** 2026-10-23  **Author:** adrian
 
-Tackle ships an ACP v1 server: the crate pins agent-client-protocol 2.2.0 and implements the stable v1 surface plus RFD-shaped fork, compaction, and notices gated behind client-advertised unstable capabilities (adrs/2026-09-17-tackle). That specification recorded ACP v2 as a non-goal (version-negotiation boundary only); this ADR revisits that decision.
+Tackle ships an ACP v1 server: the crate pins agent-client-protocol 3.5.0 and implements the stable v1 surface plus RFD-shaped fork, compaction, and notices gated behind client-advertised unstable capabilities (adrs/2026-09-17-tackle). That specification recorded ACP v2 as a non-goal (version-negotiation boundary only); this ADR revisits that decision.
 
 ACP v2 has been published as a Draft since 2026-07-20. It is a consolidation release, not a superset: initialize is restructured (required info, one capabilities object, object support markers, session-nested groups); authenticate and logout become auth/login and auth/logout; session/load and session/set_mode are removed (session/resume gains replayFrom, modes become config options); the prompt response acknowledges insertion with a messageId instead of ending the turn, with foreground state and stop reasons moving to state_update notifications; updates become ID-keyed upserts; diffs become structured file changes; and the entire client filesystem and terminal execution surface is removed. v1 remains the stable negotiated wire version and is explicitly left unchanged.
 
@@ -48,7 +48,7 @@ Tackle serves ACP v1 only. Clients that request v2 negotiate down to v1 or disco
 - Draft v2 surfaces other than session/fork: subagents, plan operations, configurable LLM providers, MCP-over-ACP, client-provided system prompts, end-turn token usage
 - Per-client behavioural quirks beyond the documented support matrix
 - Dropping or deprecating ACP v1
-- Bumping the ACP SDK beyond 2.2.0
+- Bumping the ACP SDK beyond 3.5.0
 - Re-architecting the protocol-neutral core (agent, store, invokables, mcp)
 - An MCP-over-ACP transport
 - Shipping an MCP server that re-exposes client editor capabilities, which is the client's responsibility under v2
@@ -240,7 +240,7 @@ v2 is compiled and offered unconditionally, with no compile-time or runtime feat
 
 ### NFR-006: Dependency Posture
 
-Tackle stays on agent-client-protocol 2.2.0, whose v2 schema and runtime already implement the baseline. The only new dependency is arch-lint, a development-time CI check. No SDK bump, fork, or vendored patch.
+Tackle stays on agent-client-protocol 3.5.0, whose v2 schema and runtime already implement the baseline. The only new dependency is arch-lint, a development-time CI check. No SDK bump, fork, or vendored patch.
 
 **Slug:** `dependency-posture`
 
