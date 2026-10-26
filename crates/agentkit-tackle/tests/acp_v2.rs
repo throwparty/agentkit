@@ -1182,3 +1182,56 @@ async fn v2_reports_the_absence_of_mcp_tooling() {
         .await
         .expect("v2 absence notice");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn v2_new_session_sends_a_usage_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ScriptedModel)
+        .mount(&server)
+        .await;
+    let agent = spawn_agent(dir.path(), &model_config(&server.uri()));
+    let usages: Arc<Mutex<Vec<(u64, u64)>>> = Arc::default();
+    let handler = Arc::clone(&usages);
+
+    Client
+        .v2()
+        .on_receive_notification(
+            async move |notification: v2::UpdateSessionNotification, _cx| {
+                if let v2::SessionUpdate::UsageUpdate(update) = &notification.update {
+                    handler.lock().unwrap().push((update.used, update.size));
+                }
+                Ok(())
+            },
+            on_receive_notification!(),
+        )
+        .connect_with(agent, |connection: V2ConnectionTo<Agent>| async move {
+            connection
+                .send_request(v2::InitializeRequest::new(
+                    ProtocolVersion::V2,
+                    v2::Implementation::new("test-client", "1.0.0"),
+                ))
+                .block_task()
+                .await?;
+            connection
+                .send_request(v2::NewSessionRequest::new(std::env::current_dir().unwrap()))
+                .block_task()
+                .await?;
+
+            let mut snapshot = None;
+            for _ in 0..200 {
+                if let Some(usage) = usages.lock().unwrap().first().copied() {
+                    snapshot = Some(usage);
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            let (used, size) = snapshot.expect("a usage snapshot follows session/new");
+            assert!(used > 0, "the seed contributes context: {used}");
+            assert!(size > 0, "the model window is known: {size}");
+            Ok(())
+        })
+        .await
+        .expect("v2 usage snapshot");
+}

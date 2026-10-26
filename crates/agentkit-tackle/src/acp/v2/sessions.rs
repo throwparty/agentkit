@@ -14,19 +14,68 @@ use crate::store::{ListFilter, Role, SessionId, SessionKind, TurnKind, TurnUsage
 use agent_client_protocol::role::acp::Client;
 use agent_client_protocol::schema::v2::{
     AbsolutePath, AvailableCommandsUpdate, CloseSessionRequest, CloseSessionResponse,
-    ContentBlock, DeleteSessionRequest, DeleteSessionResponse, ForkSessionRequest,
+    ContentBlock, Cost, DeleteSessionRequest, DeleteSessionResponse, ForkSessionRequest,
     ForkSessionResponse, IdleStateUpdate, ListSessionsRequest, ListSessionsResponse, MessageId,
     NewSessionRequest, NewSessionResponse, Notice, NoticeSeverity, ReplayFrom, ResumeSessionRequest,
     ResumeSessionResponse,
     SessionConfigId, SessionConfigOption, SessionConfigOptionCategory, SessionConfigOptionValue,
     SessionConfigSelectOption, SessionConfigValueId, SessionInfo, SessionUpdate,
     SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, StateUpdate,
-    UpdateSessionNotification, UserMessage,
+    UpdateSessionNotification, UsageUpdate, UserMessage,
 };
 use agent_client_protocol::{Error, Responder, V2ConnectionTo};
 use std::sync::Arc;
 
 use super::{store_session_id, wire_session_id};
+
+
+/// Sends exactly one usage snapshot for a live session: the effective model's
+/// window, the assembled-context estimate, and the cumulative cost when known.
+async fn send_usage_snapshot(
+    state: &TackleState,
+    cx: &V2ConnectionTo<Client>,
+    wire_session: &agent_client_protocol::schema::v2::SessionId,
+    store_session: &crate::store::SessionId,
+) -> Result<(), Error> {
+    let session = state
+        .db
+        .get_session(store_session)
+        .await
+        .map_err(|err| Error::internal_error().data(err.to_string()))?
+        .ok_or_else(|| Error::internal_error().data("no such session".to_owned()))?;
+    let size = config_options::resolve_model_for(state, &session, None)
+        .and_then(|model| config_options::effective_context_window(state, &model))
+        .unwrap_or(0);
+    if size == 0 {
+        return Ok(());
+    }
+    let assembled = state
+        .db
+        .assemble_context(store_session)
+        .await
+        .map_err(|err| Error::internal_error().data(err.to_string()))?;
+    let used_bytes: u64 = assembled
+        .iter()
+        .map(|item| item.message.content.len() as u64)
+        .sum();
+    let used = crate::scripts::host::estimate_tokens(used_bytes);
+    let usage = state
+        .db
+        .session_usage(store_session)
+        .await
+        .map_err(|err| Error::internal_error().data(err.to_string()))?;
+    let cost = (usage.cost_usd > 0.0).then_some(usage.cost_usd);
+    let update = UsageUpdate::new(used, size);
+    let update = match cost {
+        Some(amount) => update.cost(Cost::new(amount, "USD")),
+        None => update,
+    };
+    let _ = cx.send_notification(UpdateSessionNotification::new(
+        wire_session.clone(),
+        SessionUpdate::UsageUpdate(update),
+    ));
+    Ok(())
+}
 
 /// Maps a domain config option onto the v2 wire type (object-valued kind with
 /// a `type` discriminator and a `configId`).
@@ -203,6 +252,13 @@ pub(super) async fn handle_new_session(
             SessionUpdate::Notice(Notice::new(NoticeSeverity::Warning, text)),
         ));
     }
+    send_usage_snapshot(
+        &state,
+        &cx,
+        &wire_session_id(&session.id),
+        &session.id,
+    )
+    .await?;
     Ok(())
 }
 
@@ -346,7 +402,14 @@ pub(super) async fn handle_resume_session(
         ResumeSessionResponse::new()
             .config_options(wire_options(&selectors.options))
             .available_commands(super::commands::available_commands(&state, &negotiation).await),
+    )?;
+    send_usage_snapshot(
+        &state,
+        &cx,
+        &request.session_id,
+        &store_session_id(&request.session_id),
     )
+    .await
 }
 
 /// `session/fork`: create a seeded fork, fire the `session_forked` scripts,
@@ -362,7 +425,7 @@ pub(super) async fn handle_fork_session(
     let access = fork_access(
         &state,
         Arc::new(super::notices::ConnectionNotices {
-            cx,
+            cx: cx.clone(),
             source: "fork",
         }),
     );
@@ -382,7 +445,14 @@ pub(super) async fn handle_fork_session(
         ForkSessionResponse::new(wire_session_id(&fork.id))
             .config_options(wire_options(&selectors.options))
             .available_commands(super::commands::available_commands(&state, &negotiation).await),
+    )?;
+    send_usage_snapshot(
+        &state,
+        &cx,
+        &wire_session_id(&fork.id),
+        &fork.id,
     )
+    .await
 }
 
 /// `session/set_config_option`: apply a model or actor switch and return the
