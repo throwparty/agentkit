@@ -18,6 +18,7 @@ pub(crate) fn agent(
     state: Arc<TackleState>,
     negotiation: Arc<ConnectionNegotiation>,
     owner: Arc<String>,
+    elicitation: Arc<crate::mcp::DynamicElicitationSink>,
 ) -> impl agent_client_protocol::ConnectTo<Client> {
     Agent
         .v2()
@@ -25,10 +26,18 @@ pub(crate) fn agent(
         .on_receive_request(
             {
                 let state = state.clone();
+                let elicitation = elicitation.clone();
                 async move |request: InitializeRequest,
                             responder,
-                            _connection: V2ConnectionTo<Client>| {
-                    super::initialize::handle_initialize(state.clone(), request, responder).await
+                            connection: V2ConnectionTo<Client>| {
+                    super::initialize::handle_initialize(
+                        state.clone(),
+                        elicitation.clone(),
+                        connection,
+                        request,
+                        responder,
+                    )
+                    .await
                 }
             },
             agent_client_protocol::on_receive_request!(),

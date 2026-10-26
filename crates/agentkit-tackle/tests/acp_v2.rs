@@ -1819,3 +1819,182 @@ async fn v2_failure_after_insertion_keeps_the_message_and_reports_the_error() {
         .await
         .expect("v2 failure after insertion");
 }
+
+/// A model that asks for the echo fixture's elicitation tool, then answers
+/// once the tool result is in the transcript.
+struct ElicitModel;
+
+impl Respond for ElicitModel {
+    fn respond(&self, request: &Request) -> ResponseTemplate {
+        let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap_or_default();
+        let messages = body
+            .get("messages")
+            .and_then(|messages| messages.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let has_tool_result = messages
+            .iter()
+            .any(|message| message.get("role").and_then(|role| role.as_str()) == Some("tool"));
+        let arguments = serde_json::to_string(&serde_json::json!({})).unwrap();
+        if has_tool_result {
+            let lines = [
+                r#"data: {"id":"c1","object":"chat.completion.chunk","created":0,"model":"m","choices":[{"index":0,"delta":{"role":"assistant"}}]}"#,
+                r#"data: {"id":"c1","object":"chat.completion.chunk","created":0,"model":"m","choices":[{"index":0,"delta":{"content":"done"}}]}"#,
+                r#"data: {"id":"c1","object":"chat.completion.chunk","created":0,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#,
+                "data: [DONE]",
+            ];
+            ResponseTemplate::new(200)
+                .set_body_raw(lines.join("\n\n") + "\n", "text/event-stream")
+        } else {
+            let lines = [
+                r#"data: {"id":"c1","object":"chat.completion.chunk","created":0,"model":"m","choices":[{"index":0,"delta":{"role":"assistant"}}]}"#.to_owned(),
+                format!(
+                    r#"data: {{"id":"c1","object":"chat.completion.chunk","created":0,"model":"m","choices":[{{"index":0,"delta":{{"tool_calls":[{{"index":0,"id":"call_elicit","type":"function","function":{{"name":"mcp.echo.elicit","arguments":{arguments}}}}}]}}}}]}}"#
+                ),
+                r#"data: {"id":"c1","object":"chat.completion.chunk","created":0,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}"#.to_owned(),
+                "data: [DONE]".to_owned(),
+            ];
+            ResponseTemplate::new(200)
+                .set_body_raw(lines.join("\n\n") + "\n", "text/event-stream")
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn v2_elicitation_reaches_the_client_and_returns_to_the_tool() {
+    use agentkit_tackle::agent_client_protocol::on_receive_request;
+
+    let dir = tempfile::tempdir().unwrap();
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ElicitModel)
+        .mount(&server)
+        .await;
+    let config = format!(
+        "[endpoints.mock]\nbase_url = \"{}\"\nwire_format = \"openai-chat-completions\"\nauth = \"none\"\nmodels = [\"gpt-4o-mini\"]\n\n\
+         [defaults]\nmodel = \"mock/gpt-4o-mini\"\n\n\
+         [mcp_servers.echo]\ntransport = \"stdio\"\ncommand = {}\n\n\
+         [scripts.titling]\nevents = [\"title_turn\"]\nfile = \"builtin:titling.rhai\"\nenabled = false\n",
+        server.uri(),
+        serde_json::to_string(env!("CARGO_BIN_EXE_tackle-mcp-echo")).unwrap()
+    );
+    let agent = spawn_agent(dir.path(), &config);
+    let elicitations: Arc<Mutex<Vec<String>>> = Arc::default();
+    let seen: Arc<Mutex<Vec<Seen>>> = Arc::default();
+    let elicitations_handler = Arc::clone(&elicitations);
+    let seen_handler = Arc::clone(&seen);
+
+    Client
+        .v2()
+        .on_receive_notification(
+            async move |notification: v2::UpdateSessionNotification, _cx| {
+                let mut seen = seen_handler.lock().unwrap();
+                match &notification.update {
+                    v2::SessionUpdate::StateUpdate(v2::StateUpdate::Idle(idle)) => {
+                        seen.push(Seen::Idle(idle.stop_reason.clone()));
+                    }
+                    v2::SessionUpdate::AgentMessage(message) => {
+                        if let agentkit_tackle::agent_client_protocol::schema::MaybeUndefined::Value(
+                            blocks,
+                        ) = &message.content
+                        {
+                            for block in blocks {
+                                if let v2::ContentBlock::Text(text) = block {
+                                    seen.push(Seen::AgentText(text.text.clone()));
+                                }
+                            }
+                        }
+                    }
+                    v2::SessionUpdate::AgentMessageChunk(chunk) => {
+                        if let v2::ContentBlock::Text(text) = &chunk.content {
+                            seen.push(Seen::AgentText(text.text.clone()));
+                        }
+                    }
+                    _ => {}
+                }
+                Ok(())
+            },
+            on_receive_notification!(),
+        )
+        .on_receive_request(
+            async move |request: v2::RequestPermissionRequest, responder, _cx| {
+                let chosen = request
+                    .options
+                    .iter()
+                    .find(|option| option.name == "Allow once")
+                    .or_else(|| request.options.first());
+                match chosen {
+                    Some(option) => responder.respond(v2::RequestPermissionResponse::new(
+                        v2::RequestPermissionOutcome::Selected(
+                            v2::SelectedPermissionOutcome::new(option.option_id.clone()),
+                        ),
+                    )),
+                    None => responder.respond(v2::RequestPermissionResponse::new(
+                        v2::RequestPermissionOutcome::Cancelled,
+                    )),
+                }
+            },
+            on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |request: v2::CreateElicitationRequest, responder, _cx| {
+                elicitations_handler
+                    .lock()
+                    .unwrap()
+                    .push(request.message.clone());
+                responder.respond(v2::CreateElicitationResponse::new(
+                    v2::ElicitationAction::Accept(v2::ElicitationAcceptAction::new()),
+                ))
+            },
+            on_receive_request!(),
+        )
+        .connect_with(agent, |connection: V2ConnectionTo<Agent>| async move {
+            connection
+                .send_request(
+                    v2::InitializeRequest::new(
+                        ProtocolVersion::V2,
+                        v2::Implementation::new("test-client", "1.0.0"),
+                    )
+                    .capabilities(
+                        v2::ClientCapabilities::new().elicitation(
+                            v2::ElicitationCapabilities::new()
+                                .form(v2::ElicitationFormCapabilities::default()),
+                        ),
+                    ),
+                )
+                .block_task()
+                .await?;
+            let created = connection
+                .send_request(v2::NewSessionRequest::new(std::env::current_dir().unwrap()))
+                .block_task()
+                .await?;
+            connection
+                .send_request(v2::PromptRequest::new(
+                    created.session_id,
+                    vec![v2::ContentBlock::Text(v2::TextContent::new("elicit"))],
+                ))
+                .block_task()
+                .await?;
+            assert!(
+                wait_for_idle(&seen).await.is_some(),
+                "the tool turn reaches idle: {:?}",
+                seen.lock().unwrap()
+            );
+            assert_eq!(
+                elicitations.lock().unwrap().as_slice(),
+                ["Name the project".to_owned()],
+                "the MCP elicitation reaches the ACP client"
+            );
+            assert!(
+                seen.lock()
+                    .unwrap()
+                    .iter()
+                    .any(|entry| matches!(entry, Seen::AgentText(text) if text == "done")),
+                "the tool result returns to the model: {:?}",
+                seen.lock().unwrap()
+            );
+            Ok(())
+        })
+        .await
+        .expect("v2 elicitation");
+}
