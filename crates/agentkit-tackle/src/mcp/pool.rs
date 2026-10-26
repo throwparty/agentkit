@@ -68,12 +68,14 @@ pub struct Elicitation {
     pub url: Option<String>,
 }
 
-/// What the user (via the ACP permission surface) answered. A
-/// permission prompt cannot collect form data, so an acceptance
-/// carries no content — servers design around that.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What the user (via the ACP elicitation surface) answered. An
+/// acceptance carries the submitted form values when the client
+/// collected them.
+#[derive(Debug, Clone, PartialEq)]
 pub enum ElicitationResponse {
-    Accept,
+    Accept {
+        content: Option<serde_json::Value>,
+    },
     Decline,
     Cancel,
 }
@@ -189,7 +191,11 @@ impl ClientHandler for ForwardingHandler {
         };
         let response = self.sink.elicit(elicitation).await;
         Ok(match response {
-            ElicitationResponse::Accept => ElicitResult::new(ElicitationAction::Accept),
+            ElicitationResponse::Accept { content } => match content {
+                Some(content) => ElicitResult::new(ElicitationAction::Accept)
+                    .with_content(content),
+                None => ElicitResult::new(ElicitationAction::Accept),
+            },
             ElicitationResponse::Decline => ElicitResult::new(ElicitationAction::Decline),
             ElicitationResponse::Cancel => ElicitResult::new(ElicitationAction::Cancel),
         })

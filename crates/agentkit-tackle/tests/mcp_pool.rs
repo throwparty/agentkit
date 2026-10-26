@@ -255,7 +255,8 @@ impl ElicitationSink for RecordingSink {
         Box<dyn std::future::Future<Output = ElicitationResponse> + Send + '_>,
     > {
         self.received.lock().unwrap().push(elicitation);
-        Box::pin(async move { self.response })
+        let response = self.response.clone();
+        Box::pin(async move { response })
     }
 }
 

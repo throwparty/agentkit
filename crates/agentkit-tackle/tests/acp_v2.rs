@@ -1910,6 +1910,16 @@ async fn v2_elicitation_reaches_the_client_and_returns_to_the_tool() {
                             seen.push(Seen::AgentText(text.text.clone()));
                         }
                     }
+                    v2::SessionUpdate::ToolCallUpdate(update) => {
+                        if let agentkit_tackle::agent_client_protocol::schema::MaybeUndefined::Value(
+                            content,
+                        ) = &update.content
+                        {
+                            seen.push(Seen::ToolText(
+                                serde_json::to_string(content).unwrap_or_default(),
+                            ));
+                        }
+                    }
                     _ => {}
                 }
                 Ok(())
@@ -1942,8 +1952,15 @@ async fn v2_elicitation_reaches_the_client_and_returns_to_the_tool() {
                     .lock()
                     .unwrap()
                     .push(request.message.clone());
+                let mut content = std::collections::BTreeMap::new();
+                content.insert(
+                    "name".to_owned(),
+                    v2::ElicitationContentValue::String("tackle".to_owned()),
+                );
                 responder.respond(v2::CreateElicitationResponse::new(
-                    v2::ElicitationAction::Accept(v2::ElicitationAcceptAction::new()),
+                    v2::ElicitationAction::Accept(
+                        v2::ElicitationAcceptAction::new().content(content),
+                    ),
                 ))
             },
             on_receive_request!(),
@@ -1991,6 +2008,13 @@ async fn v2_elicitation_reaches_the_client_and_returns_to_the_tool() {
                     .iter()
                     .any(|entry| matches!(entry, Seen::AgentText(text) if text == "done")),
                 "the tool result returns to the model: {:?}",
+                seen.lock().unwrap()
+            );
+            assert!(
+                seen.lock().unwrap().iter().any(
+                    |entry| matches!(entry, Seen::ToolText(text) if text.contains("elicit:tackle"))
+                ),
+                "the accepted form content reaches the MCP server: {:?}",
                 seen.lock().unwrap()
             );
             Ok(())
