@@ -135,18 +135,32 @@ async fn dispatch_and_await(connection: &Connection, body: &str) -> String {
         let _ = connection.incoming.send(body.to_owned()).await;
         return "{}".to_owned();
     }
+    let Some(id) = id else {
+        let _ = connection.incoming.send(body.to_owned()).await;
+        return "{}".to_owned();
+    };
     let (response_tx, response_rx) = oneshot::channel::<String>();
-    if let Some(id) = &id {
-        connection
-            .pending
-            .lock()
-            .unwrap()
-            .insert(id.clone(), response_tx);
-    }
+    connection
+        .pending
+        .lock()
+        .unwrap()
+        .insert(id.clone(), response_tx);
     let _ = connection.incoming.send(body.to_owned()).await;
-    match id {
-        Some(_) => response_rx.await.unwrap_or_else(|_| "{}".to_owned()),
-        None => "{}".to_owned(),
+    match tokio::time::timeout(std::time::Duration::from_secs(300), response_rx).await {
+        Ok(Ok(response)) => response,
+        Ok(Err(_)) => {
+            connection.pending.lock().unwrap().remove(&id);
+            "{}".to_owned()
+        }
+        Err(_) => {
+            connection.pending.lock().unwrap().remove(&id);
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": { "code": -32603, "message": "request timed out" },
+            })
+            .to_string()
+        }
     }
 }
 
