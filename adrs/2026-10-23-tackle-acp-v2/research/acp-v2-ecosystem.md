@@ -12,19 +12,19 @@ numbers with dates). Where a claim rests on a vendor doc rather than code, it is
 
 ## Method
 
-Two planes, because ACP is a two-sided protocol and they fail differently:
-
-- **Clients** (editors/IDEs) *consume* tackle's ACP server. Their negotiated version and
-  advertised capabilities decide which half of tackle they can even talk to.
-- **Agent harnesses** *are* tackle's peers. Their v2 implementations are prior art, and
-  their advertised capabilities are what clients test against.
+ACP has a single client role. Editors/IDEs and agent harnesses both act as ACP clients;
+what differs is which protocol surface each opts to implement and how that surface behaves.
+This document tracks both because they exercise different parts of tackle's server: an
+editor's negotiated version and advertised capabilities decide which half of tackle it can
+talk to, while an agent harness's v2 implementation is prior art and its advertised
+capabilities are what other clients test against.
 
 Load-bearing fact up front: **the stable ACP protocol version is still 1.** v2 has been a
 Draft since 2026-07-20, its schema is still `v2.0.0-alpha.x`, and the protocol authors'
 guidance is that "v1-only peers will remain common for some time" and that v2 must not ship
 by default.
 
-## Summary — clients
+## Summary — editor and IDE clients
 
 | Client | Protocol | v2 status | Client fs/terminal today |
 |---|---|---|---|
@@ -33,7 +33,7 @@ by default.
 | Neovim (CodeCompanion, avante, agentic, hermes) | 1 | None | `fs` present; terminal varies |
 | Emacs (`agent-shell.el`) | 1 | None | `fs` only |
 
-## Summary — agent harnesses
+## Summary — agent-harness clients
 
 | Agent | Protocol | v2 status |
 |---|---|---|
@@ -56,8 +56,9 @@ release users. Details are kept current in [Tackle's Zed client page](../../../d
 Relevant wiring, from Zed `main`:
 
 - A v2 client ingress exists (`crates/agent_servers/src/acp.rs`): `V2Builder` handlers for
-  `session/update`, `terminal_update`/`terminal_output_chunk`, `request_permission`, and
-  elicitation, alongside the v1 path.
+  `session/update`, `request_permission`, and elicitation, alongside the v1 path. ACP v2
+  has no client terminal surface, so Zed's v1 terminal handlers are not part of the v2
+  path.
 - It forwards the project's configured MCP servers to the agent
   (`mcp_configurations_for_project`), and its docs state that "Zed-configured MCP servers
   may be forwarded to External Agents over ACP". That is MCP *forwarding*, not a
@@ -197,7 +198,7 @@ also gives the rationale — the surface "has not been widely adopted by both Cl
 Agents, and many Agents are moving toward their own sandboxing and execution configuration
 instead".
 
-Both halves of that are visible in the wild:
+Both sides are visible in the wild:
 
 - **Agents are already abandoning the client surface.** `pi-acp` declines `fs/*` and
   `terminal/*` and executes locally; `eve`'s ACP mode states it "does not give the agent
