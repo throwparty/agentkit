@@ -131,8 +131,13 @@ while ((m = entryRe.exec(yarnlock)) !== null) {
 }
 
 // Ranges as declared by dependents, before any resolution rewrote them.
+// Yarn quotes keys only when they would be ambiguous, which includes every
+// scoped name (`"@scope/pkg": "npm:1.0.0"`), so accept both forms.
 const declaredRanges = new Set();
-const declRe = new RegExp('^\\s+' + esc + ': "npm:([^"]+)"$', "gm");
+const declRe = new RegExp(
+  '^\\s+(?:"' + esc + '"|' + esc + '): "npm:([^"]+)"$',
+  "gm",
+);
 while ((m = declRe.exec(yarnlock)) !== null) {
   declaredRanges.add(m[1].trim());
 }
@@ -151,7 +156,10 @@ function resolveRange(range) {
   let current = range;
   while (!seen.has(current)) {
     seen.add(current);
-    const override = pj.resolutions?.[pkgName + "@" + current];
+    // A bare override (`"qs": "^6.16.0"`) rewrites every descriptor of the
+    // package, so it applies when no descriptor-specific entry matches.
+    const override =
+      pj.resolutions?.[pkgName + "@" + current] ?? pj.resolutions?.[pkgName];
     if (!override) break;
     current = override;
   }
@@ -160,6 +168,10 @@ function resolveRange(range) {
 
 const toAdd = [];
 for (const range of declaredRanges) {
+  // A bare override already covers every descriptor, so update that instead
+  // of growing the resolutions list with a redundant entry.
+  if (pj.resolutions?.[pkgName]) continue;
+
   const resolvedVer = resolveRange(range);
   if (resolvedVer === undefined || !isVuln(resolvedVer, constraints)) continue;
 
@@ -172,9 +184,9 @@ for (const range of declaredRanges) {
 }
 
 // Intermediate entries in an existing resolution chain would otherwise keep
-// pointing at the vulnerable version.
+// pointing at the vulnerable version, including bare-name overrides.
 for (const [key, value] of Object.entries(pj.resolutions ?? {})) {
-  if (!key.startsWith(pkgName + "@")) continue;
+  if (key !== pkgName && !key.startsWith(pkgName + "@")) continue;
   const resolvedVer = versionFor(value);
   if (resolvedVer === undefined || !isVuln(resolvedVer, constraints)) continue;
   if (toAdd.some(([k]) => k === key)) continue;
