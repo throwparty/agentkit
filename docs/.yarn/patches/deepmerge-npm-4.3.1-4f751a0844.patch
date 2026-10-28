@@ -1,0 +1,185 @@
+diff --git a/dist/cjs.js b/dist/cjs.js
+index 7c36cbdd06cc22c92d590be3f87a08a91ca06b40..ff13b955c77c459744bb8a62b5a9881e1b3c9bd1 100644
+--- a/dist/cjs.js
++++ b/dist/cjs.js
+@@ -76,11 +76,23 @@ function propertyIsUnsafe(target, key) {
+ 			&& Object.propertyIsEnumerable.call(target, key)) // and also unsafe if they're nonenumerable.
+ }
+ 
++function setOwnProperty(object, key, value) {
++	// Plain assignment would invoke inherited setters, and `__proto__` is an
++	// accessor on Object.prototype: a `__proto__` key taken from the target or
++	// source would replace the destination's prototype instead of becoming data.
++	Object.defineProperty(object, key, {
++		value: value,
++		enumerable: true,
++		writable: true,
++		configurable: true
++	})
++}
++
+ function mergeObject(target, source, options) {
+ 	var destination = {};
+ 	if (options.isMergeableObject(target)) {
+ 		getKeys(target).forEach(function(key) {
+-			destination[key] = cloneUnlessOtherwiseSpecified(target[key], options);
++			setOwnProperty(destination, key, cloneUnlessOtherwiseSpecified(target[key], options));
+ 		});
+ 	}
+ 	getKeys(source).forEach(function(key) {
+@@ -89,9 +101,9 @@ function mergeObject(target, source, options) {
+ 		}
+ 
+ 		if (propertyIsOnObject(target, key) && options.isMergeableObject(source[key])) {
+-			destination[key] = getMergeFunction(key, options)(target[key], source[key], options);
++			setOwnProperty(destination, key, getMergeFunction(key, options)(target[key], source[key], options));
+ 		} else {
+-			destination[key] = cloneUnlessOtherwiseSpecified(source[key], options);
++			setOwnProperty(destination, key, cloneUnlessOtherwiseSpecified(source[key], options));
+ 		}
+ 	});
+ 	return destination
+diff --git a/dist/umd.js b/dist/umd.js
+index 4071e7c56ec8e5273fe166f6e723ac460fab8b72..632944861c94a36eb21aaf3967687fc19b1e4b25 100644
+--- a/dist/umd.js
++++ b/dist/umd.js
+@@ -80,11 +80,23 @@
+ 				&& Object.propertyIsEnumerable.call(target, key)) // and also unsafe if they're nonenumerable.
+ 	}
+ 
++	function setOwnProperty(object, key, value) {
++		// Plain assignment would invoke inherited setters, and `__proto__` is an
++		// accessor on Object.prototype: a `__proto__` key taken from the target or
++		// source would replace the destination's prototype instead of becoming data.
++		Object.defineProperty(object, key, {
++			value: value,
++			enumerable: true,
++			writable: true,
++			configurable: true
++		})
++	}
++
+ 	function mergeObject(target, source, options) {
+ 		var destination = {};
+ 		if (options.isMergeableObject(target)) {
+ 			getKeys(target).forEach(function(key) {
+-				destination[key] = cloneUnlessOtherwiseSpecified(target[key], options);
++				setOwnProperty(destination, key, cloneUnlessOtherwiseSpecified(target[key], options));
+ 			});
+ 		}
+ 		getKeys(source).forEach(function(key) {
+@@ -93,9 +105,9 @@
+ 			}
+ 
+ 			if (propertyIsOnObject(target, key) && options.isMergeableObject(source[key])) {
+-				destination[key] = getMergeFunction(key, options)(target[key], source[key], options);
++				setOwnProperty(destination, key, getMergeFunction(key, options)(target[key], source[key], options));
+ 			} else {
+-				destination[key] = cloneUnlessOtherwiseSpecified(source[key], options);
++				setOwnProperty(destination, key, cloneUnlessOtherwiseSpecified(source[key], options));
+ 			}
+ 		});
+ 		return destination
+diff --git a/index.js b/index.js
+index 77968aed5d456cccc294f60912ef381fa1e52a7b..e115815950876c1f221da0388e244e28697c5dc2 100644
+--- a/index.js
++++ b/index.js
+@@ -51,11 +51,23 @@ function propertyIsUnsafe(target, key) {
+ 			&& Object.propertyIsEnumerable.call(target, key)) // and also unsafe if they're nonenumerable.
+ }
+ 
++function setOwnProperty(object, key, value) {
++	// Plain assignment would invoke inherited setters, and `__proto__` is an
++	// accessor on Object.prototype: a `__proto__` key taken from the target or
++	// source would replace the destination's prototype instead of becoming data.
++	Object.defineProperty(object, key, {
++		value: value,
++		enumerable: true,
++		writable: true,
++		configurable: true
++	})
++}
++
+ function mergeObject(target, source, options) {
+ 	var destination = {}
+ 	if (options.isMergeableObject(target)) {
+ 		getKeys(target).forEach(function(key) {
+-			destination[key] = cloneUnlessOtherwiseSpecified(target[key], options)
++			setOwnProperty(destination, key, cloneUnlessOtherwiseSpecified(target[key], options))
+ 		})
+ 	}
+ 	getKeys(source).forEach(function(key) {
+@@ -64,9 +76,9 @@ function mergeObject(target, source, options) {
+ 		}
+ 
+ 		if (propertyIsOnObject(target, key) && options.isMergeableObject(source[key])) {
+-			destination[key] = getMergeFunction(key, options)(target[key], source[key], options)
++			setOwnProperty(destination, key, getMergeFunction(key, options)(target[key], source[key], options))
+ 		} else {
+-			destination[key] = cloneUnlessOtherwiseSpecified(source[key], options)
++			setOwnProperty(destination, key, cloneUnlessOtherwiseSpecified(source[key], options))
+ 		}
+ 	})
+ 	return destination
+diff --git a/test/prototype-pollution.js b/test/prototype-pollution.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..8531e9335f25812e364ffe80c26dd6c9c33637d9
+--- /dev/null
++++ b/test/prototype-pollution.js
+@@ -0,0 +1,56 @@
++// Regression tests for GHSA-gcqx-w48m-w2h4: mergeObject() wrote destination
++// keys with plain assignment, so an own `__proto__` key reached the inherited
++// accessor and replaced the prototype of the merged object.
++//
++// Runs on node:test so the package's dev dependencies are not required.
++
++const assert = require("node:assert/strict");
++const test = require("node:test");
++
++const deepmerge = require("../dist/cjs.js");
++
++const hostile = () => JSON.parse('{"__proto__": {"polluted": true}}');
++
++function assertUnpolluted(value) {
++	assert.equal(value.polluted, undefined, "merged value inherited a polluted property");
++	assert.equal(Object.getPrototypeOf(value), Object.prototype);
++}
++
++test("source prototype key does not reach the merged object", () => {
++	assertUnpolluted(deepmerge({}, hostile()));
++});
++
++test("source prototype key does not reach the merged object when the target has no prototype", () => {
++	// propertyIsUnsafe() only inspects the target: against a null-prototype
++	// target the key is not found up the chain, so it gets copied to the
++	// destination, where plain assignment would invoke the `__proto__` setter.
++	assertUnpolluted(deepmerge(Object.create(null), hostile()));
++});
++
++test("target prototype key is copied as data, not as a prototype", () => {
++	const merged = deepmerge(hostile(), {});
++
++	assertUnpolluted(merged);
++	assert.ok(Object.hasOwn(merged, "__proto__"), "own key should be copied");
++});
++
++test("deepmerge.all does not let an early value poison a later merge", () => {
++	assertUnpolluted(deepmerge.all([Object.create(null), hostile()]));
++});
++
++test("Object.prototype is left alone", () => {
++	deepmerge(Object.create(null), hostile());
++	deepmerge(hostile(), {});
++	deepmerge.all([Object.create(null), hostile()]);
++
++	assert.equal({}.polluted, undefined);
++});
++
++test("ordinary merging is unchanged", () => {
++	assert.deepEqual(deepmerge({ a: { b: 1 } }, { a: { c: 2 } }), {
++		a: { b: 1, c: 2 },
++	});
++	assert.deepEqual(deepmerge([1, 2], [3]), [1, 2, 3]);
++	assert.deepEqual(deepmerge.all([{ a: 1 }, { b: 2 }]), { a: 1, b: 2 });
++	assert.equal(deepmerge([], "replacement"), "replacement");
++});
