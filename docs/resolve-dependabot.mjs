@@ -113,23 +113,73 @@ console.log("[2/4] Scanning yarn.lock for vulnerable resolutions …");
 
 const constraints = parseVulnRange(vulnRange);
 const esc = pkgName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const re = new RegExp('"' + esc + '@npm:([^"]+)":\\n  version: ([^\\n]+)', "g");
-const toAdd = [];
 
+// Lockfile keys hold the *resolved* descriptors, which may already have been
+// rewritten by an existing `resolutions` entry. Map every resolved range to
+// its version so declared ranges can be followed through the chain.
+const resolvedVersions = new Map();
+const entryRe = new RegExp(
+  '^"' + esc + '@npm:([^"]+)":\\n  version: ([^\\n]+)',
+  "gm",
+);
+const prefix = new RegExp("^" + esc + "@npm:");
 let m;
-while ((m = re.exec(yarnlock)) !== null) {
-  const rawRanges = m[1];
-  const resolvedVer = m[2].trim();
-  if (!isVuln(resolvedVer, constraints)) continue;
-
-  for (const r of rawRanges.split(",").map((s) => s.trim())) {
-    const rangeKey = pkgName + "@" + r;
-    const rangeVal = "^" + firstPatched;
-    toAdd.push([rangeKey, rangeVal]);
-    console.log(
-      "  " + rangeKey + " → " + rangeVal + "  (was " + resolvedVer + ")",
-    );
+while ((m = entryRe.exec(yarnlock)) !== null) {
+  for (const r of m[1].split(",").map((s) => s.trim())) {
+    resolvedVersions.set(r.replace(prefix, ""), m[2].trim());
   }
+}
+
+// Ranges as declared by dependents, before any resolution rewrote them.
+const declaredRanges = new Set();
+const declRe = new RegExp('^\\s+' + esc + ': "npm:([^"]+)"$', "gm");
+while ((m = declRe.exec(yarnlock)) !== null) {
+  declaredRanges.add(m[1].trim());
+}
+
+// Lockfile keys carry ranges (`^5.0.9`), resolution values carry ranges too,
+// so prefer the exact form and fall back to a bare version.
+function versionFor(range) {
+  return (
+    resolvedVersions.get(range) ??
+    resolvedVersions.get(range.replace(/^[\^~]/, ""))
+  );
+}
+
+function resolveRange(range) {
+  const seen = new Set();
+  let current = range;
+  while (!seen.has(current)) {
+    seen.add(current);
+    const override = pj.resolutions?.[pkgName + "@" + current];
+    if (!override) break;
+    current = override;
+  }
+  return versionFor(current);
+}
+
+const toAdd = [];
+for (const range of declaredRanges) {
+  const resolvedVer = resolveRange(range);
+  if (resolvedVer === undefined || !isVuln(resolvedVer, constraints)) continue;
+
+  const rangeKey = pkgName + "@" + range;
+  const rangeVal = "^" + firstPatched;
+  toAdd.push([rangeKey, rangeVal]);
+  console.log(
+    "  " + rangeKey + " → " + rangeVal + "  (was " + resolvedVer + ")",
+  );
+}
+
+// Intermediate entries in an existing resolution chain would otherwise keep
+// pointing at the vulnerable version.
+for (const [key, value] of Object.entries(pj.resolutions ?? {})) {
+  if (!key.startsWith(pkgName + "@")) continue;
+  const resolvedVer = versionFor(value);
+  if (resolvedVer === undefined || !isVuln(resolvedVer, constraints)) continue;
+  if (toAdd.some(([k]) => k === key)) continue;
+  toAdd.push([key, "^" + firstPatched]);
+  console.log("  " + key + " → ^" + firstPatched + "  (was " + value + ")");
 }
 
 if (toAdd.length === 0) {
