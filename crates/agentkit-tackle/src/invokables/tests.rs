@@ -6,6 +6,7 @@ use crate::mcp::NamespacedTool;
 use agent_client_protocol::schema::v1::AvailableCommandInput;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 #[test]
 fn kind_of_decodes_every_namespace() {
@@ -58,6 +59,26 @@ fn mcp_tool(server: &str, tool: &str) -> NamespacedTool {
         description: format!("{tool} on {server}"),
         schema: serde_json::json!({"type": "object"}),
     }
+}
+
+#[test]
+fn render_tools_emits_wire_names_and_matching_manifest() {
+    let definitions = definitions_with(vec![]);
+    let registry = Registry::build(&definitions, &[mcp_tool("github", "search_issues")]).unwrap();
+    let rendered = registry
+        .render_tools(
+            Arc::new(StrictToolNameScheme::default()),
+            ToolNameContext::new("test", "model", "openai-chat-completions"),
+        )
+        .unwrap();
+
+    assert_eq!(rendered.tools.len(), 1);
+    let wire = &rendered.tools[0].name;
+    assert_eq!(wire, "mcp__github__search_issues");
+    assert!(rendered.manifest.contains(wire));
+    assert!(!rendered.manifest.contains("mcp.github.search_issues"));
+    assert!(registry.resolve("mcp.github.search_issues").is_some());
+    assert!(registry.resolve(wire).is_none());
 }
 
 #[test]
