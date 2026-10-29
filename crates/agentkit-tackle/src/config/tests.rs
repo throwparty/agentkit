@@ -343,6 +343,23 @@ fn endpoint_models_accept_list_and_table_forms() {
 }
 
 #[test]
+fn endpoint_models_list_preserves_static_order() {
+    let list: Config = toml::from_str(
+        "[endpoints.test]\n\
+         base_url = \"http://localhost/v1\"\n\
+         wire_format = \"openai-chat-completions\"\n\
+         auth = \"none\"\n\
+         models = [\"b\", \"a\"]\n",
+    )
+    .unwrap();
+    let endpoint = list.endpoints.get("test").unwrap();
+    assert_eq!(
+        endpoint.models.keys().cloned().collect::<Vec<_>>(),
+        vec!["b".to_owned(), "a".to_owned()]
+    );
+}
+
+#[test]
 fn project_scripts_do_not_create_trust_entries() {
     let dir = tempfile::tempdir().unwrap();
     let project = dir.path().join("project");

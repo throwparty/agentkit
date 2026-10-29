@@ -2,7 +2,7 @@
 
 ## Tasks
 
-### T-001: Naming types and strict scheme
+### T-001: [x] Naming types and strict scheme
 
 Add `invokables/tool_name.rs` with `InvokableName`, `WireToolName`, `NamespaceSeparator`, `ToolNameScheme`, and `StrictToolNameScheme`. Implement dot-to-`__` namespace encoding, invalid-character replacement with `_`, the configured maximum length, the 8-hex SHA-256 suffix, decode, and precise errors for empty or impossible names.
 
@@ -15,7 +15,7 @@ Add `invokables/tool_name.rs` with `InvokableName`, `WireToolName`, `NamespaceSe
 | Depends On |  |
 | References | canonical-and-wire-separation,tool-name-scheme,readable-encoding,determinism,readable-default,ambiguous-underscores,empty-name,limit-too-small,non-ascii-name,no-silent-drops |
 
-### T-002: Remaining schemes and custom pattern
+### T-002: [x] Remaining schemes and custom pattern
 
 Add `GeminiToolNameScheme`, `MetaToolNameScheme`, `CohereToolNameScheme`, and `CustomToolNameScheme`. Encode and decode per scheme, including Gemini leading-character and dot rules, Meta single-dot handling, Cohere leading-digit rejection, and a custom pattern with optional maximum length.
 
@@ -28,7 +28,7 @@ Add `GeminiToolNameScheme`, `MetaToolNameScheme`, `CohereToolNameScheme`, and `C
 | Depends On | T-001 |
 | References | tool-name-scheme,custom-scheme-and-pattern,surface-defaults,invalid-custom-pattern,unimplemented-surface-scheme |
 
-### T-003: Per-request ToolNameMap
+### T-003: [x] Per-request ToolNameMap
 
 Implement `ToolNameMap` with forward and reverse maps. Support forward entries for current model-invokable names and for history tool call and result names. `encode` allocates a unique wire name and appends a hash suffix on collision or truncation. `decode` consults only the current model-invokable set and returns `None` for unknown wire names.
 
@@ -41,7 +41,7 @@ Implement `ToolNameMap` with forward and reverse maps. Support forward entries f
 | Depends On | T-001,T-002 |
 | References | tool-name-map,canonical-and-wire-separation,request-local-state,collision-handling,length-and-truncation,historical-tool-not-current,unknown-call-passthrough,dispatch-safety |
 
-### T-004: Registry render entry point
+### T-004: [x] Registry render entry point
 
 Add `RenderedTools { tools, manifest, names }` and `Registry::render_tools(scheme)`. Render model-invokable tools and the system-prompt manifest with wire names. Keep direct invocation, ACP command advertisement, and dispatch on canonical names.
 
@@ -54,7 +54,7 @@ Add `RenderedTools { tools, manifest, names }` and `Registry::render_tools(schem
 | Depends On | T-003 |
 | References | registry-render-entry-point,wire-named-manifest,manifest-matches-tools,canonical-and-wire-separation |
 
-### T-005: Endpoint and model configuration schema
+### T-005: [x] Endpoint and model configuration schema
 
 Add `ToolNamesConfig`, `ModelConfig`, and `ToolNameSchemeName`. Replace `EndpointConfig.models` with a normalized map that accepts both `models = [...]` and `models.<name>` tables. Add endpoint-level `tool_names` and per-model `models.<name>.tool_names`.
 
@@ -67,7 +67,7 @@ Add `ToolNamesConfig`, `ModelConfig`, and `ToolNameSchemeName`. Replace `Endpoin
 | Depends On | T-002 |
 | References | endpoint-and-model-configuration,backward-compatibility,list-compatibility,quoted-model-keys,scheme-and-pattern-conflict |
 
-### T-006: Scheme resolution and precedence
+### T-006: [x] Scheme resolution and precedence
 
 Add `config/tool_names.rs` with `resolve_tool_names(endpoint, model)`. Resolve model override over endpoint override over wire-format default. Validate `custom` plus `pattern`, reject unimplemented surface schemes, and return a precise error naming the endpoint and model.
 
@@ -106,7 +106,7 @@ Store the `ToolNameMap` on `RigProvider`. Change `rig::to_rig_message` to encode
 | Depends On | T-003,T-007 |
 | References | provider-encode-and-decode,canonical-persistence,strict-provider-tool-call,unknown-call-passthrough,model-returns-canonical-name,dispatch-safety |
 
-### T-009: Static model list and config call sites
+### T-009: [x] Static model list and config call sites
 
 Update `agent/config_options.rs` to use normalized map keys for the static model fallback. Update `cli/auth.rs`, `agent/script_loop.rs`, provider tests, and any `EndpointConfig` construction from `models: Vec::new()` to the default map. Preserve discovery failure notices.
 
