@@ -4,12 +4,16 @@ use super::client_tools::ClientTool;
 use super::direct::{DirectError, DirectInvocation};
 use super::invokable::Invokable;
 use super::name::{agent_name, prompt_name};
+use super::tool_name::{
+    InvokableName, ToolNameContext, ToolNameError, ToolNameMap, ToolNameScheme,
+};
 use crate::definitions::{context, Definitions};
 use crate::mcp::{McpPool, NamespacedTool};
 use agent_client_protocol::schema::v1::{
     AvailableCommand, AvailableCommandInput, UnstructuredCommandInput,
 };
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 #[derive(Debug, thiserror::Error)]
 pub enum RegistryError {
@@ -18,6 +22,58 @@ pub enum RegistryError {
         namespace: &'static str,
         name: String,
     },
+}
+
+/// The registry rendered for one model surface.
+#[derive(Debug, Clone)]
+pub struct RenderedTools {
+    pub tools: Vec<crate::providers::ToolDefinition>,
+    pub manifest: String,
+    pub names: ToolNameMap,
+}
+
+fn tool_parameters(invokable: &Invokable) -> serde_json::Value {
+    match invokable {
+        Invokable::Mcp { schema, .. } => schema.clone(),
+        Invokable::Prompt { parameters, .. } => {
+            let mut properties = serde_json::Map::new();
+            for parameter in parameters {
+                properties.insert(parameter.clone(), serde_json::json!({ "type": "string" }));
+            }
+            serde_json::json!({ "type": "object", "properties": properties })
+        }
+        Invokable::Agent { .. } => {
+            // The invocation arguments form the nested agent's prompt.
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "type": "string",
+                        "description": "The task for the sub-agent."
+                    }
+                },
+                "required": ["prompt"],
+            })
+        }
+        Invokable::Client { schema, .. } => schema.clone(),
+    }
+}
+
+fn render_manifest(invokables: &[&Invokable], names: &ToolNameMap) -> String {
+    let mut lines = vec!["Invokables available to you (invoke them as tools):".to_owned()];
+    for invokable in invokables {
+        let canonical = InvokableName::new(invokable.name());
+        let name = names
+            .get(&canonical)
+            .map(|wire| wire.as_str())
+            .unwrap_or(invokable.name());
+        lines.push(format!("- {name}: {}", invokable.description()));
+    }
+    lines.push(
+        "Never emit slash-command syntax (for example `/name` or `/!tool`) as literal text."
+            .to_owned(),
+    );
+    lines.join("\n")
 }
 
 /// A prompt expansion failure: precise, carrying the usage string for
@@ -304,55 +360,59 @@ impl Registry {
             .filter(|invokable| invokable.model_invokable())
     }
 
-    /// The tool definitions offered to the model: each
-    /// model-invokable with a JSON-schema parameter object.
+    /// The canonical tool definitions offered to the model, before surface
+    /// rendering. Used by tests and direct inspection.
     pub fn model_tools(&self) -> Vec<crate::providers::ToolDefinition> {
         self.model_invokables()
-            .map(|invokable| {
-                let parameters = match invokable {
-                    Invokable::Mcp { schema, .. } => schema.clone(),
-                    Invokable::Prompt { parameters, .. } => {
-                        let mut properties = serde_json::Map::new();
-                        for parameter in parameters {
-                            properties
-                                .insert(parameter.clone(), serde_json::json!({ "type": "string" }));
-                        }
-                        serde_json::json!({ "type": "object", "properties": properties })
-                    }
-                    Invokable::Agent { .. } => {
-                        // The invocation arguments form the nested
-                        // agent's prompt.
-                        serde_json::json!({
-                            "type": "object",
-                            "properties": {
-                                "prompt": {
-                                    "type": "string",
-                                    "description": "The task for the sub-agent."
-                                }
-                            },
-                            "required": ["prompt"],
-                        })
-                    }
-                    Invokable::Client { schema, .. } => schema.clone(),
-                };
-                crate::providers::ToolDefinition {
-                    name: invokable.name().to_owned(),
-                    description: invokable.description().to_owned(),
-                    parameters,
-                }
+            .map(|invokable| crate::providers::ToolDefinition {
+                name: invokable.name().to_owned(),
+                description: invokable.description().to_owned(),
+                parameters: tool_parameters(invokable),
             })
             .collect()
     }
 
-    /// The invokable listing injected into the system prompt.
+    /// Renders the model-facing tools, manifest, and name map for one surface.
+    pub fn render_tools(
+        &self,
+        scheme: Arc<dyn ToolNameScheme>,
+        context: ToolNameContext,
+    ) -> Result<RenderedTools, ToolNameError> {
+        let invokables = self.model_invokables().collect::<Vec<_>>();
+        let names = invokables
+            .iter()
+            .map(|invokable| InvokableName::new(invokable.name()))
+            .collect::<Vec<_>>();
+        let names = ToolNameMap::build(scheme, context, names)?;
+        let tools = invokables
+            .iter()
+            .map(|invokable| {
+                let canonical = InvokableName::new(invokable.name());
+                let name = names
+                    .get(&canonical)
+                    .expect("rendered map contains every model invokable")
+                    .as_str()
+                    .to_owned();
+                crate::providers::ToolDefinition {
+                    name,
+                    description: invokable.description().to_owned(),
+                    parameters: tool_parameters(invokable),
+                }
+            })
+            .collect();
+        let manifest = render_manifest(&invokables, &names);
+        Ok(RenderedTools {
+            tools,
+            manifest,
+            names,
+        })
+    }
+
+    /// The canonical invokable listing, without surface rendering.
     pub fn manifest(&self) -> String {
         let mut lines = vec!["Invokables available to you (invoke them as tools):".to_owned()];
         for invokable in self.model_invokables() {
-            let name = match invokable {
-                Invokable::Mcp { name, .. } | Invokable::Client { name, .. } => format!("!{name}"),
-                _ => invokable.name().to_owned(),
-            };
-            lines.push(format!("- {}: {}", name, invokable.description()));
+            lines.push(format!("- {}: {}", invokable.name(), invokable.description()));
         }
         lines.push(
             "Never emit slash-command syntax (for example `/name` or `/!tool`) as literal text."
