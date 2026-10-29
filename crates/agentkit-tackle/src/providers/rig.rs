@@ -96,3 +96,58 @@ pub(super) fn tool_calls_of(
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::invokables::tool_name::{StrictToolNameScheme, ToolNameContext};
+    use std::sync::Arc;
+
+    fn names() -> ToolNameMap {
+        ToolNameMap::build(
+            Arc::new(StrictToolNameScheme::default()),
+            ToolNameContext::new("test", "model", "openai-chat-completions"),
+            [InvokableName::new("mcp.echo.echo")],
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn history_tool_calls_are_encoded() {
+        let mut names = names();
+        let message = ChatMessage {
+            role: ChatRole::Assistant,
+            tool_calls: vec![super::super::ModelToolCall {
+                id: "call-1".to_owned(),
+                name: "mcp.echo.echo".to_owned(),
+                arguments: "{}".to_owned(),
+            }],
+            ..Default::default()
+        };
+        let Message::Assistant(assistant) = to_rig_message(&message, &mut names).unwrap() else {
+            panic!("expected an assistant message");
+        };
+        let call = assistant
+            .content
+            .iter()
+            .find_map(|content| match content {
+                AssistantContent::ToolCall(call) => Some(call),
+                _ => None,
+            })
+            .expect("tool call");
+        assert_eq!(call.function.name.to_string(), "mcp__echo__echo");
+    }
+
+    #[test]
+    fn response_tool_calls_are_decoded() {
+        let names = names();
+        let content = AssistantContent::tool_call(
+            "call-1",
+            ToolName::new("mcp__echo__echo").unwrap(),
+            serde_json::json!({}),
+        );
+        let calls = tool_calls_of(&[content], &names);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "mcp.echo.echo");
+    }
+}
