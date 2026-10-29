@@ -198,7 +198,7 @@ async fn run_agent_invocation(
         .or_else(|| config_options::resolve_model_for(state, &session, None))
         .ok_or_else(|| "no model configured for the nested agent".to_owned())?;
     let provider =
-        crate::providers::openai_chat_completions::provider_for(&model_ref, &state.config().config)
+        crate::providers::openai_chat_completions::provider_for(&model_ref, &state.config().config, None)
             .map_err(|err| err.to_string())?;
     let result = crate::agent::nested::run_nested_agent(
         &provider,

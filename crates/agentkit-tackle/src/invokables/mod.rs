@@ -25,7 +25,7 @@ mod tests;
 pub use direct::{parse_direct, DirectError, DirectInvocation};
 pub use invokable::Invokable;
 pub use name::{agent_name, kind_of, mcp_name, prompt_name, Kind};
-pub use registry::{ExpansionError, Registry, RegistryError};
+pub use registry::{ExpansionError, RenderedTools, Registry, RegistryError};
 pub use tool_name::{
     CohereToolNameScheme, CustomToolNameScheme, GeminiToolNameScheme, InvokableName,
     MetaToolNameScheme, NamespaceSeparator, StrictToolNameScheme, ToolNameContext, ToolNameError,

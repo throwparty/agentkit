@@ -1,12 +1,16 @@
 //! Shared rig-core plumbing: conversions between tackle model types and rig types.
 
 use super::{ChatContent, ChatMessage, ChatRole, ModelError};
+use crate::invokables::tool_name::{InvokableName, ToolNameMap, WireToolName};
 use rig_core::message::{
     AssistantContent, AssistantMessage, CallId, ImageMediaType, Message, MimeType, ToolName,
     UserContent,
 };
 
-pub(super) fn to_rig_message(message: &ChatMessage) -> Result<Message, ModelError> {
+pub(super) fn to_rig_message(
+    message: &ChatMessage,
+    names: &mut ToolNameMap,
+) -> Result<Message, ModelError> {
     match message.role {
         ChatRole::User => Ok(Message::User {
             content: message
@@ -30,19 +34,29 @@ pub(super) fn to_rig_message(message: &ChatMessage) -> Result<Message, ModelErro
             for call in &message.tool_calls {
                 let arguments =
                     serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
+                let wire = names
+                    .encode(&InvokableName::new(&call.name))
+                    .map_err(|error| ModelError::Context(format!("tool name: {error}")))?;
                 content.push(AssistantContent::tool_call(
                     call.id.clone(),
-                    tool_name(&call.name)?,
+                    tool_name(wire.as_str())?,
                     arguments,
                 ));
             }
             Ok(Message::Assistant(AssistantMessage::new(content)))
         }
-        ChatRole::Tool => Ok(Message::tool_result(
-            CallId::from_wire(message.tool_call_id.clone().unwrap_or_default()),
-            tool_name(message.tool_name.as_deref().unwrap_or_default())?,
-            message.text(),
-        )),
+        ChatRole::Tool => {
+            let wire = names
+                .encode(&InvokableName::new(
+                    message.tool_name.as_deref().unwrap_or_default(),
+                ))
+                .map_err(|error| ModelError::Context(format!("tool name: {error}")))?;
+            Ok(Message::tool_result(
+                CallId::from_wire(message.tool_call_id.clone().unwrap_or_default()),
+                tool_name(wire.as_str())?,
+                message.text(),
+            ))
+        }
     }
 }
 
@@ -59,15 +73,25 @@ fn assistant_image(url: &str) -> Option<AssistantContent> {
 }
 
 /// Extracts the tool calls from a completed choice.
-pub(super) fn tool_calls_of(choice: &[AssistantContent]) -> Vec<super::ModelToolCall> {
+pub(super) fn tool_calls_of(
+    choice: &[AssistantContent],
+    names: &ToolNameMap,
+) -> Vec<super::ModelToolCall> {
     choice
         .iter()
         .filter_map(|content| match content {
-            AssistantContent::ToolCall(call) => Some(super::ModelToolCall {
-                id: call.id.to_string(),
-                name: call.function.name.to_string(),
-                arguments: serde_json::Value::Object(call.function.arguments.clone()).to_string(),
-            }),
+            AssistantContent::ToolCall(call) => {
+                let wire = WireToolName::new(call.function.name.to_string());
+                let name = names
+                    .decode(&wire)
+                    .map(|canonical| canonical.as_str().to_owned())
+                    .unwrap_or_else(|| call.function.name.to_string());
+                Some(super::ModelToolCall {
+                    id: call.id.to_string(),
+                    name,
+                    arguments: serde_json::Value::Object(call.function.arguments.clone()).to_string(),
+                })
+            }
             _ => None,
         })
         .collect()

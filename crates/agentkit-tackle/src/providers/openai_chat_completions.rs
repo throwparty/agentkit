@@ -2,8 +2,9 @@
 
 use super::rig::{to_rig_message, tool_calls_of};
 use super::{ModelError, ModelProvider, ModelRequest, ModelResponse, ModelUsage};
-use crate::config::Config;
+use crate::config::{resolve_tool_names, Config};
 use crate::credentials::{credential_helper_name, resolve_credential};
+use crate::invokables::tool_name::{ToolNameContext, ToolNameMap};
 use rig_core::completion::{CompletionRequest, ToolDefinition};
 use rig_core::driver::Model;
 use rig_core::message::{AssistantContent, Message, ToolName};
@@ -16,6 +17,7 @@ pub struct RigProvider {
     /// The chat-completions model: the chat client (not the
     /// responses-API default) provides this model type.
     model: Model<openai::wire::Chat>,
+    names: ToolNameMap,
 }
 
 impl RigProvider {
@@ -25,26 +27,32 @@ impl RigProvider {
         base_url: &str,
         credential: &str,
         model: &str,
+        names: ToolNameMap,
     ) -> Result<Self, ModelError> {
         let client = openai::OpenAIConfig::new(credential.to_owned())
             .with_base_url(base_url)
             .client();
         Ok(Self {
             model: client.chat(model),
+            names,
         })
     }
 
-    fn completion(&self, request: ModelRequest) -> Result<CompletionRequest, ModelError> {
+    fn completion(
+        &self,
+        request: ModelRequest,
+    ) -> Result<(CompletionRequest, ToolNameMap), ModelError> {
+        let mut names = self.names.clone();
         // The last message is the prompt; everything before is history;
         // the system prompt rides the preamble (a leading System message).
         let mut messages = request.messages.into_iter();
         let prompt = messages
             .next_back()
-            .map(|message| to_rig_message(&message))
+            .map(|message| to_rig_message(&message, &mut names))
             .transpose()?
             .unwrap_or_else(|| Message::user(""));
         let history = messages
-            .map(|message| to_rig_message(&message))
+            .map(|message| to_rig_message(&message, &mut names))
             .collect::<Result<Vec<_>, _>>()?;
         let mut builder = CompletionRequest::new(prompt)
             .messages(history)
@@ -54,13 +62,17 @@ impl RigProvider {
                 .map_err(|_| ModelError::Context("empty tool name".to_owned()))?;
             builder = builder.tool(ToolDefinition::new(name, tool.description, tool.parameters));
         }
-        Ok(builder)
+        Ok((builder, names))
     }
 }
 
 /// Constructs the concrete provider for an endpoint-qualified model from
 /// the configuration, resolving credentials through the helper.
-pub fn provider_for(model_ref: &str, config: &Config) -> Result<RigProvider, ModelError> {
+pub fn provider_for(
+    model_ref: &str,
+    config: &Config,
+    names: Option<ToolNameMap>,
+) -> Result<RigProvider, ModelError> {
     let Some((endpoint_name, model)) = model_ref.split_once('/') else {
         return Err(ModelError::UnknownModel {
             model: model_ref.to_owned(),
@@ -83,7 +95,23 @@ pub fn provider_for(model_ref: &str, config: &Config) -> Result<RigProvider, Mod
             })?
         }
     };
-    RigProvider::openai_completions(&endpoint.base_url, credential.expose_secret(), model)
+    let names = match names {
+        Some(names) => names,
+        None => {
+            let scheme = resolve_tool_names(endpoint_name, endpoint, model)
+                .map_err(|error| ModelError::Context(error.to_string()))?;
+            ToolNameMap::new(
+                scheme,
+                ToolNameContext::new(endpoint_name, model, endpoint.wire_format.as_str()),
+            )
+        }
+    };
+    RigProvider::openai_completions(
+        &endpoint.base_url,
+        credential.expose_secret(),
+        model,
+        names,
+    )
 }
 
 impl ModelProvider for RigProvider {
@@ -95,7 +123,7 @@ impl ModelProvider for RigProvider {
     ) -> Result<ModelResponse, ModelError> {
         use futures::StreamExt as _;
 
-        let completion = self.completion(request)?;
+        let (completion, names) = self.completion(request)?;
         let mut stream = self
             .model
             .stream(completion)
@@ -157,7 +185,7 @@ impl ModelProvider for RigProvider {
         };
         Ok(ModelResponse {
             text,
-            tool_calls: tool_calls_of(&response.choice),
+            tool_calls: tool_calls_of(&response.choice, &names),
             usage,
         })
     }
@@ -246,7 +274,7 @@ mod tests {
     #[test]
     fn unknown_model_ref_is_rejected() {
         let config = config_with_endpoint("http://localhost", Auth::None);
-        let Err(err) = provider_for("missing/model", &config) else {
+        let Err(err) = provider_for("missing/model", &config, None) else {
             panic!("expected an unknown-model rejection");
         };
         assert!(err.to_string().contains("not configured"), "{err}");
@@ -265,7 +293,7 @@ mod tests {
             .await;
 
         let config = config_with_endpoint(&server.uri(), Auth::None);
-        let provider = provider_for("test/test-model", &config).unwrap();
+        let provider = provider_for("test/test-model", &config, None).unwrap();
         let response = provider
             .stream_completion(
                 ModelRequest {
@@ -335,7 +363,7 @@ mod tests {
             .await;
 
         let config = config_with_endpoint(&server.uri(), Auth::None);
-        let provider = provider_for("test/test-model", &config).unwrap();
+        let provider = provider_for("test/test-model", &config, None).unwrap();
         provider
             .stream_completion(
                 ModelRequest {
@@ -405,7 +433,7 @@ mod tests {
             let _guard = PATH_LOCK.lock().unwrap();
             let path_var = std::env::var("PATH").unwrap();
             std::env::set_var("PATH", format!("{}:{}", dir.path().display(), path_var));
-            let provider = provider_for("test/model", &config);
+            let provider = provider_for("test/model", &config, None);
             std::env::set_var("PATH", path_var);
             provider.unwrap()
         };
@@ -460,7 +488,7 @@ mod tests {
             .await;
 
         let config = config_with_endpoint(&server.uri(), Auth::None);
-        let provider = provider_for("test/streaming-model", &config).unwrap();
+        let provider = provider_for("test/streaming-model", &config, None).unwrap();
 
         let mut deltas = Vec::new();
         let response = provider
@@ -512,7 +540,7 @@ mod tests {
             .await;
 
         let config = config_with_endpoint(&server.uri(), Auth::None);
-        let provider = provider_for("test/streaming-model", &config).unwrap();
+        let provider = provider_for("test/streaming-model", &config, None).unwrap();
 
         let mut thoughts = Vec::new();
         let mut deltas = Vec::new();
@@ -590,7 +618,7 @@ mod tests {
         let assistant_id = "msg-assistant-1";
 
         let config = config_with_endpoint(&server.uri(), Auth::None);
-        let provider = provider_for("test/model", &config).unwrap();
+        let provider = provider_for("test/model", &config, None).unwrap();
 
         let mut deltas = Vec::new();
         let mut usage_updates = Vec::new();
@@ -660,7 +688,7 @@ mod tests {
             .await;
 
         let config = config_with_endpoint(&server.uri(), Auth::None);
-        let provider = provider_for("test/model", &config).unwrap();
+        let provider = provider_for("test/model", &config, None).unwrap();
         let mut retries = Vec::new();
         let outcome = retry_completion(&provider, "test/model", &mut retries)
             .await
@@ -704,7 +732,7 @@ mod tests {
             .unwrap();
 
         let config = config_with_endpoint(&server.uri(), Auth::None);
-        let provider = provider_for("test/model", &config).unwrap();
+        let provider = provider_for("test/model", &config, None).unwrap();
         let outcome = crate::agent::turn::run_turn(
             &provider,
             &store,
@@ -776,7 +804,7 @@ data: {not json}
             .unwrap();
 
         let config = config_with_endpoint(&server.uri(), Auth::None);
-        let provider = provider_for("test/model", &config).unwrap();
+        let provider = provider_for("test/model", &config, None).unwrap();
         let outcome = crate::agent::turn::run_turn(
             &provider,
             &store,

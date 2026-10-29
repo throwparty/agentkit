@@ -10,7 +10,9 @@ use crate::acp::common::session::{begin_prompt_turn, BeginError, BegunTurn};
 use crate::agent::config_options::{effective_context_window, resolve_model_for, session_actor};
 use crate::agent::context_report::{self, ReportInputs};
 use crate::agent::fork::{self, fork_access};
-use crate::agent::prompt::{build_registry_and_system, resolve_model_and_window, run_prompt_turn};
+use crate::agent::prompt::{
+    build_registry_and_system, resolve_model_and_window, run_prompt_turn, tool_names_for,
+};
 use crate::agent::runtime::TurnRuntime;
 use crate::agent::{compaction, TurnStop};
 use crate::invokables::client_tools::{ClientToolExecutor, Executed};
@@ -519,13 +521,17 @@ async fn run_context(
     runtime: &TurnRuntime,
 ) -> Result<(), String> {
     let (model_ref, window) = resolve_model_and_window(state, session_row).await?;
-    let (_, tools, system) = build_registry_and_system(
+    let (scheme, context) = tool_names_for(&state.config().config, &model_ref)?;
+    let (_, rendered, system) = build_registry_and_system(
         &state.definitions(),
         actor_name,
         &runtime.pool,
         &runtime.client_tools,
+        scheme,
+        context,
     )
-    .await;
+    .await?;
+    let tools = rendered.tools;
     let assembled = state
         .db
         .assemble_context(store_session)

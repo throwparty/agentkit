@@ -115,7 +115,7 @@ async fn run_script_turn(
             ))?,
     };
     let provider =
-        crate::providers::openai_chat_completions::provider_for(&model_ref, &state.config().config)
+        crate::providers::openai_chat_completions::provider_for(&model_ref, &state.config().config, None)
             .map_err(|err| HostError::Model(err.to_string()))?;
 
     // The prompt's own turn carries the instruction; the rest of the
