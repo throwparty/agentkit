@@ -1,5 +1,5 @@
 title: Tackle Tool Call API Surface
-status: draft
+status: implemented
 created: 2026-10-29
 author: adrian
 context: "Tackle addresses tools by canonical invokable names: `mcp.<server>.<tool>`, `prompt.<name>`, `agent.<actor>`, and `client.<surface>.<method>`. The registry currently emits those names directly to model providers through `Registry::model_tools` and `Registry::manifest`, and the OpenAI chat-completions provider passes them to rig unchanged. Strict providers reject names containing dots: OpenAI and Anthropic require `^[a-zA-Z0-9_-]{1,64}$`, DeepSeek documents `^[a-zA-Z0-9_-]+$`, Gemini allows dots but requires a leading letter or underscore, Meta allows at most one dot, and Cohere disallows a leading digit. A dotted MCP name such as `mcp.github.search_issues` therefore fails before the model runs. A request-only Switchboard mutation cannot fix the response half because the model returns the rewritten name. This ADR refines FR-009 of `2026-09-17-tackle`, which assumed the model sees canonical namespaced names. Switchboard proxy changes are out of scope."

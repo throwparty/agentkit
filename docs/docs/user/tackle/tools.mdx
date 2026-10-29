@@ -15,6 +15,19 @@ Tackle inventories every tool in a single registry, namespacing entries by their
 
 Each registration carries visibility flags: _user-invokable_ (advertised to the client as a `/` command), _model-invokable_ (offered to the model as a tool), or both. The model always sees the namespaced name, so two servers can offer the same tool name without colliding. Namespacing makes cross-mechanism collisions impossible; within a namespace a project entry replaces a user entry of the same name, and a same-layer collision is a configuration error rather than a silent shadow.
 
+## Canonical and wire names
+
+The names above are canonical: the registry, session storage, permission pipeline, and direct invocation all use them. The model does not always see them verbatim. Some providers reject dots in tool names, so Tackle renders a surface-safe wire name for the model and maps the model's tool calls back to the canonical name.
+
+- `.` becomes `__`: `mcp.github.search_issues` → `mcp__github__search_issues`.
+- Other characters outside the surface's allowed set become `_`.
+- A readable name that collides with another, or exceeds the surface maximum, gets a short hash suffix: `mcp__github__search_issues_1a2b3c4d`.
+- Canonical components may contain underscores; the request-local map resolves them, so decoding never guesses from the wire name alone.
+
+Only the model and the provider see wire names. Direct invocation (`/!mcp.github.search_issues`), policy scripts, persisted turns, and telemetry keep the canonical name. A rewrite that loses information — a truncation or hash suffix — emits a `tracing::warn!()` with both names; routine namespace and character rewrites are silent.
+
+The default scheme comes from the endpoint's `wire_format`: `strict` (`[A-Za-z0-9_]`, maximum 64) for OpenAI chat completions, and `gemini` for the future Gemini surface. Override it per endpoint or per model with [`tool_names`](./reference/config#tool-names) when an upstream needs a different convention.
+
 ## Direct invocation
 
 Any MCP or client-capability tool can be invoked directly by the user, with no model request and no permission prompt:
