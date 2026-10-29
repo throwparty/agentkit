@@ -728,9 +728,60 @@ pub enum ToolNameError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
+    use tracing_subscriber::layer::SubscriberExt;
+
+    #[derive(Clone)]
+    struct SharedBytes(Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for SharedBytes {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0
+                .lock()
+                .expect("capture lock poisoned")
+                .extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
 
     fn name(value: &str) -> InvokableName {
         InvokableName::new(value)
+    }
+
+    #[test]
+    fn lossy_warnings_are_deduplicated() {
+        let bytes = Arc::new(Mutex::new(Vec::new()));
+        let writer = SharedBytes(Arc::clone(&bytes));
+        let subscriber = tracing_subscriber::registry().with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(move || writer.clone())
+                .with_ansi(false),
+        );
+
+        tracing::subscriber::with_default(subscriber, || {
+            let context = ToolNameContext::new("t010", "dedupe", "openai-chat-completions");
+            for _ in 0..2 {
+                let scheme = Arc::new(StrictToolNameScheme::new(12));
+                let mut map = ToolNameMap::build(
+                    scheme,
+                    context.clone(),
+                    [name("mcp.t010.lossy")],
+                )
+                .unwrap();
+                map.encode(&name("mcp.t010.lossy")).unwrap();
+            }
+        });
+
+        let logs = String::from_utf8(bytes.lock().expect("capture lock poisoned").clone()).unwrap();
+        assert_eq!(
+            logs.matches("tool name rewritten lossily").count(),
+            1,
+            "{logs}"
+        );
     }
 
     fn context() -> ToolNameContext {
