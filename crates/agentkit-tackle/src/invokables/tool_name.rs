@@ -9,8 +9,9 @@ use regex::Regex;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::borrow::Borrow;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 
 const DEFAULT_MAX_LENGTH: usize = 64;
 
@@ -203,6 +204,11 @@ pub trait ToolNameScheme: Send + Sync + fmt::Debug {
     /// Whether `wire` differs from the lossless readable rendering of
     /// `canonical`.
     fn is_lossy(&self, canonical: &InvokableName, wire: &WireToolName) -> bool;
+
+    /// Rejects a final rendered name that the scheme cannot accept.
+    fn validate(&self, _name: &WireToolName) -> Result<(), ToolNameError> {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -552,6 +558,154 @@ impl ToolNameScheme for CustomToolNameScheme {
     fn is_lossy(&self, canonical: &InvokableName, wire: &WireToolName) -> bool {
         self.rules.is_lossy(canonical, wire)
     }
+
+    fn validate(&self, wire: &WireToolName) -> Result<(), ToolNameError> {
+        if self.pattern.is_match(wire.as_str()) {
+            return Ok(());
+        }
+        Err(ToolNameError::PatternMismatch {
+            name: wire.as_str().to_owned(),
+        })
+    }
+}
+
+/// Identity and surface labels used for diagnostics.
+#[derive(Debug, Clone)]
+pub struct ToolNameContext {
+    pub endpoint: String,
+    pub model: String,
+    pub surface: String,
+}
+
+impl ToolNameContext {
+    #[must_use]
+    pub fn new(endpoint: impl Into<String>, model: impl Into<String>, surface: impl Into<String>) -> Self {
+        Self {
+            endpoint: endpoint.into(),
+            model: model.into(),
+            surface: surface.into(),
+        }
+    }
+}
+
+/// The request-local mapping between canonical names and wire names.
+#[derive(Debug, Clone)]
+pub struct ToolNameMap {
+    scheme: Arc<dyn ToolNameScheme>,
+    context: ToolNameContext,
+    current: BTreeSet<InvokableName>,
+    forward: BTreeMap<InvokableName, WireToolName>,
+    reverse: BTreeMap<WireToolName, InvokableName>,
+}
+
+impl ToolNameMap {
+    #[must_use]
+    pub fn new(scheme: Arc<dyn ToolNameScheme>, context: ToolNameContext) -> Self {
+        Self {
+            scheme,
+            context,
+            current: BTreeSet::new(),
+            forward: BTreeMap::new(),
+            reverse: BTreeMap::new(),
+        }
+    }
+
+    /// Builds a map for the current model-invokable names.
+    pub fn build(
+        scheme: Arc<dyn ToolNameScheme>,
+        context: ToolNameContext,
+        names: impl IntoIterator<Item = InvokableName>,
+    ) -> Result<Self, ToolNameError> {
+        let mut map = Self::new(scheme, context);
+        for name in names {
+            map.current.insert(name.clone());
+            map.encode(&name)?;
+        }
+        Ok(map)
+    }
+
+    #[must_use]
+    pub fn scheme(&self) -> &dyn ToolNameScheme {
+        &*self.scheme
+    }
+
+    /// Returns the wire name for a canonical name, allocating it if needed.
+    /// History names are encoded but not added to the decodable current set.
+    pub fn encode(&mut self, name: &InvokableName) -> Result<WireToolName, ToolNameError> {
+        if let Some(wire) = self.forward.get(name) {
+            return Ok(wire.clone());
+        }
+
+        let base = self.scheme.encode(name)?;
+        let mut wire = base;
+        let mut lossy = self.scheme.is_lossy(name, &wire);
+
+        if self.reverse.contains_key(&wire) {
+            let suffix = hash_suffix(name.as_str());
+            let max_length = self.scheme.max_length();
+            let keep = max_length.saturating_sub(suffix.len() + 1);
+            if keep == 0 {
+                return Err(ToolNameError::TooLong {
+                    name: name.to_string(),
+                    max_length,
+                });
+            }
+            let readable = wire.as_str().chars().take(keep).collect::<String>();
+            wire = WireToolName::new(format!("{readable}_{suffix}"));
+            lossy = true;
+            if self.reverse.contains_key(&wire) {
+                return Err(ToolNameError::Collision {
+                    name: name.to_string(),
+                });
+            }
+        }
+
+        self.scheme.validate(&wire)?;
+        self.forward.insert(name.clone(), wire.clone());
+        self.reverse.insert(wire.clone(), name.clone());
+        if lossy {
+            self.warn(name, &wire);
+        }
+        Ok(wire)
+    }
+
+    /// Decodes a model tool call. Only names in the current model-invokable set
+    /// are decodable; history-only names return `None`.
+    #[must_use]
+    pub fn decode(&self, wire: &WireToolName) -> Option<&InvokableName> {
+        let name = self.reverse.get(wire)?;
+        self.current.contains(name).then_some(name)
+    }
+
+    #[must_use]
+    pub fn get(&self, name: &InvokableName) -> Option<&WireToolName> {
+        self.forward.get(name)
+    }
+
+    fn warn(&self, canonical: &InvokableName, wire: &WireToolName) {
+        static WARNED: OnceLock<Mutex<HashSet<(String, String, String)>>> = OnceLock::new();
+        let warned = WARNED.get_or_init(|| Mutex::new(HashSet::new()));
+        let key = (
+            self.context.endpoint.clone(),
+            self.context.model.clone(),
+            canonical.to_string(),
+        );
+        if !warned
+            .lock()
+            .expect("tool name warning lock poisoned")
+            .insert(key)
+        {
+            return;
+        }
+        tracing::warn!(
+            endpoint = %self.context.endpoint,
+            model = %self.context.model,
+            surface = %self.context.surface,
+            canonical = %canonical,
+            wire = %wire,
+            "tool name rewritten lossily"
+        );
+    }
 }
 
 /// A naming failure.
@@ -569,12 +723,18 @@ pub enum ToolNameError {
     MissingPattern,
     #[error("tool name collision for `{name}`")]
     Collision { name: String },
-}#[cfg(test)]
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
     fn name(value: &str) -> InvokableName {
         InvokableName::new(value)
+    }
+
+    fn context() -> ToolNameContext {
+        ToolNameContext::new("test", "model", "openai-chat-completions")
     }
 
     #[test]
@@ -629,6 +789,53 @@ mod tests {
     }
 
     #[test]
+    fn collision_gets_a_distinct_hash_suffix() {
+        let scheme = Arc::new(StrictToolNameScheme::default());
+        let mut map = ToolNameMap::build(
+            scheme,
+            context(),
+            [name("mcp.a.b-c"), name("mcp.a.b_c")],
+        )
+        .unwrap();
+        let first = map.encode(&name("mcp.a.b-c")).unwrap();
+        let second = map.encode(&name("mcp.a.b_c")).unwrap();
+        assert_ne!(first, second);
+        assert_eq!(map.decode(&first).unwrap().as_str(), "mcp.a.b-c");
+        assert_eq!(map.decode(&second).unwrap().as_str(), "mcp.a.b_c");
+    }
+
+    #[test]
+    fn ambiguous_double_underscore_is_resolved_by_the_map() {
+        let scheme = Arc::new(StrictToolNameScheme::default());
+        let mut map = ToolNameMap::build(
+            scheme,
+            context(),
+            [name("mcp.github.search__issues"), name("mcp.github.search.issues")],
+        )
+        .unwrap();
+        let literal = map.encode(&name("mcp.github.search__issues")).unwrap();
+        let namespace = map.encode(&name("mcp.github.search.issues")).unwrap();
+        assert_ne!(literal, namespace);
+        assert_eq!(
+            map.decode(&literal).unwrap().as_str(),
+            "mcp.github.search__issues"
+        );
+        assert_eq!(
+            map.decode(&namespace).unwrap().as_str(),
+            "mcp.github.search.issues"
+        );
+    }
+
+    #[test]
+    fn history_names_encode_but_do_not_decode() {
+        let scheme = Arc::new(StrictToolNameScheme::default());
+        let mut map = ToolNameMap::build(scheme, context(), [name("mcp.current.tool")]).unwrap();
+        let history = map.encode(&name("mcp.history.tool")).unwrap();
+        assert_eq!(map.decode(&history), None);
+        assert!(map.get(&name("mcp.history.tool")).is_some());
+    }
+
+    #[test]
     fn gemini_preserves_dots_and_initial_letter() {
         let scheme = GeminiToolNameScheme::default();
         assert_eq!(
@@ -679,6 +886,17 @@ mod tests {
         assert!(matches!(
             CustomToolNameScheme::new("(", 64),
             Err(ToolNameError::InvalidPattern { .. })
+        ));
+    }
+
+    #[test]
+    fn custom_collision_suffix_is_validated() {
+        let scheme = Arc::new(CustomToolNameScheme::new("^[a-z_]+$", 64).unwrap());
+        let mut map = ToolNameMap::new(scheme, context());
+        assert!(map.encode(&name("mcp.a.b-c")).is_ok());
+        assert!(matches!(
+            map.encode(&name("mcp.a.b_c")),
+            Err(ToolNameError::PatternMismatch { .. })
         ));
     }
 }
