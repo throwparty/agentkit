@@ -1,0 +1,25 @@
+title: Tackle Tool Call API Surface Implementation Plan
+status: draft
+created: 2026-10-29
+author: adrian
+approach: "Five test-first milestones. M1 adds naming types, schemes, map, and unit tests. M2 adds `Registry::render_tools` and updates manifest and tool call sites. M3 threads the map through the provider, encodes history, and decodes model responses. M4 adds configuration schema, list-or-table deserialization, scheme resolution, precedence, and validation. M5 adds turn-level integration coverage, warning tests, and documentation. Each milestone preserves canonical dispatch until M3 switches the provider path."
+architecture: "`ToolNameScheme` and `ToolNameMap` live in `invokables/tool_name.rs`, beside the registry. The registry remains the owner of canonical `InvokableName`s and exposes `Registry::render_tools`. `agent/prompt.rs` selects the scheme and constructs the provider with the map. The provider is the only consumer of wire names. Switchboard is unchanged.\n\n{{mermaid: architecture.mmd}}"
+technologies[6]{name,role}:
+  Rust 2021,Existing crate language and toolchain
+  serde,Configuration deserialization
+  toml,Endpoint and model configuration format
+  sha2,Short deterministic suffix for collision and truncation
+  tracing,Lossy-rewrite warnings
+  rig-core,Existing OpenAI chat-completions transport
+components[9]{name,purpose,details}:
+  invokables/tool_name.rs,Naming types and schemes,"Defines `InvokableName`, `WireToolName`, `NamespaceSeparator`, `ToolNameScheme`, `StrictToolNameScheme`, `GeminiToolNameScheme`, `MetaToolNameScheme`, `CohereToolNameScheme`, `CustomToolNameScheme`, and `ToolNameMap`. Implements readable encoding, hash suffixes, and unit tests for collisions, truncation, and ambiguous underscores."
+  invokables/registry.rs,Registry rendering,"Adds `RenderedTools { tools, manifest, names }` and `Registry::render_tools(scheme)`. Replaces `model_tools` and `manifest` call sites with the rendered form. Direct invocation and command advertisement keep canonical names."
+  config/schema.rs,Endpoint and model schema,"Adds `ToolNamesConfig`, `ModelConfig`, and a list-or-table `models` deserializer. Adds `ToolNameSchemeName` and endpoint-level `tool_names`. Keeps `models = [...]` valid and normalizes both forms to a map."
+  config/tool_names.rs,Scheme resolution,"Resolves the effective scheme from model override, endpoint override, and wire-format default. Validates `custom` and `pattern` combinations and rejects unimplemented surface schemes. Exposes `resolve_tool_names(endpoint, model)` for turn preparation."
+  agent/prompt.rs,Turn preparation,"Resolves `model_ref`, resolves the scheme, calls `Registry::render_tools`, and passes the `ToolNameMap` into `provider_for`. Updates `build_registry_and_system` and the `/context` callers to use wire-named tools and manifest."
+  providers/openai_chat_completions.rs,Provider naming,"Stores the `ToolNameMap` on `RigProvider`. Encodes historical tool call and result names through `rig::to_rig_message`. Decodes model tool calls through `rig::tool_calls_of` before building `ModelResponse`."
+  providers/rig.rs,History encode and response decode,"Changes `to_rig_message` and `tool_calls_of` to take the map. Encodes canonical history names to wire names and decodes wire names back to canonical. Unknown wire names pass through unchanged."
+  agent/config_options.rs,Static model list,"Reads model names from the normalized map keys instead of a vector. Preserves discovery fallback behavior and notices."
+  Tests and docs,Verification and documentation,"Adds unit tests for schemes and maps, config parsing and precedence tests, provider encode/decode tests, and a turn-level tool-call test with dotted MCP names. Updates `docs/docs/user/tackle/reference/config.mdx` and `docs/docs/user/tackle/tools.mdx`."
+dataFlow: "Turn preparation resolves `model_ref` from the session, actor, and defaults. `resolve_tool_names` selects the scheme from model override, endpoint override, and wire-format default. `Registry::render_tools(scheme)` returns wire-named tools, a wire-named manifest, and a `ToolNameMap`. `provider_for` receives the map. The turn loop sends wire tool definitions and the provider encodes history tool call and result names. The model returns wire tool calls; the provider decodes them against the map and returns canonical `ModelResponse`. The turn loop persists and dispatches canonical names. Lossy rewrites emit `tracing::warn!()`."
+deployment: "No service or schema migration. `models = [...]` remains accepted, wire names are request-local and never persisted, and existing canonical sessions remain valid. No new dependency is required because `sha2` and `tracing` are already in the crate. Documentation changes are limited to the Tackle config and tools pages."
