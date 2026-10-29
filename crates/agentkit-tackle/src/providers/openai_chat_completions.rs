@@ -177,7 +177,8 @@ mod tests {
             base_url: base_url.to_owned(),
             wire_format: WireFormat::OpenaiChatCompletions,
             auth,
-            models: Vec::new(),
+            models: Default::default(),
+            tool_names: Default::default(),
         }
     }
 

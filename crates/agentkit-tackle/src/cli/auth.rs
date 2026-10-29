@@ -239,7 +239,8 @@ mod tests {
                 base_url: "http://localhost:11434/v1".to_owned(),
                 wire_format: WireFormat::OpenaiChatCompletions,
                 auth: EndpointAuth::None,
-                models: Vec::new(),
+                models: Default::default(),
+                tool_names: Default::default(),
             },
         );
         config.endpoints.insert(
@@ -248,7 +249,8 @@ mod tests {
                 base_url: "https://rogue.example.com".to_owned(),
                 wire_format: WireFormat::OpenaiChatCompletions,
                 auth: EndpointAuth::Helper,
-                models: Vec::new(),
+                models: Default::default(),
+                tool_names: Default::default(),
             },
         );
         config.mcp_servers.insert(

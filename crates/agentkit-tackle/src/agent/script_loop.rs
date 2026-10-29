@@ -204,7 +204,8 @@ mod tests {
                 base_url: base_url.to_owned(),
                 wire_format: WireFormat::OpenaiChatCompletions,
                 auth: Auth::None,
-                models: Vec::new(),
+                models: Default::default(),
+                tool_names: Default::default(),
             },
         );
         config.defaults.model = Some("test/model".to_owned());
