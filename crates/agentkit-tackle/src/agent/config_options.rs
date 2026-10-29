@@ -210,7 +210,7 @@ pub async fn build(state: &TackleState, session: &Session) -> Selectors {
         };
         let qualified = |model: &str| format!("{name}/{model}");
         let discovered = discover_models(&endpoint.base_url, credential).await;
-        let models = match discovered {
+        let models: Vec<String> = match discovered {
             Some(models) => {
                 state.replace_discovered_windows(
                     name,
@@ -235,7 +235,7 @@ pub async fn build(state: &TackleState, session: &Session) -> Selectors {
                         )),
                     );
                 }
-                endpoint.models.clone()
+                endpoint.models.keys().cloned().collect()
             }
         };
         for model in models {

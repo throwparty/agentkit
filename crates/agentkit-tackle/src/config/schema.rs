@@ -1,5 +1,6 @@
 //! The configuration schema: the user/project layers and the typed fields they carry.
 
+use crate::invokables::tool_name::ToolNameSchemeName;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -82,10 +83,13 @@ pub struct EndpointConfig {
     pub base_url: String,
     pub wire_format: WireFormat,
     pub auth: Auth,
-    /// Static model list, used as the fallback when `/models` discovery
-    /// fails or returns nothing.
+    /// Static models used as the fallback when `/models` discovery fails or
+    /// returns nothing. A list entry or a per-model table both normalize here.
     #[serde(default)]
-    pub models: Vec<String>,
+    pub models: ModelsConfig,
+    /// Endpoint-wide tool-name policy.
+    #[serde(default)]
+    pub tool_names: ToolNamesConfig,
 }
 
 /// The endpoint's wire format. v1 implements the OpenAI
@@ -96,6 +100,91 @@ pub struct EndpointConfig {
 #[serde(rename_all = "kebab-case")]
 pub enum WireFormat {
     OpenaiChatCompletions,
+}
+
+impl WireFormat {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::OpenaiChatCompletions => "openai-chat-completions",
+        }
+    }
+}
+
+/// Tool-name policy for an endpoint or a model.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolNamesConfig {
+    #[serde(default)]
+    pub scheme: Option<ToolNameSchemeName>,
+    #[serde(default)]
+    pub max_length: Option<usize>,
+    #[serde(default)]
+    pub pattern: Option<String>,
+}
+
+impl ToolNamesConfig {
+    #[must_use]
+    pub fn is_configured(&self) -> bool {
+        self.scheme.is_some() || self.max_length.is_some() || self.pattern.is_some()
+    }
+}
+
+/// Per-model configuration. Future model-scoped settings live here.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelConfig {
+    #[serde(default)]
+    pub tool_names: ToolNamesConfig,
+}
+
+/// The endpoint's static model set, normalizing a list or a table.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ModelsConfig(BTreeMap<String, ModelConfig>);
+
+impl ModelsConfig {
+    #[must_use]
+    pub fn from_models(models: BTreeMap<String, ModelConfig>) -> Self {
+        Self(models)
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn keys(&self) -> impl Iterator<Item = &String> {
+        self.0.keys()
+    }
+
+    #[must_use]
+    pub fn get(&self, model: &str) -> Option<&ModelConfig> {
+        self.0.get(model)
+    }
+}
+
+impl<'de> Deserialize<'de> for ModelsConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Repr {
+            List(Vec<String>),
+            Table(BTreeMap<String, ModelConfig>),
+        }
+
+        Ok(match Repr::deserialize(deserializer)? {
+            Repr::List(models) => Self(
+                models
+                    .into_iter()
+                    .map(|model| (model, ModelConfig::default()))
+                    .collect(),
+            ),
+            Repr::Table(models) => Self(models),
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

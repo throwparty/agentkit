@@ -299,6 +299,50 @@ fn project_scripts_load_without_consent() {
 }
 
 #[test]
+fn endpoint_models_accept_list_and_table_forms() {
+    let list: Config = toml::from_str(
+        "[endpoints.test]\n\
+         base_url = \"http://localhost/v1\"\n\
+         wire_format = \"openai-chat-completions\"\n\
+         auth = \"none\"\n\
+         models = [\"a\", \"b\"]\n",
+    )
+    .unwrap();
+    let endpoint = list.endpoints.get("test").unwrap();
+    assert!(endpoint.models.get("a").is_some());
+    assert!(endpoint.models.get("b").is_some());
+    assert!(!endpoint.models.get("a").unwrap().tool_names.is_configured());
+
+    let table: Config = toml::from_str(
+        "[endpoints.test]\n\
+         base_url = \"http://localhost/v1\"\n\
+         wire_format = \"openai-chat-completions\"\n\
+         auth = \"none\"\n\
+         \n\
+         [endpoints.test.tool_names]\n\
+         scheme = \"strict\"\n\
+         \n\
+         [endpoints.test.models.\"meta/llama-4\"]\n\
+         \n\
+         [endpoints.test.models.\"meta/llama-4\".tool_names]\n\
+         scheme = \"meta\"\n\
+         max_length = 32\n",
+    )
+    .unwrap();
+    let endpoint = table.endpoints.get("test").unwrap();
+    assert_eq!(
+        endpoint.tool_names.scheme,
+        Some(crate::invokables::tool_name::ToolNameSchemeName::Strict)
+    );
+    let model = endpoint.models.get("meta/llama-4").unwrap();
+    assert_eq!(
+        model.tool_names.scheme,
+        Some(crate::invokables::tool_name::ToolNameSchemeName::Meta)
+    );
+    assert_eq!(model.tool_names.max_length, Some(32));
+}
+
+#[test]
 fn project_scripts_do_not_create_trust_entries() {
     let dir = tempfile::tempdir().unwrap();
     let project = dir.path().join("project");
