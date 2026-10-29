@@ -5,6 +5,7 @@
 //! [`ToolNameMap`] keeps the per-request mapping needed to decode model tool
 //! calls back to canonical names.
 
+use regex::Regex;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::borrow::Borrow;
@@ -159,15 +160,19 @@ impl ToolNameSchemeName {
     /// Builds the scheme, applying an optional maximum length and custom pattern.
     pub fn build(
         self,
-        _pattern: Option<&str>,
+        pattern: Option<&str>,
         max_length: Option<usize>,
     ) -> Result<Arc<dyn ToolNameScheme>, ToolNameError> {
         let max_length = max_length.unwrap_or(DEFAULT_MAX_LENGTH);
         match self {
             Self::Strict => Ok(Arc::new(StrictToolNameScheme::new(max_length))),
-            _ => Err(ToolNameError::UnsupportedScheme {
-                scheme: self.as_str().to_owned(),
-            }),
+            Self::Gemini => Ok(Arc::new(GeminiToolNameScheme::new(max_length))),
+            Self::Meta => Ok(Arc::new(MetaToolNameScheme::new(max_length))),
+            Self::Cohere => Ok(Arc::new(CohereToolNameScheme::new(max_length))),
+            Self::Custom => {
+                let pattern = pattern.ok_or(ToolNameError::MissingPattern)?;
+                Ok(Arc::new(CustomToolNameScheme::new(pattern, max_length)?))
+            }
         }
     }
 }
@@ -345,6 +350,210 @@ impl ToolNameScheme for StrictToolNameScheme {
     }
 }
 
+/// Gemini style names: start with a letter or `_`, dots allowed, maximum 64.
+#[derive(Debug, Clone)]
+pub struct GeminiToolNameScheme {
+    rules: SchemeRules,
+}
+
+impl GeminiToolNameScheme {
+    #[must_use]
+    pub fn new(max_length: usize) -> Self {
+        Self {
+            rules: SchemeRules {
+                separator: NamespaceSeparator::Dot,
+                allowed: |character| {
+                    character.is_ascii_alphanumeric() || character == '_' || character == '-'
+                },
+                max_length,
+                require_initial_letter: true,
+                reject_leading_digit: false,
+            },
+        }
+    }
+}
+
+impl Default for GeminiToolNameScheme {
+    fn default() -> Self {
+        Self::new(DEFAULT_MAX_LENGTH)
+    }
+}
+
+impl ToolNameScheme for GeminiToolNameScheme {
+    fn name(&self) -> &'static str {
+        "gemini"
+    }
+
+    fn max_length(&self) -> usize {
+        self.rules.max_length
+    }
+
+    fn encode(&self, name: &InvokableName) -> Result<WireToolName, ToolNameError> {
+        self.rules.encode(name)
+    }
+
+    fn decode(&self, name: &WireToolName) -> Option<InvokableName> {
+        Some(InvokableName::new(name.as_str()))
+    }
+
+    fn is_lossy(&self, canonical: &InvokableName, wire: &WireToolName) -> bool {
+        self.rules.is_lossy(canonical, wire)
+    }
+}
+
+/// Meta style names: dots are flattened, underscore and hyphen allowed.
+#[derive(Debug, Clone)]
+pub struct MetaToolNameScheme {
+    rules: SchemeRules,
+}
+
+impl MetaToolNameScheme {
+    #[must_use]
+    pub fn new(max_length: usize) -> Self {
+        Self {
+            rules: SchemeRules {
+                separator: NamespaceSeparator::DoubleUnderscore,
+                allowed: |character| {
+                    character.is_ascii_alphanumeric() || character == '_' || character == '-'
+                },
+                max_length,
+                require_initial_letter: false,
+                reject_leading_digit: false,
+            },
+        }
+    }
+}
+
+impl Default for MetaToolNameScheme {
+    fn default() -> Self {
+        Self::new(DEFAULT_MAX_LENGTH)
+    }
+}
+
+impl ToolNameScheme for MetaToolNameScheme {
+    fn name(&self) -> &'static str {
+        "meta"
+    }
+
+    fn max_length(&self) -> usize {
+        self.rules.max_length
+    }
+
+    fn encode(&self, name: &InvokableName) -> Result<WireToolName, ToolNameError> {
+        self.rules.encode(name)
+    }
+
+    fn decode(&self, name: &WireToolName) -> Option<InvokableName> {
+        decode_double_underscore(name)
+    }
+
+    fn is_lossy(&self, canonical: &InvokableName, wire: &WireToolName) -> bool {
+        self.rules.is_lossy(canonical, wire)
+    }
+}
+
+/// Cohere style names: letters, digits, underscore; no leading digit.
+#[derive(Debug, Clone)]
+pub struct CohereToolNameScheme {
+    rules: SchemeRules,
+}
+
+impl CohereToolNameScheme {
+    #[must_use]
+    pub fn new(max_length: usize) -> Self {
+        Self {
+            rules: SchemeRules {
+                separator: NamespaceSeparator::DoubleUnderscore,
+                allowed: |character| character.is_ascii_alphanumeric() || character == '_',
+                max_length,
+                require_initial_letter: false,
+                reject_leading_digit: true,
+            },
+        }
+    }
+}
+
+impl Default for CohereToolNameScheme {
+    fn default() -> Self {
+        Self::new(DEFAULT_MAX_LENGTH)
+    }
+}
+
+impl ToolNameScheme for CohereToolNameScheme {
+    fn name(&self) -> &'static str {
+        "cohere"
+    }
+
+    fn max_length(&self) -> usize {
+        self.rules.max_length
+    }
+
+    fn encode(&self, name: &InvokableName) -> Result<WireToolName, ToolNameError> {
+        self.rules.encode(name)
+    }
+
+    fn decode(&self, name: &WireToolName) -> Option<InvokableName> {
+        decode_double_underscore(name)
+    }
+
+    fn is_lossy(&self, canonical: &InvokableName, wire: &WireToolName) -> bool {
+        self.rules.is_lossy(canonical, wire)
+    }
+}
+
+/// A caller-supplied pattern over the strict readable form.
+#[derive(Debug, Clone)]
+pub struct CustomToolNameScheme {
+    rules: SchemeRules,
+    pattern: Regex,
+}
+
+impl CustomToolNameScheme {
+    pub fn new(pattern: &str, max_length: usize) -> Result<Self, ToolNameError> {
+        let pattern = Regex::new(pattern).map_err(|_| ToolNameError::InvalidPattern {
+            pattern: pattern.to_owned(),
+        })?;
+        Ok(Self {
+            rules: SchemeRules {
+                separator: NamespaceSeparator::DoubleUnderscore,
+                allowed: |character| character.is_ascii_alphanumeric() || character == '_',
+                max_length,
+                require_initial_letter: false,
+                reject_leading_digit: false,
+            },
+            pattern,
+        })
+    }
+}
+
+impl ToolNameScheme for CustomToolNameScheme {
+    fn name(&self) -> &'static str {
+        "custom"
+    }
+
+    fn max_length(&self) -> usize {
+        self.rules.max_length
+    }
+
+    fn encode(&self, name: &InvokableName) -> Result<WireToolName, ToolNameError> {
+        let wire = self.rules.encode(name)?;
+        if !self.pattern.is_match(wire.as_str()) {
+            return Err(ToolNameError::PatternMismatch {
+                name: name.to_string(),
+            });
+        }
+        Ok(wire)
+    }
+
+    fn decode(&self, name: &WireToolName) -> Option<InvokableName> {
+        decode_double_underscore(name)
+    }
+
+    fn is_lossy(&self, canonical: &InvokableName, wire: &WireToolName) -> bool {
+        self.rules.is_lossy(canonical, wire)
+    }
+}
+
 /// A naming failure.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ToolNameError {
@@ -360,11 +569,7 @@ pub enum ToolNameError {
     MissingPattern,
     #[error("tool name collision for `{name}`")]
     Collision { name: String },
-    #[error("tool name scheme `{scheme}` is not implemented")]
-    UnsupportedScheme { scheme: String },
-}
-
-#[cfg(test)]
+}#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -421,5 +626,59 @@ mod tests {
         assert!(wire.as_str().len() <= 16);
         assert!(wire.as_str().starts_with("mcp__"));
         assert!(scheme.is_lossy(&name("mcp.github.search_issues"), &wire));
+    }
+
+    #[test]
+    fn gemini_preserves_dots_and_initial_letter() {
+        let scheme = GeminiToolNameScheme::default();
+        assert_eq!(
+            scheme.encode(&name("mcp.github.search")).unwrap().as_str(),
+            "mcp.github.search"
+        );
+        assert_eq!(
+            scheme.encode(&name("1mcp.github.search")).unwrap().as_str(),
+            "_1mcp.github.search"
+        );
+    }
+
+    #[test]
+    fn meta_flattens_dots() {
+        let scheme = MetaToolNameScheme::default();
+        assert_eq!(
+            scheme.encode(&name("mcp.github.search")).unwrap().as_str(),
+            "mcp__github__search"
+        );
+    }
+
+    #[test]
+    fn cohere_rejects_leading_digits_and_hyphens() {
+        let scheme = CohereToolNameScheme::default();
+        assert_eq!(
+            scheme.encode(&name("mcp.github.search-tool")).unwrap().as_str(),
+            "mcp__github__search_tool"
+        );
+        assert_eq!(
+            scheme.encode(&name("1mcp.github.search")).unwrap().as_str(),
+            "_1mcp__github__search"
+        );
+    }
+
+    #[test]
+    fn custom_pattern_validates_the_strict_rendering() {
+        let scheme = CustomToolNameScheme::new("^[a-zA-Z0-9_]+$", 64).unwrap();
+        assert!(scheme.encode(&name("mcp.github.search")).is_ok());
+        let reject = CustomToolNameScheme::new("^[a-z]+$", 64).unwrap();
+        assert!(matches!(
+            reject.encode(&name("mcp.github.search")),
+            Err(ToolNameError::PatternMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn invalid_custom_pattern_fails() {
+        assert!(matches!(
+            CustomToolNameScheme::new("(", 64),
+            Err(ToolNameError::InvalidPattern { .. })
+        ));
     }
 }
