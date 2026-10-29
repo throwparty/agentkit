@@ -80,7 +80,7 @@ Add `config/tool_names.rs` with `resolve_tool_names(endpoint, model)`. Resolve m
 | Depends On | T-005 |
 | References | endpoint-and-model-configuration,surface-defaults,custom-scheme-and-pattern,configuration-precedence,invalid-custom-pattern,scheme-and-pattern-conflict,unimplemented-surface-scheme |
 
-### T-007: Turn preparation and provider construction
+### T-007: [x] Turn preparation and provider construction
 
 Resolve the scheme in `prepare_turn` after `model_ref` is known. Call `Registry::render_tools`, pass the `ToolNameMap` into `provider_for`, and carry wire-named tools and system prompt in `LoopInputs`. Update the `/context` builders in ACP v1 and v2 to use the same rendered tools and manifest.
 
@@ -93,7 +93,7 @@ Resolve the scheme in `prepare_turn` after `model_ref` is known. Call `Registry:
 | Depends On | T-004,T-006 |
 | References | registry-render-entry-point,wire-named-manifest,provider-encode-and-decode,surface-defaults,configuration-precedence |
 
-### T-008: Provider history encoding and response decoding
+### T-008: [x] Provider history encoding and response decoding
 
 Store the `ToolNameMap` on `RigProvider`. Change `rig::to_rig_message` to encode historical tool call and result names and `rig::tool_calls_of` to decode model tool calls. Leave unknown wire names unchanged so the existing unknown-invokable path handles them.
 
@@ -119,7 +119,7 @@ Update `agent/config_options.rs` to use normalized map keys for the static model
 | Depends On | T-005 |
 | References | endpoint-and-model-configuration,backward-compatibility,list-compatibility |
 
-### T-010: Lossy rewrite warnings
+### T-010: [x] Lossy rewrite warnings
 
 Emit `tracing::warn!()` only for truncation and hash suffixes. Include the canonical name, wire name, endpoint, model, and surface. Deduplicate per endpoint, model, and canonical name. Routine dot and invalid-character rewrites stay silent.
 
@@ -132,7 +132,7 @@ Emit `tracing::warn!()` only for truncation and hash suffixes. Include the canon
 | Depends On | T-003,T-006 |
 | References | lossy-rewrite-warnings,observability,lossy-warning-only |
 
-### T-011: End-to-end and integration coverage
+### T-011: [x] End-to-end and integration coverage
 
 Add a turn-level test with a dotted MCP tool through a strict endpoint. Verify the model is offered a safe name, the tool executes, storage and telemetry contain only canonical names, the manifest matches the tools, unknown calls pass through, and an impossible name fails without dropping the tool.
 
@@ -145,7 +145,7 @@ Add a turn-level test with a dotted MCP tool through a strict endpoint. Verify t
 | Depends On | T-008,T-009,T-010 |
 | References | strict-provider-tool-call,canonical-persistence,manifest-matches-tools,unknown-call-passthrough,impossible-name-fails,testability,performance,dispatch-safety |
 
-### T-012: Documentation
+### T-012: [x] Documentation
 
 Update `docs/docs/user/tackle/reference/config.mdx` with endpoint and per-model `tool_names`, list and table model forms, precedence, and the custom pattern escape hatch. Update `docs/docs/user/tackle/tools.mdx` with wire naming, warnings, and strict-provider behavior.
 

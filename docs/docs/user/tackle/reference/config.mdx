@@ -32,6 +32,41 @@ models = []  # optional static fallback when /models discovery fails
 - `wire_format` — `openai-chat-completions` (the only wire format implemented in v1).
 - `auth` — `none` or `helper` (resolve a bearer token via the credential helper).
 
+### Tool names
+
+Some providers reject the dots in Tackle's canonical namespaced names (`mcp.<server>.<tool>`). Tackle renders a surface-safe name for each model call and maps the model's tool calls back to the canonical name. The default is derived from `wire_format`; override it per endpoint or per model when an upstream is stricter or more permissive:
+
+```toml
+[endpoints.switchboard.tool_names]
+scheme = "strict"
+max_length = 64
+
+[endpoints.switchboard.models."meta/llama-4"]
+tool_names.scheme = "meta"
+tool_names.max_length = 64
+```
+
+- `scheme` — `strict`, `gemini`, `meta`, `cohere`, or `custom`. `strict` allows `[A-Za-z0-9_]` and is the default for `openai-chat-completions`; `gemini` preserves dots and is the default for the future `google-generate-content` surface.
+- `max_length` — overrides the scheme's default maximum (64 for `strict`).
+- `pattern` — with `scheme = "custom"`, a regex the rendered name must match. Setting `pattern` without `custom`, or `custom` without `pattern`, is a configuration error.
+- Precedence is model `tool_names` over endpoint `tool_names` over the wire-format default.
+
+The `models` value accepts either a list or a per-model table. A list entry uses the endpoint defaults; the table form adds per-model settings.
+
+List form:
+
+```toml
+[endpoints.switchboard]
+models = ["meta/llama-4"]
+```
+
+Table form:
+
+```toml
+[endpoints.switchboard.models."meta/llama-4"]
+tool_names.scheme = "meta"
+```
+
 ## `credential_helper` (user layer only)
 
 Name of the credential helper binary; defaults to `keychain`. `auth = "helper"` endpoints run `agentkit-credential-<helper> get tackle <endpoint-name>` and read `access_token` from its JSON output — store one with `tackle auth add <endpoint-name> <token>` (see the [CLI reference](./cli#auth)).
