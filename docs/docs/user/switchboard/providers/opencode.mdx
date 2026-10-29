@@ -4,13 +4,26 @@ sidebar_position: 2
 
 # 🔳 OpenCode
 
-The [OpenCode Zen](https://opencode.ai/docs/zen/) gateway serves several model families across three wire formats under a single base URL and API key. Because a Switchboard provider is pinned to one `api_surface` per entry, Zen is configured as three entries sharing the same `base_url` and credential:
+OpenCode serves models through two independent products. Configure only the one you use.
 
-| Identity        | `api_surface`             | Model families                                         |
-| --------------- | ------------------------- | ------------------------------------------------------ |
-| `zen_chat`      | `openai-chat-completions` | DeepSeek, GLM, Kimi, MiniMax, and Zen's `-free` models |
-| `zen_responses` | `openai-responses`        | GPT, Grok, Muse                                        |
-| `zen_messages`  | `anthropic-messages`      | Claude, Qwen Plus                                      |
+| Product          | Billing         | Base URL                        |
+| ---------------- | --------------- | ------------------------------- |
+| **OpenCode Zen** | `pay_as_you_go` | `https://opencode.ai/zen/v1`    |
+| **OpenCode Go**  | `subscription`  | `https://opencode.ai/zen/go/v1` |
+
+## OpenCode Zen
+
+The [OpenCode Zen](https://opencode.ai/docs/zen/) gateway serves several model families across three wire formats under a single base URL and API key. Because a Switchboard provider is pinned to one `api_surface`, Zen is configured as three provider blocks sharing the same `base_url` and credential.
+
+Free models are limited to the OpenCode client and are not available through Switchboard.
+
+| Identity        | `api_surface`             | Model families                    |
+| --------------- | ------------------------- | --------------------------------- |
+| `zen_chat`      | `openai-chat-completions` | DeepSeek, GLM, Kimi, MiniMax      |
+| `zen_responses` | `openai-responses`        | GPT, Grok, Muse                   |
+| `zen_messages`  | `anthropic-messages`      | Claude, Qwen Plus                 |
+
+Claude and Qwen Plus use the `anthropic-messages` surface; native Anthropic support is on the [roadmap](../roadmap).
 
 ```toml
 [[providers]]
@@ -27,8 +40,6 @@ models = [
   "minimax-m3",
   "qwen3.8-max",
 ]
-
-mutations = ["zen.rhai"]
 
 [providers.auth]
 type = "bearer_token"
@@ -50,8 +61,6 @@ models = [
   "muse-spark-1.3",
 ]
 
-mutations = ["zen.rhai"]
-
 [providers.auth]
 type = "bearer_token"
 
@@ -71,8 +80,6 @@ models = [
   "qwen3.6-plus",
 ]
 
-mutations = ["zen.rhai"]
-
 [providers.auth]
 type = "bearer_token"
 
@@ -81,41 +88,26 @@ input_per_mtok = 0
 output_per_mtok = 0
 ```
 
-The model lists above are a representative subset — Zen's catalogue churns, and the full lists are long. Regenerate them with the script at the bottom of this page.
+The model lists above are a representative subset — Zen's catalogue churns, and the full lists are long.
 
-All three entries share one [mutation script](../reference/config#mutations), `zen.rhai`, resolved against the directory containing your configuration file:
+### Zen credentials
 
-```rhai
-// zen.rhai
-fn mutate(request) {
-    request.headers["user-agent"] = "opencode/1.18.31 ai-sdk/provider-utils/4.0.23 runtime/bun/1.4.2";
-    request.headers["x-opencode-session"] = "ses_aaaaaaaaaaaaaaaaaaaaaaaaaa";
-    request
-}
-```
-
-A few details worth calling out:
-
-- **`x-opencode-session`** — Zen requires this header, shaped like a session id, before it will serve `-free` models. Pick any stable opaque value.
-- **`user-agent`** — Switchboard identifies itself upstream as `agentkit-switchboard/<version>` by default; Zen behaves better when presented as an OpenCode client, so the script overrides it.
-- **Claude models** — Zen's `anthropic-messages` surface is currently the only way to get Claude models through Switchboard; native Anthropic support is on the [roadmap](../roadmap).
-
-## Credentials
-
-All three entries present the same Zen API key. Store it under each identity:
+Zen draws on workspace credits. Store an OpenCode Console API key under each identity:
 
 ```shell
-switchboard auth add zen_chat sk-...
-switchboard auth add zen_responses sk-...
-switchboard auth add zen_messages sk-...
+switchboard auth add zen_chat oc_sk_...
+switchboard auth add zen_responses oc_sk_...
+switchboard auth add zen_messages oc_sk_...
 ```
 
-## Regenerating the model list
+The key must be allowed to request models, not just list them.
 
-The authoritative source for model families is the models.dev catalog (classified by the SDK package each model declares, `providers.opencode.models[*].provider.npm`), intersected with what Zen's `/models` endpoint actually serves right now. This script rebuilds all three `models` lists from both:
+### Regenerating the Zen model list
+
+The authoritative source for Zen model families is the models.dev catalog, classified by the SDK package each model declares (`providers.opencode.models[*].provider.npm`), intersected with what `https://opencode.ai/zen/v1/models` serves right now. The script rebuilds all three `models` lists from both:
 
 <details>
-    <summary>Regenerating the model list</summary>
+    <summary>Regenerating the Zen model list</summary>
 
 ```bash
 #!/usr/bin/env bash
@@ -198,4 +190,184 @@ emit_provider zen_messages anthropic-messages
 
 </details>
 
-The generated blocks don't include `mutations` — add `mutations = ["zen.rhai"]` and the script above by hand, and make sure the generated `[[providers]]` blocks replace (rather than duplicate) any existing Zen entries.
+The generated blocks are ready to use; make sure they replace (rather than duplicate) existing Zen blocks.
+
+## OpenCode Go
+
+[OpenCode Go](https://opencode.ai/docs/go/) is the subscription counterpart: a smaller, curated set of coding models with monthly included usage. Because the allowance is quotaed rather than billed per token, all three provider blocks use `billing = "subscription"`.
+
+Go serves the same three wire formats as Zen, but has no Gemini surface in Switchboard. `gemini-4-argon` is in Go's catalogue; the script below skips it because Switchboard has no Gemini client.
+
+| Identity       | `api_surface`             | Model families                                                            |
+| -------------- | ------------------------- | ------------------------------------------------------------------------- |
+| `go_chat`      | `openai-chat-completions` | DeepSeek, GLM, Kimi, MiMo, MiniMax, LongCat, Step, Hy, and `-free` models |
+| `go_responses` | `openai-responses`        | GPT Luna, Grok, Muse Spark Contributor                                    |
+| `go_messages`  | `anthropic-messages`      | Claude Haiku, MiniMax M3, Qwen                                            |
+
+Claude Haiku uses the `anthropic-messages` surface; native Anthropic support is on the [roadmap](../roadmap).
+
+```toml
+[[providers]]
+identity = "go_chat"
+api_surface = "openai-chat-completions"
+base_url = "https://opencode.ai/zen/go/v1"
+billing = "subscription"
+models = [
+  "beam-free",
+  "deepseek-v4.1-flash",
+  "glm-5.3",
+  "glm-5.3-flash",
+  "kimi-k3",
+  "mimo-v2.6-pro",
+  "minimax-m3.1-flash",
+]
+
+[providers.auth]
+type = "bearer_token"
+
+[providers.pricing]
+input_per_mtok = 0
+output_per_mtok = 0
+
+[[providers]]
+identity = "go_responses"
+api_surface = "openai-responses"
+base_url = "https://opencode.ai/zen/go/v1"
+billing = "subscription"
+models = [
+  "gpt-5.6-luna",
+  "gpt-6-luna",
+  "grok-4.7",
+  "muse-spark-1.3-contributor",
+]
+
+[providers.auth]
+type = "bearer_token"
+
+[providers.pricing]
+input_per_mtok = 0
+output_per_mtok = 0
+
+[[providers]]
+identity = "go_messages"
+api_surface = "anthropic-messages"
+base_url = "https://opencode.ai/zen/go/v1"
+billing = "subscription"
+models = [
+  "claude-haiku-5-5",
+  "minimax-m3",
+  "qwen3.7-plus",
+  "qwen3.8-max",
+]
+
+[providers.auth]
+type = "bearer_token"
+
+[providers.pricing]
+input_per_mtok = 0
+output_per_mtok = 0
+```
+
+The model lists above are a representative subset.
+
+### Go credentials
+
+Go requires a workspace subscribed to Go. Store an OpenCode Console API key under each identity:
+
+```shell
+switchboard auth add go_chat oc_sk_...
+switchboard auth add go_responses oc_sk_...
+switchboard auth add go_messages oc_sk_...
+```
+
+The key must be allowed to request models, not just list them. Go Teams members use a personal key; service account keys are not covered by Go Teams.
+
+### Regenerating the Go model list
+
+The authoritative source for Go model families is the models.dev catalog, classified by the SDK package each model declares (`providers["opencode-go"].models[*].provider.npm`), intersected with what `https://opencode.ai/zen/go/v1/models` serves right now. The script rebuilds all three `models` lists from both:
+
+<details>
+    <summary>Regenerating the Go model list</summary>
+
+```bash
+#!/usr/bin/env bash
+# Generate OpenCode Go [[providers]] blocks for switchboard config.toml.
+# Surface: models.dev providers.opencode-go.models[*].provider.npm
+# Membership: GET https://opencode.ai/zen/go/v1/models
+#
+# Usage: opencode-go-models.sh >> ~/.config/agentkit/switchboard/config.toml
+set -euo pipefail
+
+MODELS_DEV_URL="${MODELS_DEV_URL:-https://models.dev/api.json}"
+GO_MODELS_URL="${GO_MODELS_URL:-https://opencode.ai/zen/go/v1/models}"
+
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "$tmpdir"' EXIT
+
+curl -fsSL "$MODELS_DEV_URL" -o "$tmpdir/models.dev.json"
+curl -fsSL "$GO_MODELS_URL" -o "$tmpdir/go-models.json"
+
+# model ids live on Go /models, classified by models.dev provider.npm
+#   @ai-sdk/openai    -> openai-responses
+#   @ai-sdk/anthropic -> anthropic-messages
+#   null / missing    -> openai-chat-completions
+#   anything else     -> skip (google, unknown)
+jq -r --slurpfile live "$tmpdir/go-models.json" '
+  ($live[0].data // [] | map(.id) | unique) as $live_ids
+  | (."opencode-go".models // {})
+  | to_entries
+  | map(select(.key as $id | $live_ids | index($id)))
+  | map(
+      .key as $id
+      | (.value.provider.npm // null) as $npm
+      | {
+          id: $id,
+          surface: (
+            if $npm == "@ai-sdk/openai" then "openai-responses"
+            elif $npm == "@ai-sdk/anthropic" then "anthropic-messages"
+            elif $npm == null then "openai-chat-completions"
+            else empty
+            end
+          ),
+        }
+    )
+  | group_by(.surface)
+  | map({ key: .[0].surface, value: map(.id) | sort })
+  | from_entries
+' "$tmpdir/models.dev.json" > "$tmpdir/by-surface.json"
+
+emit_provider() {
+  local identity="$1" surface="$2"
+  local models
+  models="$(jq -r --arg s "$surface" '.[$s] // [] | .[]' "$tmpdir/by-surface.json")"
+  if [ -z "$models" ]; then
+    echo "error: no models for $identity ($surface)" >&2
+    exit 1
+  fi
+
+  echo '[[providers]]'
+  echo "identity = \"$identity\""
+  echo "api_surface = \"$surface\""
+  echo 'base_url = "https://opencode.ai/zen/go/v1"'
+  echo 'billing = "subscription"'
+  echo 'models = ['
+  printf '  "%s",\n' $models
+  echo ']'
+  echo
+  echo '[providers.auth]'
+  echo 'type = "bearer_token"'
+  echo
+  echo '[providers.pricing]'
+  echo 'input_per_mtok = 0'
+  echo 'output_per_mtok = 0'
+  echo
+}
+
+emit_provider go_chat openai-chat-completions
+emit_provider go_responses openai-responses
+emit_provider go_messages anthropic-messages
+```
+
+</details>
+
+The generated blocks are ready to use; make sure they replace (rather than duplicate) existing Go blocks.
