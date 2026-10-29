@@ -43,6 +43,7 @@ use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 
 /// The MCP tool under test, namespaced by the registry.
 const TOOL: &str = "mcp.echo.echo";
+const WIRE_TOOL: &str = "mcp__echo__echo";
 /// The tool's advertised description (manifest assertion A7).
 const DESCRIPTION: &str = "Echoes the provided text";
 /// The trigger phrase every round's prompt contains.
@@ -143,7 +144,7 @@ impl ScriptedModel {
             let lines = [
                 r#"data: {"id":"c1","object":"chat.completion.chunk","created":0,"model":"m","choices":[{"index":0,"delta":{"role":"assistant"}}]}"#.to_owned(),
                 format!(
-                    r#"data: {{"id":"c1","object":"chat.completion.chunk","created":0,"model":"m","choices":[{{"index":0,"delta":{{"tool_calls":[{{"index":0,"id":"call_e2e","type":"function","function":{{"name":"{TOOL}","arguments":{arguments}}}}}]}}}}]}}"#
+                    r#"data: {{"id":"c1","object":"chat.completion.chunk","created":0,"model":"m","choices":[{{"index":0,"delta":{{"tool_calls":[{{"index":0,"id":"call_e2e","type":"function","function":{{"name":"{WIRE_TOOL}","arguments":{arguments}}}}}]}}}}]}}"#
                 ),
                 format!(
                     r#"data: {{"id":"c1","object":"chat.completion.chunk","created":0,"model":"m","choices":[{{"index":0,"delta":{{}},"finish_reason":"tool_calls"}}],"usage":{}}}"#,
@@ -670,15 +671,15 @@ async fn assert_mock_received(server: &MockServer, fails: &StdArc<StdMutex<Vec<S
     let tools_offer = parsed.iter().any(|body| {
         body["tools"].as_array().is_some_and(|tools| {
             tools.iter().any(|tool| {
-                tool["function"]["name"].as_str() == Some(TOOL)
-                    || tool["name"].as_str() == Some(TOOL)
+                tool["function"]["name"].as_str() == Some(WIRE_TOOL)
+                    || tool["name"].as_str() == Some(WIRE_TOOL)
             })
         })
     });
     if !tools_offer {
         fail!(
             fails,
-            "A6: no model request carried a tools array containing {TOOL} \
+            "A6: no model request carried a tools array containing {WIRE_TOOL} \
              ({} requests seen)",
             parsed.len()
         );
@@ -696,13 +697,13 @@ async fn assert_mock_received(server: &MockServer, fails: &StdArc<StdMutex<Vec<S
                     .join("\n")
             })
             .unwrap_or_default();
-        system.contains(&format!("!{TOOL}")) && system.contains(DESCRIPTION)
+        system.contains(WIRE_TOOL) && system.contains(DESCRIPTION)
     });
     if !manifest {
         fail!(
             fails,
             "A7: no system message carried the invokable manifest \
-             (!{TOOL} plus its description)"
+             ({WIRE_TOOL} plus its description)"
         );
     }
 

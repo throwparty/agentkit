@@ -196,9 +196,13 @@ mod tests {
     use super::*;
     use crate::config::{Auth, EndpointConfig, WireFormat};
     use crate::credentials::PATH_LOCK;
+    use crate::invokables::tool_name::{
+        InvokableName, StrictToolNameScheme, ToolNameContext, ToolNameMap,
+    };
     use crate::providers::ChatMessage;
     use crate::store::SessionStore;
     use std::io::Write as _;
+    use std::sync::Arc;
 
     fn endpoint_config(base_url: &str, auth: Auth) -> EndpointConfig {
         EndpointConfig {
@@ -269,6 +273,92 @@ mod tests {
             String::new(),
         ]
         .join("\n")
+    }
+
+    fn sse_tool_call(name: &str) -> String {
+        let chunk = |delta: serde_json::Value| {
+            serde_json::json!({
+                "id": "c1",
+                "object": "chat.completion.chunk",
+                "created": 0,
+                "model": "m",
+                "choices": [{"index": 0, "delta": delta}],
+            })
+        };
+        let terminal = serde_json::json!({
+            "id": "c1",
+            "object": "chat.completion.chunk",
+            "created": 0,
+            "model": "m",
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7},
+        });
+        [
+            format!("data: {}", chunk(serde_json::json!({"role": "assistant"}))),
+            String::new(),
+            format!(
+                "data: {}",
+                chunk(serde_json::json!({
+                    "tool_calls": [{
+                        "index": 0,
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": name, "arguments": "{}"},
+                    }],
+                }))
+            ),
+            String::new(),
+            format!("data: {terminal}"),
+            String::new(),
+            "data: [DONE]".to_owned(),
+            String::new(),
+        ]
+        .join("\n")
+    }
+
+    #[tokio::test]
+    async fn tool_names_are_sent_on_the_wire_and_decoded_back() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/chat/completions"))
+            .and(wiremock::matchers::body_partial_json(serde_json::json!({
+                "tools": [{"function": {"name": "mcp__echo__echo"}}],
+            })))
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_raw(
+                sse_tool_call("mcp__echo__echo").into_bytes(),
+                "text/event-stream",
+            ))
+            .mount(&server)
+            .await;
+
+        let config = config_with_endpoint(&server.uri(), Auth::None);
+        let names = ToolNameMap::build(
+            Arc::new(StrictToolNameScheme::default()),
+            ToolNameContext::new("test", "test-model", "openai-chat-completions"),
+            [InvokableName::new("mcp.echo.echo")],
+        )
+        .unwrap();
+        let provider = provider_for("test/test-model", &config, Some(names)).unwrap();
+        let response = provider
+            .stream_completion(
+                ModelRequest {
+                    model: "test-model".to_owned(),
+                    system: String::new(),
+                    messages: vec![ChatMessage::user("hi")],
+                    tools: vec![crate::providers::ToolDefinition {
+                        name: "mcp__echo__echo".to_owned(),
+                        description: "echo".to_owned(),
+                        parameters: serde_json::json!({"type": "object"}),
+                    }],
+                },
+                &mut |_delta: &str| {},
+                &mut |_delta: &str| {},
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.tool_calls.len(), 1);
+        assert_eq!(response.tool_calls[0].name, "mcp.echo.echo");
     }
 
     #[test]
