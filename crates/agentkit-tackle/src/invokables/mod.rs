@@ -12,6 +12,7 @@
 
 pub mod client_tools;
 pub mod titles;
+pub mod tool_name;
 
 mod direct;
 mod invokable;
@@ -25,3 +26,7 @@ pub use direct::{parse_direct, DirectError, DirectInvocation};
 pub use invokable::Invokable;
 pub use name::{agent_name, kind_of, mcp_name, prompt_name, Kind};
 pub use registry::{ExpansionError, Registry, RegistryError};
+pub use tool_name::{
+    InvokableName, NamespaceSeparator, StrictToolNameScheme, ToolNameError, ToolNameScheme,
+    ToolNameSchemeName, WireToolName,
+};
