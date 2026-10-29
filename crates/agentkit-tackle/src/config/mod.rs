@@ -9,6 +9,7 @@
 
 mod load;
 mod schema;
+mod tool_names;
 
 pub mod trust;
 
@@ -24,3 +25,4 @@ pub use schema::{
     ModelConfig, ModelsConfig, ScriptConfig, SessionsConfig, ToolNamesConfig, TurnsConfig,
     WireFormat,
 };
+pub use tool_names::{resolve_tool_names, ToolNamesConfigError};
