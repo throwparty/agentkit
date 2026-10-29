@@ -1,0 +1,10 @@
+flowchart LR
+  Config[Endpoint and model tool_names] --> Resolve[Resolve ToolNameScheme]
+  Resolve --> Render[Registry render_tools]
+  Render --> Rendered[RenderedTools]
+  Rendered --> Prompt[System prompt and wire tools]
+  Rendered --> Map[ToolNameMap]
+  Map --> History[Provider encodes history]
+  History --> Upstream[Model API]
+  Upstream --> Decode[Provider decodes tool calls]
+  Decode --> Loop[Turn loop and registry dispatch]
