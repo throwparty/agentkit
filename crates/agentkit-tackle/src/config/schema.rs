@@ -2,7 +2,7 @@
 
 use crate::invokables::tool_name::ToolNameSchemeName;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -140,26 +140,34 @@ pub struct ModelConfig {
 
 /// The endpoint's static model set, normalizing a list or a table.
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct ModelsConfig(BTreeMap<String, ModelConfig>);
+pub struct ModelsConfig {
+    // The list form's order is meaningful: it selects the fallback model when
+    // discovery fails and no explicit model is configured.
+    order: Vec<String>,
+    models: BTreeMap<String, ModelConfig>,
+}
 
 impl ModelsConfig {
     #[must_use]
     pub fn from_models(models: BTreeMap<String, ModelConfig>) -> Self {
-        Self(models)
+        Self {
+            order: models.keys().cloned().collect(),
+            models,
+        }
     }
 
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.order.is_empty()
     }
 
     pub fn keys(&self) -> impl Iterator<Item = &String> {
-        self.0.keys()
+        self.order.iter()
     }
 
     #[must_use]
     pub fn get(&self, model: &str) -> Option<&ModelConfig> {
-        self.0.get(model)
+        self.models.get(model)
     }
 }
 
@@ -176,13 +184,25 @@ impl<'de> Deserialize<'de> for ModelsConfig {
         }
 
         Ok(match Repr::deserialize(deserializer)? {
-            Repr::List(models) => Self(
-                models
-                    .into_iter()
-                    .map(|model| (model, ModelConfig::default()))
-                    .collect(),
-            ),
-            Repr::Table(models) => Self(models),
+            Repr::List(models) => {
+                let mut order = Vec::new();
+                let mut seen = BTreeSet::new();
+                let mut configs = BTreeMap::new();
+                for model in models {
+                    if seen.insert(model.clone()) {
+                        order.push(model.clone());
+                    }
+                    configs.entry(model).or_insert_with(ModelConfig::default);
+                }
+                Self {
+                    order,
+                    models: configs,
+                }
+            }
+            Repr::Table(models) => Self {
+                order: models.keys().cloned().collect(),
+                models,
+            },
         })
     }
 }
