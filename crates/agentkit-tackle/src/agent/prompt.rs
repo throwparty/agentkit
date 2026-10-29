@@ -7,8 +7,10 @@ use crate::agent::sink::TurnSink;
 use crate::agent::tool_call::{policy_script_sources, run_model_tool_call, ToolCallContext};
 use crate::agent::turn::TurnError;
 use crate::agent::{compaction, titling, TurnOutcome, TurnStop};
+use crate::config::{resolve_tool_names, Config};
 use crate::content::{prompt_parts_of, timestamp};
-use crate::invokables::Registry;
+use crate::invokables::tool_name::{ToolNameContext, ToolNameScheme};
+use crate::invokables::{RenderedTools, Registry};
 use crate::providers::openai_chat_completions::{provider_for, RigProvider};
 use crate::providers::{ChatContent, ChatMessage, ModelToolCall, ToolCallOutcome, ToolDefinition};
 use crate::state::{LeaseHeartbeat, TackleState};
@@ -26,6 +28,25 @@ struct LoopInputs {
     prompt: Vec<ChatContent>,
     prior: Vec<ChatMessage>,
     context_length_note: String,
+}
+
+/// Resolves the endpoint/model tool-name policy for a model reference.
+pub(crate) fn tool_names_for(
+    config: &Config,
+    model_ref: &str,
+) -> Result<(Arc<dyn ToolNameScheme>, ToolNameContext), String> {
+    let (endpoint_name, model) = model_ref
+        .split_once('/')
+        .ok_or_else(|| format!("model `{model_ref}` is not endpoint-qualified"))?;
+    let endpoint = config
+        .endpoints
+        .get(endpoint_name)
+        .ok_or_else(|| format!("model `{model_ref}` is not configured"))?;
+    let scheme = resolve_tool_names(endpoint_name, endpoint, model).map_err(|error| error.to_string())?;
+    Ok((
+        scheme,
+        ToolNameContext::new(endpoint_name, model, endpoint.wire_format.as_str()),
+    ))
 }
 
 /// One model turn of a prompt: resolve the actor, model, tools, and
@@ -144,13 +165,17 @@ async fn prepare_turn(
     blocks_json: &str,
 ) -> Result<(LoopInputs, String, u64, u32), String> {
     let (model_ref, size) = resolve_model_and_window(state, session_row).await?;
-    let (registry, tools, system) = build_registry_and_system(
+    let (scheme, context) = tool_names_for(&state.config().config, &model_ref)?;
+    let (registry, rendered, system) = build_registry_and_system(
         &state.definitions(),
         actor_name,
         &runtime.pool,
         &runtime.client_tools,
+        scheme,
+        context,
     )
-    .await;
+    .await?;
+    let RenderedTools { tools, names, .. } = rendered;
     let prompt = expand_prompt(first_text, blocks_json, &registry)?;
     let assembled = state
         .db
@@ -158,8 +183,8 @@ async fn prepare_turn(
         .await
         .map_err(|err| err.to_string())?;
     let prior = compaction::prior_messages(&assembled, turn_id);
-    let provider =
-        provider_for(&model_ref, &state.config().config).map_err(|err| err.to_string())?;
+    let provider = provider_for(&model_ref, &state.config().config, Some(names))
+        .map_err(|err| err.to_string())?;
     let inputs = LoopInputs {
         registry,
         provider,
@@ -203,20 +228,24 @@ pub(crate) async fn build_registry_and_system(
     actor_name: &str,
     pool: &Arc<tokio::sync::Mutex<crate::mcp::McpPool>>,
     client_tools: &[crate::invokables::client_tools::ClientTool],
-) -> (Registry, Vec<ToolDefinition>, String) {
+    scheme: Arc<dyn ToolNameScheme>,
+    context: ToolNameContext,
+) -> Result<(Registry, RenderedTools, String), String> {
     let mcp_tokens = {
         let pool = pool.lock().await;
         pool.list_tools().await
     };
     let registry = Registry::build_with_client_tools(definitions, &mcp_tokens, client_tools)
         .unwrap_or_default();
-    let tools = registry.model_tools();
+    let rendered = registry
+        .render_tools(scheme, context)
+        .map_err(|error| error.to_string())?;
     let mut system = persona_body(definitions, actor_name);
-    if !tools.is_empty() {
+    if !rendered.tools.is_empty() {
         system.push_str("\n\n");
-        system.push_str(&registry.manifest());
+        system.push_str(&rendered.manifest);
     }
-    (registry, tools, system)
+    Ok((registry, rendered, system))
 }
 
 /// The persona body with its context variables substituted and its

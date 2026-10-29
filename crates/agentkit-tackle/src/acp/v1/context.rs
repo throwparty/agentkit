@@ -7,7 +7,7 @@ use super::negotiation::ConnectionNegotiation;
 use super::support::{send_agent_message_chunk, turn_runtime, Cx};
 use crate::agent::compaction;
 use crate::agent::context_report::{self, ReportInputs};
-use crate::agent::prompt::{build_registry_and_system, resolve_model_and_window};
+use crate::agent::prompt::{build_registry_and_system, resolve_model_and_window, tool_names_for};
 use crate::state::TackleState;
 use agent_client_protocol::schema::v1::{PromptResponse, SessionId, StopReason};
 use agent_client_protocol::{Error, Responder};
@@ -73,14 +73,18 @@ async fn build_reply(
     session_row: Option<&crate::store::Session>,
 ) -> Result<(String, String), String> {
     let (model_ref, window) = resolve_model_and_window(state, session_row).await?;
+    let (scheme, context) = tool_names_for(&state.config().config, &model_ref)?;
     let runtime = turn_runtime(negotiation, cx, wire_session.clone(), CancellationToken::new());
-    let (_, tools, system) = build_registry_and_system(
+    let (_, rendered, system) = build_registry_and_system(
         &state.definitions(),
         actor_name,
         &runtime.pool,
         &runtime.client_tools,
+        scheme,
+        context,
     )
-    .await;
+    .await?;
+    let tools = rendered.tools;
     let assembled = state
         .db
         .assemble_context(store_session)
