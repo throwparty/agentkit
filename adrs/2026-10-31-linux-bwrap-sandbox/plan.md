@@ -2,17 +2,18 @@
 
 ## Approach
 
-Five milestones, each producing evidence. M1 is the argv builder: a typed description of the view rendered to bwrap arguments, with validation, invariants and a version check. M2 is the fixture: a Rust crate plus a hostile script that is the common workload. M3 is the first real run: iterate the bind set until cargo build, test and run work, attributing every addition to the failure that required it. M4 is lifecycle, diagnostics and the portability matrix that answers the map's open question about unprivileged user namespaces. M5 writes the findings and the recommendation. No milestone touches the Litterbox CLI, its MCP surface, or any workspace crate.
+Five milestones, each producing evidence. M1 is the argv builder: a typed description of the view rendered to bwrap arguments, with validation, invariants and a version check. M2 is the fixture: a Rust crate plus a hostile script that is the common workload. M3 is the first real run: iterate the bind set until cargo build, test and run work, attributing every addition to the failure that required it. M4 is lifecycle, diagnostics and the user namespace probe. M5 writes the findings and the recommendation. No milestone touches the Litterbox CLI, its MCP surface, or any workspace crate.
 
 ## Architecture
 
-One Rust binary and one fixture under `adrs/2026-10-31-linux-bwrap-sandbox/poc`. The binary takes `--workspace`, repeatable `--read`, `--write` and `--env`, then `--` and a command. It builds the bwrap argv from a typed view, canonicalises and validates every path, checks the bwrap version, and execs bwrap, which execs the command. The builder and bwrap are one invocation, and the child inherits the namespaces and cannot leave them. The fixture runs as the child, so the harness confines the same workload on every run.
+One Rust binary and one fixture under `adrs/2026-10-31-linux-bwrap-sandbox/poc`. The binary takes `--workspace`, repeatable `--read`, `--env` and `--omit`, plus `--new-session` and `--print-argv`, then `--` and a command. It canonicalises and validates every path, opens each grant once with no symlink resolution, builds the bwrap argv, checks the bwrap version, and runs bwrap with a status descriptor. The child inherits the namespaces and cannot leave them. The fixture runs as the child, so the harness confines the same workload on every run.
 
 
 ```mermaid
 graph TD
   H["Harness (typed view to argv)"] -->|execs| B["bwrap"]
-  B -->|user, mount, pid, ipc, uts, cgroup| V["Mount view"]
+  B -->|namespaces| N["user, mount, pid, ipc, uts, cgroup, net"]
+  B -->|mount view| V["binds, tmpfs, proc, dev"]
   V -->|ro-bind| S["/nix/store"]
   V -->|rw-bind| W["workspace at /src"]
   V -->|tmpfs| T["/tmp and $HOME"]
@@ -27,7 +28,7 @@ graph TD
 
 | Technology | Role |
 |------------|------|
-| Rust 2021 | Prototype language; harness binary and fixture crate |
+| Rust 2024 | Prototype language; harness binary and fixture crate |
 | bubblewrap (bwrap) | Creates the namespaces and the filesystem view |
 | Nix | Supplies the host toolchain and the store bound read-only |
 | procfs and /dev | Provided inside the view by bwrap |
@@ -39,7 +40,7 @@ graph TD
 
 View model and argv builder
 
-Owns a typed description of the view: workspace, read-only paths, writable paths, environment. Canonicalises every path, applies the invariants the caller cannot widen, checks the bwrap version, renders the argv and execs. Covers FR-011 to FR-020 and AC-010 to AC-014.
+Owns a typed description of the view: workspace, read-only grants, environment and baseline groups. Canonicalises and validates every path, opens each grant once, applies the invariants the caller cannot widen, checks the bwrap version, renders the argv and runs bwrap with a status descriptor. Covers FR-011 to FR-020 and AC-010 to AC-014.
 
 
 ### poc/fixture
@@ -67,14 +68,21 @@ Pauses, resumes and group-kills a live loop, fails if the pid is not its own pro
 
 Fail-closed harness
 
-Runs the harness with a missing bwrap, an old bwrap, a missing workspace and a symlink escape, asserting exact exit codes and that the command never ran. Covers FR-016 and AC-007.
+Runs the harness with a missing workspace, host-home grants, protected-path grants, a symlink escape, a missing bwrap and an untrusted bwrap, asserting exact exit codes, an absent sentinel and a positive control. Covers FR-016 and AC-007.
+
+
+### poc/all.sh
+
+Aggregate entrypoint
+
+Builds and unit-tests the harness, then runs every script and the timing measurement in one pass. Covers NFR-004.
 
 
 ### poc/portability.sh
 
-User namespace matrix
+User namespace probe
 
-Runs the same probe on each available distribution or container image and records whether unprivileged user namespaces can be created, with the exact error where they cannot. Covers NFR-008 and AC-013.
+Runs the unprivileged user namespace probe on the host and records the result. Covers NFR-008 and AC-013.
 
 
 ### poc/timing.py
@@ -93,7 +101,7 @@ Per question: observed behaviour, the exact argv or error, the gap, and the open
 
 ## Data Flow
 
-The fixture runs as the confined child of bwrap. The harness parses arguments, canonicalises paths, builds the view and its argv, checks the version, and execs bwrap; bwrap creates the namespaces, assembles the mount view, drops capabilities and execs the command. The child inherits the view and cannot widen it. Observations are collected outside the sandbox: exit code, stderr, errno from the denied syscall or the absence of a path, and whether the write landed on the host. Each observation is recorded with the argv that produced it.
+The fixture runs as the confined child of bwrap. The harness parses arguments, canonicalises and opens each grant, builds the view and its argv, checks the version, and starts bwrap with a status descriptor; bwrap creates the namespaces, assembles the mount view, drops capabilities and execs the command. The child inherits the view and cannot widen it. Observations are collected outside the sandbox: exit code, stderr, errno from the denied syscall or the absence of a path, and whether the write landed on the host. Each observation records the exit code, the errno and the view that produced it; the argv is printed on failure.
 
 
 ## Deployment

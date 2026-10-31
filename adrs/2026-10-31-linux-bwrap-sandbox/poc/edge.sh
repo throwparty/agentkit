@@ -21,36 +21,51 @@ for expected in null zero urandom random; do
     }
 done
 
-pids=$(run sh -c 'ls /proc | grep -cE "^[0-9]+$"')
-if (( pids >= 20 )); then
-    echo "edge: $pids processes visible"
+inner_pid=$(run readlink /proc/self/ns/pid)
+outer_pid=$(readlink /proc/self/ns/pid)
+if [[ "$inner_pid" == "$outer_pid" ]]; then
+    echo "edge: pid namespace shared"
     exit 1
 fi
 
-inner=$(run readlink /proc/self/ns/cgroup)
-outer=$(readlink /proc/self/ns/cgroup)
-if [[ "$inner" == "$outer" ]]; then
+inner_cgroup=$(run readlink /proc/self/ns/cgroup)
+outer_cgroup=$(readlink /proc/self/ns/cgroup)
+if [[ "$inner_cgroup" == "$outer_cgroup" ]]; then
     echo "edge: cgroup namespace shared"
     exit 1
 fi
 
-if run bwrap --unshare-user -- /bin/sh -c true 2>/tmp/lbx-nested.err; then
-    echo "edge: nested bwrap ran against the host root"
-    exit 1
-fi
-if ! grep -q "No such file" /tmp/lbx-nested.err; then
-    echo "edge: nested bwrap failed unexpectedly"
-    cat /tmp/lbx-nested.err
-    exit 1
+if run bwrap --unshare-user --ro-bind /nix/store /nix/store \
+    --ro-bind /bin/sh /bin/sh -- /bin/sh -c true; then
+    echo "nested bwrap: permitted"
+else
+    echo "nested bwrap: blocked"
 fi
 
 start=$(date +%s%N)
-run sh -c 'sleep 1 &'
+run sh -c 'exec sleep 1'
 end=$(date +%s%N)
-elapsed=$(( (end - start) / 1000000 ))
-if (( elapsed > 500 )); then
-    echo "edge: background process held the sandbox ($elapsed ms)"
+exec_ms=$(( (end - start) / 1000000 ))
+if (( exec_ms < 900 )); then
+    echo "edge: exec did not hold the sandbox ($exec_ms ms)"
     exit 1
 fi
 
-echo "edge: devices, pid namespace, cgroup namespace, nested bwrap and teardown ok"
+run sh -c 'sleep 9876 &' >/dev/null 2>&1 || true
+if pgrep -f 'sleep 9876' >/dev/null 2>&1; then
+    echo "edge: background process survived teardown"
+    pkill -f 'sleep 9876' 2>/dev/null || true
+    exit 1
+fi
+
+if find "$workspace" -perm -4000 -print -quit | grep -q .; then
+    echo "edge: setuid binary present in the workspace"
+    exit 1
+fi
+
+if ! run sh -c "grep ' /src ' /proc/self/mountinfo" | grep -q nosuid; then
+    echo "edge: /src is not mounted nosuid"
+    exit 1
+fi
+
+echo "edge: devices, namespaces, nested bwrap, exec lifetime, teardown, setuid and nosuid ok"

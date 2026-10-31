@@ -43,12 +43,12 @@ Canonicalise every path with `std::fs::canonicalize` before rendering, reject re
 
 ### T-004: [x] Version floor and fail closed
 
-Parse `bwrap --version`, refuse to run below the floor required by the emitted flags, and exit non-zero without execing when bwrap is missing, too old, or a namespace cannot be created.
+Parse `bwrap --version`, refuse to run below the floor required by the emitted flags, and exit non-zero without execing when bwrap is missing, untrusted or setup fails.
 
 
 | Field | Value |
 |-------|-------|
-| Success Criteria | The exact exit code is asserted for a missing binary, an old version and a blocked user namespace; the command sentinel is absent in each case. |
+| Success Criteria | The exact exit code is asserted for a missing workspace, host-home and protected-path grants, a missing binary and an untrusted binary; setup failure exits 70; a blocked user namespace is recorded as an open risk. |
 | Complexity | 🟡 Medium |
 | Effort | 2h |
 | Depends On | T-002 |
@@ -145,16 +145,16 @@ Establish what an operator sees when a command is blocked: errno in the child, w
 | Depends On | T-007 |
 | References | denial-diagnostics,explainable-failures |
 
-### T-012: Portability matrix
+### T-012: [x] User namespace probe
 
-Run the user namespace probe on NixOS, Fedora and Ubuntu, including Ubuntu's default AppArmor restriction, and record the exact command and result for each.
+Run the unprivileged user namespace probe on the host and record the exact command and result. Cross-distribution and LSM policy are out of scope by decision.
 
 
 | Field | Value |
 |-------|-------|
-| Success Criteria | Each distribution has a row with kernel version, the probe command and its output; Ubuntu's restricted case records the remediation. |
-| Complexity | 🟡 Medium |
-| Effort | 2h |
+| Success Criteria | The host kernel version, probe command and output are recorded; the harness fails closed where namespaces are unavailable. |
+| Complexity | 🟢 Low |
+| Effort | 1h |
 | Depends On | T-004 |
 | References | portability-matrix,userns-restricted |
 

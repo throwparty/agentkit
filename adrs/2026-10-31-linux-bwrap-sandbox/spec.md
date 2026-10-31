@@ -1,8 +1,8 @@
 # Linux Bubblewrap Sandbox Spike
 
-**Status:** draft  **Created:** 2026-10-31  **Author:** adrian
+**Status:** implemented  **Created:** 2026-10-31  **Author:** adrian
 
-Converted from the map at maps/2026-10-31-nix-devshell-sandbox. The map establishes, with evidence: bubblewrap builds its sandbox from unprivileged user namespaces with no root and no daemon; the host Nix store can be shared read-only because store paths are content-addressed; an unshared network namespace is loopback-only, so destination filtering is a proxy problem; confinement needs no virtualisation; and lifecycle works through process groups, with a setsid escape that stays confined but cannot be addressed. The map leaves one question open: whether the target distributions permit unprivileged user namespaces. This ADR scopes the bubblewrap proof-of-concept that answers that question and establishes the minimal view for a real Nix-built workload. Enforcement is by mount visibility and namespace membership, so every capability must be expressed as a mount or a namespace flag. The prototype lives under this ADR directory and is discarded with it. macOS, the Nix devShell provider and the Litterbox interface are out of scope.
+Bubblewrap builds its sandbox from unprivileged user namespaces with no root and no daemon. The host Nix store can be shared read-only; content addressing gives integrity and deduplication, and the store is assumed to contain no private data. An unshared network namespace is loopback-only, so destination filtering is a proxy problem. Confinement needs no virtualisation. Lifecycle works through process groups: the harness becomes a session leader, and a setsid escape stays confined but cannot be addressed. Unprivileged user namespaces are available on the spike host; cross-distribution and LSM policy are out of scope. This ADR scopes the bubblewrap proof-of-concept and establishes the minimal view for a real Nix-built workload. Enforcement is by mount visibility and namespace membership, so every capability must be expressed as a mount or a namespace flag. Requirement titles carry a Shared or Bwrap prefix because the renderer has no nested headings. The prototype lives under this ADR directory and is discarded with it. macOS, the Nix devShell provider and the Litterbox interface are out of scope.
 
 
 ## Problem
@@ -27,6 +27,7 @@ On Linux, Litterbox cannot confine agent commands without a container runtime, a
 - A shared provider abstraction or any change to the Litterbox interface
 - Port forwarding or network grants beyond a loopback-only namespace
 - Seccomp, Landlock or cgroup resource limits
+- Distribution-specific LSM policy such as AppArmor and SELinux
 - Reaping processes that leave their process group
 - Virtualisation or VM-backed containers
 - Signing, packaging or distribution
@@ -54,7 +55,7 @@ The harness materialises a working directory for the fixture and mounts it at /s
 
 ### FR-004: Shared: Process Per Command
 
-Each exec starts a fresh bwrap invocation. The workspace and the sandbox home persist between commands; process state and pids do not. A command that stays resident keeps running after the exec returns.
+Each exec starts a fresh bwrap invocation. The workspace and the sandbox home persist between commands; process state and pids do not. A long-running command is the top-level process of its own invocation and keeps the sandbox alive until it exits.
 
 **Slug:** `new-process-per-command`
 
@@ -96,13 +97,13 @@ Spike code is additive and unreachable unless explicitly enabled. It is not wire
 
 ### FR-011: Bwrap: Namespace Set
 
-The sandbox runs with user, mount, pid, ipc, uts and cgroup namespaces where available, a new session and die-with-parent, and no sharing of the host network namespace.
+The sandbox runs with user, mount, pid, ipc, uts and cgroup namespaces, die-with-parent, no sharing of the host network namespace, and further user namespaces disabled. The harness becomes a session leader; --new-session is available and off by default.
 
 **Slug:** `namespace-set`
 
 ### FR-012: Bwrap: Filesystem View
 
-The view contains a read-only host toolchain store, a writable workspace, a private home and /tmp, /proc and a minimal /dev. Nothing else from the host filesystem is visible.
+The view contains a read-only host toolchain store, a writable workspace, a private home and /tmp, /proc, a minimal /dev, and a fixed read-only list of system and /etc files. The environment is cleared and rebuilt from an allowlist. Caller grants are opened once and mounted by descriptor.
 
 **Slug:** `filesystem-view`
 
@@ -120,13 +121,13 @@ The caller cannot widen the invariants: the host home is never mounted, the stor
 
 ### FR-015: Bwrap: Argument Construction
 
-Arguments are built in one place from a typed description of the view. Paths are canonicalised and validated before they become argv, there is no shell interpolation, and the caller never supplies bwrap flags.
+Arguments are built in one place from a typed description of the view. Paths are canonicalised and validated, opened once with no symlink resolution, and mounted by descriptor; there is no shell interpolation, and the caller never supplies bwrap flags.
 
 **Slug:** `argument-construction`
 
 ### FR-016: Bwrap: Fail Closed
 
-If bwrap is missing or too old, or a namespace cannot be created, the harness exits non-zero without running the command. A command never runs unsandboxed because confinement failed.
+If bwrap is missing or untrusted, or setup fails before the child starts, the harness exits non-zero without running the command. A setup failure carries a distinct exit code from the workload's own status. A command never runs unsandboxed because confinement failed.
 
 **Slug:** `fail-closed`
 
@@ -198,9 +199,9 @@ The prototype is assessed on quality, ease of use and maintainability; quantitat
 
 **Slug:** `judgement-over-metrics`
 
-### NFR-008: Shared: Portability Matrix
+### NFR-008: Shared: Host Requirement
 
-Unprivileged user namespace availability is recorded for at least NixOS, Fedora and Ubuntu, with the exact check and result.
+The host must permit unprivileged user namespaces; the check and result are recorded on the host used for the spike. Cross-distribution and LSM policy are out of scope.
 
 **Slug:** `portability-matrix`
 
@@ -284,9 +285,9 @@ The host home directory does not appear anywhere in the sandbox view.
 
 **Slug:** `host-home-absent`
 
-### AC-013: Bwrap: Portability Recorded
+### AC-013: Bwrap: Host Requirement Recorded
 
-The user namespace result for each tested distribution is recorded with the command used.
+The user namespace check and its result on the host are recorded.
 
 **Slug:** `portability-recorded`
 
@@ -300,7 +301,7 @@ A change to the argv builder that alters the emitted arguments fails a fixture t
 
 ### EC-001: Shared: User Namespaces Restricted
 
-Ubuntu restricts unprivileged user namespaces by default. The harness records the exact failure and the remediation, and never falls back to an unconfined run.
+Where unprivileged user namespaces are unavailable, the harness records the exact failure and never falls back to an unconfined run.
 
 **Slug:** `userns-restricted`
 ### EC-002: Shared: Bwrap Missing Or Old
