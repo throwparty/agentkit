@@ -638,20 +638,13 @@ fn resolve_sandbox_metadata(name: &str) -> Result<SandboxMetadata, SandboxError>
 }
 
 fn is_container_missing(error: &SandboxError) -> bool {
-    matches!(
-        error,
-        SandboxError::Compute(ComputeError::ContainerExec {
-            source: bollard::errors::Error::DockerResponseServerError {
-                status_code: 404,
-                ..
-            }
-        }) | SandboxError::Compute(ComputeError::ContainerInspect {
-            source: bollard::errors::Error::DockerResponseServerError {
-                status_code: 404,
-                ..
-            }
-        })
-    )
+    match error {
+        SandboxError::Compute(ComputeError::ContainerExec { source })
+        | SandboxError::Compute(ComputeError::ContainerInspect { source }) => {
+            source.kind().is_not_found()
+        }
+        _ => false,
+    }
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

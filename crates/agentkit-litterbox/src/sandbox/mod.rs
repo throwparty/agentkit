@@ -9,7 +9,7 @@ use tar::Archive;
 use tempfile::TempDir;
 use tokio::time::sleep;
 
-use crate::compute::{Compute, ContainerInspection, ContainerSpec};
+use crate::compute::{Compute, ContainerInspection, ContainerSpec, PortBindingSpec};
 use crate::domain::{
     ComputeError, ExecutionResult, ForwardedPortMapping, SandboxConfig, SandboxError,
     SandboxMetadata, SandboxStatus, ScmMode, slugify_name,
@@ -281,12 +281,8 @@ fn stage_archive(archive: &[u8]) -> Result<TempDir, SandboxError> {
 fn is_container_name_conflict(error: &SandboxError) -> bool {
     matches!(
         error,
-        SandboxError::Compute(ComputeError::ContainerProvision {
-            source: bollard::errors::Error::DockerResponseServerError {
-                status_code: 409,
-                ..
-            }
-        })
+        SandboxError::Compute(ComputeError::ContainerProvision { source })
+            if source.kind().is_conflict()
     )
 }
 
@@ -295,7 +291,7 @@ async fn build_forwarded_ports(
 ) -> Result<
     (
         Vec<String>,
-        HashMap<String, Vec<bollard::models::PortBinding>>,
+        HashMap<String, Vec<PortBindingSpec>>,
         Vec<ForwardedPortMapping>,
     ),
     SandboxError,
@@ -305,7 +301,7 @@ async fn build_forwarded_ports(
     }
 
     let mut env = Vec::new();
-    let mut port_bindings: HashMap<String, Vec<bollard::models::PortBinding>> = HashMap::new();
+    let mut port_bindings: HashMap<String, Vec<PortBindingSpec>> = HashMap::new();
     let mut forwarded = Vec::new();
 
     for port in &config.forwarded_ports {
@@ -316,7 +312,7 @@ async fn build_forwarded_ports(
         env.push(format!("{env_key}={host_port}"));
         port_bindings.insert(
             format!("{}/tcp", port.target),
-            vec![bollard::models::PortBinding {
+            vec![PortBindingSpec {
                 host_ip: Some("0.0.0.0".to_string()),
                 host_port: Some(host_port.to_string()),
             }],
