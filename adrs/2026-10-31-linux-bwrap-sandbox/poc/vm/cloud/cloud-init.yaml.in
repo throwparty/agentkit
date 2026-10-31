@@ -1,0 +1,21 @@
+#cloud-config
+package_update: true
+packages:
+  - bubblewrap
+  - build-essential
+  - util-linux
+  - iproute2
+
+write_files:
+  - path: /etc/sysctl.d/90-lbx.conf
+    content: |
+      kernel.unprivileged_userns_clone = @USERNS_BOOL@
+      kernel.apparmor_restrict_unprivileged_userns = @APPARMOR_BOOL@
+
+runcmd:
+  - [sh, -c, "dnf -y install bubblewrap gcc util-linux || true"]
+  - [sh, -c, "sysctl --system || true"]
+  - [mkdir, -p, /mnt/host]
+  - [sh, -c, "mount -t 9p -o trans=virtio,version=9p2000.L,ro host0 /mnt/host"]
+  - [bash, /mnt/host/adrs/2026-10-31-linux-bwrap-sandbox/poc/vm/cloud/@PROBE@]
+  - [poweroff, -f]
