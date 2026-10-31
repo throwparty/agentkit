@@ -63,6 +63,23 @@ them one at a time to prove necessity. That experiment is open.
 `env` resolves through the PATH to coreutils' multicall binary. Binding it as
 `/usr/bin/env` preserves the argv[0] dispatch, so shebangs work.
 
+## Baseline attribution
+
+`poc/attribution.sh` builds the fixture four ways:
+
+```
+default: build ok
+--minimal: build ok
+--no-shell: build ok
+--minimal --no-shell: build ok
+```
+
+`--minimal` removes the system profile and every `/etc` bind; `--no-shell`
+removes `/usr/bin/env` and `/bin/sh`. The fixture builds with both removed. The
+store bind is the one host tree the toolchain needs. The full view stays the
+default because shebang scripts need the shell binds and NixOS tools expect the
+system profile; the `/etc` group is defensive for this workload.
+
 ## Denials
 
 The mechanism is absence, not permission:
@@ -124,6 +141,29 @@ not available to test here, and Ubuntu's AppArmor restriction on unprivileged
 user namespaces is a known distribution risk that this spike did not verify.
 The map's open question (T-008) is therefore answered for NixOS only.
 
+## Fail closed
+
+`poc/failclosed.sh` exercises the error paths. Every case exits with the
+documented code and the command sentinel is absent:
+
+| Case | Exit |
+|---|---|
+| missing workspace | 64 |
+| workspace under the host home | 64 |
+| write grant for the store | 64 |
+| no command | 64 |
+| unknown argument | 64 |
+| bwrap missing | 69 |
+| bwrap below the version floor | 69 |
+
+## Teardown
+
+The prototypes are not members of the Cargo workspace (`cargo metadata` at the
+repository root lists neither package), no crate under `crates/` references
+them, and `cargo check -p agentkit-litterbox` passes. Deleting
+`adrs/2026-10-31-linux-bwrap-sandbox` removes the spike; nothing else refers to
+it.
+
 ## Open risks
 
 1. User namespaces are required. A host that restricts them fails at bwrap
@@ -133,8 +173,9 @@ The map's open question (T-008) is therefore answered for NixOS only.
 3. The environment is inherited. `HOME` and `TMPDIR` are overridden, while the
    rest of the host environment passes through, including any secrets in it. A
    production implementation must clear it and forward an allowlist.
-4. The `/etc` and system-profile bind list is host-specific. It was written for
-   NixOS and needs a discovery pass on other distributions.
+4. The `/etc` and system-profile bind list is host-specific. Attribution shows
+   the fixture builds without it, so it is defensive; other workloads will
+   discover their own needs.
 5. `--new-session` is omitted for lifecycle control. The trade-off is recorded
    above.
 6. There is no seccomp or Landlock layer. The sandbox is the namespace and
