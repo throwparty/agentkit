@@ -2,7 +2,7 @@
 
 ## Tasks
 
-### T-001: Scratch layout
+### T-001: [x] Scratch layout
 
 Create `adrs/2026-10-31-linux-bwrap-sandbox/poc` with `bwrap` and `fixture` subdirectories. Each Cargo.toml carries an empty `[workspace]` table so neither crate joins the agentkit workspace, and no agentkit crate references them.
 
@@ -15,7 +15,7 @@ Create `adrs/2026-10-31-linux-bwrap-sandbox/poc` with `bwrap` and `fixture` subd
 | Depends On |  |
 | References | spike-only |
 
-### T-002: Typed view and argv builder
+### T-002: [x] Typed view and argv builder
 
 Represent the view as types: workspace, read-only paths, writable paths, environment, and a fixed namespace set. Render bwrap argv from the model, and keep the builder free of shell interpolation.
 
@@ -28,7 +28,7 @@ Represent the view as types: workspace, read-only paths, writable paths, environ
 | Depends On | T-001 |
 | References | argument-construction,namespace-set,filesystem-view |
 
-### T-003: Canonicalisation and invariants
+### T-003: [x] Canonicalisation and invariants
 
 Canonicalise every path with `std::fs::canonicalize` before rendering, reject relative paths and paths escaping the workspace, and apply invariants the caller cannot widen: no host home, store read-only, workspace the only writable tree, network namespace always unshared.
 
@@ -54,7 +54,7 @@ Parse `bwrap --version`, refuse to run below the floor required by the emitted f
 | Depends On | T-002 |
 | References | version-floor,fail-closed,bwrap-missing-or-old |
 
-### T-005: Fixture crate
+### T-005: [x] Fixture crate
 
 A small Rust crate that builds and tests, materialised into the workspace before each run.
 
@@ -67,7 +67,7 @@ A small Rust crate that builds and tests, materialised into the workspace before
 | Depends On | T-001 |
 | References | shared-command-app,research-scenarios |
 
-### T-006: Hostile checks
+### T-006: [x] Hostile checks
 
 Add the adversarial half of the fixture: a write outside the workspace, a write inside the host home, a read of a credential file, an outbound connection, and a child process that repeats the write. Each check reports whether the write landed.
 
@@ -80,7 +80,7 @@ Add the adversarial half of the fixture: a write outside the workspace, a write 
 | Depends On | T-005 |
 | References | write-outside-workspace-denied,credential-read-denied,descendants-confined,network-denied-by-default |
 
-### T-007: First end-to-end run
+### T-007: [x] First end-to-end run
 
 Run the fixture under the harness with the initial bind set and record the raw output, the argv, and every failure.
 
@@ -106,7 +106,7 @@ Add the paths a Nix-built toolchain needs, discovered by failure: the store, the
 | Depends On | T-007 |
 | References | toolchain-baseline,nixos-system-profile |
 
-### T-009: Isolation assertions
+### T-009: [x] Isolation assertions
 
 Prove the store is read-only, the host home is absent from the view, and host processes are invisible and unsignalable.
 
@@ -119,7 +119,7 @@ Prove the store is read-only, the host home is absent from the view, and host pr
 | Depends On | T-007 |
 | References | store-read-only,host-home-absent,host-pids-hidden |
 
-### T-010: Lifecycle
+### T-010: [x] Lifecycle
 
 Make each sandbox its own session and process group and exercise pause, resume and delete against a command that keeps working. Count survivors after the kill.
 
@@ -132,7 +132,7 @@ Make each sandbox its own session and process group and exercise pause, resume a
 | Depends On | T-007 |
 | References | process-group-lifecycle,pause-and-resume,delete-kills-and-cleans,process-group-escape |
 
-### T-011: Denial diagnostics
+### T-011: [x] Denial diagnostics
 
 Establish what an operator sees when a command is blocked: errno in the child, whether the path is absent or permission-denied, and what bwrap or the kernel logged.
 
@@ -158,7 +158,7 @@ Run the user namespace probe on NixOS, Fedora and Ubuntu, including Ubuntu's def
 | Depends On | T-004 |
 | References | portability-matrix,userns-restricted |
 
-### T-013: Cost measurement
+### T-013: [x] Cost measurement
 
 Time argv construction plus bwrap plus exec against a bare exec baseline and record median and p95.
 
@@ -171,7 +171,7 @@ Time argv construction plus bwrap plus exec against a bare exec baseline and rec
 | Depends On | T-007 |
 | References | startup-cost |
 
-### T-014: Golden arguments
+### T-014: [x] Golden arguments
 
 Store the rendered argv for a small set of views as fixtures and compare byte for byte.
 
@@ -197,7 +197,7 @@ Exercise the edge cases that are cheap to confirm: a setuid binary, a device nod
 | Depends On | T-007 |
 | References | setuid-binaries,device-nodes,nested-bwrap,cgroup-namespace-unavailable,zombie-reaping,proc-mount-failure |
 
-### T-016: Findings and assessment
+### T-016: [x] Findings and assessment
 
 Write `findings.md`: per goal, the observation with the raw output, the gap, and the open risk. Add the qualitative judgement of the argv builder, configuration effort and maintainability.
 
