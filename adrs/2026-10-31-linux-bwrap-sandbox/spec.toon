@@ -1,8 +1,8 @@
 title: Linux Bubblewrap Sandbox Spike
-status: draft
+status: implemented
 created: 2026-10-31
 author: adrian
-context: "Converted from the map at maps/2026-10-31-nix-devshell-sandbox. The map establishes, with evidence: bubblewrap builds its sandbox from unprivileged user namespaces with no root and no daemon; the host Nix store can be shared read-only because store paths are content-addressed; an unshared network namespace is loopback-only, so destination filtering is a proxy problem; confinement needs no virtualisation; and lifecycle works through process groups, with a setsid escape that stays confined but cannot be addressed. The map leaves one question open: whether the target distributions permit unprivileged user namespaces. This ADR scopes the bubblewrap proof-of-concept that answers that question and establishes the minimal view for a real Nix-built workload. Enforcement is by mount visibility and namespace membership, so every capability must be expressed as a mount or a namespace flag. The prototype lives under this ADR directory and is discarded with it. macOS, the Nix devShell provider and the Litterbox interface are out of scope."
+context: "Bubblewrap builds its sandbox from unprivileged user namespaces with no root and no daemon. The host Nix store can be shared read-only; content addressing gives integrity and deduplication, and the store is assumed to contain no private data. An unshared network namespace is loopback-only, so destination filtering is a proxy problem. Confinement needs no virtualisation. Lifecycle works through process groups: the harness becomes a session leader, and a setsid escape stays confined but cannot be addressed. Unprivileged user namespaces are available on the spike host; cross-distribution and LSM policy are out of scope. This ADR scopes the bubblewrap proof-of-concept and establishes the minimal view for a real Nix-built workload. Enforcement is by mount visibility and namespace membership, so every capability must be expressed as a mount or a namespace flag. Requirement titles carry a Shared or Bwrap prefix because the renderer has no nested headings. The prototype lives under this ADR directory and is discarded with it. macOS, the Nix devShell provider and the Litterbox interface are out of scope."
 problem: "On Linux, Litterbox cannot confine agent commands without a container runtime, and has no backend that uses the kernel's own namespace facility. Before designing one, we do not know whether a real development workload runs under a minimal bind set, what that bind set must contain for a Nix-built toolchain, how denials present when a path is absent or permission-denied, or what the lifecycle and per-command cost look like without a container daemon."
 goals[6]:
   - Determine whether bwrap can confine a real development workload built from the host toolchain
@@ -11,7 +11,7 @@ goals[6]:
   - Measure per-command cost against a bare exec baseline
   - Exercise process-per-command lifecycle without a supervisor or container daemon
   - Produce findings that a production implementation can be designed against
-nonGoals[10]:
+nonGoals[11]:
   - Replacing the Docker backend on Linux
   - Nix devShell selection, activation or environment capture
   - Nix builds inside the sandbox, store write models or gc roots
@@ -19,6 +19,7 @@ nonGoals[10]:
   - A shared provider abstraction or any change to the Litterbox interface
   - Port forwarding or network grants beyond a loopback-only namespace
   - Seccomp, Landlock or cgroup resource limits
+  - Distribution-specific LSM policy such as AppArmor and SELinux
   - Reaping processes that leave their process group
   - Virtualisation or VM-backed containers
   - Signing, packaging or distribution
@@ -26,19 +27,19 @@ requirements[20]{id,title,slug,description}:
   FR-001,"Shared: Fixture Application",shared-command-app,"A small Rust application is built, tested and run inside the sandbox. It provides the realistic workload and the hostile workload in one tree, so the harness is exercised against identical inputs on every run."
   FR-002,"Shared: Fixture Scenarios",research-scenarios,"The fixture covers a cargo build, test and run, and a hostile script that writes outside the workspace, writes to the host home, reads a credential file, opens an outbound connection and repeats the write from a child process."
   FR-003,"Shared: Workspace Materialisation",workspace-materialisation,"The harness materialises a working directory for the fixture and mounts it at /src inside the sandbox. Upload and download are ordinary copies between host paths and that directory; the directory is never the host project tree."
-  FR-004,"Shared: Process Per Command",new-process-per-command,"Each exec starts a fresh bwrap invocation. The workspace and the sandbox home persist between commands; process state and pids do not. A command that stays resident keeps running after the exec returns."
+  FR-004,"Shared: Process Per Command",new-process-per-command,"Each exec starts a fresh bwrap invocation. The workspace and the sandbox home persist between commands; process state and pids do not. A long-running command is the top-level process of its own invocation and keeps the sandbox alive until it exits."
   FR-005,"Shared: Process Group Lifecycle",process-group-lifecycle,"Each sandbox invocation establishes its own session and process group, and the harness demonstrates pause, resume and kill against that group. Supervision stays at harness level."
   FR-006,"Shared: Denial Diagnostics",denial-diagnostics,"The findings record what an operator sees when a command is blocked: the errno, whether the path was absent or permission-denied, and what bwrap or the kernel logged."
   FR-007,"Shared: Backend Selection",backend-selection,"The harness is selected explicitly and is available only on Linux. The Docker backend remains the default and behaviour elsewhere is unchanged."
   FR-008,"Shared: Qualitative Assessment",qualitative-assessment,"The findings record the shape of the argv builder, what the workload needed beyond the initial bind set, what was awkward, and whether we would want to own it."
   FR-009,"Shared: Findings Document",findings-document,"The spike produces findings.md beside the ADR: per question, the observed behaviour, the exact argv or error, and the open risks for a production implementation."
   FR-010,"Shared: Spike Only",spike-only,"Spike code is additive and unreachable unless explicitly enabled. It is not wired into the MCP tools or the default CLI path."
-  FR-011,"Bwrap: Namespace Set",namespace-set,"The sandbox runs with user, mount, pid, ipc, uts and cgroup namespaces where available, a new session and die-with-parent, and no sharing of the host network namespace."
-  FR-012,"Bwrap: Filesystem View",filesystem-view,"The view contains a read-only host toolchain store, a writable workspace, a private home and /tmp, /proc and a minimal /dev. Nothing else from the host filesystem is visible."
+  FR-011,"Bwrap: Namespace Set",namespace-set,"The sandbox runs with user, mount, pid, ipc, uts and cgroup namespaces, die-with-parent, no sharing of the host network namespace, and further user namespaces disabled. The harness becomes a session leader; --new-session is available and off by default."
+  FR-012,"Bwrap: Filesystem View",filesystem-view,"The view contains a read-only host toolchain store, a writable workspace, a private home and /tmp, /proc, a minimal /dev, and a fixed read-only list of system and /etc files. The environment is cleared and rebuilt from an allowlist. Caller grants are opened once and mounted by descriptor."
   FR-013,"Bwrap: Toolchain Baseline",toolchain-baseline,"The baseline binds the paths a Nix-built toolchain needs, discovered by failure: the store, the system profile on NixOS, the dynamic linker and the certificate, hosts and resolver files. Each addition is attributed to the observation that required it."
   FR-014,"Bwrap: Invariants",invariant-rules,"The caller cannot widen the invariants: the host home is never mounted, the store is always read-only, the workspace is the only writable tree and the network namespace is always unshared."
-  FR-015,"Bwrap: Argument Construction",argument-construction,"Arguments are built in one place from a typed description of the view. Paths are canonicalised and validated before they become argv, there is no shell interpolation, and the caller never supplies bwrap flags."
-  FR-016,"Bwrap: Fail Closed",fail-closed,"If bwrap is missing or too old, or a namespace cannot be created, the harness exits non-zero without running the command. A command never runs unsandboxed because confinement failed."
+  FR-015,"Bwrap: Argument Construction",argument-construction,"Arguments are built in one place from a typed description of the view. Paths are canonicalised and validated, opened once with no symlink resolution, and mounted by descriptor; there is no shell interpolation, and the caller never supplies bwrap flags."
+  FR-016,"Bwrap: Fail Closed",fail-closed,"If bwrap is missing or untrusted, or setup fails before the child starts, the harness exits non-zero without running the command. A setup failure carries a distinct exit code from the workload's own status. A command never runs unsandboxed because confinement failed."
   FR-017,"Bwrap: Network Denied",network-denied,"The sandbox has no route to the host network. Loopback inside the namespace is available; a connection to any host address fails."
   FR-018,"Bwrap: Version Floor",version-floor,"The harness checks the bwrap version and refuses to run below the floor required for the flags it emits. The floor is recorded in the findings."
   FR-019,"Bwrap: Golden Arguments",golden-arguments,"For a fixed set of inputs the emitted argv matches a fixture byte for byte, so a change to the builder shows up as a fixture diff."
@@ -51,7 +52,7 @@ nonFunctional[9]{id,title,slug,description}:
   NFR-005,"Shared: No Behaviour Change Elsewhere",no-behaviour-change-elsewhere,"Non-Linux platforms, the Docker backend and the MCP tools behave exactly as before. The prototype is additive and off by default."
   NFR-006,"Shared: Explainable Failures",explainable-failures,"Every failure is captured with the command, the argv and the raw error or denial. A blocked command must be distinguishable from a command that failed for its own reasons."
   NFR-007,"Shared: Judgement Over Metrics",judgement-over-metrics,"The prototype is assessed on quality, ease of use and maintainability; quantitative observations are context."
-  NFR-008,"Shared: Portability Matrix",portability-matrix,"Unprivileged user namespace availability is recorded for at least NixOS, Fedora and Ubuntu, with the exact check and result."
+  NFR-008,"Shared: Host Requirement",portability-matrix,"The host must permit unprivileged user namespaces; the check and result are recorded on the host used for the spike. Cross-distribution and LSM policy are out of scope."
   NFR-009,"Shared: Primitive Longevity",primitive-longevity,"The findings record bwrap's maintenance status and version, and what the design would do if a required flag or namespace disappeared."
 acceptance[14]{id,title,slug,description}:
   AC-001,"Shared: Write Outside Workspace Denied",write-outside-workspace-denied,"A command writing to a path outside the workspace fails and no artefact lands on the host."
@@ -66,10 +67,10 @@ acceptance[14]{id,title,slug,description}:
   AC-010,"Bwrap: Store Read-Only",store-read-only,"Writing to a path in the Nix store fails while executing a binary from it succeeds."
   AC-011,"Bwrap: Host Pids Hidden",host-pids-hidden,"A process inside the sandbox cannot see or signal processes outside it."
   AC-012,"Bwrap: Host Home Absent",host-home-absent,"The host home directory does not appear anywhere in the sandbox view."
-  AC-013,"Bwrap: Portability Recorded",portability-recorded,"The user namespace result for each tested distribution is recorded with the command used."
+  AC-013,"Bwrap: Host Requirement Recorded",portability-recorded,"The user namespace check and its result on the host are recorded."
   AC-014,"Bwrap: Golden Arguments",golden-arguments-accepted,"A change to the argv builder that alters the emitted arguments fails a fixture test."
 edgeCases[11]{id,title,slug,description}:
-  EC-001,"Shared: User Namespaces Restricted",userns-restricted,"Ubuntu restricts unprivileged user namespaces by default. The harness records the exact failure and the remediation, and never falls back to an unconfined run."
+  EC-001,"Shared: User Namespaces Restricted",userns-restricted,"Where unprivileged user namespaces are unavailable, the harness records the exact failure and never falls back to an unconfined run."
   EC-002,"Shared: Bwrap Missing Or Old",bwrap-missing-or-old,"If bwrap is absent or below the version floor the harness reports the required version and exits non-zero."
   EC-003,"Shared: Proc Mount Failure",proc-mount-failure,"If /proc cannot be mounted the harness fails."
   EC-004,"Shared: Setuid Binaries",setuid-binaries,"A sandboxed process cannot gain privilege through a setuid binary; the error is confirmed legible."
