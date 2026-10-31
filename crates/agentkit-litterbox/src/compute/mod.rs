@@ -389,25 +389,70 @@ impl DockerCompute {
 }
 
 fn connect_docker_client() -> Result<Docker, SandboxError> {
-    match resolve_docker_host(docker_host_from_env, docker_host_from_context) {
-        Some(host) => connect_with_host(&host),
-        None => DockerCompute::connect_with_defaults(),
+    match select_endpoint_source(docker_context_from_env(), docker_host_from_env()) {
+        EndpointSource::ContextEnv { name } => {
+            let host = docker_host_for_context(Some(&name)).ok_or_else(|| {
+                SandboxError::Config(format!(
+                    "DOCKER_CONTEXT is set to '{name}' but the docker CLI could not resolve it"
+                ))
+            })?;
+            connect_with_host(&host)
+        }
+        EndpointSource::HostEnv { host } => connect_with_host(&host),
+        EndpointSource::CliContext => match docker_host_for_context(None) {
+            Some(host) => connect_with_host(&host),
+            None => DockerCompute::connect_with_defaults(),
+        },
     }
 }
 
-/// Matches the Docker CLI: `DOCKER_HOST` overrides the active context.
-fn resolve_docker_host(
-    from_env: impl FnOnce() -> Option<String>,
-    from_context: impl FnOnce() -> Option<String>,
-) -> Option<String> {
-    from_env().or_else(from_context)
+/// Which endpoint to use, resolved in the same order as the Docker CLI:
+/// `DOCKER_CONTEXT` overrides `DOCKER_HOST`, which overrides the active context.
+enum EndpointSource {
+    ContextEnv { name: String },
+    HostEnv { host: String },
+    CliContext,
+}
+
+fn select_endpoint_source(context: Option<String>, host: Option<String>) -> EndpointSource {
+    match (context, host) {
+        (Some(name), _) => EndpointSource::ContextEnv { name },
+        (None, Some(host)) => EndpointSource::HostEnv { host },
+        (None, None) => EndpointSource::CliContext,
+    }
+}
+
+fn docker_context_from_env() -> Option<String> {
+    non_empty_env("DOCKER_CONTEXT")
 }
 
 fn docker_host_from_env() -> Option<String> {
-    std::env::var("DOCKER_HOST")
+    non_empty_env("DOCKER_HOST")
+}
+
+fn non_empty_env(name: &str) -> Option<String> {
+    std::env::var(name)
         .ok()
-        .map(|host| host.trim().to_string())
-        .filter(|host| !host.is_empty())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+/// Asks the docker CLI for a context endpoint. `None` means the active context,
+/// which is already shaped by `DOCKER_CONTEXT` and `docker context use`.
+fn docker_host_for_context(context: Option<&str>) -> Option<String> {
+    let mut command = Command::new("docker");
+    command.args(["context", "inspect"]);
+    if let Some(context) = context {
+        command.arg(context);
+    }
+    command.args(["-f", "{{.Endpoints.docker.Host}}"]);
+
+    let output = command.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let host = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if host.is_empty() { None } else { Some(host) }
 }
 
 fn connect_with_host(host: &str) -> Result<Docker, SandboxError> {
@@ -442,21 +487,6 @@ fn connect_with_host(host: &str) -> Result<Docker, SandboxError> {
         }
         _ => DockerCompute::connect_with_defaults(),
     }
-}
-
-fn docker_host_from_context() -> Option<String> {
-    let output = Command::new("docker")
-        .args(["context", "inspect", "-f", "{{.Endpoints.docker.Host}}"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let host = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if host.is_empty() {
-        return None;
-    }
-    Some(host)
 }
 
 impl Compute for DockerCompute {
@@ -631,18 +661,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn docker_host_env_overrides_context() {
-        let host = resolve_docker_host(
-            || Some("unix:///tmp/env.sock".to_string()),
-            || Some("unix:///tmp/context.sock".to_string()),
+    fn docker_context_env_beats_docker_host_env() {
+        let source = select_endpoint_source(
+            Some("remote".to_string()),
+            Some("unix:///tmp/env.sock".to_string()),
         );
-        assert_eq!(host.as_deref(), Some("unix:///tmp/env.sock"));
+        assert!(matches!(source, EndpointSource::ContextEnv { name } if name == "remote"));
     }
 
     #[test]
-    fn docker_host_falls_back_to_context() {
-        let host = resolve_docker_host(|| None, || Some("tcp://127.0.0.1:2375".to_string()));
-        assert_eq!(host.as_deref(), Some("tcp://127.0.0.1:2375"));
+    fn docker_host_env_used_without_context_env() {
+        let source = select_endpoint_source(None, Some("unix:///tmp/env.sock".to_string()));
+        assert!(matches!(source, EndpointSource::HostEnv { host } if host == "unix:///tmp/env.sock"));
+    }
+
+    #[test]
+    fn active_context_used_when_neither_env_is_set() {
+        assert!(matches!(
+            select_endpoint_source(None, None),
+            EndpointSource::CliContext
+        ));
     }
 
     #[tokio::test]
