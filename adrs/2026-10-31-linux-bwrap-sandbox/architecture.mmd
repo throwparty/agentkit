@@ -1,0 +1,11 @@
+graph TD
+  H["Harness (typed view to argv)"] -->|execs| B["bwrap"]
+  B -->|namespaces| N["user, mount, pid, ipc, uts, cgroup, net"]
+  B -->|mount view| V["binds, tmpfs, proc, dev"]
+  V -->|ro-bind| S["/nix/store"]
+  V -->|rw-bind| W["workspace at /src"]
+  V -->|tmpfs| T["/tmp and $HOME"]
+  V -->|proc, dev| P["/proc and /dev"]
+  B -->|execs| C["Confined command"]
+  C --> F["Fixture: cargo build, test, run"]
+  C --> X["Hostile checks"]

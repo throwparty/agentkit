@@ -1,0 +1,356 @@
+# Linux Bubblewrap Sandbox Spike
+
+**Status:** draft  **Created:** 2026-10-31  **Author:** adrian
+
+Converted from the map at maps/2026-10-31-nix-devshell-sandbox. The map establishes, with evidence: bubblewrap builds its sandbox from unprivileged user namespaces with no root and no daemon; the host Nix store can be shared read-only because store paths are content-addressed; an unshared network namespace is loopback-only, so destination filtering is a proxy problem; confinement needs no virtualisation; and lifecycle works through process groups, with a setsid escape that stays confined but cannot be addressed. The map leaves one question open: whether the target distributions permit unprivileged user namespaces. This ADR scopes the bubblewrap proof-of-concept that answers that question and establishes the minimal view for a real Nix-built workload. Enforcement is by mount visibility and namespace membership, so every capability must be expressed as a mount or a namespace flag. The prototype lives under this ADR directory and is discarded with it. macOS, the Nix devShell provider and the Litterbox interface are out of scope.
+
+
+## Problem
+
+On Linux, Litterbox cannot confine agent commands without a container runtime, and has no backend that uses the kernel's own namespace facility. Before designing one, we do not know whether a real development workload runs under a minimal bind set, what that bind set must contain for a Nix-built toolchain, how denials present when a path is absent or permission-denied, or what the lifecycle and per-command cost look like without a container daemon.
+
+## Goals
+
+- Determine whether bwrap can confine a real development workload built from the host toolchain
+- Establish the minimal namespace and bind set for a Nix-built toolchain
+- Learn how denials present and how legible they are to an operator
+- Measure per-command cost against a bare exec baseline
+- Exercise process-per-command lifecycle without a supervisor or container daemon
+- Produce findings that a production implementation can be designed against
+
+## Non-goals
+
+- Replacing the Docker backend on Linux
+- Nix devShell selection, activation or environment capture
+- Nix builds inside the sandbox, store write models or gc roots
+- macOS or Windows confinement
+- A shared provider abstraction or any change to the Litterbox interface
+- Port forwarding or network grants beyond a loopback-only namespace
+- Seccomp, Landlock or cgroup resource limits
+- Reaping processes that leave their process group
+- Virtualisation or VM-backed containers
+- Signing, packaging or distribution
+
+
+## Functional Requirements
+
+### FR-001: Shared: Fixture Application
+
+A small Rust application is built, tested and run inside the sandbox. It provides the realistic workload and the hostile workload in one tree, so the harness is exercised against identical inputs on every run.
+
+**Slug:** `shared-command-app`
+
+### FR-002: Shared: Fixture Scenarios
+
+The fixture covers a cargo build, test and run, and a hostile script that writes outside the workspace, writes to the host home, reads a credential file, opens an outbound connection and repeats the write from a child process.
+
+**Slug:** `research-scenarios`
+
+### FR-003: Shared: Workspace Materialisation
+
+The harness materialises a working directory for the fixture and mounts it at /src inside the sandbox. Upload and download are ordinary copies between host paths and that directory; the directory is never the host project tree.
+
+**Slug:** `workspace-materialisation`
+
+### FR-004: Shared: Process Per Command
+
+Each exec starts a fresh bwrap invocation. The workspace and the sandbox home persist between commands; process state and pids do not. A command that stays resident keeps running after the exec returns.
+
+**Slug:** `new-process-per-command`
+
+### FR-005: Shared: Process Group Lifecycle
+
+Each sandbox invocation establishes its own session and process group, and the harness demonstrates pause, resume and kill against that group. Supervision stays at harness level.
+
+**Slug:** `process-group-lifecycle`
+
+### FR-006: Shared: Denial Diagnostics
+
+The findings record what an operator sees when a command is blocked: the errno, whether the path was absent or permission-denied, and what bwrap or the kernel logged.
+
+**Slug:** `denial-diagnostics`
+
+### FR-007: Shared: Backend Selection
+
+The harness is selected explicitly and is available only on Linux. The Docker backend remains the default and behaviour elsewhere is unchanged.
+
+**Slug:** `backend-selection`
+
+### FR-008: Shared: Qualitative Assessment
+
+The findings record the shape of the argv builder, what the workload needed beyond the initial bind set, what was awkward, and whether we would want to own it.
+
+**Slug:** `qualitative-assessment`
+
+### FR-009: Shared: Findings Document
+
+The spike produces findings.md beside the ADR: per question, the observed behaviour, the exact argv or error, and the open risks for a production implementation.
+
+**Slug:** `findings-document`
+
+### FR-010: Shared: Spike Only
+
+Spike code is additive and unreachable unless explicitly enabled. It is not wired into the MCP tools or the default CLI path.
+
+**Slug:** `spike-only`
+
+### FR-011: Bwrap: Namespace Set
+
+The sandbox runs with user, mount, pid, ipc, uts and cgroup namespaces where available, a new session and die-with-parent, and no sharing of the host network namespace.
+
+**Slug:** `namespace-set`
+
+### FR-012: Bwrap: Filesystem View
+
+The view contains a read-only host toolchain store, a writable workspace, a private home and /tmp, /proc and a minimal /dev. Nothing else from the host filesystem is visible.
+
+**Slug:** `filesystem-view`
+
+### FR-013: Bwrap: Toolchain Baseline
+
+The baseline binds the paths a Nix-built toolchain needs, discovered by failure: the store, the system profile on NixOS, the dynamic linker and the certificate, hosts and resolver files. Each addition is attributed to the observation that required it.
+
+**Slug:** `toolchain-baseline`
+
+### FR-014: Bwrap: Invariants
+
+The caller cannot widen the invariants: the host home is never mounted, the store is always read-only, the workspace is the only writable tree and the network namespace is always unshared.
+
+**Slug:** `invariant-rules`
+
+### FR-015: Bwrap: Argument Construction
+
+Arguments are built in one place from a typed description of the view. Paths are canonicalised and validated before they become argv, there is no shell interpolation, and the caller never supplies bwrap flags.
+
+**Slug:** `argument-construction`
+
+### FR-016: Bwrap: Fail Closed
+
+If bwrap is missing or too old, or a namespace cannot be created, the harness exits non-zero without running the command. A command never runs unsandboxed because confinement failed.
+
+**Slug:** `fail-closed`
+
+### FR-017: Bwrap: Network Denied
+
+The sandbox has no route to the host network. Loopback inside the namespace is available; a connection to any host address fails.
+
+**Slug:** `network-denied`
+
+### FR-018: Bwrap: Version Floor
+
+The harness checks the bwrap version and refuses to run below the floor required for the flags it emits. The floor is recorded in the findings.
+
+**Slug:** `version-floor`
+
+### FR-019: Bwrap: Golden Arguments
+
+For a fixed set of inputs the emitted argv matches a fixture byte for byte, so a change to the builder shows up as a fixture diff.
+
+**Slug:** `golden-arguments`
+
+### FR-020: Bwrap: Path Canonicalisation
+
+Every path is canonicalised with realpath before it reaches argv. Relative paths, paths containing dot-dot and symlinks resolving outside the workspace are rejected before execution.
+
+**Slug:** `path-canonicalisation`
+
+## Non-functional Requirements
+
+### NFR-001: Shared: Audit Surface
+
+The harness is a single Rust binary with no async runtime and no dependency beyond libc and the standard library.
+
+**Slug:** `small-audit-surface`
+
+### NFR-002: Shared: No Daemon
+
+Confinement requires no container daemon, supervisor or background service; bwrap is a subprocess that owns the sandbox lifetime.
+
+**Slug:** `no-daemon`
+
+### NFR-003: Shared: Startup Cost Measured
+
+Per-command cost is timed against a bare exec baseline and recorded as median and p95.
+
+**Slug:** `startup-cost`
+
+### NFR-004: Shared: Reproducibility
+
+The harness runs again from the repository with one command and produces a comparable result. Fixtures live in the repository.
+
+**Slug:** `testability`
+
+### NFR-005: Shared: No Behaviour Change Elsewhere
+
+Non-Linux platforms, the Docker backend and the MCP tools behave exactly as before. The prototype is additive and off by default.
+
+**Slug:** `no-behaviour-change-elsewhere`
+
+### NFR-006: Shared: Explainable Failures
+
+Every failure is captured with the command, the argv and the raw error or denial. A blocked command must be distinguishable from a command that failed for its own reasons.
+
+**Slug:** `explainable-failures`
+
+### NFR-007: Shared: Judgement Over Metrics
+
+The prototype is assessed on quality, ease of use and maintainability; quantitative observations are context.
+
+**Slug:** `judgement-over-metrics`
+
+### NFR-008: Shared: Portability Matrix
+
+Unprivileged user namespace availability is recorded for at least NixOS, Fedora and Ubuntu, with the exact check and result.
+
+**Slug:** `portability-matrix`
+
+### NFR-009: Shared: Primitive Longevity
+
+The findings record bwrap's maintenance status and version, and what the design would do if a required flag or namespace disappeared.
+
+**Slug:** `primitive-longevity`
+
+## Acceptance Criteria
+
+### AC-001: Shared: Write Outside Workspace Denied
+
+A command writing to a path outside the workspace fails and no artefact lands on the host.
+
+**Slug:** `write-outside-workspace-denied`
+
+### AC-002: Shared: Credential Read Denied
+
+A command reading a credential file in the host home fails because the host home is not in the view.
+
+**Slug:** `credential-read-denied`
+
+### AC-003: Shared: Network Denied By Default
+
+A command opening an outbound connection fails; a loopback listener inside the namespace still works.
+
+**Slug:** `network-denied-by-default`
+
+### AC-004: Shared: Descendants Confined
+
+A shell that spawns a child which writes outside the workspace is denied. Confinement is inherited by descendants.
+
+**Slug:** `descendants-confined`
+
+### AC-005: Shared: Pause And Resume
+
+Pausing a sandbox stops its command from making progress; resuming lets it continue.
+
+**Slug:** `pause-and-resume`
+
+### AC-006: Shared: Delete Kills And Cleans
+
+Destroying the sandbox kills the process group and removes the workspace and private directories, leaving no process or directory behind.
+
+**Slug:** `delete-kills-and-cleans`
+
+### AC-007: Shared: Fail Closed
+
+Missing bwrap, an old bwrap, a blocked user namespace or an invalid path causes a non-zero exit and no command execution.
+
+**Slug:** `fail-closed-behaviour`
+
+### AC-008: Shared: Docker Path Unaffected
+
+The Docker backend still creates, execs into and deletes containers as before when selected.
+
+**Slug:** `docker-path-unaffected`
+
+### AC-009: Shared: Questions Answered
+
+Each goal is answered in the findings with the command, the argv and the observed result, plus a written judgement.
+
+**Slug:** `findings-answer-questions`
+
+### AC-010: Bwrap: Store Read-Only
+
+Writing to a path in the Nix store fails while executing a binary from it succeeds.
+
+**Slug:** `store-read-only`
+
+### AC-011: Bwrap: Host Pids Hidden
+
+A process inside the sandbox cannot see or signal processes outside it.
+
+**Slug:** `host-pids-hidden`
+
+### AC-012: Bwrap: Host Home Absent
+
+The host home directory does not appear anywhere in the sandbox view.
+
+**Slug:** `host-home-absent`
+
+### AC-013: Bwrap: Portability Recorded
+
+The user namespace result for each tested distribution is recorded with the command used.
+
+**Slug:** `portability-recorded`
+
+### AC-014: Bwrap: Golden Arguments
+
+A change to the argv builder that alters the emitted arguments fails a fixture test.
+
+**Slug:** `golden-arguments-accepted`
+
+## Edge Cases
+
+### EC-001: Shared: User Namespaces Restricted
+
+Ubuntu restricts unprivileged user namespaces by default. The harness records the exact failure and the remediation, and never falls back to an unconfined run.
+
+**Slug:** `userns-restricted`
+### EC-002: Shared: Bwrap Missing Or Old
+
+If bwrap is absent or below the version floor the harness reports the required version and exits non-zero.
+
+**Slug:** `bwrap-missing-or-old`
+### EC-003: Shared: Proc Mount Failure
+
+If /proc cannot be mounted the harness fails.
+
+**Slug:** `proc-mount-failure`
+### EC-004: Shared: Setuid Binaries
+
+A sandboxed process cannot gain privilege through a setuid binary; the error is confirmed legible.
+
+**Slug:** `setuid-binaries`
+### EC-005: Shared: Device Nodes
+
+Only the device nodes the harness creates are present; host devices sit outside the view.
+
+**Slug:** `device-nodes`
+### EC-006: Shared: Symlinked Paths
+
+Paths are canonicalised because /tmp and other paths may be symlinks. A path resolving outside the workspace is rejected.
+
+**Slug:** `symlinked-paths`
+### EC-007: Shared: Process Group Escape
+
+A command that calls setsid leaves the process group. It stays confined because the namespace cannot be removed, but delete can no longer reap it. The behaviour is recorded.
+
+**Slug:** `process-group-escape`
+### EC-008: Shared: Cgroup Namespace Unavailable
+
+Where a cgroup namespace cannot be created, the harness records whether it continues without it and why.
+
+**Slug:** `cgroup-namespace-unavailable`
+### EC-009: Shared: NixOS System Profile
+
+On NixOS the system profile and the current-system symlink must be in the view for basic tools to run. On other distributions the path is absent and the addition is skipped.
+
+**Slug:** `nixos-system-profile`
+### EC-010: Shared: Nested Bwrap
+
+User namespace nesting may or may not be permitted. The harness records whether a sandboxed bwrap can create a further sandbox.
+
+**Slug:** `nested-bwrap`
+### EC-011: Shared: Zombie Reaping
+
+bwrap reaps its own children. The harness records what happens to grandchildren orphaned by a command that exits.
+
+**Slug:** `zombie-reaping`
+
