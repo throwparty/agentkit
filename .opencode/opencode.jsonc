@@ -1,6 +1,5 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "switchboard/nemotron3-120b-nvfp4-128k",
   "provider": {
     "switchboard": {
       "api": "openai",
