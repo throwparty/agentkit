@@ -1,0 +1,12 @@
+flowchart LR
+  Fixture[Fixture crate and hostile script] --> Custom[Custom prototype binary]
+  Fixture --> Nono[Nono prototype binary]
+  Custom --> CustomPolicy[Policy model renders SBPL]
+  CustomPolicy --> CustomApply[sandbox_init applies profile]
+  Nono --> NonoPolicy[CapabilitySet maps grants]
+  NonoPolicy --> NonoApply[Nono applies profile]
+  CustomApply --> Kernel[Kernel sandbox]
+  NonoApply --> Kernel
+  Kernel --> Child[Confined child process]
+  Child --> Observe[Observation from outside the sandbox]
+  Observe --> Findings[findings.md]
