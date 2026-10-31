@@ -389,10 +389,25 @@ impl DockerCompute {
 }
 
 fn connect_docker_client() -> Result<Docker, SandboxError> {
-    if let Some(host) = docker_host_from_context() {
-        return connect_with_host(&host);
+    match resolve_docker_host(docker_host_from_env, docker_host_from_context) {
+        Some(host) => connect_with_host(&host),
+        None => DockerCompute::connect_with_defaults(),
     }
-    DockerCompute::connect_with_defaults()
+}
+
+/// Matches the Docker CLI: `DOCKER_HOST` overrides the active context.
+fn resolve_docker_host(
+    from_env: impl FnOnce() -> Option<String>,
+    from_context: impl FnOnce() -> Option<String>,
+) -> Option<String> {
+    from_env().or_else(from_context)
+}
+
+fn docker_host_from_env() -> Option<String> {
+    std::env::var("DOCKER_HOST")
+        .ok()
+        .map(|host| host.trim().to_string())
+        .filter(|host| !host.is_empty())
 }
 
 fn connect_with_host(host: &str) -> Result<Docker, SandboxError> {
@@ -614,6 +629,21 @@ fn is_not_found(error: &BollardError) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn docker_host_env_overrides_context() {
+        let host = resolve_docker_host(
+            || Some("unix:///tmp/env.sock".to_string()),
+            || Some("unix:///tmp/context.sock".to_string()),
+        );
+        assert_eq!(host.as_deref(), Some("unix:///tmp/env.sock"));
+    }
+
+    #[test]
+    fn docker_host_falls_back_to_context() {
+        let host = resolve_docker_host(|| None, || Some("tcp://127.0.0.1:2375".to_string()));
+        assert_eq!(host.as_deref(), Some("tcp://127.0.0.1:2375"));
+    }
 
     #[tokio::test]
     async fn docker_connects_and_ensures_image() -> Result<(), Box<dyn std::error::Error>> {
