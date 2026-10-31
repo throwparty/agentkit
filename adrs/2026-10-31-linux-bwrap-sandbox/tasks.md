@@ -41,7 +41,7 @@ Canonicalise every path with `std::fs::canonicalize` before rendering, reject re
 | Depends On | T-002 |
 | References | path-canonicalisation,invariant-rules |
 
-### T-004: Version floor and fail closed
+### T-004: [x] Version floor and fail closed
 
 Parse `bwrap --version`, refuse to run below the floor required by the emitted flags, and exit non-zero without execing when bwrap is missing, too old, or a namespace cannot be created.
 
@@ -93,7 +93,7 @@ Run the fixture under the harness with the initial bind set and record the raw o
 | Depends On | T-003,T-004,T-005,T-006 |
 | References | shared-command-app |
 
-### T-008: Baseline iteration
+### T-008: [x] Baseline iteration
 
 Add the paths a Nix-built toolchain needs, discovered by failure: the store, the system profile on NixOS, the dynamic linker, and the certificate, hosts and resolver files. Attribute each addition to the observation that required it.
 
@@ -210,7 +210,7 @@ Write `findings.md`: per goal, the observation with the raw output, the gap, and
 | Depends On | T-008,T-009,T-010,T-011,T-012,T-013,T-015 |
 | References | findings-document,qualitative-assessment,findings-answer-questions,judgement-over-metrics |
 
-### T-017: Teardown check
+### T-017: [x] Teardown check
 
 Confirm the harness is unreachable from the rest of the suite, then record what would have to be removed to discard the spike.
 
