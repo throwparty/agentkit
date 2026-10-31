@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use agentkit_litterbox::compute::DockerCompute;
+use agentkit_litterbox::compute::{DockerCompute, SandboxState};
 use agentkit_litterbox::domain::{
     ComputeError, SandboxError, SandboxMetadata, SandboxStatus, ScmMode, slugify_name,
 };
@@ -11,7 +11,6 @@ use agentkit_litterbox::sandbox::{
     DockerSandboxProvider, SandboxProvider, branch_name_for_slug, container_name_for_slug,
 };
 use agentkit_litterbox::scm::{Scm, ThreadSafeScm};
-use bollard::query_parameters::ListContainersOptionsBuilder;
 use clap::{CommandFactory, Parser, Subcommand};
 
 #[derive(Parser)]
@@ -186,23 +185,13 @@ async fn handle_list() -> ExitCode {
         let status = match compute.as_ref() {
             Some(compute) => {
                 let container = container_name_for_slug(&repo_prefix, &slug);
-                match compute.client().inspect_container(&container, None).await {
-                    Ok(info) => {
-                        let state = info.state.as_ref();
-                        let running = state.and_then(|state| state.running).unwrap_or(false);
-                        let paused = state.and_then(|state| state.paused).unwrap_or(false);
-                        if paused {
-                            SandboxStatus::Paused
-                        } else if running {
-                            SandboxStatus::Active
-                        } else {
-                            SandboxStatus::Error("not running".to_string())
-                        }
+                match compute.state(&container).await {
+                    Ok(SandboxState::Paused) => SandboxStatus::Paused,
+                    Ok(SandboxState::Running) => SandboxStatus::Active,
+                    Ok(SandboxState::Stopped) => SandboxStatus::Error("not running".to_string()),
+                    Ok(SandboxState::Missing) => {
+                        SandboxStatus::Error("missing container".to_string())
                     }
-                    Err(bollard::errors::Error::DockerResponseServerError {
-                        status_code: 404,
-                        ..
-                    }) => SandboxStatus::Error("missing container".to_string()),
                     Err(error) => return report_error("list", error),
                 }
             }
@@ -288,31 +277,17 @@ async fn handle_pause_all_repos() -> ExitCode {
         Ok(compute) => compute,
         Err(error) => return report_error("pause --all-repos", error),
     };
-    let options = Some(ListContainersOptionsBuilder::default().all(true).build());
-    let containers = match compute.client().list_containers(options).await {
+    let containers = match compute.list("litterbox-").await {
         Ok(containers) => containers,
         Err(error) => return report_error("pause --all-repos", error),
     };
 
     let mut paused = 0usize;
     for container in containers {
-        let Some(names) = container.names.as_ref() else {
-            continue;
-        };
-        if !names.iter().any(|name| name.starts_with("/litterbox-")) {
+        if !container.state.is_active() {
             continue;
         }
-        let Some(id) = container.id.as_ref() else {
-            continue;
-        };
-        let running = matches!(
-            container.state,
-            Some(bollard::models::ContainerSummaryStateEnum::RUNNING)
-        );
-        if !running {
-            continue;
-        }
-        match compute.pause_container(id).await {
+        match compute.pause_container(&container.id).await {
             Ok(()) => paused += 1,
             Err(error) if is_container_missing(&error) => {}
             Err(error) => return report_error("pause --all-repos", error),
@@ -378,29 +353,11 @@ async fn handle_delete(name: String, force: bool) -> ExitCode {
         Err(error) => return report_error("delete", error),
     };
 
-    match compute
-        .client()
-        .inspect_container(&metadata.container_id, None)
-        .await
-    {
-        Ok(info) => {
-            let running = info
-                .state
-                .as_ref()
-                .and_then(|state| state.running)
-                .unwrap_or(false);
-            let paused = info
-                .state
-                .as_ref()
-                .and_then(|state| state.paused)
-                .unwrap_or(false);
-            if running && !paused && !force {
-                return report_error("delete", "sandbox is active; use --force to delete");
-            }
+    match compute.state(&metadata.container_id).await {
+        Ok(state) if state.is_active() && !force => {
+            return report_error("delete", "sandbox is active; use --force to delete");
         }
-        Err(bollard::errors::Error::DockerResponseServerError {
-            status_code: 404, ..
-        }) => {}
+        Ok(_) => {}
         Err(error) => return report_error("delete", error),
     }
 
@@ -507,11 +464,7 @@ fn status_label(status: &SandboxStatus) -> String {
 fn is_container_missing(error: &SandboxError) -> bool {
     matches!(
         error,
-        SandboxError::Compute(ComputeError::ContainerPause {
-            source: bollard::errors::Error::DockerResponseServerError {
-                status_code: 404,
-                ..
-            }
-        })
+        SandboxError::Compute(ComputeError::ContainerPause { source })
+            if source.kind().is_not_found()
     )
 }

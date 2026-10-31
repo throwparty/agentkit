@@ -193,62 +193,125 @@ pub enum ScmError {
     },
 }
 
+/// How a backend failure should be interpreted by callers, independent of the
+/// wire format the backend happens to use.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FailureKind {
+    NotFound,
+    Conflict,
+    Other,
+}
+
+impl FailureKind {
+    pub fn is_not_found(self) -> bool {
+        self == Self::NotFound
+    }
+
+    pub fn is_conflict(self) -> bool {
+        self == Self::Conflict
+    }
+}
+
+/// An opaque backend error, plus the little that callers are allowed to branch on.
+#[derive(Debug)]
+pub struct BackendError {
+    kind: FailureKind,
+    source: Box<dyn std::error::Error + Send + Sync + 'static>,
+}
+
+impl BackendError {
+    pub fn new(
+        kind: FailureKind,
+        source: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
+    ) -> Self {
+        Self {
+            kind,
+            source: source.into(),
+        }
+    }
+
+    pub fn other(source: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>) -> Self {
+        Self::new(FailureKind::Other, source)
+    }
+
+    pub fn kind(&self) -> FailureKind {
+        self.kind
+    }
+}
+
+impl std::fmt::Display for BackendError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}", self.source)
+    }
+}
+
+impl std::error::Error for BackendError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.source.as_ref())
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum ComputeError {
-    #[error("Docker client connection failed: {source}")]
+    #[error("backend connection failed: {source}")]
     Connection {
         #[source]
-        source: bollard::errors::Error,
+        source: BackendError,
     },
-    #[error("Docker image inspection failed: {source}")]
+    #[error("image inspection failed: {source}")]
     ImageInspect {
         #[source]
-        source: bollard::errors::Error,
+        source: BackendError,
     },
-    #[error("Docker image pull failed: {source}")]
+    #[error("image pull failed: {source}")]
     ImagePull {
         #[source]
-        source: bollard::errors::Error,
+        source: BackendError,
     },
-    #[error("Docker container provisioning failed: {source}")]
+    #[error("sandbox provisioning failed: {source}")]
     ContainerProvision {
         #[source]
-        source: bollard::errors::Error,
+        source: BackendError,
     },
-    #[error("Docker container inspection failed: {source}")]
+    #[error("sandbox inspection failed: {source}")]
     ContainerInspect {
         #[source]
-        source: bollard::errors::Error,
+        source: BackendError,
     },
-    #[error("Docker pause failed: {source}")]
+    #[error("sandbox pause failed: {source}")]
     ContainerPause {
         #[source]
-        source: bollard::errors::Error,
+        source: BackendError,
     },
-    #[error("Docker resume failed: {source}")]
+    #[error("sandbox resume failed: {source}")]
     ContainerResume {
         #[source]
-        source: bollard::errors::Error,
+        source: BackendError,
     },
-    #[error("Docker delete failed: {source}")]
+    #[error("sandbox delete failed: {source}")]
     ContainerDelete {
         #[source]
-        source: bollard::errors::Error,
+        source: BackendError,
     },
-    #[error("Docker exec failed: {source}")]
+    #[error("command execution failed: {source}")]
     ContainerExec {
         #[source]
-        source: bollard::errors::Error,
+        source: BackendError,
     },
-    #[error("Docker upload failed: {source}")]
+    #[error("upload failed: {source}")]
     ContainerUpload {
         #[source]
-        source: bollard::errors::Error,
+        source: BackendError,
     },
-    #[error("Docker download failed: {source}")]
+    #[error("download failed: {source}")]
     ContainerDownload {
         #[source]
-        source: bollard::errors::Error,
+        source: BackendError,
+    },
+    #[error("sandbox listing failed: {source}")]
+    ContainerList {
+        #[source]
+        source: BackendError,
     },
 }
 

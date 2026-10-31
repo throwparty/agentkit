@@ -11,7 +11,7 @@ use bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
 use bollard::models::{ContainerCreateBody, HostConfig, PortBinding};
 use bollard::query_parameters::{
     CreateContainerOptionsBuilder, CreateImageOptions, DownloadFromContainerOptionsBuilder,
-    RemoveContainerOptions, UploadToContainerOptionsBuilder,
+    ListContainersOptionsBuilder, RemoveContainerOptions, UploadToContainerOptionsBuilder,
 };
 use bollard::{API_DEFAULT_VERSION, Docker};
 use bytes::Bytes;
@@ -19,7 +19,7 @@ use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
 use tar::{Archive, Builder};
 
-use crate::domain::{ComputeError, ExecutionResult, SandboxError};
+use crate::domain::{BackendError, ComputeError, ExecutionResult, FailureKind, SandboxError};
 
 pub trait Compute {
     fn ensure_image<'a>(&'a self, image: &'a str) -> BoxFuture<'a, Result<(), SandboxError>>;
@@ -31,6 +31,15 @@ pub trait Compute {
         &'a self,
         container_id: &'a str,
     ) -> BoxFuture<'a, Result<ContainerInspection, SandboxError>>;
+    fn state<'a>(
+        &'a self,
+        container_id: &'a str,
+    ) -> BoxFuture<'a, Result<SandboxState, SandboxError>>;
+    /// Sandboxes whose backend name starts with `name_prefix`.
+    fn list<'a>(
+        &'a self,
+        name_prefix: &'a str,
+    ) -> BoxFuture<'a, Result<Vec<SandboxSummary>, SandboxError>>;
     fn pause_container<'a>(
         &'a self,
         container_id: &'a str,
@@ -72,7 +81,7 @@ pub struct ContainerSpec {
     pub command: Vec<String>,
     pub working_dir: Option<String>,
     pub env: Vec<String>,
-    pub port_bindings: HashMap<String, Vec<PortBinding>>,
+    pub port_bindings: HashMap<String, Vec<PortBindingSpec>>,
 }
 
 #[derive(Clone, Debug)]
@@ -81,7 +90,27 @@ pub struct PortBindingSpec {
     pub host_port: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SandboxState {
+    Running,
+    Paused,
+    Stopped,
+    Missing,
+}
+
+impl SandboxState {
+    pub fn is_active(self) -> bool {
+        self == Self::Running
+    }
+}
+
 #[derive(Clone, Debug)]
+pub struct SandboxSummary {
+    pub id: String,
+    pub names: Vec<String>,
+    pub state: SandboxState,
+}
+
 pub struct ContainerInspection {
     pub env: Vec<String>,
     pub port_bindings: HashMap<String, Vec<PortBindingSpec>>,
@@ -107,7 +136,7 @@ impl DockerCompute {
 
     fn connect_with_defaults() -> Result<Docker, SandboxError> {
         Docker::connect_with_local_defaults()
-            .map_err(|source| SandboxError::Compute(ComputeError::Connection { source }))
+            .map_err(|source| SandboxError::Compute(ComputeError::Connection { source: backend_error(source) }))
     }
 
     pub async fn ensure_image(&self, image: &str) -> Result<(), SandboxError> {
@@ -115,7 +144,7 @@ impl DockerCompute {
             Ok(_) => Ok(()),
             Err(error) if is_not_found(&error) => self.pull_image(image).await,
             Err(error) => Err(SandboxError::Compute(ComputeError::ImageInspect {
-                source: error,
+                source: backend_error(error),
             })),
         }
     }
@@ -128,7 +157,7 @@ impl DockerCompute {
         let mut stream = self.client.create_image(options, None, None);
 
         while let Some(item) = stream.next().await {
-            item.map_err(|source| SandboxError::Compute(ComputeError::ImagePull { source }))?;
+            item.map_err(|source| SandboxError::Compute(ComputeError::ImagePull { source: backend_error(source) }))?;
         }
 
         Ok(())
@@ -151,7 +180,16 @@ impl DockerCompute {
             Some(
                 spec.port_bindings
                     .iter()
-                    .map(|(key, bindings)| (key.clone(), Some(bindings.clone())))
+                    .map(|(key, bindings)| {
+                        let bindings = bindings
+                            .iter()
+                            .map(|binding| PortBinding {
+                                host_ip: binding.host_ip.clone(),
+                                host_port: binding.host_port.clone(),
+                            })
+                            .collect();
+                        (key.clone(), Some(bindings))
+                    })
                     .collect(),
             )
         };
@@ -175,12 +213,12 @@ impl DockerCompute {
             .client
             .create_container(options, config)
             .await
-            .map_err(|source| SandboxError::Compute(ComputeError::ContainerProvision { source }))?;
+            .map_err(|source| SandboxError::Compute(ComputeError::ContainerProvision { source: backend_error(source) }))?;
 
         self.client
             .start_container(&response.id, None)
             .await
-            .map_err(|source| SandboxError::Compute(ComputeError::ContainerProvision { source }))?;
+            .map_err(|source| SandboxError::Compute(ComputeError::ContainerProvision { source: backend_error(source) }))?;
 
         Ok(response.id)
     }
@@ -193,7 +231,7 @@ impl DockerCompute {
             .client
             .inspect_container(container_id, None)
             .await
-            .map_err(|source| SandboxError::Compute(ComputeError::ContainerInspect { source }))?;
+            .map_err(|source| SandboxError::Compute(ComputeError::ContainerInspect { source: backend_error(source) }))?;
         let env = inspect
             .config
             .and_then(|config| config.env)
@@ -219,15 +257,77 @@ impl DockerCompute {
         Ok(ContainerInspection { env, port_bindings })
     }
 
+    pub async fn state(&self, container_id: &str) -> Result<SandboxState, SandboxError> {
+        match self.client.inspect_container(container_id, None).await {
+            Ok(info) => {
+                let state = info.state.as_ref();
+                if state.and_then(|state| state.paused).unwrap_or(false) {
+                    Ok(SandboxState::Paused)
+                } else if state.and_then(|state| state.running).unwrap_or(false) {
+                    Ok(SandboxState::Running)
+                } else {
+                    Ok(SandboxState::Stopped)
+                }
+            }
+            Err(error) if is_not_found(&error) => Ok(SandboxState::Missing),
+            Err(source) => Err(SandboxError::Compute(ComputeError::ContainerInspect {
+                source: backend_error(source),
+            })),
+        }
+    }
+
+    pub async fn list(&self, name_prefix: &str) -> Result<Vec<SandboxSummary>, SandboxError> {
+        let options = Some(ListContainersOptionsBuilder::default().all(true).build());
+        let containers =
+            self.client
+                .list_containers(options)
+                .await
+                .map_err(|source| SandboxError::Compute(ComputeError::ContainerList {
+                    source: backend_error(source),
+                }))?;
+
+        Ok(containers
+            .into_iter()
+            .filter(|container| {
+                container
+                    .names
+                    .as_ref()
+                    .map(|names| {
+                        names
+                            .iter()
+                            .any(|name| strip_leading_slash(name).starts_with(name_prefix))
+                    })
+                    .unwrap_or(false)
+            })
+            .filter_map(|container| {
+                let id = container.id?;
+                let names = container
+                    .names
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|name| strip_leading_slash(name).to_string())
+                    .collect();
+                let state = match container.state {
+                    Some(bollard::models::ContainerSummaryStateEnum::RUNNING) => {
+                        SandboxState::Running
+                    }
+                    Some(bollard::models::ContainerSummaryStateEnum::PAUSED) => {
+                        SandboxState::Paused
+                    }
+                    _ => SandboxState::Stopped,
+                };
+                Some(SandboxSummary { id, names, state })
+            })
+            .collect())
+    }
+
     pub async fn pause_container(&self, container_id: &str) -> Result<(), SandboxError> {
         match self.client.pause_container(container_id).await {
             Ok(()) => Ok(()),
             Err(bollard::errors::Error::DockerResponseServerError {
                 status_code: 409, ..
             }) => Ok(()),
-            Err(source) => Err(SandboxError::Compute(ComputeError::ContainerPause {
-                source,
-            })),
+            Err(source) => Err(SandboxError::Compute(ComputeError::ContainerPause { source: backend_error(source) })),
         }
     }
 
@@ -237,9 +337,7 @@ impl DockerCompute {
             Err(bollard::errors::Error::DockerResponseServerError {
                 status_code: 409, ..
             }) => Ok(()),
-            Err(source) => Err(SandboxError::Compute(ComputeError::ContainerResume {
-                source,
-            })),
+            Err(source) => Err(SandboxError::Compute(ComputeError::ContainerResume { source: backend_error(source) })),
         }
     }
 
@@ -259,9 +357,7 @@ impl DockerCompute {
             Err(bollard::errors::Error::DockerResponseServerError {
                 status_code: 404, ..
             }) => Ok(()),
-            Err(source) => Err(SandboxError::Compute(ComputeError::ContainerDelete {
-                source,
-            })),
+            Err(source) => Err(SandboxError::Compute(ComputeError::ContainerDelete { source: backend_error(source) })),
         }
     }
 
@@ -284,7 +380,7 @@ impl DockerCompute {
             .client
             .create_exec(container_id, exec_options)
             .await
-            .map_err(|source| SandboxError::Compute(ComputeError::ContainerExec { source }))?;
+            .map_err(|source| SandboxError::Compute(ComputeError::ContainerExec { source: backend_error(source) }))?;
 
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
@@ -293,12 +389,12 @@ impl DockerCompute {
             .client
             .start_exec(&exec.id, None::<StartExecOptions>)
             .await
-            .map_err(|source| SandboxError::Compute(ComputeError::ContainerExec { source }))?;
+            .map_err(|source| SandboxError::Compute(ComputeError::ContainerExec { source: backend_error(source) }))?;
 
         if let StartExecResults::Attached { mut output, .. } = results {
             while let Some(item) = output.next().await {
                 match item.map_err(|source| {
-                    SandboxError::Compute(ComputeError::ContainerExec { source })
+                    SandboxError::Compute(ComputeError::ContainerExec { source: backend_error(source) })
                 })? {
                     LogOutput::StdOut { message } | LogOutput::Console { message } => {
                         stdout.extend_from_slice(&message)
@@ -313,7 +409,7 @@ impl DockerCompute {
             .client
             .inspect_exec(&exec.id)
             .await
-            .map_err(|source| SandboxError::Compute(ComputeError::ContainerExec { source }))?;
+            .map_err(|source| SandboxError::Compute(ComputeError::ContainerExec { source: backend_error(source) }))?;
         let exit_code = inspect
             .exit_code
             .unwrap_or(1)
@@ -363,7 +459,7 @@ impl DockerCompute {
         self.client
             .upload_to_container(container_id, options, body)
             .await
-            .map_err(|source| SandboxError::Compute(ComputeError::ContainerUpload { source }))
+            .map_err(|source| SandboxError::Compute(ComputeError::ContainerUpload { source: backend_error(source) }))
     }
 
     async fn download_tar(
@@ -380,7 +476,7 @@ impl DockerCompute {
         let mut buffer = Vec::new();
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|source| {
-                SandboxError::Compute(ComputeError::ContainerDownload { source })
+                SandboxError::Compute(ComputeError::ContainerDownload { source: backend_error(source) })
             })?;
             buffer.extend_from_slice(&chunk);
         }
@@ -466,24 +562,22 @@ fn connect_with_host(host: &str) -> Result<Docker, SandboxError> {
             #[cfg(unix)]
             {
                 Docker::connect_with_socket(rest, 120, API_DEFAULT_VERSION)
-                    .map_err(|source| SandboxError::Compute(ComputeError::Connection { source }))
+                    .map_err(|source| SandboxError::Compute(ComputeError::Connection { source: backend_error(source) }))
             }
             #[cfg(not(unix))]
             {
                 Err(SandboxError::Compute(ComputeError::Connection {
-                    source: bollard::errors::Error::IOError {
-                        err: std::io::Error::new(
-                            std::io::ErrorKind::InvalidInput,
-                            "unix docker host is not supported on this platform",
-                        ),
-                    },
+                    source: BackendError::other(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "unix backend host is not supported on this platform",
+                    )),
                 }))
             }
         }
         "tcp" => {
             let endpoint = format!("http://{}", rest);
             Docker::connect_with_http(&endpoint, 120, API_DEFAULT_VERSION)
-                .map_err(|source| SandboxError::Compute(ComputeError::Connection { source }))
+                .map_err(|source| SandboxError::Compute(ComputeError::Connection { source: backend_error(source) }))
         }
         _ => DockerCompute::connect_with_defaults(),
     }
@@ -536,6 +630,20 @@ impl Compute for DockerCompute {
         working_dir: Option<&'a str>,
     ) -> BoxFuture<'a, Result<ExecutionResult, SandboxError>> {
         Box::pin(async move { DockerCompute::exec(self, container_id, command, working_dir).await })
+    }
+
+    fn state<'a>(
+        &'a self,
+        container_id: &'a str,
+    ) -> BoxFuture<'a, Result<SandboxState, SandboxError>> {
+        Box::pin(async move { DockerCompute::state(self, container_id).await })
+    }
+
+    fn list<'a>(
+        &'a self,
+        name_prefix: &'a str,
+    ) -> BoxFuture<'a, Result<Vec<SandboxSummary>, SandboxError>> {
+        Box::pin(async move { DockerCompute::list(self, name_prefix).await })
     }
 
     fn upload_path<'a>(
@@ -646,6 +754,24 @@ fn extract_tar(dest_path: &Path, tar: &[u8]) -> Result<(), SandboxError> {
     Ok(())
 }
 
+/// Docker summary names carry a leading `/` that container names do not.
+fn strip_leading_slash(name: &str) -> &str {
+    name.strip_prefix('/').unwrap_or(name)
+}
+
+fn backend_error(error: BollardError) -> BackendError {
+    let kind = match &error {
+        BollardError::DockerResponseServerError {
+            status_code: 404, ..
+        } => FailureKind::NotFound,
+        BollardError::DockerResponseServerError {
+            status_code: 409, ..
+        } => FailureKind::Conflict,
+        _ => FailureKind::Other,
+    };
+    BackendError::new(kind, error)
+}
+
 fn is_not_found(error: &BollardError) -> bool {
     matches!(
         error,
@@ -659,6 +785,12 @@ fn is_not_found(error: &BollardError) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn summary_names_drop_the_docker_leading_slash() {
+        assert_eq!(strip_leading_slash("/litterbox-repo-slug"), "litterbox-repo-slug");
+        assert_eq!(strip_leading_slash("litterbox-repo-slug"), "litterbox-repo-slug");
+    }
 
     #[test]
     fn docker_context_env_beats_docker_host_env() {
