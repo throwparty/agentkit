@@ -109,6 +109,21 @@ are the command, the errno and the view.
 - A nested bwrap started a new namespace and found an empty root; its command
   must be bound or it fails with `execvp ...: No such file or directory`.
 
+## Process lifetime
+
+The sandbox lives as long as the command bwrap was asked to run. A background
+child does not outlive it: `run sh -c 'sleep 1 &'` returned in 9ms, and the
+sleep was killed when the initial process exited. A long-running service must
+be the top-level command of its own invocation.
+
+## Edge checks
+
+`poc/edge.sh` confirms the device set, a fresh pid namespace, a fresh cgroup
+namespace, and a nested bwrap that starts a new namespace with an empty root.
+A setuid binary is not present in the view; bind mounts are mounted `nosuid`,
+and a crafted setuid binary was not exercised. A `/proc` mount failure was not
+exercised.
+
 ## Lifecycle
 
 `poc/lifecycle.sh`, with the sandbox in its own session and process group:

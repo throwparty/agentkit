@@ -184,7 +184,7 @@ Store the rendered argv for a small set of views as fixtures and compare byte fo
 | Depends On | T-002 |
 | References | golden-arguments,testability |
 
-### T-015: Edge checks
+### T-015: [x] Edge checks
 
 Exercise the edge cases that are cheap to confirm: a setuid binary, a device node outside the view, a nested bwrap, an unavailable cgroup namespace, and a command that exits leaving grandchildren.
 
