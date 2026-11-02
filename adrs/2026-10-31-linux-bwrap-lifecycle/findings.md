@@ -64,7 +64,9 @@ limits: task hog bounded (thread creation refused)
 Each probe has a below-limit control under the same properties: an 8 MiB
 allocation and four threads succeed. A 256 MiB allocation is OOM-killed by the
 scope, and a 64-thread creation is refused with the error printed by the
-Python workload. A setup failure cannot be mistaken for enforcement.
+Python workload. The memory probe requires the scope result `oom-kill` and the
+task probe requires the workload's `thread-limit` error, so a scope that starts
+but enforces nothing, or fails to start, fails the probe instead of passing it.
 
 ## Cost
 
