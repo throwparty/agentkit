@@ -1,27 +1,41 @@
 destination: Nix development shells run as first-class sandboxed environments on Linux and macOS, confined in user space by bubblewrap and App Sandbox respectively, with no virtualisation
 created: 2026-10-31
-tickets[11]{id,question,blockers,state,answer,evidence}:
-  T-001,"Can the App Sandbox entitlement API confine an unsigned devShell binary?",,answered,"No for the entitlement API: it requires a signed bundle. The spike exercised the sandbox_init entry point with a Seatbelt profile",evidence/T-001.md
-  T-002,"Does the sandbox_init entry point confine an unsigned binary with a Seatbelt profile on a current macOS?",,answered,"Yes. sandbox_init applies a Seatbelt profile and confines the adhoc-signed binary; this is not entitlement-based App Sandbox support",evidence/T-002.md
-  T-003,"Is bwrap viable as an unprivileged Linux sandbox?",,answered,"Yes. It builds the sandbox from unprivileged user namespaces, with no root and no daemon",evidence/T-003.md
-  T-004,"Can the host Nix store be shared without copying?",,answered,"Yes for integrity and deduplication: a read-only bind exposes the same immutable paths. Confidentiality is not implied",evidence/T-004.md
-  T-005,"Can bwrap restrict egress by destination?",,answered,"No. An unshared network namespace has loopback only; host filtering needs a proxy",evidence/T-005.md
-  T-006,"Does confinement require virtualisation?",,answered,"No. Both mechanisms enforce in the shared kernel",evidence/T-006.md
-  T-007,"Can lifecycle work without a supervisor?",,answered,"Partially: process groups give group-local pause, resume and kill. A setsid child survives destroy, stays confined but can still use CPU or write granted paths. Complete lifecycle is unresolved",evidence/T-007.md
-  T-008,"Do the target distributions permit unprivileged user namespaces?",,answered,"Yes on NixOS and Fedora; Ubuntu 24.04 blocks by default and allows when the AppArmor and clone sysctls are relaxed. Verified in VMs",evidence/T-008.md
-  T-009,"Can lifecycle use --new-session with cgroup v2 freeze on systemd hosts and process-group signalling elsewhere?",,answered,"Yes on systemd hosts with cgroup delegation: a transient user scope with freeze/thaw. The process-group launcher is the fallback",evidence/T-009.md
-  T-010,"Can per-sandbox resource limits be applied without a long-lived supervisor?",,answered,"Yes on systemd: MemoryMax and TasksMax on the transient scope. The fallback runs unlimited",evidence/T-010.md
-  T-011,"Can the devShell capture supply the environment allowlist?",,open,,
+tickets[21]{id,platform,question,blockers,state,answer,evidence}:
+  T-001,darwin,"Can the App Sandbox entitlement API confine an unsigned devShell binary?",,answered,"No for the entitlement API: it requires a signed bundle. The spike exercised the sandbox_init entry point with a Seatbelt profile",evidence/T-001.md
+  T-002,darwin,"Does the sandbox_init entry point confine an unsigned binary with a Seatbelt profile on a current macOS?",,answered,"Yes. sandbox_init applies a Seatbelt profile and confines the adhoc-signed binary; this is not entitlement-based App Sandbox support",evidence/T-002.md
+  T-003,linux,"Is bwrap viable as an unprivileged Linux sandbox?",,answered,"Yes. It builds the sandbox from unprivileged user namespaces, with no root and no daemon",evidence/T-003.md
+  T-004,linux,"Can the host Nix store be shared without copying?",,answered,"Yes for integrity and deduplication: a read-only bind exposes the same immutable paths. Confidentiality is not implied",evidence/T-004.md
+  T-005,linux,"Can bwrap restrict egress by destination?",,answered,"No. An unshared network namespace has loopback only; host filtering needs a proxy",evidence/T-005.md
+  T-006,darwin,"Does the macOS sandbox require a separate kernel or virtual machine?",,answered,"No. It enforces per process in the shared kernel, so a kernel exploit defeats it. macOS needed no VM, no image and no container runtime. The bwrap half of the same question is covered by T-003: unprivileged user namespaces, no root, no daemon",evidence/T-006.md
+  T-007,darwin,"Can lifecycle work without a supervisor?",,answered,"Partially: process groups give group-local pause, resume and kill. A setsid child survives destroy, stays confined but can still use CPU or write granted paths. Superseded on Linux by T-013 and T-019: a pid-namespace holder kills every descendant, and pid-namespace enumeration pauses them",evidence/T-007.md
+  T-008,linux,"Do the target distributions permit unprivileged user namespaces?",,answered,"Yes on NixOS and Fedora; Ubuntu 24.04 blocks by default and allows when the AppArmor and clone sysctls are relaxed. Verified in VMs",evidence/T-008.md
+  T-009,linux,"Can lifecycle use --new-session with cgroup v2 freeze on systemd hosts and process-group signalling elsewhere?",,answered,"Yes on systemd hosts with cgroup delegation: a transient user scope with freeze/thaw. The process-group launcher is the fallback",evidence/T-009.md
+  T-010,linux,"Can per-sandbox resource limits be applied without a long-lived supervisor?",,answered,"Yes on systemd: MemoryMax and TasksMax on the transient scope. The fallback runs unlimited",evidence/T-010.md
+  T-011,linux,"Can the host-side devShell capture supply the environment allowlist?",,open,,
+  T-012,linux,"Does a per-exec bwrap sandbox share pid and network context with a later command?",,open,,
+  T-013,linux,"Can an unprivileged process join a live bwrap sandbox, so successive commands share pid and network context without a supervisor of our own?",,open,,
+  T-014,linux,"Where must an egress proxy sit to be reachable from a bwrap sandbox?",T-012,open,,
+  T-015,darwin,"Can the nix devShell evaluate and build on aarch64-darwin, so a macOS CI job reuses the existing devShell?",,open,,
+  T-016,linux,"Does a host-captured devShell environment produce a working build inside the bwrap sandbox?",T-011,open,,
+  T-017,darwin,"Does a host-captured devShell environment produce a working build inside the macOS sandbox?",T-011,open,,
+  T-018,linux,"Can a bwrap sandboxed command invoke nix at all, and what does granting that give it?",,open,,
+  T-019,linux,"Can commands joined into a holder be frozen and limited when they are started outside the holder's cgroup?",T-013,open,,
+  T-020,darwin,"Does the macOS sandbox share pid and network context with a later command?",,open,,
+  T-021,darwin,"Where must an egress proxy sit to be reachable from the macOS sandbox, given the profile accepts only localhost and * as a host token?",T-020,open,,
 decision: "Adopt bubblewrap on Linux and App Sandbox via the sandbox_init entry point on macOS. The entitlement API requires a signed bundle, so unsigned devShell binaries use the deprecated entry point; its longevity is a carried risk. Process-group lifecycle is group-local: a setsid child survives destroy, so complete lifecycle management is unresolved; a systemd scope provides freeze/thaw and resource limits, with a process-group fallback. T-008 is answered on NixOS, Ubuntu and Fedora. Further carried risks: egress beyond loopback needs a proxy on both platforms, the devShell-derived environment allowlist remains open, and a user manager without cgroup delegation is accepted as an unverified host state where the scope start fails and the caller selects the process-group fallback."
-adrs[2]:
+adrs[3]:
   - adrs/2026-10-31-linux-bwrap-sandbox
   - adrs/2026-10-31-linux-bwrap-lifecycle
-steps[8]{n,step,state}:
-  1,"Spike bubblewrap confinement on Linux: fixture, minimal bind set, isolation assertions, lifecycle, diagnostics, user namespace probe (T-008) and cost",done
-  2,"Productionise the Linux isolation module: typed view to argv, invariants, version floor, golden argv, fail closed",next
-  3,"Add the Nix devShell provider: host-side activation capture, exec wrapper, store write model, private workspace and snapshots",pending
-  4,"Lift the macOS helper from the Darwin spike into the same provider contract, reusing its SBPL renderer and lifecycle findings, with the deprecation risk documented",pending
-  5,"Refactor the provider interface around environments: exec, spawn, file transfer, capability declaration and per-provider configuration",pending
-  6,"Reach parity: ports, snapshot integration, CLI and MCP surface, documentation, and the platform risk of the macOS primitive",pending
-  7,"Follow-up ADR: session isolation and resource limits. Copy this PoC, then add cgroup v2 freeze and limits on systemd hosts with a process-group fallback for hosts without it",done
-  8,"Nix provider: derive the sandbox environment allowlist from the devShell capture, with a secret-name denylist",blocked
+  - adrs/2026-10-31-darwin-app-sandbox
+steps[11]{track,n,step,state}:
+  linux,1,"Capture the devShell environment on the host, with nix print-dev-env, and record which variables and which shell state do and do not survive (T-011)",next
+  linux,2,"Build inside a holder with the captured environment and attribute every addition the build needs (T-016)",blocked
+  linux,3,"Establish whether nix itself can run inside the sandbox, and what the daemon socket would grant if it did (T-018)",next
+  linux,4,"Establish where the egress proxy must sit to be reachable from the holder's network namespace (T-014)",next
+  linux,5,"Author the provider contract: core trait, per-platform facet traits, readiness, a neutral sandbox handle and one factory. Linux owns this because it has the first implementation; Darwin consumes it and amends it rather than forking it",pending
+  linux,6,"Implement the Linux provider in its own module: holder, setns join, cgroup assignment, pid-namespace fallback, argv builder and golden fixtures",pending
+  linux,7,"Reach Linux parity: proxy egress, snapshot integration, CLI and MCP behind the contract, documentation",pending
+  darwin,1,"Build with a host-captured devShell environment inside the macOS sandbox and attribute every baseline addition the closure needs (T-017)",blocked
+  darwin,2,"Establish where the egress proxy must sit given the profile's localhost-only host token (T-021)",next
+  darwin,3,"Implement the Darwin provider in its own module against the contract: per-command helper, profile renderer, invariants, golden profiles, and a readiness check for the primitive",pending
+  darwin,4,"Reach Darwin parity: profile baseline for a full devShell closure, Seatbelt egress, snapshot integration, documentation, and the sandbox_init longevity risk",pending
