@@ -49,7 +49,12 @@ if run_scope "$unit" "${memory_props[@]}" -- "$harness" --workspace "$workspace"
 fi
 result=$(systemctl --user show "$unit.scope" -p Result --value 2>/dev/null || true)
 systemctl --user stop "$unit.scope" 2>/dev/null || true
-echo "limits: memory hog bounded (scope result ${result:-unavailable})"
+if [[ "$result" != "oom-kill" ]]; then
+    echo "limits: the memory hog failed without an OOM kill (scope result ${result:-unavailable})"
+    cat "$log_dir/$unit.out" "$log_dir/$unit.err" >&2
+    exit 1
+fi
+echo "limits: memory hog bounded (scope result $result)"
 
 unit="lbx-tasks-control-$$"
 if ! run_scope "$unit" "${task_props[@]}" -- "$harness" --workspace "$workspace" -- \
