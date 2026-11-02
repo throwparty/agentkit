@@ -28,7 +28,7 @@ tests. This extension adds launchers and findings.
 | task limit | `limits.sh`: 64-thread hog refused; 4-thread control succeeds | observed |
 | fallback script | copied `lifecycle.sh`: frozen at 10, resumed to 20, killed cleanly | observed |
 | systemd-less selection | `XDG_RUNTIME_DIR=/nonexistent`: exit 69, then the fallback ran | observed |
-| delegation absent | none | not exercised |
+| delegation absent | none: the probe checks only `systemctl --user show-environment` | accepted, unverified |
 | launcher cost | direct 23.8ms, scope 47.5ms median | observed |
 
 ## Cgroup lifecycle
@@ -94,7 +94,7 @@ state.
 
 ## Open risks
 
-1. Cgroup freeze requires a systemd user manager with delegation. Without it the fallback has no limits and shares the caller's session.
+1. Cgroup freeze requires a systemd user manager with cgroup delegation. Delegation absence is not detected: the scope start fails and the probe exits non-zero; the caller then selects the process-group fallback, which has no limits and shares the caller's session.
 2. `systemctl --user thaw` is the correct verb; `unfreeze` does not exist.
 3. A frozen unit cannot be stopped; cleanup must thaw first.
 4. Memory limits surface as an OOM kill or failed scope, so a policy limit looks like a workload failure.

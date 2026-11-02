@@ -130,7 +130,7 @@ The launcher detects the missing user manager and selects the fallback; exercise
 **Slug:** `systemd-absent`
 ### EC-002: Delegation Absent
 
-A user manager without cgroup delegation reports the reason and falls back; not exercised.
+A user manager without cgroup delegation is not detected up front: the scope start fails and the probe exits non-zero, leaving the tested process-group fallback to be selected by the caller. Accepted as an unverified host state.
 
 **Slug:** `delegation-absent`
 ### EC-003: Scope Name Collision
