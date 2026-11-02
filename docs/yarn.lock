@@ -6560,13 +6560,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"balanced-match@npm:^1.0.0":
-  version: 1.0.2
-  resolution: "balanced-match@npm:1.0.2"
-  checksum: 10c0/9308baf0a7e4838a82bbfd11e01b1cb0f0cf2893bc1676c27c2a8c0e70cbae1c59120c3268517a8ae7fb6376b4639ef81ca22582611dbee4ed28df945134aaee
-  languageName: node
-  linkType: hard
-
 "balanced-match@npm:^4.0.2":
   version: 4.0.4
   resolution: "balanced-match@npm:4.0.4"
@@ -6670,16 +6663,6 @@ __metadata:
     widest-line: "npm:^4.0.1"
     wrap-ansi: "npm:^8.1.0"
   checksum: 10c0/3a9891dc98ac40d582c9879e8165628258e2c70420c919e70fff0a53ccc7b42825e73cda6298199b2fbc1f41f5d5b93b492490ad2ae27623bed3897ddb4267f8
-  languageName: node
-  linkType: hard
-
-"brace-expansion@npm:^1.1.7":
-  version: 1.1.21
-  resolution: "brace-expansion@npm:1.1.21"
-  dependencies:
-    balanced-match: "npm:^1.0.0"
-    concat-map: "npm:0.0.1"
-  checksum: 10c0/8f0a68a720f9cb28c2ecaea5cdaf15fafd686d6b6e4e722a81c9d4bd2f68c1fd0619731cac05875d842221eaf4d97d564d329a12eb3c4c22137502fb3c65be8b
   languageName: node
   linkType: hard
 
@@ -7206,13 +7189,6 @@ __metadata:
     safe-buffer: "npm:5.2.1"
     vary: "npm:~1.1.2"
   checksum: 10c0/f95be7122323fdffcaadc807f42da38b5227eeac7d9997c1c4314abd7ca4a4de2daa3d5bd4e142706bef4d34fa0f64cd265c6f074b221143e18da1215c0a07ab
-  languageName: node
-  linkType: hard
-
-"concat-map@npm:0.0.1":
-  version: 0.0.1
-  resolution: "concat-map@npm:0.0.1"
-  checksum: 10c0/c996b1cfdf95b6c90fee4dae37e332c8b6eb7d106430c17d538034c0ad9a1630cb194d2ab37293b1bdd4d779494beee7786d586a50bd9376fd6f7bcc2bd4c98f
   languageName: node
   linkType: hard
 
@@ -11752,15 +11728,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"minimatch@npm:3.1.5":
-  version: 3.1.5
-  resolution: "minimatch@npm:3.1.5"
-  dependencies:
-    brace-expansion: "npm:^1.1.7"
-  checksum: 10c0/2ecbdc0d33f07bddb0315a8b5afbcb761307a8778b48f0b312418ccbced99f104a2d17d8aca7573433c70e8ccd1c56823a441897a45e384ea76ef401a26ace70
-  languageName: node
-  linkType: hard
-
 "minimatch@npm:^11.0.2":
   version: 11.0.4
   resolution: "minimatch@npm:11.0.4"
@@ -14245,7 +14212,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"serve-handler@npm:^6.1.7":
+"serve-handler@npm:6.1.7":
   version: 6.1.7
   resolution: "serve-handler@npm:6.1.7"
   dependencies:
@@ -14257,6 +14224,21 @@ __metadata:
     path-to-regexp: "npm:3.3.0"
     range-parser: "npm:1.2.0"
   checksum: 10c0/35afb68d81afd3c38d15792a5bc2451915b739bef2898a47ebd190db6a4e29846530ac00292b8008fe7297a819257c3948be2deaf4ffd32c96689e8947cf0ae9
+  languageName: node
+  linkType: hard
+
+"serve-handler@patch:serve-handler@npm%3A6.1.7#~/.yarn/patches/serve-handler-npm-6.1.7-b26917d24b.patch":
+  version: 6.1.7
+  resolution: "serve-handler@patch:serve-handler@npm%3A6.1.7#~/.yarn/patches/serve-handler-npm-6.1.7-b26917d24b.patch::version=6.1.7&hash=9368a7"
+  dependencies:
+    bytes: "npm:3.0.0"
+    content-disposition: "npm:0.5.2"
+    mime-types: "npm:2.1.18"
+    minimatch: "npm:3.1.5"
+    path-is-inside: "npm:1.0.2"
+    path-to-regexp: "npm:3.3.0"
+    range-parser: "npm:1.2.0"
+  checksum: 10c0/50cfb16388258750c22cbdc766fe6b88d4d118979c938723be881c894b916898c49603965b95bd0dbfa1bcadfe7fc23fd9086025f4dacdc4fa7f4457866ff8e4
   languageName: node
   linkType: hard
 
