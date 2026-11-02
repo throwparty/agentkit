@@ -10,7 +10,12 @@ workspace=$(mktemp -d /tmp/lbx-egress.XXXXXX)
 port_file=$(mktemp /tmp/lbx-port.XXXXXX)
 trap 'kill "$server" 2>/dev/null || true; rm -rf "$workspace" "$port_file"' EXIT
 
-python3 "$here/echo_server.py" >"$port_file" &
+host_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+if [[ -z "$host_ip" ]]; then
+    host_ip=127.0.0.1
+fi
+
+python3 "$here/echo_server.py" "$host_ip" >"$port_file" &
 server=$!
 
 for _ in $(seq 50); do
@@ -23,11 +28,6 @@ port=$(cat "$port_file")
 if [[ -z "$port" ]]; then
     echo "egress: echo server did not start"
     exit 1
-fi
-
-host_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
-if [[ -z "$host_ip" ]]; then
-    host_ip=127.0.0.1
 fi
 
 probe="import socket,sys; s=socket.create_connection((sys.argv[1], int(sys.argv[2])), 2); s.sendall(b'ping'); sys.exit(0 if s.recv(4) == b'ping' else 1)"
