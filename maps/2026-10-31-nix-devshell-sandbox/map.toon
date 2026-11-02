@@ -9,17 +9,19 @@ tickets[11]{id,question,blockers,state,answer,evidence}:
   T-006,"Does confinement require virtualisation?",,answered,"No. Both mechanisms enforce in the shared kernel",evidence/T-006.md
   T-007,"Can lifecycle work without a supervisor?",,answered,"Partially: process groups give group-local pause, resume and kill. A setsid child survives destroy, stays confined but can still use CPU or write granted paths. Complete lifecycle is unresolved",evidence/T-007.md
   T-008,"Do the target distributions permit unprivileged user namespaces?",,answered,"Yes on NixOS and Fedora; Ubuntu 24.04 blocks by default and allows when the AppArmor and clone sysctls are relaxed. Verified in VMs",evidence/T-008.md
-  T-009,"Can lifecycle use --new-session with cgroup v2 freeze on systemd hosts and process-group signalling elsewhere?",,answered,"Yes on systemd: a transient user scope with freeze/thaw. The process-group launcher is the fallback",evidence/T-009.md
+  T-009,"Can lifecycle use --new-session with cgroup v2 freeze on systemd hosts and process-group signalling elsewhere?",,answered,"Yes on systemd hosts with cgroup delegation: a transient user scope with freeze/thaw. The process-group launcher is the fallback",evidence/T-009.md
   T-010,"Can per-sandbox resource limits be applied without a long-lived supervisor?",,answered,"Yes on systemd: MemoryMax and TasksMax on the transient scope. The fallback runs unlimited",evidence/T-010.md
   T-011,"Can the devShell capture supply the environment allowlist?",,open,,
-decision: "Adopt bubblewrap on Linux and App Sandbox via the sandbox_init entry point on macOS. The entitlement API requires a signed bundle, so unsigned devShell binaries use the deprecated entry point; its longevity is a carried risk. Process-group lifecycle is group-local: a setsid child survives destroy, so complete lifecycle management is unresolved; a systemd scope provides freeze/thaw and resource limits, with a process-group fallback. T-008 is answered on NixOS, Ubuntu and Fedora. Further carried risks: egress beyond loopback needs a proxy on both platforms, and the devShell-derived environment allowlist remains open."
-adr: adrs/2026-10-31-linux-bwrap-sandbox
-steps[8]:
-  - "Spike bubblewrap confinement on Linux: fixture, minimal bind set, isolation assertions, lifecycle, diagnostics, user namespace probe (T-008) and cost. This is the current ADR"
-  - "Productionise the Linux isolation module: typed view to argv, invariants, version floor, golden argv, fail closed"
-  - "Add the Nix devShell provider: host-side activation capture, exec wrapper, store write model, private workspace and snapshots"
-  - "Lift the macOS helper from the Darwin spike into the same provider contract, reusing its SBPL renderer and lifecycle findings, with the deprecation risk documented"
-  - "Refactor the provider interface around environments: exec, spawn, file transfer, capability declaration and per-provider configuration"
-  - "Reach parity: ports, snapshot integration, CLI and MCP surface, documentation, and the platform risk of the macOS primitive"
-  - "Follow-up ADR: session isolation and resource limits. Copy this PoC, then add cgroup v2 freeze and limits on systemd hosts with a process-group fallback for hosts without it"
-  - "Nix provider: derive the sandbox environment allowlist from the devShell capture, with a secret-name denylist"
+decision: "Adopt bubblewrap on Linux and App Sandbox via the sandbox_init entry point on macOS. The entitlement API requires a signed bundle, so unsigned devShell binaries use the deprecated entry point; its longevity is a carried risk. Process-group lifecycle is group-local: a setsid child survives destroy, so complete lifecycle management is unresolved; a systemd scope provides freeze/thaw and resource limits, with a process-group fallback. T-008 is answered on NixOS, Ubuntu and Fedora. Further carried risks: egress beyond loopback needs a proxy on both platforms, the devShell-derived environment allowlist remains open, and a user manager without cgroup delegation is accepted as an unverified host state where the scope start fails and the caller selects the process-group fallback."
+adrs[2]:
+  - adrs/2026-10-31-linux-bwrap-sandbox
+  - adrs/2026-10-31-linux-bwrap-lifecycle
+steps[8]{n,step,state}:
+  1,"Spike bubblewrap confinement on Linux: fixture, minimal bind set, isolation assertions, lifecycle, diagnostics, user namespace probe (T-008) and cost",done
+  2,"Productionise the Linux isolation module: typed view to argv, invariants, version floor, golden argv, fail closed",next
+  3,"Add the Nix devShell provider: host-side activation capture, exec wrapper, store write model, private workspace and snapshots",pending
+  4,"Lift the macOS helper from the Darwin spike into the same provider contract, reusing its SBPL renderer and lifecycle findings, with the deprecation risk documented",pending
+  5,"Refactor the provider interface around environments: exec, spawn, file transfer, capability declaration and per-provider configuration",pending
+  6,"Reach parity: ports, snapshot integration, CLI and MCP surface, documentation, and the platform risk of the macOS primitive",pending
+  7,"Follow-up ADR: session isolation and resource limits. Copy this PoC, then add cgroup v2 freeze and limits on systemd hosts with a process-group fallback for hosts without it",done
+  8,"Nix provider: derive the sandbox environment allowlist from the devShell capture, with a secret-name denylist",blocked
