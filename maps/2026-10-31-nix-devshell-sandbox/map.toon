@@ -1,15 +1,15 @@
 destination: Nix development shells run as first-class sandboxed environments on Linux and macOS, confined in user space by bubblewrap and Seatbelt respectively, with no virtualisation
 created: 2026-10-31
 tickets[8]{id,question,blockers,state,answer,evidence}:
-  T-001,"Can App Sandbox confine an unsigned devShell binary?",,answered,"No. App Sandbox policy is entitlement-derived and only applies to a signed bundle; the Darwin spike could not use it",evidence/T-001.md
-  T-002,"Does Seatbelt confine an unsigned binary on a current macOS?",,answered,"Yes. macOS 27.2, adhoc-signed binary, write outside the workspace returns EPERM; AC-011 proven",evidence/T-002.md
+  T-001,"Can the App Sandbox entitlement API confine an unsigned devShell binary?",,answered,"No for the entitlement API: it requires a signed bundle. The spike exercised the sandbox_init entry point with a Seatbelt profile",evidence/T-001.md
+  T-002,"Does the sandbox_init entry point confine an unsigned binary with a Seatbelt profile on a current macOS?",,answered,"Yes. sandbox_init applies a Seatbelt profile and confines the adhoc-signed binary; this is not entitlement-based App Sandbox support",evidence/T-002.md
   T-003,"Is bwrap viable as an unprivileged Linux sandbox?",,answered,"Yes. It builds the sandbox from unprivileged user namespaces, with no root and no daemon",evidence/T-003.md
   T-004,"Can the host Nix store be shared without copying?",,answered,"Yes. Store paths are content-addressed, so a read-only bind exposes the same paths with the same meaning",evidence/T-004.md
   T-005,"Can bwrap restrict egress by destination?",,answered,"No. An unshared network namespace has loopback only; host filtering needs a proxy",evidence/T-005.md
   T-006,"Does confinement require virtualisation?",,answered,"No. Both mechanisms enforce in the shared kernel",evidence/T-006.md
-  T-007,"Can lifecycle work without a supervisor?",,answered,"Yes. Process groups give pause, resume and kill. A setsid escape stays confined but cannot be addressed",evidence/T-007.md
+  T-007,"Can lifecycle work without a supervisor?",,answered,"Partially: process groups give group-local pause, resume and kill. A setsid child survives destroy, stays confined but can still use CPU or write granted paths. Complete lifecycle is unresolved",evidence/T-007.md
   T-008,"Do the target distributions permit unprivileged user namespaces?",,open,,
-decision: "Adopt bubblewrap on Linux and Seatbelt on macOS. Record explicitly that macOS App Sandbox requires a signed bundle, so unsigned devShell binaries use the deprecated sandbox_init path; its longevity is a carried risk. Spike bubblewrap first in ADR 2026-10-31-linux-bwrap-sandbox; its portability matrix must answer T-008 before a production spec is written. Further carried risks: egress beyond loopback needs a proxy on both platforms, and Linux per-command cost is unmeasured until the spike runs."
+decision: "Adopt bubblewrap on Linux and the sandbox_init Seatbelt entry point on macOS. The App Sandbox entitlement path requires a signed bundle, so unsigned devShell binaries use sandbox_init; its longevity is a carried risk. Process-group lifecycle is group-local: a setsid child survives destroy, so complete lifecycle management is unresolved. Spike bubblewrap first in ADR 2026-10-31-linux-bwrap-sandbox; its portability matrix must answer T-008 before a production spec is written. Further carried risks: egress beyond loopback needs a proxy on both platforms, and Linux per-command cost is unmeasured until the spike runs."
 adr: adrs/2026-10-31-linux-bwrap-sandbox
 handedOver: adrs/2026-10-31-linux-bwrap-sandbox (probe for T-008)
 steps[6]:
