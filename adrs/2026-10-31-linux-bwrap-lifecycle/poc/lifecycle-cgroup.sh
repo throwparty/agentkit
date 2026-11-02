@@ -39,29 +39,42 @@ if [[ ! -f "$workspace/loop" ]]; then
     echo "cgroup: the sandbox never started"
     exit 1
 fi
-before=$(wc -c <"$workspace/loop")
 
 if ! systemctl --user freeze "$unit.scope"; then
     echo "cgroup: freeze unavailable"
     exit 1
 fi
+
+sleep 0.3
+frozen_before=$(wc -c <"$workspace/loop")
 sleep 0.5
-during=$(wc -c <"$workspace/loop")
+frozen_after=$(wc -c <"$workspace/loop")
 
 systemctl --user thaw "$unit.scope"
+sleep 0.3
+resumed=$(wc -c <"$workspace/loop")
 sleep 0.5
-after=$(wc -c <"$workspace/loop")
+resumed_after=$(wc -c <"$workspace/loop")
 
 systemctl --user stop "$unit.scope"
 wait "$runner" 2>/dev/null || true
 
-if [[ "$before" != "$during" ]]; then
-    echo "cgroup: not frozen ($before -> $during)"
+sleep 0.3
+stopped_before=$(wc -c <"$workspace/loop")
+sleep 0.3
+stopped_after=$(wc -c <"$workspace/loop")
+
+if [[ "$frozen_before" != "$frozen_after" ]]; then
+    echo "cgroup: not frozen ($frozen_before -> $frozen_after)"
     exit 1
 fi
-if (( after <= during )); then
-    echo "cgroup: not resumed ($during -> $after)"
+if (( resumed_after <= frozen_after )); then
+    echo "cgroup: not resumed ($frozen_after -> $resumed_after)"
+    exit 1
+fi
+if [[ "$stopped_before" != "$stopped_after" ]]; then
+    echo "cgroup: still writing after stop ($stopped_before -> $stopped_after)"
     exit 1
 fi
 
-echo "cgroup: scope $unit.scope frozen at $before, resumed to $after"
+echo "cgroup: scope $unit.scope frozen at $frozen_before, resumed to $resumed_after"
