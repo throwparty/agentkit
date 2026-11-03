@@ -152,6 +152,26 @@ impl DockerCompute {
         }
     }
 
+    /// Whether the daemon answers.
+    pub async fn ping(&self) -> Result<(), SandboxError> {
+        self.client.ping().await.map(|_| ()).map_err(|source| {
+            SandboxError::Compute(ComputeError::Connection {
+                source: backend_error(source),
+            })
+        })
+    }
+
+    /// Whether an image is present locally, without pulling it.
+    pub async fn image_present(&self, image: &str) -> Result<bool, SandboxError> {
+        match self.client.inspect_image(image).await {
+            Ok(_) => Ok(true),
+            Err(error) if is_not_found(&error) => Ok(false),
+            Err(error) => Err(SandboxError::Compute(ComputeError::ImageInspect {
+                source: backend_error(error),
+            })),
+        }
+    }
+
     async fn pull_image(&self, image: &str) -> Result<(), SandboxError> {
         let options = Some(CreateImageOptions {
             from_image: Some(image.to_string()),

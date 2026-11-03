@@ -1,6 +1,6 @@
 //! Optional operations a mechanism may or may not provide.
 //!
-//! A facet is a supertrait of [`Sandbox`]: implementing it means the backend
+//! A facet is a supertrait of [`Backend`]: implementing it means the backend
 //! can do these things *as well as* everything in the contract. Code that
 //! requires a facet is compiled against a backend that has it, so a mechanism
 //! without one cannot be asked for the operation by accident.
@@ -8,21 +8,21 @@
 //! A core-only value cannot be asked for a facet operation:
 //!
 //! ```compile_fail
-//! use agentkit_litterbox::sandbox::contract::Sandbox;
+//! use agentkit_litterbox::sandbox::contract::Backend;
 //! use agentkit_litterbox::sandbox::facets::Lifecycle;
 //!
 //! fn pause_all(lifecycle: &dyn Lifecycle) {
 //!     let _ = lifecycle;
 //! }
 //!
-//! fn from_core(core: &dyn Sandbox) {
+//! fn from_core(core: &dyn Backend) {
 //!     pause_all(core);
 //! }
 //! ```
 
 use futures_util::future::BoxFuture;
 
-use super::contract::{Error, Forward, Sandbox, SandboxRecord};
+use super::contract::{Backend, Error, Forward, SandboxRecord};
 
 /// Bounds on the resources a sandbox may consume.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -34,16 +34,15 @@ pub struct ResourceLimits {
 }
 
 /// Pausing and resuming a sandbox.
-pub trait Lifecycle: Sandbox {
+pub trait Lifecycle: Backend {
     /// Stop the sandbox's work without destroying it.
-    fn pause(&self, sandbox: &SandboxRecord) -> BoxFuture<'_, Result<(), Error>>;
-
+    fn pause<'a>(&'a self, sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>>;
     /// Continue a paused sandbox.
-    fn resume(&self, sandbox: &SandboxRecord) -> BoxFuture<'_, Result<(), Error>>;
+    fn resume<'a>(&'a self, sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>>;
 }
 
 /// Bounding what a sandbox may consume.
-pub trait Limits: Sandbox {
+pub trait Limits: Backend {
     /// Apply limits to a running sandbox.
     fn set_limits(
         &self,
@@ -53,9 +52,12 @@ pub trait Limits: Sandbox {
 }
 
 /// Ports forwarded from the sandbox to the host.
-pub trait Forwarding: Sandbox {
+pub trait Forwarding: Backend {
     /// Report the ports this sandbox forwards.
-    fn forwards(&self, sandbox: &SandboxRecord) -> BoxFuture<'_, Result<Vec<Forward>, Error>>;
+    fn forwards<'a>(
+        &'a self,
+        sandbox: &'a SandboxRecord,
+    ) -> BoxFuture<'a, Result<Vec<Forward>, Error>>;
 }
 
 #[cfg(test)]
@@ -66,55 +68,66 @@ mod tests {
 
     use super::{Lifecycle, ResourceLimits};
     use crate::sandbox::contract::{
-        CreateRequest, Error, Execution, Inspection, Sandbox, SandboxRecord, Scope,
+        Backend, CreateRequest, Error, Execution, Inspection, SandboxRecord, Scope,
     };
 
     struct Pausable;
 
-    impl Sandbox for Pausable {
-        fn create(&self, _request: &CreateRequest) -> BoxFuture<'_, Result<SandboxRecord, Error>> {
+    impl Backend for Pausable {
+        fn create<'a>(
+            &'a self,
+            _request: &'a CreateRequest,
+        ) -> BoxFuture<'a, Result<SandboxRecord, Error>> {
             Box::pin(async { Err(Error::failed("stub")) })
         }
 
-        fn list(&self, _scope: &Scope) -> BoxFuture<'_, Result<Vec<SandboxRecord>, Error>> {
+        fn list<'a>(
+            &'a self,
+            _scope: &'a Scope,
+        ) -> BoxFuture<'a, Result<Vec<SandboxRecord>, Error>> {
             Box::pin(async { Ok(Vec::new()) })
         }
 
-        fn exec(
-            &self,
-            _sandbox: &SandboxRecord,
-            _command: &[String],
-        ) -> BoxFuture<'_, Result<Execution, Error>> {
+        fn exec<'a>(
+            &'a self,
+            _sandbox: &'a SandboxRecord,
+            _command: &'a [String],
+        ) -> BoxFuture<'a, Result<Execution, Error>> {
             Box::pin(async { Err(Error::failed("stub")) })
         }
 
-        fn upload(
-            &self,
-            _sandbox: &SandboxRecord,
-            _source: &std::path::Path,
-            _destination: &str,
-        ) -> BoxFuture<'_, Result<(), Error>> {
+        fn upload<'a>(
+            &'a self,
+            _sandbox: &'a SandboxRecord,
+            _source: &'a std::path::Path,
+            _destination: &'a str,
+        ) -> BoxFuture<'a, Result<(), Error>> {
             Box::pin(async { Err(Error::failed("stub")) })
         }
 
-        fn download(
-            &self,
-            _sandbox: &SandboxRecord,
-            _source: &str,
-            _destination: &std::path::Path,
-        ) -> BoxFuture<'_, Result<(), Error>> {
+        fn download<'a>(
+            &'a self,
+            _sandbox: &'a SandboxRecord,
+            _source: &'a str,
+            _destination: &'a std::path::Path,
+        ) -> BoxFuture<'a, Result<(), Error>> {
             Box::pin(async { Err(Error::failed("stub")) })
         }
 
-        fn inspect(&self, _sandbox: &SandboxRecord) -> BoxFuture<'_, Result<Inspection, Error>> {
+        fn inspect<'a>(
+            &'a self,
+            _sandbox: &'a SandboxRecord,
+        ) -> BoxFuture<'a, Result<Inspection, Error>> {
             Box::pin(async { Err(Error::failed("stub")) })
         }
 
-        fn delete(&self, _sandbox: &SandboxRecord) -> BoxFuture<'_, Result<(), Error>> {
+        fn delete<'a>(&'a self, _sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>> {
             Box::pin(async { Ok(()) })
         }
 
-        fn readiness(&self) -> BoxFuture<'_, Result<crate::sandbox::report::Readiness, Error>> {
+        fn readiness<'a>(
+            &'a self,
+        ) -> BoxFuture<'a, Result<crate::sandbox::report::Readiness, Error>> {
             Box::pin(async {
                 Ok(crate::sandbox::report::Readiness {
                     backend: "pausable".to_string(),
@@ -131,11 +144,11 @@ mod tests {
     }
 
     impl Lifecycle for Pausable {
-        fn pause(&self, _sandbox: &SandboxRecord) -> BoxFuture<'_, Result<(), Error>> {
+        fn pause<'a>(&'a self, _sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>> {
             Box::pin(async { Ok(()) })
         }
 
-        fn resume(&self, _sandbox: &SandboxRecord) -> BoxFuture<'_, Result<(), Error>> {
+        fn resume<'a>(&'a self, _sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>> {
             Box::pin(async { Ok(()) })
         }
     }
@@ -152,7 +165,7 @@ mod tests {
     #[tokio::test]
     async fn one_object_is_both_the_contract_and_its_facet() {
         let backend = Arc::new(Pausable);
-        let core: Arc<dyn Sandbox> = backend.clone();
+        let core: Arc<dyn Backend> = backend.clone();
         let lifecycle: Arc<dyn Lifecycle> = backend;
 
         lifecycle.pause(&record()).await.expect("pause works");

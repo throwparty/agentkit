@@ -1,278 +1,453 @@
-use std::io::Cursor;
+//! Docker as a sandboxing mechanism.
+//!
+//! The backend knows about containers, images and bindings. It knows nothing
+//! about branches or the project a sandbox belongs to beyond the name it was
+//! handed: it is given a prepared tree and asked to confine commands against it.
+
 use std::path::Path;
 
-pub mod compute;
-mod naming;
-
-use self::naming::build_forwarded_ports;
-pub use self::naming::container_name_for_slug;
-
 use futures_util::future::BoxFuture;
-use tar::Archive;
-use tempfile::TempDir;
+use serde::{Deserialize, Serialize};
 
-use self::compute::{Compute, ContainerInspection, ContainerSpec};
-use crate::domain::{
-    ComputeError, ExecutionResult, SandboxConfig, SandboxError, SandboxMetadata, SandboxStatus,
-    ScmMode, slugify_name,
+use self::compute::{ContainerSpec, SandboxState};
+use crate::sandbox::contract::{
+    CreateRequest, Error, Execution, Forward, Inspection, Sandbox, SandboxRecord, SandboxStatus,
+    Scope,
 };
-use crate::scm::{GitScm, Scm};
-use crate::vcs_store::VcsStore;
+use crate::sandbox::environment::{Change, Origin, Provenance, Variable};
+use crate::sandbox::facets::{Forwarding, Lifecycle};
+use crate::sandbox::report::{Capability, Check, EgressPosture, Readiness, State};
 
-const DEFAULT_WORKDIR: &str = "/src";
+pub mod compute;
+pub(crate) mod naming;
 
-pub trait SandboxProvider {
-    fn create<'a>(
-        &'a self,
-        name: &'a str,
-        config: &'a SandboxConfig,
-    ) -> BoxFuture<'a, Result<SandboxMetadata, SandboxError>>;
-    fn inspect_container<'a>(
-        &'a self,
-        container_id: &'a str,
-    ) -> BoxFuture<'a, Result<ContainerInspection, SandboxError>>;
-    fn pause<'a>(&'a self, container_id: &'a str) -> BoxFuture<'a, Result<(), SandboxError>>;
-    fn resume<'a>(&'a self, container_id: &'a str) -> BoxFuture<'a, Result<(), SandboxError>>;
-    fn delete<'a>(
-        &'a self,
-        metadata: &'a SandboxMetadata,
-    ) -> BoxFuture<'a, Result<(), SandboxError>>;
-    fn shell<'a>(
-        &'a self,
-        metadata: &'a SandboxMetadata,
-        command: &'a [String],
-    ) -> BoxFuture<'a, Result<ExecutionResult, SandboxError>>;
-    fn upload_path<'a>(
-        &'a self,
-        metadata: &'a SandboxMetadata,
-        src_path: &'a Path,
-        dest_path: &'a str,
-    ) -> BoxFuture<'a, Result<(), SandboxError>>;
-    fn download_path<'a>(
-        &'a self,
-        metadata: &'a SandboxMetadata,
-        src_path: &'a str,
-        dest_path: &'a Path,
-    ) -> BoxFuture<'a, Result<(), SandboxError>>;
+pub use naming::container_name_for_slug;
+
+/// The backend's own name in records and reports.
+pub const BACKEND: &str = "docker";
+
+/// Where the workspace is mounted inside the container.
+const WORKDIR: &str = "/src";
+
+/// Docker's settings, typed here and nowhere else.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DockerSettings {
+    /// The image every sandbox created by this backend runs.
+    pub image: String,
+    /// The host address forwarded ports bind to.
+    pub bind: String,
 }
 
-pub struct DockerSandboxProvider<S, C> {
-    scm: S,
-    compute: C,
-}
-
-impl<S, C> DockerSandboxProvider<S, C> {
-    pub fn new(scm: S, compute: C) -> Self {
-        Self { scm, compute }
+impl Default for DockerSettings {
+    fn default() -> Self {
+        Self {
+            image: String::new(),
+            bind: "127.0.0.1".to_string(),
+        }
     }
 }
 
-pub fn branch_name_for_slug(slug: &str) -> String {
-    format!("litterbox/{}", slug)
+/// Addressing data the Docker backend keeps in a sandbox record.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct DockerData {
+    container: String,
+    forwards: Vec<Forward>,
 }
 
-impl<S, C> SandboxProvider for DockerSandboxProvider<S, C>
-where
-    S: Scm + Send + Sync,
-    C: Compute + Send + Sync,
-{
+impl DockerData {
+    fn from_record(record: &SandboxRecord) -> Result<Self, Error> {
+        record
+            .data
+            .clone()
+            .try_into()
+            .map_err(|error: toml::de::Error| {
+                Error::failed(format!(
+                    "sandbox '{}' has an unreadable record: {error}",
+                    record.name
+                ))
+            })
+    }
+
+    fn into_value(self) -> Result<toml::Value, Error> {
+        toml::Value::try_from(self)
+            .map_err(|error| Error::failed(format!("could not serialise the record: {error}")))
+    }
+}
+
+/// Docker's implementation of the contract.
+pub struct DockerBackend {
+    compute: compute::DockerCompute,
+    settings: DockerSettings,
+}
+
+impl DockerBackend {
+    /// Build a backend from a connected client and its settings.
+    pub fn new(compute: compute::DockerCompute, settings: DockerSettings) -> Self {
+        Self { compute, settings }
+    }
+
+    /// The settings this backend was built with.
+    pub fn settings(&self) -> &DockerSettings {
+        &self.settings
+    }
+
+    /// The client, for callers that need the API directly.
+    pub fn compute(&self) -> &compute::DockerCompute {
+        &self.compute
+    }
+
+    fn container_name(&self, request: &CreateRequest) -> String {
+        container_name_for_slug(&request.project_slug, &request.name)
+    }
+
+    async fn rollback(&self, container: &str) {
+        let _ = self.compute.delete_container(container).await;
+    }
+}
+
+impl Sandbox for DockerBackend {
     fn create<'a>(
         &'a self,
-        name: &'a str,
-        config: &'a SandboxConfig,
-    ) -> BoxFuture<'a, Result<SandboxMetadata, SandboxError>> {
+        request: &'a CreateRequest,
+    ) -> BoxFuture<'a, Result<SandboxRecord, Error>> {
         Box::pin(async move {
-            let slug = slugify_name(name)?;
-            let branch_name = self.scm.create_branch(&slug)?;
-            let repo_prefix = self.scm.repo_prefix()?;
-            let archive = match self.scm.make_archive("HEAD") {
-                Ok(archive) => archive,
-                Err(error) => {
-                    let _ = self.scm.delete_branch(&slug);
-                    return Err(error);
-                }
-            };
-            let staged = match stage_archive(&archive) {
-                Ok(staged) => staged,
-                Err(error) => {
-                    let _ = self.scm.delete_branch(&slug);
-                    return Err(error);
-                }
-            };
+            self.compute.ensure_image(&self.settings.image).await?;
 
-            if let Err(error) = self.compute.ensure_image(&config.image).await {
-                let _ = self.scm.delete_branch(&slug);
-                return Err(error);
-            }
+            let (env, port_bindings, forwards) =
+                naming::forwarded_ports(&request.ports, &self.settings.bind).await?;
 
-            let (env, port_bindings, forwarded_ports) = build_forwarded_ports(config).await?;
-
+            let container = self.container_name(request);
             let spec = ContainerSpec {
-                name: container_name_for_slug(&repo_prefix, &slug),
-                image: config.image.clone(),
+                name: container.clone(),
+                image: self.settings.image.clone(),
                 command: vec![
                     "sh".to_string(),
                     "-c".to_string(),
                     "tail -f /dev/null".to_string(),
                 ],
-                working_dir: Some(DEFAULT_WORKDIR.to_string()),
+                working_dir: Some(WORKDIR.to_string()),
                 env,
                 port_bindings,
             };
 
-            let container_id = match self.compute.create_container(&spec).await {
+            let id = match self.compute.create_container(&spec).await {
                 Ok(id) => id,
-                Err(error) => {
-                    let _ = self.scm.delete_branch(&slug);
-                    if is_container_name_conflict(&error) {
-                        return Err(SandboxError::SandboxExists { name: slug.clone() });
-                    }
-                    return Err(error);
+                Err(error) if is_name_conflict(&error) => {
+                    return Err(Error::Conflict {
+                        name: request.name.clone(),
+                    });
                 }
+                Err(error) => return Err(error.into()),
             };
 
             if let Err(error) = self
                 .compute
-                .upload_path(&container_id, staged.path(), DEFAULT_WORKDIR)
+                .upload_path(&id, &request.workspace.source, &request.workspace.mount)
                 .await
             {
-                let _ = self.compute.delete_container(&container_id).await;
-                let _ = self.scm.delete_branch(&slug);
-                return Err(error);
+                self.rollback(&id).await;
+                return Err(error.into());
             }
 
-            if let Some(command) = &config.setup_command {
-                let startup_command = vec!["sh".to_string(), "-c".to_string(), command.clone()];
-                let result = match self
-                    .compute
-                    .exec(&container_id, &startup_command, Some(DEFAULT_WORKDIR))
-                    .await
-                {
+            if let Some(command) = &request.setup_command {
+                let argv = vec!["sh".to_string(), "-c".to_string(), command.clone()];
+                let result = match self.compute.exec(&id, &argv, Some(WORKDIR)).await {
                     Ok(result) => result,
                     Err(error) => {
-                        let _ = self.compute.delete_container(&container_id).await;
-                        let _ = self.scm.delete_branch(&slug);
-                        return Err(error);
+                        self.rollback(&id).await;
+                        return Err(error.into());
                     }
                 };
-
                 if result.exit_code != 0 {
-                    let _ = self.compute.delete_container(&container_id).await;
-                    let _ = self.scm.delete_branch(&slug);
+                    self.rollback(&id).await;
                     let stderr = if result.stderr.is_empty() {
                         result.stdout
                     } else {
                         result.stderr
                     };
-                    return Err(SandboxError::SetupCommandFailed {
-                        exit_code: result.exit_code,
-                        stderr,
-                    });
+                    return Err(Error::failed(format!(
+                        "setup command failed with exit code {}: {stderr}",
+                        result.exit_code
+                    )));
                 }
             }
 
-            Ok(SandboxMetadata {
-                name: slug,
-                branch_name,
-                container_id,
-                status: SandboxStatus::Active,
-                mode: self.scm.mode(),
-                project_slug: self.scm.repo_prefix()?,
-                forwarded_ports,
+            let data = DockerData {
+                container: id,
+                forwards,
+            };
+
+            Ok(SandboxRecord {
+                name: request.name.clone(),
+                backend: BACKEND.to_string(),
+                project_slug: request.project_slug.clone(),
+                data: data.into_value()?,
             })
         })
     }
 
-    fn pause<'a>(&'a self, container_id: &'a str) -> BoxFuture<'a, Result<(), SandboxError>> {
-        Box::pin(async move { self.compute.pause_container(container_id).await })
-    }
-
-    fn inspect_container<'a>(
-        &'a self,
-        container_id: &'a str,
-    ) -> BoxFuture<'a, Result<ContainerInspection, SandboxError>> {
-        Box::pin(async move { self.compute.inspect_container(container_id).await })
-    }
-
-    fn resume<'a>(&'a self, container_id: &'a str) -> BoxFuture<'a, Result<(), SandboxError>> {
-        Box::pin(async move { self.compute.resume_container(container_id).await })
-    }
-
-    fn delete<'a>(
-        &'a self,
-        metadata: &'a SandboxMetadata,
-    ) -> BoxFuture<'a, Result<(), SandboxError>> {
+    fn list<'a>(&'a self, scope: &'a Scope) -> BoxFuture<'a, Result<Vec<SandboxRecord>, Error>> {
         Box::pin(async move {
-            self.compute
-                .delete_container(&metadata.container_id)
-                .await?;
+            let (prefix, project) = match scope {
+                Scope::Repository { project_slug } => {
+                    (format!("litterbox-{project_slug}-"), project_slug.clone())
+                }
+                Scope::Machine => ("litterbox-".to_string(), String::new()),
+            };
 
-            match metadata.mode {
-                ScmMode::Direct => {
-                    self.scm.delete_branch(&metadata.name)?;
-                }
-                ScmMode::Remote => {
-                    let bare_path = VcsStore::resolve_path(&metadata.project_slug);
-                    let scm = GitScm::open(&bare_path, ScmMode::Remote)?;
-                    scm.delete_branch(&metadata.name)?;
-                    let remaining = scm.list_sandboxes()?;
-                    if remaining.is_empty() {
-                        VcsStore::destroy_bare(&metadata.project_slug)?;
-                    }
-                }
+            let summaries = self.compute.list(&prefix).await?;
+            let mut records = Vec::new();
+            for summary in summaries {
+                let Some(name) = summary
+                    .names
+                    .iter()
+                    .find_map(|name| name.strip_prefix(&prefix).map(str::to_string))
+                else {
+                    continue;
+                };
+                let data = DockerData {
+                    container: summary.id,
+                    forwards: Vec::new(),
+                };
+                records.push(SandboxRecord {
+                    name,
+                    backend: BACKEND.to_string(),
+                    project_slug: project.clone(),
+                    data: data.into_value()?,
+                });
             }
+            Ok(records)
+        })
+    }
 
+    fn exec<'a>(
+        &'a self,
+        sandbox: &'a SandboxRecord,
+        command: &'a [String],
+    ) -> BoxFuture<'a, Result<Execution, Error>> {
+        Box::pin(async move {
+            let data = DockerData::from_record(sandbox)?;
+            let result = self
+                .compute
+                .exec(&data.container, command, Some(WORKDIR))
+                .await?;
+            Ok(Execution {
+                exit_code: result.exit_code,
+                stdout: result.stdout,
+                stderr: result.stderr,
+            })
+        })
+    }
+
+    fn upload<'a>(
+        &'a self,
+        sandbox: &'a SandboxRecord,
+        source: &'a Path,
+        destination: &'a str,
+    ) -> BoxFuture<'a, Result<(), Error>> {
+        Box::pin(async move {
+            let data = DockerData::from_record(sandbox)?;
+            self.compute
+                .upload_path(&data.container, source, destination)
+                .await?;
             Ok(())
         })
     }
 
-    fn shell<'a>(
+    fn download<'a>(
         &'a self,
-        metadata: &'a SandboxMetadata,
-        command: &'a [String],
-    ) -> BoxFuture<'a, Result<ExecutionResult, SandboxError>> {
+        sandbox: &'a SandboxRecord,
+        source: &'a str,
+        destination: &'a Path,
+    ) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async move {
+            let data = DockerData::from_record(sandbox)?;
             self.compute
-                .exec(&metadata.container_id, command, Some(DEFAULT_WORKDIR))
-                .await
+                .download_path(&data.container, source, destination)
+                .await?;
+            Ok(())
         })
     }
 
-    fn upload_path<'a>(
+    fn inspect<'a>(
         &'a self,
-        metadata: &'a SandboxMetadata,
-        src_path: &'a Path,
-        dest_path: &'a str,
-    ) -> BoxFuture<'a, Result<(), SandboxError>> {
+        sandbox: &'a SandboxRecord,
+    ) -> BoxFuture<'a, Result<Inspection, Error>> {
         Box::pin(async move {
-            self.compute
-                .upload_path(&metadata.container_id, src_path, dest_path)
-                .await
+            let data = DockerData::from_record(sandbox)?;
+            let status = match self.compute.state(&data.container).await {
+                Ok(SandboxState::Running) => SandboxStatus::Active,
+                Ok(SandboxState::Paused) => SandboxStatus::Paused,
+                Ok(SandboxState::Stopped | SandboxState::Missing) => SandboxStatus::Missing,
+                Err(error) => SandboxStatus::Error {
+                    reason: error.to_string(),
+                },
+            };
+
+            Ok(Inspection {
+                name: sandbox.name.clone(),
+                backend: BACKEND.to_string(),
+                status,
+                // Docker's default bridge puts the container on the host's
+                // route, so egress is direct rather than confined.
+                egress: EgressPosture::Direct,
+                workspace: WORKDIR.to_string(),
+                environment: forwarded_provenance(&data.forwards),
+                forwards: data.forwards,
+            })
         })
     }
 
-    fn download_path<'a>(
-        &'a self,
-        metadata: &'a SandboxMetadata,
-        src_path: &'a str,
-        dest_path: &'a Path,
-    ) -> BoxFuture<'a, Result<(), SandboxError>> {
+    fn delete<'a>(&'a self, sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async move {
-            self.compute
-                .download_path(&metadata.container_id, src_path, dest_path)
-                .await
+            let data = DockerData::from_record(sandbox)?;
+            // `delete_container` already treats a missing container as success.
+            self.compute.delete_container(&data.container).await?;
+            Ok(())
+        })
+    }
+
+    fn readiness<'a>(&'a self) -> BoxFuture<'a, Result<Readiness, Error>> {
+        Box::pin(async move {
+            let daemon = match self.compute.ping().await {
+                Ok(()) => Check {
+                    primitive: "the Docker daemon".to_string(),
+                    state: State::Available,
+                    reason: None,
+                    remedy: None,
+                    fallback: None,
+                },
+                Err(error) => Check {
+                    primitive: "the Docker daemon".to_string(),
+                    state: State::Unavailable,
+                    reason: Some(error.to_string()),
+                    remedy: Some("start the daemon and point DOCKER_HOST at it".to_string()),
+                    fallback: None,
+                },
+            };
+
+            let image = match self.compute.image_present(&self.settings.image).await {
+                Ok(true) => Check {
+                    primitive: format!("image {}", self.settings.image),
+                    state: State::Available,
+                    reason: None,
+                    remedy: None,
+                    fallback: None,
+                },
+                Ok(false) => Check {
+                    primitive: format!("image {}", self.settings.image),
+                    state: State::Degraded,
+                    reason: Some(
+                        "the image is not present and will be pulled on first use".to_string(),
+                    ),
+                    remedy: Some(
+                        "pull the image ahead of time to avoid the first-create delay".to_string(),
+                    ),
+                    fallback: None,
+                },
+                Err(error) => Check {
+                    primitive: format!("image {}", self.settings.image),
+                    state: State::Unavailable,
+                    reason: Some(error.to_string()),
+                    remedy: Some(
+                        "check the image name and that the registry is reachable".to_string(),
+                    ),
+                    fallback: None,
+                },
+            };
+
+            Ok(Readiness {
+                backend: BACKEND.to_string(),
+                checks: vec![daemon, image],
+            })
+        })
+    }
+
+    fn capabilities<'a>(&'a self) -> BoxFuture<'a, Result<Vec<Capability>, Error>> {
+        Box::pin(async move {
+            Ok(vec![
+                Capability {
+                    operation: "pause and resume".to_string(),
+                    state: State::Available,
+                    reason: None,
+                    remedy: None,
+                },
+                Capability {
+                    operation: "resource limits".to_string(),
+                    state: State::Unavailable,
+                    reason: Some("the backend does not set limits on the container".to_string()),
+                    remedy: Some("bound the workload from inside the container".to_string()),
+                },
+                Capability {
+                    operation: "port forwarding".to_string(),
+                    state: State::Available,
+                    reason: None,
+                    remedy: None,
+                },
+                Capability {
+                    operation: "proxied egress".to_string(),
+                    state: State::Unavailable,
+                    reason: Some(
+                        "the sandbox shares the host network and reports direct egress".to_string(),
+                    ),
+                    remedy: Some(
+                        "run a proxy inside the container or use a network-isolating backend"
+                            .to_string(),
+                    ),
+                },
+            ])
         })
     }
 }
 
-fn stage_archive(archive: &[u8]) -> Result<TempDir, SandboxError> {
-    let tempdir = TempDir::new()?;
-    let mut archive = Archive::new(Cursor::new(archive));
-    archive.unpack(tempdir.path())?;
-    Ok(tempdir)
+impl Lifecycle for DockerBackend {
+    fn pause<'a>(&'a self, sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>> {
+        Box::pin(async move {
+            let data = DockerData::from_record(sandbox)?;
+            self.compute.pause_container(&data.container).await?;
+            Ok(())
+        })
+    }
+
+    fn resume<'a>(&'a self, sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>> {
+        Box::pin(async move {
+            let data = DockerData::from_record(sandbox)?;
+            self.compute.resume_container(&data.container).await?;
+            Ok(())
+        })
+    }
 }
 
-fn is_container_name_conflict(error: &SandboxError) -> bool {
+impl Forwarding for DockerBackend {
+    fn forwards<'a>(
+        &'a self,
+        sandbox: &'a SandboxRecord,
+    ) -> BoxFuture<'a, Result<Vec<Forward>, Error>> {
+        Box::pin(async move {
+            let data = DockerData::from_record(sandbox)?;
+            Ok(data.forwards)
+        })
+    }
+}
+
+fn forwarded_provenance(forwards: &[Forward]) -> Provenance {
+    Provenance {
+        origin: Origin::Backend {
+            from: "the Docker image".to_string(),
+        },
+        variables: forwards
+            .iter()
+            .map(|forward| Variable {
+                name: forward.env_var.clone(),
+                change: Change::Set,
+            })
+            .collect(),
+        host_paths: Vec::new(),
+    }
+}
+
+fn is_name_conflict(error: &crate::domain::SandboxError) -> bool {
+    use crate::domain::{ComputeError, SandboxError};
     matches!(
         error,
         SandboxError::Compute(ComputeError::ContainerProvision { source })
@@ -282,438 +457,51 @@ fn is_container_name_conflict(error: &SandboxError) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::net::TcpListener;
+    use super::{BACKEND, DockerBackend, DockerSettings, Sandbox, compute};
+    use crate::sandbox::contract::{CreateRequest, Workspace};
+    use crate::sandbox::report::EgressPosture;
 
-    use super::naming::{
-        DEFAULT_PORT_RANGE_END, DEFAULT_PORT_RANGE_START, allocate_host_port, env_var_for_slug,
-    };
-
-    use std::fs;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    use bollard::query_parameters::RemoveContainerOptions;
-    use git2::{IndexAddOption, Repository, Signature};
-    use tempfile::TempDir;
-
-    use super::compute::DockerCompute;
-    use crate::domain::ForwardedPort;
-    use crate::scm::ThreadSafeScm;
-
-    static UNIQUE_COUNTER: AtomicUsize = AtomicUsize::new(0);
-
-    fn unique_suffix() -> String {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time")
-            .as_nanos();
-        let counter = UNIQUE_COUNTER.fetch_add(1, Ordering::Relaxed);
-        format!("{nanos}-{counter}")
+    fn backend() -> DockerBackend {
+        DockerBackend::new(
+            compute::DockerCompute::connect().expect("docker available"),
+            DockerSettings {
+                image: "busybox:latest".to_string(),
+                bind: "127.0.0.1".to_string(),
+            },
+        )
     }
 
-    fn init_repo() -> (TempDir, Repository) {
-        let tempdir = TempDir::new().expect("tempdir");
-        let repo = Repository::init(tempdir.path()).expect("repo init");
-
-        let file_path = tempdir.path().join("README.md");
-        fs::write(&file_path, "hello").expect("write file");
-
-        let mut index = repo.index().expect("index");
-        index
-            .add_all(["*"].iter(), IndexAddOption::DEFAULT, None)
-            .expect("add all");
-        index.write().expect("index write");
-        let tree_id = index.write_tree().expect("write tree");
-
-        let signature = Signature::now("Litterbox", "noreply@example.com").expect("signature");
-        {
-            let tree = repo.find_tree(tree_id).expect("find tree");
-            repo.commit(Some("HEAD"), &signature, &signature, "init", &tree, &[])
-                .expect("commit");
+    #[tokio::test]
+    async fn create_inspect_and_delete_are_idempotent() -> Result<(), Box<dyn std::error::Error>> {
+        if std::env::var("LITTERBOX_DOCKER_TESTS").is_err() {
+            return Ok(());
         }
 
-        (tempdir, repo)
-    }
+        let backend = backend();
+        let workspace = tempfile::tempdir()?;
+        std::fs::write(workspace.path().join("README.md"), "hello")?;
 
-    #[test]
-    fn env_var_for_slug_formats_name() {
-        let env = env_var_for_slug("my-service");
-
-        assert_eq!(env, "LITTERBOX_FWD_PORT_MY_SERVICE");
-    }
-
-    #[tokio::test]
-    async fn allocate_host_port_returns_in_range() {
-        let port = allocate_host_port(45000, 45010).await.expect("alloc port");
-
-        assert!((45000..=45010).contains(&port));
-    }
-
-    #[tokio::test]
-    async fn allocate_host_port_skips_bound_port() {
-        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind port");
-        let port = listener.local_addr().expect("local addr").port();
-
-        if TcpListener::bind(("127.0.0.1", port + 1)).is_err() {
-            return;
-        }
-
-        let allocated = allocate_host_port(port, port + 1)
-            .await
-            .expect("alloc port");
-
-        assert_ne!(allocated, port);
-    }
-
-    #[tokio::test]
-    async fn allocate_host_port_rejects_invalid_range() {
-        let err = allocate_host_port(9000, 8000)
-            .await
-            .expect_err("invalid range rejected");
-
-        assert!(err.to_string().contains("Invalid port range"));
-    }
-
-    #[tokio::test]
-    async fn allocate_host_port_fails_when_range_exhausted() {
-        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind port");
-        let port = listener.local_addr().expect("local addr").port();
-
-        let err = allocate_host_port(port, port)
-            .await
-            .expect_err("no available ports");
-
-        assert!(err.to_string().contains("No available host ports"));
-    }
-
-    #[tokio::test]
-    async fn build_forwarded_ports_returns_env_and_mappings() {
-        let config = SandboxConfig {
-            image: "busybox".to_string(),
+        let request = CreateRequest {
+            name: format!("contract-{}", std::process::id()),
+            project_slug: "contract-test".to_string(),
+            workspace: Workspace {
+                source: workspace.path().to_path_buf(),
+                mount: "/src".to_string(),
+            },
             setup_command: None,
-            forwarded_ports: vec![ForwardedPort {
-                name: "web".to_string(),
-                target: 8080,
-            }],
+            ports: Vec::new(),
         };
 
-        let (env, port_bindings, forwarded) =
-            build_forwarded_ports(&config).await.expect("build ports");
+        let record = backend.create(&request).await?;
+        assert_eq!(record.backend, BACKEND);
 
-        assert_eq!(env.len(), 1);
-        assert!(env[0].starts_with("LITTERBOX_FWD_PORT_WEB="));
-        assert!(port_bindings.contains_key("8080/tcp"));
-        assert_eq!(forwarded.len(), 1);
-        assert_eq!(forwarded[0].env_var, "LITTERBOX_FWD_PORT_WEB");
-        assert_eq!(forwarded[0].target, 8080);
-        assert!(
-            (DEFAULT_PORT_RANGE_START..=DEFAULT_PORT_RANGE_END).contains(&forwarded[0].host_port)
-        );
-    }
+        let inspection = backend.inspect(&record).await?;
+        assert_eq!(inspection.egress, EgressPosture::Direct);
+        assert_eq!(inspection.workspace, "/src");
+        assert!(inspection.forwards.is_empty());
 
-    #[tokio::test]
-    async fn build_forwarded_ports_allows_empty_config() {
-        let config = SandboxConfig {
-            image: "busybox".to_string(),
-            setup_command: None,
-            forwarded_ports: Vec::new(),
-        };
-
-        let (env, port_bindings, forwarded) =
-            build_forwarded_ports(&config).await.expect("build ports");
-
-        assert!(env.is_empty());
-        assert!(port_bindings.is_empty());
-        assert!(forwarded.is_empty());
-    }
-
-    #[tokio::test]
-    async fn build_forwarded_ports_rejects_invalid_name() {
-        let config = SandboxConfig {
-            image: "busybox".to_string(),
-            setup_command: None,
-            forwarded_ports: vec![ForwardedPort {
-                name: "----".to_string(),
-                target: 8080,
-            }],
-        };
-
-        let err = build_forwarded_ports(&config)
-            .await
-            .expect_err("invalid name rejected");
-
-        assert!(err.to_string().contains("Invalid sandbox name"));
-    }
-
-    #[tokio::test]
-    async fn create_provisions_container() -> Result<(), Box<dyn std::error::Error>> {
-        if std::env::var("LITTERBOX_DOCKER_TESTS").is_err() {
-            return Ok(());
-        }
-
-        let (tempdir, _repo) = init_repo();
-        let scm = ThreadSafeScm::open(tempdir.path())?;
-        let compute = DockerCompute::connect()?;
-        let provider = DockerSandboxProvider::new(scm, compute);
-
-        let name = format!("sandbox-{}", unique_suffix());
-        let metadata = provider
-            .create(
-                &name,
-                &SandboxConfig {
-                    image: "busybox:latest".to_string(),
-                    setup_command: None,
-                    forwarded_ports: Vec::new(),
-                },
-            )
-            .await?;
-
-        let client = provider.compute.client();
-        let container = client
-            .inspect_container(&metadata.container_id, None)
-            .await?;
-        let running = container
-            .state
-            .and_then(|state| state.running)
-            .unwrap_or(false);
-        assert!(running);
-
-        let _ = client
-            .remove_container(
-                &metadata.container_id,
-                Some(RemoveContainerOptions {
-                    force: true,
-                    ..Default::default()
-                }),
-            )
-            .await;
-        let _ = provider.scm.delete_branch(&metadata.name);
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn create_provisions_forwarded_ports() -> Result<(), Box<dyn std::error::Error>> {
-        if std::env::var("LITTERBOX_DOCKER_TESTS").is_err() {
-            return Ok(());
-        }
-
-        let (tempdir, _repo) = init_repo();
-        let scm = ThreadSafeScm::open(tempdir.path())?;
-        let compute = DockerCompute::connect()?;
-        let provider = DockerSandboxProvider::new(scm, compute);
-
-        let name = format!("sandbox-{}", unique_suffix());
-        let metadata = provider
-            .create(
-                &name,
-                &SandboxConfig {
-                    image: "busybox:latest".to_string(),
-                    setup_command: None,
-                    forwarded_ports: vec![ForwardedPort {
-                        name: "web".to_string(),
-                        target: 8080,
-                    }],
-                },
-            )
-            .await?;
-
-        let client = provider.compute.client();
-        let container = client
-            .inspect_container(&metadata.container_id, None)
-            .await?;
-        let env = container
-            .config
-            .and_then(|config| config.env)
-            .unwrap_or_default();
-        let env_value = env
-            .iter()
-            .find(|entry| entry.starts_with("LITTERBOX_FWD_PORT_WEB="))
-            .expect("env var present")
-            .split('=')
-            .nth(1)
-            .expect("env var value");
-
-        let host_port = env_value.parse::<u16>().expect("host port parses");
-        assert!((DEFAULT_PORT_RANGE_START..=DEFAULT_PORT_RANGE_END).contains(&host_port));
-
-        let bindings = container
-            .host_config
-            .and_then(|config| config.port_bindings)
-            .expect("port bindings present");
-        let binding = bindings
-            .get("8080/tcp")
-            .and_then(|entry| entry.as_ref())
-            .and_then(|entries| entries.first())
-            .expect("port binding present");
-        assert_eq!(binding.host_port.as_deref(), Some(env_value));
-
-        let _ = client
-            .remove_container(
-                &metadata.container_id,
-                Some(RemoveContainerOptions {
-                    force: true,
-                    ..Default::default()
-                }),
-            )
-            .await;
-        let _ = provider.scm.delete_branch(&metadata.name);
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn pause_resume_delete_container() -> Result<(), Box<dyn std::error::Error>> {
-        if std::env::var("LITTERBOX_DOCKER_TESTS").is_err() {
-            return Ok(());
-        }
-
-        let (tempdir, _repo) = init_repo();
-        let scm = ThreadSafeScm::open(tempdir.path())?;
-        let compute = DockerCompute::connect()?;
-        let provider = DockerSandboxProvider::new(scm, compute);
-
-        let name = format!("sandbox-{}", unique_suffix());
-        let metadata = provider
-            .create(
-                &name,
-                &SandboxConfig {
-                    image: "busybox:latest".to_string(),
-                    setup_command: None,
-                    forwarded_ports: Vec::new(),
-                },
-            )
-            .await?;
-
-        provider.pause(&metadata.container_id).await?;
-        let client = provider.compute.client();
-        let container = client
-            .inspect_container(&metadata.container_id, None)
-            .await?;
-        let paused = container
-            .state
-            .and_then(|state| state.paused)
-            .unwrap_or(false);
-        assert!(paused);
-
-        provider.resume(&metadata.container_id).await?;
-        let container = client
-            .inspect_container(&metadata.container_id, None)
-            .await?;
-        let running = container
-            .state
-            .and_then(|state| state.running)
-            .unwrap_or(false);
-        assert!(running);
-
-        provider.delete(&metadata).await?;
-        assert!(
-            client
-                .inspect_container(&metadata.container_id, None)
-                .await
-                .is_err()
-        );
-
-        let repo = Repository::open(tempdir.path())?;
-        assert!(
-            repo.find_branch(&metadata.branch_name, git2::BranchType::Local)
-                .is_err()
-        );
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn shell_executes_commands() -> Result<(), Box<dyn std::error::Error>> {
-        if std::env::var("LITTERBOX_DOCKER_TESTS").is_err() {
-            return Ok(());
-        }
-
-        let (tempdir, _repo) = init_repo();
-        let scm = ThreadSafeScm::open(tempdir.path())?;
-        let compute = DockerCompute::connect()?;
-        let provider = DockerSandboxProvider::new(scm, compute);
-
-        let name = format!("sandbox-{}", unique_suffix());
-        let metadata = provider
-            .create(
-                &name,
-                &SandboxConfig {
-                    image: "busybox:latest".to_string(),
-                    setup_command: None,
-                    forwarded_ports: Vec::new(),
-                },
-            )
-            .await?;
-
-        let result = provider
-            .shell(
-                &metadata,
-                &["sh".to_string(), "-c".to_string(), "echo hello".to_string()],
-            )
-            .await?;
-        assert_eq!(result.exit_code, 0);
-        assert!(result.stdout.contains("hello"));
-
-        let failure = provider
-            .shell(
-                &metadata,
-                &[
-                    "sh".to_string(),
-                    "-c".to_string(),
-                    "ls /does-not-exist".to_string(),
-                ],
-            )
-            .await?;
-        assert_ne!(failure.exit_code, 0);
-        assert!(!failure.stderr.is_empty());
-
-        provider.delete(&metadata).await?;
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn create_remote_mode_sets_project_slug() -> Result<(), Box<dyn std::error::Error>> {
-        if std::env::var("LITTERBOX_DOCKER_TESTS").is_err() {
-            return Ok(());
-        }
-
-        let (tempdir, _repo) = init_repo();
-        let slug = format!("test-project-{}", unique_suffix());
-        let _bare_path = crate::vcs_store::VcsStore::clone_bare(tempdir.path(), &slug)?;
-
-        let scm = ThreadSafeScm::open_with_mode(&_bare_path, ScmMode::Remote)?;
-        let compute = DockerCompute::connect()?;
-        let provider = DockerSandboxProvider::new(scm, compute);
-
-        let name = format!("sandbox-{}", unique_suffix());
-        let metadata = provider
-            .create(
-                &name,
-                &SandboxConfig {
-                    image: "busybox:latest".to_string(),
-                    setup_command: None,
-                    forwarded_ports: Vec::new(),
-                },
-            )
-            .await?;
-
-        assert_eq!(metadata.project_slug, slug);
-
-        let client = provider.compute.client();
-        let _ = client
-            .remove_container(
-                &metadata.container_id,
-                Some(RemoveContainerOptions {
-                    force: true,
-                    ..Default::default()
-                }),
-            )
-            .await;
-        let _ = provider.scm.delete_branch(&metadata.name);
-        let _ = std::fs::remove_dir_all(&_bare_path);
-
+        backend.delete(&record).await?;
+        backend.delete(&record).await?;
         Ok(())
     }
 }
