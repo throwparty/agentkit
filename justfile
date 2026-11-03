@@ -20,6 +20,10 @@ lint:
     cargo clippy --all-targets --all-features -- -D warnings
     arch-lint check
 
+shellcheck:
+    shellcheck $(git ls-files '*.sh' '*.bash' '*.bats')
+    shellcheck --exclude=SC2148 $(git ls-files '*.envrc')
+
 test:
     just workflows test
 
