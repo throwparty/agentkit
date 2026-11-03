@@ -185,20 +185,23 @@ async fn handle_list(backend: Option<String>) -> ExitCode {
     for name in &listing.legacy {
         println!("{name} legacy-record");
     }
+    let mut failed = false;
     for record in &listing.sandboxes {
-        let status = sandboxes
-            .status(&record.name)
-            .await
-            .unwrap_or(SandboxStatus::Unknown);
-        println!(
-            "{} {} {}",
-            record.name,
-            status_label(&status),
-            record.backend
-        );
+        match sandboxes.status(&record.name).await {
+            Ok(status) => println!(
+                "{} {} {}",
+                record.name,
+                status_label(&status),
+                record.backend
+            ),
+            Err(error) => {
+                println!("{} unknown {}", record.name, error);
+                failed = true;
+            }
+        }
     }
 
-    ExitCode::from(0)
+    ExitCode::from(if failed { 1 } else { 0 })
 }
 
 async fn handle_pause(
@@ -361,10 +364,11 @@ async fn handle_shell(backend: Option<String>, name: String, command: Vec<String
 
     if result.exit_code == 0 {
         ExitCode::from(0)
-    } else if let Ok(code) = u8::try_from(result.exit_code) {
-        ExitCode::from(code)
     } else {
-        ExitCode::from(1)
+        // Namespaced: the taxonomy owns 0 to 7, so a sandboxed command's own
+        // status can never be mistaken for one of its classes.
+        let code = u8::try_from(result.exit_code.clamp(1, 127)).unwrap_or(1);
+        ExitCode::from(128 + code)
     }
 }
 

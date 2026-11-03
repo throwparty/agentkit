@@ -103,7 +103,9 @@ impl Sandboxes {
     /// Delete a sandbox: compute first, then the branch, each half idempotent.
     pub async fn delete(&self, name: &str) -> Result<(), Error> {
         let stored = self.stored(name)?;
-        let selected = self.select_for(&stored.sandbox).await?;
+        let selected = self
+            .select_for(&stored.sandbox, "delete the sandbox")
+            .await?;
 
         selected.core.delete(&stored.sandbox).await?;
 
@@ -121,21 +123,23 @@ impl Sandboxes {
     /// Run a command in a sandbox.
     pub async fn exec(&self, name: &str, command: &[String]) -> Result<Execution, Error> {
         let stored = self.stored(name)?;
-        let selected = self.select_for(&stored.sandbox).await?;
+        let selected = self.select_for(&stored.sandbox, "run a command").await?;
         selected.core.exec(&stored.sandbox, command).await
     }
 
     /// Describe a sandbox.
     pub async fn inspect(&self, name: &str) -> Result<Inspection, Error> {
         let stored = self.stored(name)?;
-        let selected = self.select_for(&stored.sandbox).await?;
+        let selected = self
+            .select_for(&stored.sandbox, "inspect the sandbox")
+            .await?;
         selected.core.inspect(&stored.sandbox).await
     }
 
     /// Pause a sandbox, when its mechanism can.
     pub async fn pause(&self, name: &str) -> Result<(), Error> {
         let stored = self.stored(name)?;
-        let selected = self.select_for(&stored.sandbox).await?;
+        let selected = self.select_for(&stored.sandbox, "pause").await?;
         let lifecycle = selected.lifecycle.ok_or_else(|| {
             unsupported(
                 "pause",
@@ -150,7 +154,7 @@ impl Sandboxes {
     /// Resume a paused sandbox, when its mechanism can.
     pub async fn resume(&self, name: &str) -> Result<(), Error> {
         let stored = self.stored(name)?;
-        let selected = self.select_for(&stored.sandbox).await?;
+        let selected = self.select_for(&stored.sandbox, "resume").await?;
         let lifecycle = selected.lifecycle.ok_or_else(|| {
             unsupported(
                 "resume",
@@ -224,7 +228,7 @@ impl Sandboxes {
         }
     }
 
-    async fn select_for(&self, record: &SandboxRecord) -> Result<Selected, Error> {
+    async fn select_for(&self, record: &SandboxRecord, operation: &str) -> Result<Selected, Error> {
         if record.project_slug != self.project_slug {
             return Err(Error::failed(format!(
                 "sandbox '{}' belongs to project '{}', not '{}'",
@@ -244,8 +248,22 @@ impl Sandboxes {
                 &format!("select the {} backend to operate on it", record.backend),
             ));
         }
-        let built = backends::select(&self.config).await?;
-        Ok(built)
+        backends::select(&self.config)
+            .await
+            .map_err(|error| match error {
+                Error::Unsupported {
+                    backend,
+                    reason,
+                    remedy,
+                    ..
+                } => Error::Unsupported {
+                    operation: operation.to_string(),
+                    backend,
+                    reason,
+                    remedy,
+                },
+                other => other,
+            })
     }
 
     fn stage(&self) -> Result<TempDir, Error> {
@@ -387,7 +405,7 @@ impl Sandboxes {
     /// The ports a sandbox forwards, or the reason its mechanism forwards none.
     pub async fn forwards(&self, name: &str) -> Result<Vec<Forward>, Error> {
         let stored = self.stored(name)?;
-        let selected = self.select_for(&stored.sandbox).await?;
+        let selected = self.select_for(&stored.sandbox, "forward a port").await?;
         let forwarding = selected.forwarding.ok_or_else(|| {
             unsupported(
                 "forward a port",
@@ -407,7 +425,9 @@ impl Sandboxes {
         destination: &str,
     ) -> Result<(), Error> {
         let stored = self.stored(name)?;
-        let selected = self.select_for(&stored.sandbox).await?;
+        let selected = self
+            .select_for(&stored.sandbox, "upload into the sandbox")
+            .await?;
         selected
             .core
             .upload(&stored.sandbox, source, destination)
@@ -422,7 +442,9 @@ impl Sandboxes {
         destination: &std::path::Path,
     ) -> Result<(), Error> {
         let stored = self.stored(name)?;
-        let selected = self.select_for(&stored.sandbox).await?;
+        let selected = self
+            .select_for(&stored.sandbox, "download from the sandbox")
+            .await?;
         selected
             .core
             .download(&stored.sandbox, source, destination)
@@ -432,7 +454,9 @@ impl Sandboxes {
     /// Download the workspace and commit it to the sandbox's snapshot branch.
     pub async fn snapshot(&self, name: &str, message: &str) -> Result<(), Error> {
         let stored = self.stored(name)?;
-        let selected = self.select_for(&stored.sandbox).await?;
+        let selected = self
+            .select_for(&stored.sandbox, "snapshot the workspace")
+            .await?;
 
         let staging = tempfile::tempdir()
             .map_err(|error| Error::failed(format!("could not create a staging dir: {error}")))?;
