@@ -5,6 +5,7 @@ use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub mod contract;
+pub mod error;
 
 use futures_util::future::BoxFuture;
 use tar::Archive;
