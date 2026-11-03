@@ -6,6 +6,7 @@ use agentkit_litterbox::config_loader;
 use agentkit_litterbox::mcp;
 use agentkit_litterbox::sandbox::contract::{Error, SandboxStatus, Scope};
 use agentkit_litterbox::sandboxes::Sandboxes;
+use agentkit_litterbox::sandboxes::bulk;
 use clap::{CommandFactory, Parser, Subcommand};
 
 #[derive(Parser)]
@@ -199,18 +200,10 @@ async fn handle_pause(
     };
 
     if all_envs {
-        let listing = match sandboxes.list() {
-            Ok(listing) => listing,
+        let paused = match sandboxes.pause_listed().await {
+            Ok(paused) => paused,
             Err(error) => return report(error),
         };
-        let mut paused = 0usize;
-        for record in &listing.sandboxes {
-            match sandboxes.pause(&record.name).await {
-                Ok(()) => paused += 1,
-                Err(error) if error.is_not_found() => {}
-                Err(error) => return report(error),
-            }
-        }
         println!("Paused {paused} sandbox(es)");
         return ExitCode::from(0);
     }
@@ -247,14 +240,10 @@ async fn pause_everywhere(config: Config) -> ExitCode {
         Err(error) => return report(error),
     };
 
-    let mut paused = 0usize;
-    for record in &records {
-        match lifecycle.pause(record).await {
-            Ok(()) => paused += 1,
-            Err(error) if error.is_not_found() => {}
-            Err(error) => return report(error),
-        }
-    }
+    let paused = match bulk::pause_all(&records, lifecycle.as_ref()).await {
+        Ok(paused) => paused,
+        Err(error) => return report(error),
+    };
 
     println!("Paused {paused} sandbox(es)");
     ExitCode::from(0)

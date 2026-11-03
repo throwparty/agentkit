@@ -158,7 +158,7 @@ Route list, pause, resume, delete and shell through the orchestrator; address sa
 | Depends On | T-003, T-012 |
 | References | cli-surface,sandbox-status,backend-neutral-contract,neutral-errors,backend-switched |
 
-### T-014: Bulk pause and resume through the contract
+### T-014: [x] Bulk pause and resume through the contract
 
 Drive pause --all-envs from SCM branches and pause --all-repos from each backend's list, both through the lifecycle facet, skipping sandboxes that vanish mid-batch.
 
