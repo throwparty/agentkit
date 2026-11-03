@@ -6,8 +6,9 @@
 pub mod backend;
 pub mod compute;
 pub mod config;
+pub mod construct;
+pub(crate) mod error;
 pub(crate) mod forwarding;
 pub(crate) mod naming;
 
-pub use backend::{BACKEND, DockerBackend, DockerSettings};
-pub use naming::container_name_for_slug;
+pub use backend::{BACKEND, DockerSettings};
