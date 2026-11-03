@@ -123,7 +123,7 @@ The contract defines the status vocabulary and its derivation, so every backend 
 
 ### FR-015: Core: Create Is Atomic
 
-Create either returns a sandbox record or leaves nothing behind: no compute, no workspace, no scope, no branch. A name already in use is a conflict rather than a second sandbox. A setup command runs confined, with the same environment and workspace path a later command receives, and a non-zero exit aborts the create and reports the setup failure.
+Create either returns a sandbox or leaves nothing behind: the backend leaves no compute, no workspace and no scope, and the orchestrator removes the branch it created. A name already in use is a conflict rather than a second sandbox. A setup command runs confined, with the same environment and workspace path a later command receives, and a non-zero exit aborts the create and reports the setup failure.
 
 **Slug:** `create-atomicity`
 
@@ -177,9 +177,15 @@ The Docker backend is re-expressed on the contract with its behaviour unchanged:
 
 ### FR-024: Arch: Module Boundaries
 
-The contract, each backend, the CLI, the MCP server and persistence are separate modules with declared dependencies: a backend may depend on the contract and on nothing else in Litterbox, and no backend may depend on another; the CLI and the MCP server reach a backend through the construction point rather than through its module; persistence depends on the contract's record types only. A rule broken fails the build.
+The contract, each backend, the CLI, the MCP server and persistence are separate modules with declared dependencies: a backend may depend on the contract and on nothing else in Litterbox, and no backend may depend on another; the orchestration that pairs a branch with compute depends on the contract, the registry, SCM and persistence, and is the only module that performs that pairing; the CLI and the MCP server reach a backend through the orchestrator and the construction point rather than through its module; persistence depends on the contract's record types only. A rule broken fails the build.
 
 **Slug:** `module-boundaries`
+
+### FR-025: Orchestration: Branch And Compute Pairing
+
+A sandbox is a branch paired with compute, and the pairing lives in one orchestrator rather than in a backend. The orchestrator creates the branch, prepares the workspace, hands the backend a workspace source, persists the record, and removes the branch when the backend fails to create; delete removes the compute and then the branch, and a half that is already gone is not an error. A backend neither creates nor deletes a branch and is not told that one exists.
+
+**Slug:** `branch-compute-pairing`
 
 ## Non-functional Requirements
 
@@ -331,7 +337,7 @@ A forwarded port reports its loopback bind address; a non-loopback bind appears 
 
 ### AC-017: Shared: Create Leaves Nothing Behind
 
-A create that fails at setup, upload or confinement leaves no compute, workspace, scope or branch, and a name already in use is reported as a conflict.
+A create that fails at setup, upload or confinement leaves no compute, workspace or scope, the orchestrator removes the branch it created, and a name already in use is reported as a conflict.
 
 **Slug:** `create-leaves-nothing`
 
@@ -340,6 +346,12 @@ A create that fails at setup, upload or confinement leaves no compute, workspace
 A change that makes a backend depend on another backend, or the CLI depend on a backend's module, fails the architecture lint, and the continuous integration job that runs it fails with it.
 
 **Slug:** `boundaries-fail-the-build`
+
+### AC-019: Shared: Pairing Is Owned In One Place
+
+A backend can be created from a workspace source and deleted without touching SCM; a failed create leaves no branch; a delete whose compute is already gone still removes the branch; the orchestrator is the only module that creates or deletes a branch.
+
+**Slug:** `pairing-owned-in-one-place`
 
 ## Edge Cases
 

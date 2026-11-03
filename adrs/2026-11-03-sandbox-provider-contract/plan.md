@@ -28,6 +28,7 @@ src/
 │       ├── config.rs     `DockerConfig`, its own keys, `deny_unknown_fields`
 │       ├── naming.rs     container naming, host port allocation
 │       └── tests
+├── sandboxes/            orchestration: branch, workspace, record and backend together
 ├── config/               user and project configuration, per-backend sections
 ├── metadata_store.rs     record persistence
 ├── main.rs               CLI
@@ -38,21 +39,25 @@ src/
 ```mermaid
 flowchart TD
     CLI["main.rs (CLI)"] --> CONTRACT["sandbox (contract)"]
-    CLI --> REGISTRY["backends (registry)"]
-    CLI --> PERSIST["metadata_store"]
+    CLI --> SANDBOXES["sandboxes (orchestration)"]
     CLI --> CONFIG["config"]
+    CLI --> REGISTRY["backends (registry)"]
 
     MCP["mcp.rs (MCP server)"] --> CONTRACT
-    MCP --> REGISTRY
-    MCP --> PERSIST
+    MCP --> SANDBOXES
     MCP --> CONFIG
+
+    SANDBOXES --> CONTRACT
+    SANDBOXES --> REGISTRY
+    SANDBOXES --> PERSIST["metadata_store"]
+    SANDBOXES --> SCM["scm"]
 
     REGISTRY --> CONTRACT
     REGISTRY --> DOCKER["backends::docker"]
     DOCKER --> CONTRACT
     PERSIST --> CONTRACT
 
-    CONFIG --> APPATH["agentkit-path"]
+    CONFIG --> APPATH["agentkit-common"]
     DOCKER --> BOLLARD["bollard"]
 
 ```
@@ -73,8 +78,8 @@ pub trait Sandbox {
 }
 
 pub trait Lifecycle: Sandbox {
-    fn pause(&self, name: &str) -> BoxFuture<'_, Result<(), Error>>;
-    fn resume(&self, name: &str) -> BoxFuture<'_, Result<(), Error>>;
+    fn pause(&self, sandbox: &SandboxRecord) -> BoxFuture<'_, Result<(), Error>>;
+    fn resume(&self, sandbox: &SandboxRecord) -> BoxFuture<'_, Result<(), Error>>;
 }
 
 pub trait Limits: Sandbox { /* set_limits */ }
@@ -82,6 +87,10 @@ pub trait Forwarding: Sandbox { /* forwards */ }
 ```
 
 One `Arc<DockerBackend>` coerces into `Arc<dyn Sandbox>`, `Arc<dyn Lifecycle>` and `Arc<dyn Forwarding>`, so the registry returns one object viewed through the vtables the mechanism supports. That keeps compile-time gating for code generic over a facet and gives the CLI, which holds `dyn`, a runtime answer it can print.
+
+### Orchestration
+
+The pairing of a branch with compute is not the backend's business. `src/sandboxes/` owns it: it resolves the project, asks SCM for a branch, archives HEAD, stages the tree, asks the registry for the selected backend, calls `create` with a workspace source, persists the returned record, and removes the branch if the backend reports failure. Delete runs the other way, compute first and branch second, each half idempotent. Every command goes through this module, so the CLI and the MCP server never assemble a sandbox themselves and a mechanism never learns that a branch exists (FR-025).
 
 ### Configuration
 
@@ -92,13 +101,19 @@ Per-backend sections stay untyped in the core: the config holds a map from backe
 ### Records
 
 ```rust
+// sandbox/contract.rs
 pub struct SandboxRecord {
     pub name: String,
     pub backend: String,
     pub project_slug: String,
+    pub data: toml::Value, // shape owned by the backend
+}
+
+// metadata_store.rs
+pub struct StoredSandbox {
+    pub sandbox: SandboxRecord,
     pub branch_name: String,
-    pub mode: ScmMode,
-    pub backend_data: toml::Value, // shape owned by the backend
+    pub remote: bool, // the SCM mode, kept out of the contract
 }
 ```
 
@@ -113,6 +128,7 @@ Parsing goes through `toml::Value` first. A record with `container_id` and no `b
 5. The conformance suite is an in-crate test module, not a published crate. Tests in this repository are modules selected by package and target, and a test-only crate would need a feature flag to stay out of the binary.
 6. `agentkit-path` is renamed to `agentkit-common` and carries two things: the platform directories, whose `data_dir` for this component already matches the existing layout so no state moves, and the exit-code taxonomy, so every component that adopts it numbers the same failure the same way. It stays dependency-free: anything needing serde, tokio or a platform binding does not belong in it. Litterbox adopts it here; switchboard, tackle and credentials take the rename mechanically and adopt the taxonomy when next touched.
 7. Exit codes are that shared taxonomy rather than a litterbox invention: 0 success, 1 failed, 2 reserved for CLI usage, 3 not found, 4 conflict, 5 unsupported, 6 denied, 7 unavailable. The mapping to MCP error classes sits beside the taxonomy in the same module.
+8. The branch-and-compute pairing moves out of the backend into `src/sandboxes/`. Rejected: letting a backend depend on SCM, which would either relax FR-024 or make every mechanism re-implement branch creation, rollback and bare-repo cleanup. The backend receives a prepared workspace source and knows nothing about branches; the orchestrator owns the rollback that pairs with it, so atomicity splits along the same line as the code.
 
 ## Technologies
 
@@ -161,7 +177,14 @@ Environment carries variables plus Provenance: origins and kind of change, never
 
 Where a sandbox is remembered between processes
 
-SandboxRecord with a backend field and a backend-owned payload (FR-020). Legacy files parse to a distinguishable state rather than an error, so list can report them and nothing can operate on them (AC-006). Replaces the container_id field and both fabrication paths.
+A stored envelope holding the contract record, the branch the orchestrator created and the SCM mode, so neither the contract nor a backend carries SCM vocabulary (FR-020, FR-025). Legacy files parse to a distinguishable state rather than an error, so list can report them and nothing can operate on them (AC-006). Replaces the container_id field and both fabrication paths.
+
+
+### Sandbox orchestration
+
+The one place a branch meets compute
+
+Lives in src/sandboxes. Resolves the project, creates the branch, archives HEAD, stages the workspace, asks the registry for the backend, calls create, persists the record and removes the branch when create fails (FR-025, FR-015); delete removes compute then branch, each half idempotent; pause, resume and exec load the record and dispatch to the backend or its facet. The CLI and the MCP server call this module rather than assembling a sandbox themselves.
 
 
 ### Backend registry
@@ -175,7 +198,7 @@ A compiled-in set of backends, selection from configuration or the per-invocatio
 
 The first real mechanism
 
-DockerBackend implements Sandbox, Lifecycle and Forwarding; keeps Docker's vocabulary in its own configuration, messages and errors (FR-016, FR-023); reports direct egress because the default bridge shares the host network (FR-011, AC-009); implements the forwarding facet with a loopback bind taken from user configuration (FR-013).
+DockerBackend implements Sandbox, Lifecycle and Forwarding; receives a prepared workspace source and neither creates nor deletes a branch; keeps Docker's vocabulary in its own configuration, messages and errors (FR-016, FR-023); reports direct egress because the default bridge shares the host network (FR-011, AC-009); implements the forwarding facet with a loopback bind taken from user configuration (FR-013).
 
 
 ### Docker compute
@@ -196,14 +219,14 @@ Two files plus a local override, resolved in order (FR-021, FR-022). Backend sel
 
 The user-facing surface
 
-list, pause, resume, delete, shell, stdio and docgen keep their names; container vocabulary leaves their help, output and errors (FR-016). pause and resume go through the lifecycle facet objects and report unsupported when absent. A new backends command lists available and selected backends with readiness and capability entries as a table, with --json for scripts and tests (FR-017); its final naming is settled here: backends, no arguments, no MCP equivalent. Exit codes come from the shared taxonomy in agentkit-common rather than from literals in each handler.
+list, pause, resume, delete, shell, stdio and docgen keep their names; container vocabulary leaves their help, output and errors (FR-016). Every command goes through the orchestrator rather than assembling a sandbox from the registry and the store. pause and resume go through the lifecycle facet objects and report unsupported when absent. A new backends command lists available and selected backends with readiness and capability entries as a table, with --json for scripts and tests (FR-017); its final naming is settled here: backends, no arguments, no MCP equivalent. Exit codes come from the shared taxonomy in agentkit-common rather than from literals in each handler.
 
 
 ### MCP server
 
 The agent-facing surface
 
-Tool names, arguments and result shapes for read, write, patch, bash, ls, glob, grep and sandbox-create stay as they are; responses lose container ids and gain name, backend, status, egress and provenance by variable name (FR-019). No tool accepts a backend setting, and no response carries an environment value.
+Tool names, arguments and result shapes for read, write, patch, bash, ls, glob, grep and sandbox-create stay as they are; responses lose container ids and gain name, backend, status, egress and provenance by variable name (FR-019). Tools reach the orchestrator, never a backend or the store directly. No tool accepts a backend setting, and no response carries an environment value.
 
 
 ### MCP tool mapping
@@ -236,11 +259,13 @@ A generic exercise over Sandbox and its facets, run once against TestBackend as 
 
 ## Data Flow
 
-Creation over MCP: sandbox-create loads user and project configuration, resolves the project slug, asks the registry for the selected backend, and calls create with the project's setup command and requested ports. The backend validates its own configuration (Docker fails here if its image is unset, in Docker's terms), establishes confinement, materialises the workspace, runs setup under the same environment and workspace path a later command sees, rolls everything back on failure, and returns a SandboxRecord. The server persists the record and answers with name, backend, status and egress.
+Creation over MCP: sandbox-create loads configuration and hands the name to the orchestrator. The orchestrator resolves the project, creates the branch, archives HEAD, stages the tree, asks the registry for the selected backend, and calls create with the staged workspace, the project's setup command and its requested ports; on failure it removes the branch it just created. The backend validates its own configuration (Docker fails here if its image is unset, in Docker's terms), establishes confinement, materialises the workspace, runs setup under the same environment and workspace path a later command sees, removes anything it created, and returns a record. The orchestrator persists the record; the server answers with name, backend, status and egress.
 
-Creation over the CLI follows the same path through the same registry and the same record store; there is no second implementation.
+Creation over the CLI follows the same path through the same orchestrator and the same record store; there is no second implementation.
 
-Command execution: a name resolves to a record; the record names a backend; the registry builds that backend; exec runs the command with the environment the backend owns and returns exit code, stdout and stderr. A name whose record names another backend is refused with both names (EC-004, AC-007).
+Command execution: a name resolves to a stored record; the record names a backend; the registry builds that backend; exec runs the command with the environment the backend owns and returns exit code, stdout and stderr. A name whose record names another backend is refused with both names (EC-004, AC-007).
+
+Deletion: the orchestrator removes the compute through the backend, then the branch through SCM; either half already gone is not an error, so a second delete succeeds (FR-025, EC-007).
 
 Pause and bulk pause: the registry exposes the lifecycle facet when the mechanism has one. Present, pause runs and a bulk operation iterates the scope; absent, the command reports unsupported with the mechanism's own reason and remedy (FR-004, AC-003).
 
