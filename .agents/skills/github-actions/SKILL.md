@@ -1,6 +1,7 @@
 ---
-
-## name: github-actions description: GitHub Actions CI/CD workflows, composite actions, and workflow linting (actionlint, zizmor)
+name: github-actions
+description: GitHub Actions CI/CD workflows, composite actions, and workflow linting (actionlint, zizmor)
+---
 
 ## When to use me
 

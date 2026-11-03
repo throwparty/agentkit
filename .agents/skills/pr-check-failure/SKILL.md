@@ -1,6 +1,7 @@
 ---
-
-## name: pr-check-failure description: Diagnosing and fixing failing GitHub Actions CI checks and broken builds
+name: pr-check-failure
+description: Diagnosing and fixing failing GitHub Actions CI checks and broken builds
+---
 
 ## When to use me
 

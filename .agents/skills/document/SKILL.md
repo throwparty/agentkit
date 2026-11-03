@@ -1,6 +1,7 @@
 ---
-
-## name: document description: Writing, restructuring, or reviewing documentation in docs/docs/user/ or docs/docs/dev/.
+name: document
+description: Writing, restructuring, or reviewing documentation in docs/docs/user/ or docs/docs/dev/.
+---
 
 ## When to use me
 

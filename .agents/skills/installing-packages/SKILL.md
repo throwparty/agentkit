@@ -1,6 +1,7 @@
 ---
-
-## name: installing-packages description: Installing tools and packages via Nix, npm, cargo, pip, and other package managers
+name: installing-packages
+description: Installing tools and packages via Nix, npm, cargo, pip, and other package managers
+---
 
 ## When to use me
 
