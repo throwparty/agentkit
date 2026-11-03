@@ -1,0 +1,8 @@
+# Litterbox configuration
+#
+# The sandboxing mechanism and its settings are the user's choice, so they live
+# in ~/.config/agentkit/litterbox/config.toml, not here. A project file may not
+# select or configure a backend.
+
+[project]
+setup-command = "sh -c 'echo we successfully initialised >/src/litterbox'"

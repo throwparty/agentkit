@@ -236,7 +236,7 @@ Add scopes and deny rules to arch-lint.toml for sandbox, backends, backends::doc
 | Depends On | T-013, T-016 |
 | References | module-boundaries,architecture-lint,boundaries-fail-the-build,one-construction-point,pairing-owned-in-one-place |
 
-### T-019: Docs and repository configuration
+### T-019: [x] Docs and repository configuration
 
 Migrate this repository's .litterbox.toml to the new shape, update the configuration reference for the user file, the per-backend section and the setup-command location, add a page on choosing a backend and reading a readiness report, and regenerate the CLI and MCP references.
 

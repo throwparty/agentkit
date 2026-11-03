@@ -11,10 +11,37 @@ use clap::Arg;
 /// - Each subcommand's description (long_about or about)
 /// - Positional arguments and options formatted consistently
 pub fn generate_cli_docs(command: &clap::Command) -> String {
+    generate_cli_docs_with_exit_codes(command, &[])
+}
+
+/// Generate CLI reference documentation, including top-level options and an
+/// exit-code table when the caller supplies one.
+pub fn generate_cli_docs_with_exit_codes(
+    command: &clap::Command,
+    exit_codes: &[(u8, &str)],
+) -> String {
     command.clone().build();
 
     let mut output = String::new();
     output.push_str("# 👩‍💻 Command line interface\n\n");
+
+    let global_options: Vec<&Arg> = command
+        .get_arguments()
+        .filter(|arg| !arg.is_hide_set() && !matches!(arg.get_id().as_str(), "help" | "version"))
+        .collect();
+    if !global_options.is_empty() {
+        output.push_str("## Global options\n\n");
+        for arg in global_options {
+            if let Some(label) = format_option_label(arg) {
+                output.push_str(&format!("- `{}`", label));
+                if let Some(help) = arg.get_help().or_else(|| arg.get_long_help()) {
+                    output.push_str(&format!(" {help}"));
+                }
+                output.push('\n');
+            }
+        }
+        output.push('\n');
+    }
 
     let mut subcommands: Vec<_> = command
         .get_subcommands()
@@ -66,6 +93,15 @@ pub fn generate_cli_docs(command: &clap::Command) -> String {
         }
     }
 
+    if !exit_codes.is_empty() {
+        output.push_str("## Exit codes\n\n");
+        output.push_str("| Code | Meaning |\n| --- | --- |\n");
+        for (code, meaning) in exit_codes {
+            output.push_str(&format!("| {code} | {meaning} |\n"));
+        }
+        output.push('\n');
+    }
+
     output
 }
 
@@ -101,13 +137,15 @@ fn format_option_label(arg: &Arg) -> Option<String> {
     }
 
     let mut label = flags.join(", ");
-    if let Some(value_name) = arg.get_value_names().map(|names| {
-        names
-            .iter()
-            .map(|name| name.as_str())
-            .collect::<Vec<_>>()
-            .join(" ")
-    }) {
+    if arg.get_action().takes_values()
+        && let Some(value_name) = arg.get_value_names().map(|names| {
+            names
+                .iter()
+                .map(|name| name.as_str())
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+    {
         label.push_str(&format!(" <{value_name}>"));
     }
 
@@ -215,6 +253,23 @@ mod tests {
         assert!(docs.contains("`-o, --output <FILE>`"));
         assert!(docs.contains("Input file"));
         assert!(docs.contains("Output file"));
+    }
+
+    #[test]
+    fn test_generate_cli_docs_global_options_and_exit_codes() {
+        use clap::{Arg, Command};
+
+        let cmd = Command::new("test-cli").arg(
+            Arg::new("backend")
+                .long("backend")
+                .value_name("BACKEND")
+                .help("Select the backend"),
+        );
+        let docs = generate_cli_docs_with_exit_codes(&cmd, &[(0, "success"), (3, "not found")]);
+        assert!(docs.contains("## Global options"), "{docs}");
+        assert!(docs.contains("`--backend <BACKEND>`"), "{docs}");
+        assert!(docs.contains("## Exit codes"), "{docs}");
+        assert!(docs.contains("| 3 | not found |"), "{docs}");
     }
 
     #[test]

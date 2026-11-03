@@ -1,68 +1,103 @@
 # 🎛️ Configuration
 
-Litterbox configuration is sourced from three places:
+Litterbox configuration is split by who owns the decision:
 
-1. **Defaults** which are automatically derived from your environment.
-2. **Project configuration** (`.litterbox.toml`) checked in to your repository.
-3. **Local overrides** (`.litterbox.local.toml`) user-specific settings that should be ignored by version control.
+- **The person running the code** owns the sandboxing mechanism: which backend, its
+  settings, and where forwarded ports bind. That lives in the untracked local
+  override and is never committed.
+- **The project** owns what it needs: its setup command, the ports it expects, and
+  how snapshots are stored. That lives in `.agentkit/litterbox/config.toml`.
 
-All options may be specified in the project or local overrides configuration files.
+The committed project file may not select or configure a backend. If it tries,
+Litterbox says so and ignores the setting; the sandbox runs on your machine, so
+the choice is yours.
 
-## Options
+## Where the files live
 
-### `project` (table)
+| Scope          | Path                                                                                  |
+| -------------- | ------------------------------------------------------------------------------------- |
+| Project        | `.agentkit/litterbox/config.toml` in the repository                                   |
+| Local override | `.agentkit/litterbox/config.local.toml` in the repository, ignored by version control |
 
-- `slug` is a unique identifier for the project, used to minimise collisions across projects in resources like Docker containers.
+Merge order is defaults, then project, then local override.
 
-### `docker` (table)
+## Local override
 
-- `image` specifies a Docker image to use for sandboxes.
-- `setup-command`: Command to run during sandbox setup.
+```toml
+# The sandboxing mechanism. Omit to use the default.
+backend = "docker"
 
-### `git` (table)
+# Allow a repository's [project] setup-command to run. Off by default: cloning
+# a repository must not be enough to execute its shell command on your machine.
+allow-project-setup = false
 
-- `snapshot-mode`: Controls how sandbox snapshots are stored. `"remote"` (default) stores snapshots in an isolated bare clone, keeping your working repository clean. `"direct"` stores snapshots as branches within your working repository.
+# Or allow specific projects by their namespace: the project slug that
+# `litterbox list` prints, including its suffix.
+allowed-projects = ["my-project-1a2b3c4d"]
 
-### `ports` (array of tables)
+# Accept a degraded mechanism, where a capability falls back to something
+# weaker, instead of refusing to start.
+accept-degraded = false
 
-- `name` is a unique identifier for the port.
-- `target` is the port number to expose on the sandbox.
+# Where forwarded ports bind on the host. Loopback unless you say otherwise,
+# and only ever set here.
+[forwarding]
+bind = "127.0.0.1"
 
-## Layers
+# A section per backend, in that backend's own vocabulary.
+[backends.docker]
+image = "ubuntu:latest"
+# Memory ceiling per sandbox, in MiB. At least 6. Defaults to 4096.
+memory-mb = 4096
+# CPU cores per sandbox. At least 1. Defaults to 2.
+cpus = 2
+# Maximum tasks or processes per sandbox. At least 1. Defaults to 512.
+pids-limit = 512
+# Extra Linux capabilities to grant, such as CHOWN or SETUID. Empty by default;
+# every other capability is dropped.
+cap-add = []
+```
 
-### Layer 1: defaults
+Prefer pinning the image by digest (`image = "ubuntu@sha256:..."`): a tag can
+change under you, and the image is the sandbox's confinement boundary.
 
-Litterbox automatically provides these defaults:
+Every backend owns its section: Docker accepts `image`, `memory-mb`, `cpus`,
+`pids-limit` and `cap-add`, and a key Docker does not define is rejected by name
+rather than ignored. Granting a capability widens what code in the sandbox can
+do; add only the ones an image genuinely needs.
+`litterbox backends` reports what this machine can run, marks the selected
+backend, and explains anything that will not start.
 
-- `project.slug`, derived from your current directory name (slugified).
-
-### Layer 2: project configuration (`.litterbox.toml`)
-
-All options may be specified in the project configuration file.
+## Project configuration
 
 ```toml
 [project]
 slug = "my-project"
-
-[docker]
-image = "ubuntu:latest"
 setup-command = "echo 'Setup complete'"
 
-[git]
-snapshot-mode = "direct"
-```
-
-### Layer 3: local overrides (`.litterbox.local.toml`)
-
-All options may be specified in the local overrides file.
-
-```toml
-[project]
-slug = "my-conflicting-project"
-
-[docker]
-image = "my-custom-image:v1.0"
+[[ports]]
+name = "web"
+target = 8080
 
 [git]
 snapshot-mode = "direct"
 ```
+
+- `project.slug` identifies the project. It must already be a valid slug; a value
+  the rules would change is refused rather than silently rewritten.
+- `project.setup-command` runs once, confined, after the workspace is materialised.
+  It used to live under `[docker]`; the old location is rejected with a message
+  pointing here.
+- `ports` declares what the project expects forwarded. The project cannot decide
+  where those ports bind or who may reach them.
+- `git.snapshot-mode` is `"remote"` (the default) to keep snapshots in an isolated
+  bare clone, or `"direct"` to keep them as branches in your working repository.
+
+## Overriding project settings
+
+`.agentkit/litterbox/config.local.toml` takes the project file's shape, so a
+`[project]`, `[[ports]]` or `[git]` entry there overrides the committed value. It
+is also where the machine-owned settings above live. Keep it untracked: it
+describes this checkout and this machine, not the project. Litterbox refuses a
+local override that is tracked by Git or is a symlink; cloning a repository must
+not be able to grant itself setup consent or choose its own backend.

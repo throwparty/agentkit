@@ -1,7 +1,0 @@
-# Optional: override the default project slug (derived from directory name)
-# [project]
-# slug = "throwparty-litterbox"
-
-[docker]
-image = "busybox:latest"
-setup-command = "sh -c 'echo we successfully initialised >/src/litterbox'"

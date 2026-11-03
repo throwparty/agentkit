@@ -1,0 +1,8 @@
+# The sandbox image is machine-owned: see the configuration reference.
+
+[[ports]]
+name = "www"
+target = 8080
+
+[project]
+setup-command = "busybox httpd -h /src/public -p 0.0.0.0:8080"
