@@ -29,8 +29,12 @@ Normative terminology and conventions for AgentKit components. Tackle (see `adrs
 - **Policy script** — a Rhai script registered at a decision point (e.g. `pre_tool_use`); returns a verdict, cannot act.
 - **Behaviour script** — a Rhai script registered at a workflow event (e.g. `session_forked`, `post_turn`); acts via the host API, does not gate, and never invokes tools directly — it drives the model via `send_prompt`, whose tool calls pass through the normal permission pipeline.
 
+## Component vocabularies
+
+- [Litterbox](crates/agentkit-litterbox/CONTEXT.md) — sandboxes, backends, the provider contract, and how a sandbox reports itself.
+
 ## Conventions
 
-- Project configuration lives at `./.agentkit/<component>/config.toml`; user configuration at `~/.config/agentkit/<component>/` (platform-adjusted via `agentkit-path`). Project configuration overrides user configuration except where security-relevant fields are restricted to user configuration.
-- Litterbox will migrate from `.litterbox.toml` to `.agentkit/litterbox/config.toml` for consistency.
-- Component state (databases, durable files) lives under the platform data directory via `agentkit-path`'s `data_dir`, never inside the repository.
+- Project configuration lives at `./.agentkit/<component>/config.toml`; user configuration at `~/.config/agentkit/<component>/` (platform-adjusted via `agentkit-common`). Project configuration overrides user configuration except where security-relevant fields are restricted to user configuration.
+- Litterbox project configuration lives at `.agentkit/litterbox/config.toml`; the machine-owned choice of backend, its settings and port exposure live in the untracked `.agentkit/litterbox/config.local.toml`, not a user file.
+- Component state (databases, durable files) lives under the platform data directory via `agentkit-common`'s `data_dir`, never inside the repository.
