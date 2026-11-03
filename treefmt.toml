@@ -2,7 +2,7 @@
 
 [formatter.just]
 command = "hack/fmt/just-fmt.sh"
-includes = ["justfile", "mod.just"]
+includes = ["justfile", "**/mod.just"]
 
 [formatter.mdformat]
 command = "mdformat"
