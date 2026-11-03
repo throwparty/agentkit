@@ -1,31 +1,4 @@
-use std::fmt;
-
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct ExecutionResult {
-    pub exit_code: i32,
-    pub stdout: String,
-    pub stderr: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SandboxStatus {
-    Active,
-    Paused,
-    Error(String),
-}
-
-impl fmt::Display for ExecutionResult {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "exit_code={}, stdout=\"{}\", stderr=\"{}\"",
-            self.exit_code, self.stdout, self.stderr
-        )
-    }
-}
 
 #[derive(Error, Debug)]
 pub enum SandboxError {
@@ -37,8 +10,6 @@ pub enum SandboxError {
     SandboxNotFound { name: String },
     #[error("SCM error: {0}")]
     Scm(#[from] ScmError),
-    #[error("Compute error: {0}")]
-    Compute(#[from] ComputeError),
     #[error("Setup command failed with exit code {exit_code}: {stderr}")]
     SetupCommandFailed { exit_code: i32, stderr: String },
     #[error("I/O error: {0}")]
@@ -120,128 +91,6 @@ pub enum ScmError {
     Clone {
         #[source]
         source: git2::Error,
-    },
-}
-
-/// How a backend failure should be interpreted by callers, independent of the
-/// wire format the backend happens to use.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FailureKind {
-    NotFound,
-    Conflict,
-    Other,
-}
-
-impl FailureKind {
-    pub fn is_not_found(self) -> bool {
-        self == Self::NotFound
-    }
-
-    pub fn is_conflict(self) -> bool {
-        self == Self::Conflict
-    }
-}
-
-/// An opaque backend error, plus the little that callers are allowed to branch on.
-#[derive(Debug)]
-pub struct BackendError {
-    kind: FailureKind,
-    source: Box<dyn std::error::Error + Send + Sync + 'static>,
-}
-
-impl BackendError {
-    pub fn new(
-        kind: FailureKind,
-        source: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
-    ) -> Self {
-        Self {
-            kind,
-            source: source.into(),
-        }
-    }
-
-    pub fn other(source: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>) -> Self {
-        Self::new(FailureKind::Other, source)
-    }
-
-    pub fn kind(&self) -> FailureKind {
-        self.kind
-    }
-}
-
-impl std::fmt::Display for BackendError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "{}", self.source)
-    }
-}
-
-impl std::error::Error for BackendError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(self.source.as_ref())
-    }
-}
-
-#[derive(Error, Debug)]
-pub enum ComputeError {
-    #[error("backend connection failed: {source}")]
-    Connection {
-        #[source]
-        source: BackendError,
-    },
-    #[error("image inspection failed: {source}")]
-    ImageInspect {
-        #[source]
-        source: BackendError,
-    },
-    #[error("image pull failed: {source}")]
-    ImagePull {
-        #[source]
-        source: BackendError,
-    },
-    #[error("sandbox provisioning failed: {source}")]
-    ContainerProvision {
-        #[source]
-        source: BackendError,
-    },
-    #[error("sandbox inspection failed: {source}")]
-    ContainerInspect {
-        #[source]
-        source: BackendError,
-    },
-    #[error("sandbox pause failed: {source}")]
-    ContainerPause {
-        #[source]
-        source: BackendError,
-    },
-    #[error("sandbox resume failed: {source}")]
-    ContainerResume {
-        #[source]
-        source: BackendError,
-    },
-    #[error("sandbox delete failed: {source}")]
-    ContainerDelete {
-        #[source]
-        source: BackendError,
-    },
-    #[error("command execution failed: {source}")]
-    ContainerExec {
-        #[source]
-        source: BackendError,
-    },
-    #[error("upload failed: {source}")]
-    ContainerUpload {
-        #[source]
-        source: BackendError,
-    },
-    #[error("download failed: {source}")]
-    ContainerDownload {
-        #[source]
-        source: BackendError,
-    },
-    #[error("sandbox listing failed: {source}")]
-    ContainerList {
-        #[source]
-        source: BackendError,
     },
 }
 
