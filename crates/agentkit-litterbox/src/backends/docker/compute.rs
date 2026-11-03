@@ -246,14 +246,23 @@ impl DockerCompute {
                 })
             })?;
 
-        self.client
-            .start_container(&response.id, None)
-            .await
-            .map_err(|source| {
-                SandboxError::Compute(ComputeError::ContainerProvision {
-                    source: backend_error(source),
-                })
-            })?;
+        if let Err(source) = self.client.start_container(&response.id, None).await {
+            // The container exists but never ran: remove it so the name stays
+            // usable and create leaves nothing behind.
+            let _ = self
+                .client
+                .remove_container(
+                    &response.id,
+                    Some(RemoveContainerOptions {
+                        force: true,
+                        ..Default::default()
+                    }),
+                )
+                .await;
+            return Err(SandboxError::Compute(ComputeError::ContainerProvision {
+                source: backend_error(source),
+            }));
+        }
 
         Ok(response.id)
     }

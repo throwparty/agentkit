@@ -74,6 +74,10 @@ enum Commands {
         /// Delete even if the sandbox is active
         #[arg(short, long)]
         force: bool,
+
+        /// Remove a record written by an earlier release instead of a sandbox
+        #[arg(long)]
+        discard_legacy: bool,
     },
 
     /// Report the backends available on this machine, their readiness and their
@@ -124,7 +128,11 @@ async fn main() -> ExitCode {
             all_repos,
         } => handle_pause(backend, name, all_envs, all_repos).await,
         Commands::Resume { name } => handle_resume(backend, name).await,
-        Commands::Delete { name, force } => handle_delete(backend, name, force).await,
+        Commands::Delete {
+            name,
+            force,
+            discard_legacy,
+        } => handle_delete(backend, name, force, discard_legacy).await,
         Commands::Shell { name, command } => handle_shell(backend, name, command).await,
         Commands::Backends { json } => handle_backends(backend, json).await,
         Commands::Docgen { kind } => handle_docgen(kind),
@@ -282,7 +290,12 @@ async fn handle_resume(backend: Option<String>, name: String) -> ExitCode {
     }
 }
 
-async fn handle_delete(backend: Option<String>, name: String, force: bool) -> ExitCode {
+async fn handle_delete(
+    backend: Option<String>,
+    name: String,
+    force: bool,
+    discard_legacy: bool,
+) -> ExitCode {
     let config = match load_config(backend) {
         Ok(config) => config,
         Err(error) => return report(error),
@@ -291,6 +304,16 @@ async fn handle_delete(backend: Option<String>, name: String, force: bool) -> Ex
         Ok(sandboxes) => sandboxes,
         Err(error) => return report(error),
     };
+
+    if discard_legacy {
+        return match sandboxes.discard_legacy(&name) {
+            Ok(path) => {
+                println!("Discarded the record at {}", path.display());
+                ExitCode::from(0)
+            }
+            Err(error) => report(error),
+        };
+    }
 
     match sandboxes.status(&name).await {
         Ok(SandboxStatus::Active) if !force => {
