@@ -6,6 +6,7 @@ includes = ["justfile", "mod.just"]
 
 [formatter.mdformat]
 command = "mdformat"
+excludes = ["adrs/*/refs/**"]
 includes = ["*.md"]
 
 [formatter.nixfmt]
@@ -24,7 +25,6 @@ includes = [
   "*.json",
   "*.jsonc",
   "*.jsx",
-  "*.md",
   "*.mdx",
   "*.mjs",
   "*.ts",
