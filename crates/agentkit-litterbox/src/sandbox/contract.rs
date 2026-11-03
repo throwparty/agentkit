@@ -134,6 +134,12 @@ pub struct Inspection {
     pub backend: String,
     /// Its state.
     pub status: SandboxStatus,
+    /// How it reaches the network.
+    pub egress: crate::sandbox::report::EgressPosture,
+    /// Where the sandbox sees the workspace.
+    pub workspace: String,
+    /// Where its environment came from and what was changed.
+    pub environment: crate::sandbox::environment::Provenance,
     /// Ports forwarded to the host.
     pub forwards: Vec<Forward>,
 }
@@ -233,6 +239,13 @@ pub trait Sandbox {
 
     /// Remove a sandbox and everything the backend created for it.
     fn delete(&self, sandbox: &SandboxRecord) -> BoxFuture<'_, Result<(), Error>>;
+
+    /// Report whether this backend can run here, and why not when it cannot.
+    fn readiness(&self) -> BoxFuture<'_, Result<crate::sandbox::report::Readiness, Error>>;
+
+    /// Report which optional operations this backend provides.
+    fn capabilities(&self)
+    -> BoxFuture<'_, Result<Vec<crate::sandbox::report::Capability>, Error>>;
 }
 
 #[cfg(test)]
@@ -286,6 +299,21 @@ mod tests {
 
         fn delete(&self, _sandbox: &SandboxRecord) -> BoxFuture<'_, Result<(), Error>> {
             Box::pin(async { Ok(()) })
+        }
+
+        fn readiness(&self) -> BoxFuture<'_, Result<crate::sandbox::report::Readiness, Error>> {
+            Box::pin(async {
+                Ok(crate::sandbox::report::Readiness {
+                    backend: "stub".to_string(),
+                    checks: Vec::new(),
+                })
+            })
+        }
+
+        fn capabilities(
+            &self,
+        ) -> BoxFuture<'_, Result<Vec<crate::sandbox::report::Capability>, Error>> {
+            Box::pin(async { Ok(Vec::new()) })
         }
     }
 

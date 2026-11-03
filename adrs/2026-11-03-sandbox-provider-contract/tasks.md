@@ -41,7 +41,7 @@ Add src/sandbox/error.rs with NotFound, Conflict, Unsupported carrying operation
 | Depends On | T-001 |
 | References | neutral-errors,legible-unavailability,neutral-errors-accepted |
 
-### T-004: Readiness and capability reports
+### T-004: [x] Readiness and capability reports
 
 Add report.rs and environment.rs: Readiness with per-primitive Check entries, Capability per operation, EgressPosture as denied, direct or proxied, Environment with Provenance by variable name and kind, and the workspace path type.
 
@@ -54,7 +54,7 @@ Add report.rs and environment.rs: Readiness with per-primitive Check entries, Ca
 | Depends On | T-002 |
 | References | backend-readiness,capability-report,egress-posture,environment-provenance,legible-unavailability,degradation-reported,delegation-absent,host-path-in-environment |
 
-### T-005: Facet traits and the compile-time gate
+### T-005: [x] Facet traits and the compile-time gate
 
 Add facets.rs with Lifecycle, Limits and Forwarding as supertraits of Sandbox, plus LimitsSpec and Forward. Include a compile_fail test showing a lifecycle call is rejected on a core-only type.
 
