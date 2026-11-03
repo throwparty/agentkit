@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// Where the environment as a whole came from.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Origin {
     /// Captured on the host from a development environment.
     Captured {
@@ -25,7 +25,7 @@ pub enum Origin {
 }
 
 /// What the backend did to one variable.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Change {
     /// Passed through unchanged.
     Unchanged,
@@ -38,7 +38,7 @@ pub enum Change {
 }
 
 /// One variable's provenance, without its value.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Variable {
     /// The variable's name.
     pub name: String,
@@ -47,7 +47,7 @@ pub struct Variable {
 }
 
 /// A host path an environment value names, reported rather than granted.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct HostPath {
     /// The variable that named it.
     pub variable: String,
@@ -56,7 +56,7 @@ pub struct HostPath {
 }
 
 /// Where the environment came from and what was changed about it.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Provenance {
     /// The source of the environment as a whole.
     pub origin: Origin,
@@ -67,7 +67,7 @@ pub struct Provenance {
 }
 
 /// The environment a command receives, with its provenance.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Environment {
     /// Variable names and values, in the order the backend will apply them.
     pub variables: BTreeMap<String, String>,
@@ -79,7 +79,11 @@ pub struct Environment {
 
 impl Environment {
     /// An environment the backend did not alter.
-    pub fn unchanged(origin: Origin, variables: BTreeMap<String, String>) -> Self {
+    pub fn unchanged(
+        origin: Origin,
+        variables: BTreeMap<String, String>,
+        workspace: impl Into<String>,
+    ) -> Self {
         let provenance = Provenance {
             origin,
             variables: variables
@@ -94,7 +98,7 @@ impl Environment {
         Self {
             variables,
             provenance,
-            workspace: String::from("/src"),
+            workspace: workspace.into(),
         }
     }
 }
@@ -118,6 +122,7 @@ mod tests {
                 from: "nix print-dev-env".to_string(),
             },
             variables,
+            "/sandbox",
         )
     }
 

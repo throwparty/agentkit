@@ -27,16 +27,14 @@ pub struct SandboxRecord {
 }
 
 /// A workspace prepared for materialisation inside a sandbox.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct Workspace {
     /// Host directory holding the tree to materialise.
     pub source: PathBuf,
-    /// Path the sandbox sees the workspace at.
-    pub mount: String,
 }
 
 /// A port a project expects to have forwarded.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct RequestedPort {
     /// Stable name for the port, used to derive the environment variable.
     pub name: String,
@@ -44,8 +42,47 @@ pub struct RequestedPort {
     pub target: u16,
 }
 
+/// The environment variable that carries a forwarded port's host port.
+///
+/// This is the one place the name rule lives: configuration validation and
+/// every backend use it, so a name that loads is a name that can be forwarded.
+pub fn forwarded_port_env_var(name: &str) -> Result<String, String> {
+    let slug = name.trim().to_ascii_lowercase().replace(' ', "-");
+    let valid = !slug.is_empty()
+        && slug.len() <= 63
+        && slug
+            .chars()
+            .any(|character| character.is_ascii_alphanumeric())
+        && slug.chars().all(|character| {
+            character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
+        });
+    if !valid {
+        return Err(format!(
+            "'{name}' is not a valid port name; use lowercase letters, digits and hyphens"
+        ));
+    }
+    Ok(format!(
+        "LITTERBOX_FWD_PORT_{}",
+        slug.replace('-', "_").to_ascii_uppercase()
+    ))
+}
+
+/// Where a sandbox's environment comes from.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum EnvironmentSource {
+    /// The mechanism's own default, such as an image's environment.
+    Mechanism,
+    /// A captured host environment, described by where it came from.
+    Captured {
+        /// What was captured, in the caller's words.
+        from: String,
+        /// The variables, in order.
+        variables: Vec<(String, String)>,
+    },
+}
+
 /// Everything a backend needs to create a sandbox.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct CreateRequest {
     /// The sandbox name.
     pub name: String,
@@ -53,6 +90,10 @@ pub struct CreateRequest {
     pub project_slug: String,
     /// The prepared workspace.
     pub workspace: Workspace,
+    /// Where the environment comes from.
+    pub environment: EnvironmentSource,
+    /// The host address forwarded ports bind to, from user configuration.
+    pub forward_bind: String,
     /// A command to run once, confined, before the sandbox is returned.
     pub setup_command: Option<String>,
     /// Ports the project expects to be forwarded.
@@ -60,7 +101,7 @@ pub struct CreateRequest {
 }
 
 /// Which sandboxes an enumeration covers.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum Scope {
     /// Every sandbox belonging to one project.
     Repository {
@@ -72,7 +113,7 @@ pub enum Scope {
 }
 
 /// The state of a sandbox, in terms every backend can report.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum SandboxStatus {
     /// Running and able to accept commands.
     Active,
@@ -90,7 +131,7 @@ pub enum SandboxStatus {
 }
 
 /// The result of running one command in a sandbox.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct Execution {
     /// The command's exit status.
     pub exit_code: i32,
@@ -126,7 +167,7 @@ pub struct Forward {
 }
 
 /// What a neutral inspection reports about a sandbox.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct Inspection {
     /// The sandbox name.
     pub name: String,
@@ -166,6 +207,8 @@ pub enum Error {
         operation: String,
         /// The backend that cannot perform it.
         backend: String,
+        /// The primitive the mechanism lacks.
+        primitive: String,
         /// Why the mechanism cannot perform it.
         reason: String,
         /// What the user can do instead.
@@ -178,6 +221,22 @@ pub enum Error {
         operation: String,
         /// Why it was refused.
         reason: String,
+    },
+    /// The mechanism this host needs is not available.
+    #[error("{backend} is not available here: {reason}. {remedy}")]
+    Unavailable {
+        /// The backend that cannot run.
+        backend: String,
+        /// What is missing.
+        reason: String,
+        /// What the user can do.
+        remedy: String,
+    },
+    /// The configuration is unusable.
+    #[error("configuration: {message}")]
+    Misconfigured {
+        /// What is wrong, naming the key or file.
+        message: String,
     },
     /// The operation ran and failed.
     #[error("{message}")]
@@ -204,7 +263,7 @@ impl Error {
 ///
 /// Object-safe: methods take `&self` and return boxed futures, so a caller can
 /// hold one value whatever backend the user selected.
-pub trait Sandbox {
+pub trait Backend: Send + Sync {
     /// Create a sandbox and return its record.
     fn create<'a>(
         &'a self,
@@ -219,7 +278,7 @@ pub trait Sandbox {
         command: &'a [String],
     ) -> BoxFuture<'a, Result<Execution, Error>>;
 
-    /// Copy a host path into the sandbox.
+    /// Copy a host path into a directory inside the sandbox.
     fn upload<'a>(
         &'a self,
         sandbox: &'a SandboxRecord,
@@ -255,11 +314,11 @@ mod tests {
 
     use futures_util::future::BoxFuture;
 
-    use super::{CreateRequest, Error, Execution, Inspection, Sandbox, SandboxRecord, Scope};
+    use super::{Backend, CreateRequest, Error, Execution, Inspection, SandboxRecord, Scope};
 
     struct Stub;
 
-    impl Sandbox for Stub {
+    impl Backend for Stub {
         fn create<'a>(
             &'a self,
             _request: &'a CreateRequest,
@@ -330,8 +389,36 @@ mod tests {
     }
 
     #[test]
-    fn the_contract_is_object_safe() {
-        let sandbox: Arc<dyn Sandbox> = Arc::new(Stub);
+    fn an_inspection_carries_no_container_or_environment_value() {
+        let inspection = Inspection {
+            name: "demo".to_string(),
+            backend: "docker".to_string(),
+            status: super::SandboxStatus::Active,
+            egress: crate::sandbox::report::EgressPosture::Direct,
+            workspace: "/src".to_string(),
+            environment: crate::sandbox::environment::Provenance {
+                origin: crate::sandbox::environment::Origin::Backend {
+                    from: "the Docker image".to_string(),
+                },
+                variables: vec![crate::sandbox::environment::Variable {
+                    name: "TOKEN".to_string(),
+                    change: crate::sandbox::environment::Change::Unchanged,
+                }],
+                host_paths: Vec::new(),
+            },
+            forwards: Vec::new(),
+        };
+
+        let json = serde_json::to_string(&inspection).expect("serialises");
+        assert!(!json.contains("container"), "{json}");
+        assert!(!json.contains("SECRET-VALUE"), "{json}");
+        assert!(json.contains("TOKEN"), "{json}");
+    }
+
+    #[tokio::test]
+    async fn the_contract_is_object_safe() {
+        let sandbox: Arc<dyn Backend> = Arc::new(Stub);
+        assert!(sandbox.list(&Scope::Machine).await.is_ok());
         let record = SandboxRecord {
             name: "demo".to_string(),
             backend: "stub".to_string(),
@@ -339,6 +426,5 @@ mod tests {
             data: toml::Value::Table(Default::default()),
         };
         assert_eq!(record.name, "demo");
-        assert!(Arc::strong_count(&sandbox) == 1);
     }
 }

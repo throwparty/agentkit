@@ -8,8 +8,8 @@ use crate::config::Config;
 use crate::domain::{SandboxError, ScmMode};
 use crate::metadata_store::{self, LoadedSandbox, StoredSandbox};
 use crate::sandbox::contract::{
-    CreateRequest, Error, Execution, Inspection, RequestedPort, SandboxRecord, SandboxStatus,
-    Workspace,
+    CreateRequest, Error, Execution, Forward, Inspection, RequestedPort, SandboxRecord,
+    SandboxStatus, Workspace,
 };
 use crate::scm::{Scm, ThreadSafeScm};
 use crate::vcs_store::VcsStore;
@@ -54,13 +54,14 @@ impl Sandboxes {
 
     /// Create a sandbox: branch, workspace, compute and record, in that order.
     pub async fn create(&self, name: &str) -> Result<SandboxRecord, Error> {
+        let name = self.valid_name(name)?;
         let selected = backends::select(&self.config).await?;
 
-        let branch_name = self.scm.create_branch(name)?;
+        let branch_name = self.scm.create_branch(&name)?;
         let staged = match self.stage() {
             Ok(staged) => staged,
             Err(error) => {
-                let _ = self.scm.delete_branch(name);
+                let _ = self.scm.delete_branch(&name);
                 return Err(error);
             }
         };
@@ -79,7 +80,7 @@ impl Sandboxes {
         let record = match selected.core.create(&request).await {
             Ok(record) => record,
             Err(error) => {
-                let _ = self.scm.delete_branch(name);
+                let _ = self.scm.delete_branch(&name);
                 return Err(error);
             }
         };
@@ -92,7 +93,7 @@ impl Sandboxes {
 
         if let Err(error) = metadata_store::store_sandbox(&self.project_slug, &stored) {
             let _ = selected.core.delete(&record).await;
-            let _ = self.scm.delete_branch(name);
+            let _ = self.scm.delete_branch(&name);
             return Err(error.into());
         }
 
@@ -107,13 +108,13 @@ impl Sandboxes {
         selected.core.delete(&stored.sandbox).await?;
 
         // A branch that is already gone is not a failure.
-        let _ = self.scm.delete_branch(name);
+        let _ = self.scm.delete_branch(&stored.sandbox.name);
 
         if stored.remote && self.scm.list_sandboxes().is_ok_and(|left| left.is_empty()) {
             let _ = VcsStore::destroy_bare(&self.project_slug);
         }
 
-        metadata_store::remove_sandbox(&self.project_slug, name)?;
+        metadata_store::remove_sandbox(&self.project_slug, &stored.sandbox.name)?;
         Ok(())
     }
 
@@ -194,7 +195,8 @@ impl Sandboxes {
     }
 
     fn stored(&self, name: &str) -> Result<StoredSandbox, Error> {
-        match metadata_store::load_sandbox(&self.project_slug, name)? {
+        let name = self.valid_name(name)?;
+        match metadata_store::load_sandbox(&self.project_slug, &name)? {
             Some(LoadedSandbox::Current(stored)) => Ok(stored),
             Some(LoadedSandbox::Legacy { .. }) => Err(Error::failed(format!(
                 "sandbox '{name}' was created by an earlier release and is not supported; \
@@ -283,6 +285,154 @@ fn open_scm(
                 Some(host_abs),
             )
         }
+    }
+}
+
+/// The operations the file and command tools need, addressed by sandbox name.
+///
+/// This is the seam the MCP tools are written against: the orchestrator
+/// implements it, and tests implement it without a repository or a daemon.
+pub trait SandboxIo {
+    /// Run a command.
+    fn exec<'a>(
+        &'a self,
+        name: &'a str,
+        command: &'a [String],
+    ) -> futures_util::future::BoxFuture<'a, Result<Execution, Error>>;
+
+    /// Copy a host path into the sandbox.
+    fn upload<'a>(
+        &'a self,
+        name: &'a str,
+        source: &'a std::path::Path,
+        destination: &'a str,
+    ) -> futures_util::future::BoxFuture<'a, Result<(), Error>>;
+
+    /// Copy a sandbox path out to the host.
+    fn download<'a>(
+        &'a self,
+        name: &'a str,
+        source: &'a str,
+        destination: &'a std::path::Path,
+    ) -> futures_util::future::BoxFuture<'a, Result<(), Error>>;
+}
+
+impl SandboxIo for Sandboxes {
+    fn exec<'a>(
+        &'a self,
+        name: &'a str,
+        command: &'a [String],
+    ) -> futures_util::future::BoxFuture<'a, Result<Execution, Error>> {
+        Box::pin(Sandboxes::exec(self, name, command))
+    }
+
+    fn upload<'a>(
+        &'a self,
+        name: &'a str,
+        source: &'a std::path::Path,
+        destination: &'a str,
+    ) -> futures_util::future::BoxFuture<'a, Result<(), Error>> {
+        Box::pin(Sandboxes::upload(self, name, source, destination))
+    }
+
+    fn download<'a>(
+        &'a self,
+        name: &'a str,
+        source: &'a str,
+        destination: &'a std::path::Path,
+    ) -> futures_util::future::BoxFuture<'a, Result<(), Error>> {
+        Box::pin(Sandboxes::download(self, name, source, destination))
+    }
+}
+
+impl Sandboxes {
+    /// The ports a sandbox forwards, or the reason its mechanism forwards none.
+    pub async fn forwards(&self, name: &str) -> Result<Vec<Forward>, Error> {
+        let stored = self.stored(name)?;
+        let selected = self.select_for(&stored.sandbox).await?;
+        let forwarding = selected.forwarding.ok_or_else(|| {
+            unsupported(
+                "forward a port",
+                &stored.sandbox,
+                "the mechanism has no forwarding facet",
+                "use a mechanism that forwards ports",
+            )
+        })?;
+        forwarding.forwards(&stored.sandbox).await
+    }
+
+    /// Copy a host path into a sandbox.
+    pub async fn upload(
+        &self,
+        name: &str,
+        source: &std::path::Path,
+        destination: &str,
+    ) -> Result<(), Error> {
+        let stored = self.stored(name)?;
+        let selected = self.select_for(&stored.sandbox).await?;
+        selected
+            .core
+            .upload(&stored.sandbox, source, destination)
+            .await
+    }
+
+    /// Copy a sandbox path out to the host.
+    pub async fn download(
+        &self,
+        name: &str,
+        source: &str,
+        destination: &std::path::Path,
+    ) -> Result<(), Error> {
+        let stored = self.stored(name)?;
+        let selected = self.select_for(&stored.sandbox).await?;
+        selected
+            .core
+            .download(&stored.sandbox, source, destination)
+            .await
+    }
+
+    /// Download the workspace and commit it to the sandbox's snapshot branch.
+    pub async fn snapshot(&self, name: &str, message: &str) -> Result<(), Error> {
+        let stored = self.stored(name)?;
+        let selected = self.select_for(&stored.sandbox).await?;
+
+        let staging = tempfile::tempdir()
+            .map_err(|error| Error::failed(format!("could not create a staging dir: {error}")))?;
+        selected
+            .core
+            .download(&stored.sandbox, WORKSPACE_MOUNT, staging.path())
+            .await?;
+
+        let scm = self.snapshot_scm(&stored)?;
+        scm.commit_snapshot_from_staging(staging.path(), message)?;
+        Ok(())
+    }
+
+    fn snapshot_scm(&self, stored: &StoredSandbox) -> Result<ThreadSafeScm, Error> {
+        match stored.remote {
+            false => Ok(ThreadSafeScm::for_sandbox(
+                Path::new("."),
+                self.config.project.slug.clone(),
+                &stored.sandbox.name,
+            )?),
+            true => {
+                let host = Path::new(".");
+                let bare = VcsStore::clone_bare(host, &self.project_slug)?;
+                let host_abs = host.canonicalize().unwrap_or_else(|_| host.to_path_buf());
+                let scm = ThreadSafeScm::open_with_mode_and_prefix(
+                    &bare,
+                    ScmMode::Remote,
+                    None,
+                    Some(host_abs),
+                )?;
+                scm.set_snapshot_branch(stored.branch_name.clone())?;
+                Ok(scm)
+            }
+        }
+    }
+
+    fn valid_name(&self, name: &str) -> Result<String, Error> {
+        crate::domain::slugify_name(name).map_err(|error| Error::failed(error.to_string()))
     }
 }
 

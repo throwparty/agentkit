@@ -4,7 +4,7 @@
 //! each read them without parsing a message.
 
 /// Whether an operation or primitive is usable.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum State {
     /// Usable now.
     Available,
@@ -87,7 +87,7 @@ pub struct Capability {
 }
 
 /// How a sandbox reaches the network.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum EgressPosture {
     /// No route beyond the sandbox's own loopback.
     Denied,

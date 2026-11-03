@@ -125,7 +125,7 @@ pub fn build(config: &Config) -> Result<Selected, Error> {
 pub async fn select(config: &Config) -> Result<Selected, Error> {
     let selected = build(config)?;
     let readiness = selected.core.readiness().await?;
-    if readiness.is_available() {
+    if readiness.state() != crate::sandbox::report::State::Unavailable {
         return Ok(selected);
     }
 
