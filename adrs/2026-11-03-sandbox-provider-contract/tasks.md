@@ -110,7 +110,7 @@ Add src/config/ with the user file under agentkit-common's config directory, the
 | Depends On | T-001 |
 | References | backend-selection,per-backend-config,port-forwarding,project-asks-for-backend |
 
-### T-010: Backend registry and construction point
+### T-010: [x] Backend registry and construction point
 
 Add backends/mod.rs listing the compiled-in set, resolving selection from configuration or the per-invocation flag, constructing one backend, and returning Selected with the core trait object and whichever facet objects the mechanism implements.
 
