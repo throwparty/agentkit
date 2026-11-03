@@ -170,7 +170,7 @@ Drive pause --all-envs from SCM branches and pause --all-repos from each backend
 | Depends On | T-013 |
 | References | bulk-operations-via-contract,bulk-pause-via-contract,bulk-and-delete-race |
 
-### T-015: Backend introspection command
+### T-015: [x] Backend introspection command
 
 Add a backends command listing every compiled-in backend, marking the selected one, and printing readiness and capability entries, with --json emitting the same structure. Expose nothing equivalent over MCP.
 
