@@ -4,6 +4,8 @@ use std::net::TcpListener;
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+pub mod contract;
+
 use futures_util::future::BoxFuture;
 use tar::Archive;
 use tempfile::TempDir;
