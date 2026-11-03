@@ -1,37 +1,30 @@
 //! The sandboxing mechanisms this binary can run, and the one place a backend
-//! is constructed.
+//! is selected or constructed.
 //!
-//! The set is compiled in. Adding a mechanism is one entry here and one module
-//! beside it; nothing else in the crate learns its name.
+//! One table names each mechanism and how to build it. Adding a backend is one
+//! entry and one module.
 
-use std::sync::Arc;
+use serde::Serialize;
 
 use crate::config::Config;
-use crate::sandbox::contract::{Error, Sandbox};
-use crate::sandbox::facets::{Forwarding, Lifecycle, Limits};
+use crate::sandbox::contract::Error;
+use crate::sandbox::report::{Capability, Readiness, State};
+use crate::sandbox::selected::Selected;
 
-use crate::backends::report;
+use crate::backends::docker;
 
-/// The names of the backends compiled into this binary.
-pub const AVAILABLE: &[&str] = &[crate::backends::docker::BACKEND];
+/// A backend builds itself from its own section.
+type Constructor = fn(&toml::Value) -> Result<Selected, Error>;
+
+/// Every mechanism compiled into this binary, with its constructor.
+const BACKENDS: &[(&str, Constructor)] = &[(docker::BACKEND, docker::construct::build)];
 
 /// The backend used when the user has not selected one.
-pub const DEFAULT: &str = crate::backends::docker::BACKEND;
+pub const DEFAULT: &str = docker::BACKEND;
 
-/// One backend, viewed through the contract and the facets it supports.
-///
-/// Every field points at the same object; the facets are `None` when the
-/// mechanism does not implement them.
-#[derive(Clone)]
-pub struct Selected {
-    /// The contract every caller uses.
-    pub core: Arc<dyn Sandbox>,
-    /// Pausing and resuming, when the mechanism has it.
-    pub lifecycle: Option<Arc<dyn Lifecycle>>,
-    /// Resource limits, when the mechanism has them.
-    pub limits: Option<Arc<dyn Limits>>,
-    /// Port forwarding, when the mechanism has it.
-    pub forwarding: Option<Arc<dyn Forwarding>>,
+/// The names of the backends compiled into this binary.
+pub fn available_names() -> Vec<&'static str> {
+    BACKENDS.iter().map(|(name, _)| *name).collect()
 }
 
 /// The backend the user selected, or the default.
@@ -39,83 +32,26 @@ pub fn selected_name(config: &Config) -> &str {
     config.backend.as_deref().unwrap_or(DEFAULT)
 }
 
-/// Report every compiled-in backend, its readiness and its capability entries.
-///
-/// This builds a backend even when it cannot run, so the report can say why.
-pub async fn introspect(config: &Config) -> Vec<report::BackendReport> {
-    let selected = selected_name(config);
-    let mut reports = Vec::new();
-
-    for name in AVAILABLE {
-        let mut candidate = config.clone();
-        candidate.backend = Some((*name).to_string());
-        let is_selected = *name == selected;
-
-        let entry = match build(&candidate) {
-            Ok(backend) => match backend.core.readiness().await {
-                Ok(readiness) => {
-                    let capabilities = backend.core.capabilities().await.unwrap_or_default();
-                    report::BackendReport::new(name, is_selected, &readiness, &capabilities)
-                }
-                Err(error) => report::BackendReport::unavailable(
-                    name,
-                    is_selected,
-                    error.to_string(),
-                    "inspect the backend's configuration and this host".to_string(),
-                ),
-            },
-            Err(error) => {
-                let (reason, remedy) = match error {
-                    Error::Unsupported { reason, remedy, .. } => (reason, remedy),
-                    other => (
-                        other.to_string(),
-                        "inspect the backend's configuration".to_string(),
-                    ),
-                };
-                report::BackendReport::unavailable(name, is_selected, reason, remedy)
-            }
-        };
-
-        reports.push(entry);
-    }
-
-    reports
-}
-
 /// Construct the selected backend without checking that it can run.
 ///
 /// Introspection needs to build a backend that is not ready so it can report
 /// why; everything else should use [`select`].
 pub fn build(config: &Config) -> Result<Selected, Error> {
-    match selected_name(config) {
-        crate::backends::docker::BACKEND => {
+    let name = selected_name(config);
+    match BACKENDS.iter().find(|(candidate, _)| *candidate == name) {
+        Some((_, constructor)) => {
             let section = config
                 .backends
-                .get(crate::backends::docker::BACKEND)
+                .get(name)
                 .cloned()
-                .unwrap_or(toml::Value::Table(Default::default()));
-            let settings = crate::backends::docker::config::DockerConfig::from_section(&section)?
-                .settings(&config.forwarding.bind)?;
-            let compute = crate::backends::docker::compute::DockerCompute::connect()?;
-            let backend = Arc::new(crate::backends::docker::DockerBackend::new(
-                compute, settings,
-            ));
-
-            let core: Arc<dyn Sandbox> = backend.clone();
-            let lifecycle: Arc<dyn Lifecycle> = backend.clone();
-            let forwarding: Arc<dyn Forwarding> = backend;
-
-            Ok(Selected {
-                core,
-                lifecycle: Some(lifecycle),
-                limits: None,
-                forwarding: Some(forwarding),
-            })
+                .unwrap_or_else(|| toml::Value::Table(Default::default()));
+            constructor(&section)
         }
-        other => Err(Error::Unsupported {
+        None => Err(Error::Unsupported {
             operation: "select a backend".to_string(),
-            backend: other.to_string(),
-            reason: format!("this binary contains {}", AVAILABLE.join(", ")),
+            backend: name.to_string(),
+            primitive: "a backend by that name".to_string(),
+            reason: format!("this binary contains {}", available_names().join(", ")),
             remedy: "choose one of the backends listed by `litterbox backends`".to_string(),
         }),
     }
@@ -123,37 +59,282 @@ pub fn build(config: &Config) -> Result<Selected, Error> {
 
 /// Construct the selected backend only if it can run on this host.
 pub async fn select(config: &Config) -> Result<Selected, Error> {
-    let selected = build(config)?;
-    let readiness = selected.core.readiness().await?;
-    if readiness.state() != crate::sandbox::report::State::Unavailable {
-        return Ok(selected);
+    select_as(config, "create a sandbox").await
+}
+
+/// Why a backend may not serve an operation, in the terms to report.
+struct Refusal {
+    reason: String,
+    remedy: String,
+}
+
+/// Decide whether readiness permits the operation.
+fn refusal(readiness: &Readiness, accept_degraded: bool) -> Option<Refusal> {
+    let unusable = readiness.state() == State::Unavailable;
+    // A degraded check with a fallback means the mechanism substitutes
+    // something weaker. That is refused unless the user accepted it.
+    let bounded_degradation = readiness.state() == State::Degraded
+        && !accept_degraded
+        && readiness
+            .checks
+            .iter()
+            .any(|check| check.state != State::Available && check.fallback.is_some());
+
+    if !unusable && !bounded_degradation {
+        return None;
     }
 
-    let failing = readiness
+    let failing: Vec<&crate::sandbox::report::Check> = readiness
         .checks
         .iter()
-        .find(|check| check.state != crate::sandbox::report::State::Available);
+        .filter(|check| check.state != State::Available)
+        .collect();
 
-    Err(Error::Unsupported {
-        operation: "create a sandbox".to_string(),
-        backend: readiness.backend.clone(),
+    let remedies: Vec<String> = failing
+        .iter()
+        .filter_map(|check| check.remedy.clone())
+        .collect();
+    let base = if remedies.is_empty() {
+        "run `litterbox backends` to see what is missing".to_string()
+    } else {
+        remedies.join("; ")
+    };
+    let remedy = if bounded_degradation {
+        format!("{base}; set accept-degraded = true in the user configuration to proceed anyway")
+    } else {
+        base
+    };
+
+    Some(Refusal {
         reason: failing
-            .and_then(|check| check.reason.clone())
-            .unwrap_or_else(|| "the backend is not ready on this host".to_string()),
-        remedy: failing
-            .and_then(|check| check.remedy.clone())
-            .unwrap_or_else(|| "run `litterbox backends` to see what is missing".to_string()),
+            .iter()
+            .map(|check| {
+                format!(
+                    "{} is {:?}: {}",
+                    check.primitive,
+                    check.state,
+                    check
+                        .reason
+                        .clone()
+                        .unwrap_or_else(|| "not available on this host".to_string())
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; "),
+        remedy,
     })
+}
+
+/// Name the attempted operation in an unavailable report.
+fn with_operation(operation: &str, error: Error) -> Error {
+    match error {
+        Error::Unavailable {
+            backend,
+            reason,
+            remedy,
+        } => Error::Unavailable {
+            backend,
+            reason: format!("{operation}: {reason}"),
+            remedy,
+        },
+        other => other,
+    }
+}
+
+/// Construct the selected backend for one operation, if it can run here.
+pub async fn select_as(config: &Config, operation: &str) -> Result<Selected, Error> {
+    let selected = build(config)?;
+    let readiness = selected.core().readiness().await?;
+
+    if let Some(refusal) = refusal(&readiness, config.accept_degraded) {
+        return Err(with_operation(
+            operation,
+            Error::Unavailable {
+                backend: readiness.backend.clone(),
+                reason: refusal.reason,
+                remedy: refusal.remedy,
+            },
+        ));
+    }
+
+    Ok(selected)
+}
+
+/// One backend's readiness, as introspection reports it.
+#[derive(Clone, Debug, Serialize)]
+pub struct BackendReport {
+    /// The backend's name.
+    pub name: String,
+    /// Whether the user selected it.
+    pub selected: bool,
+    /// Its readiness, when it could be built.
+    pub readiness: Option<Readiness>,
+    /// The optional operations it provides.
+    pub capabilities: Vec<Capability>,
+    /// Why it could not be built at all.
+    pub error: Option<String>,
+}
+
+/// Report every compiled-in backend, its readiness and its capability entries.
+///
+/// This builds a backend even when it cannot run, so the report can say why.
+pub async fn introspect(config: &Config) -> Vec<BackendReport> {
+    let selected = selected_name(config);
+    let mut reports = Vec::new();
+
+    for (name, _) in BACKENDS {
+        let mut candidate = config.clone();
+        candidate.backend = Some((*name).to_string());
+        let is_selected = *name == selected;
+
+        let report = match build(&candidate) {
+            Ok(backend) => match backend.core().readiness().await {
+                Ok(readiness) => {
+                    let (extras, error) = match backend.core().capabilities().await {
+                        Ok(capabilities) => (capabilities, None),
+                        Err(error) => (
+                            Vec::new(),
+                            Some(format!("capabilities could not be reported: {error}")),
+                        ),
+                    };
+                    let mut capabilities = backend.standard_capabilities();
+                    for extra in extras {
+                        if let Some(existing) = capabilities
+                            .iter_mut()
+                            .find(|capability| capability.operation == extra.operation)
+                        {
+                            *existing = extra;
+                        } else {
+                            capabilities.push(extra);
+                        }
+                    }
+                    BackendReport {
+                        name: (*name).to_string(),
+                        selected: is_selected,
+                        readiness: Some(readiness),
+                        capabilities,
+                        error,
+                    }
+                }
+                Err(error) => BackendReport {
+                    name: (*name).to_string(),
+                    selected: is_selected,
+                    readiness: None,
+                    capabilities: Vec::new(),
+                    error: Some(error.to_string()),
+                },
+            },
+            Err(error) => BackendReport {
+                name: (*name).to_string(),
+                selected: is_selected,
+                readiness: None,
+                capabilities: Vec::new(),
+                error: Some(error.to_string()),
+            },
+        };
+
+        reports.push(report);
+    }
+
+    reports
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{AVAILABLE, DEFAULT, Selected, build, selected_name};
+    use super::{DEFAULT, available_names, build, refusal, selected_name};
     use crate::config::Config;
+    use crate::sandbox::report::{Check, Fallback, Readiness, State};
+
+    fn check(primitive: &str, state: State, fallback: Option<Fallback>) -> Check {
+        Check {
+            primitive: primitive.to_string(),
+            state,
+            reason: Some(format!("{primitive} is {state:?}")),
+            remedy: Some(format!("fix {primitive}")),
+            fallback,
+        }
+    }
+
+    fn readiness(checks: Vec<Check>) -> Readiness {
+        Readiness {
+            backend: "test".to_string(),
+            checks,
+        }
+    }
 
     #[test]
-    fn docker_is_the_only_backend_and_the_default() {
-        assert_eq!(AVAILABLE, &["docker"]);
+    fn a_refusal_names_the_operation_that_was_attempted() {
+        let error = super::with_operation(
+            "pause",
+            crate::sandbox::contract::Error::Unavailable {
+                backend: "test".to_string(),
+                reason: "a daemon is Unavailable".to_string(),
+                remedy: "start it".to_string(),
+            },
+        );
+        let message = error.to_string();
+        assert!(message.contains("pause"), "{message}");
+        assert!(message.contains("a daemon"), "{message}");
+    }
+
+    #[test]
+    fn an_available_backend_is_not_refused() {
+        let readiness = readiness(vec![check("a daemon", State::Available, None)]);
+        assert!(refusal(&readiness, false).is_none());
+    }
+
+    #[test]
+    fn an_unavailable_backend_names_every_failing_primitive() {
+        let readiness = readiness(vec![
+            check("a daemon", State::Unavailable, None),
+            check("a namespace", State::Unavailable, None),
+            check("an image", State::Available, None),
+        ]);
+        let stopped = refusal(&readiness, true).expect("refused");
+        assert!(stopped.reason.contains("a daemon"), "{}", stopped.reason);
+        assert!(stopped.reason.contains("a namespace"), "{}", stopped.reason);
+        assert!(!stopped.reason.contains("an image"), "{}", stopped.reason);
+        assert!(
+            stopped.remedy.contains("fix a daemon"),
+            "{}",
+            stopped.remedy
+        );
+        assert!(
+            !stopped.remedy.contains("accept-degraded"),
+            "an unavailable backend cannot be accepted: {}",
+            stopped.remedy
+        );
+    }
+
+    #[test]
+    fn a_fallback_is_refused_until_the_user_accepts_degradation() {
+        let readiness = readiness(vec![check(
+            "a namespace",
+            State::Degraded,
+            Some(Fallback {
+                name: "host networking".to_string(),
+                does_not_bound: "egress".to_string(),
+            }),
+        )]);
+
+        let bounded = refusal(&readiness, false).expect("refused");
+        assert!(
+            bounded.remedy.contains("accept-degraded = true"),
+            "{}",
+            bounded.remedy
+        );
+        assert!(refusal(&readiness, true).is_none());
+    }
+
+    #[test]
+    fn a_degraded_check_without_a_fallback_is_not_refused() {
+        let readiness = readiness(vec![check("an image", State::Degraded, None)]);
+        assert!(refusal(&readiness, false).is_none());
+    }
+
+    #[test]
+    fn docker_is_compiled_in_and_is_the_default() {
+        assert!(available_names().contains(&"docker"));
         assert_eq!(DEFAULT, "docker");
         assert_eq!(selected_name(&Config::default()), "docker");
     }
@@ -167,8 +348,8 @@ mod tests {
         assert_eq!(selected_name(&config), "docker");
     }
 
-    #[tokio::test]
-    async fn an_unknown_backend_lists_what_exists() {
+    #[test]
+    fn an_unknown_backend_lists_what_exists() {
         let config = Config {
             backend: Some("bubblewrap".to_string()),
             ..Config::default()
@@ -182,20 +363,92 @@ mod tests {
         assert!(message.contains("docker"), "{message}");
     }
 
-    #[tokio::test]
-    async fn docker_exposes_its_facets() {
-        let result = build(&Config::default());
-        let Ok(selected) = result else {
-            // No Docker CLI or daemon in this environment; construction is
-            // covered by the daemon-gated backend tests.
-            return;
-        };
-        assert!(selected.lifecycle.is_some());
-        assert!(selected.forwarding.is_some());
-        assert!(selected.limits.is_none());
+    #[test]
+    fn an_absent_limits_facet_is_reported_structurally() {
+        let backend = std::sync::Arc::new(crate::sandbox::conformance::TestBackend::new());
+        let selected = crate::sandbox::selected::Selected::new("test", backend);
 
-        let Selected { core, .. } = selected;
-        let readiness = core.readiness().await.expect("readiness");
-        assert_eq!(readiness.backend, "docker");
+        match selected.limits_or_unsupported("set limits") {
+            Err(crate::sandbox::contract::Error::Unsupported {
+                operation,
+                backend,
+                primitive,
+                reason,
+                remedy,
+            }) => {
+                assert_eq!(operation, "set limits");
+                assert_eq!(backend, "test");
+                assert!(!primitive.is_empty());
+                assert!(!reason.is_empty());
+                assert!(!remedy.is_empty());
+            }
+            Err(other) => panic!("expected an unsupported report, got {other}"),
+            Ok(_) => panic!("an absent limits facet was accepted"),
+        }
+    }
+
+    #[test]
+    fn an_absent_facet_reports_its_operation_primitive_and_remedy() {
+        let backend = std::sync::Arc::new(crate::sandbox::conformance::TestBackend::new());
+        let selected = crate::sandbox::selected::Selected::new("test", backend);
+
+        let error = match selected.lifecycle_or_unsupported("pause") {
+            Ok(_) => panic!("a backend without the facet must refuse"),
+            Err(error) => error,
+        };
+        match error {
+            crate::sandbox::contract::Error::Unsupported {
+                operation,
+                backend,
+                primitive,
+                reason,
+                remedy,
+            } => {
+                assert_eq!(operation, "pause");
+                assert_eq!(backend, "test");
+                assert!(!primitive.is_empty());
+                assert!(!reason.is_empty());
+                assert!(!remedy.is_empty());
+            }
+            other => panic!("expected an unsupported report, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn introspection_derives_standard_capabilities_from_the_facets() {
+        let reports = super::introspect(&Config::default()).await;
+        let docker = reports
+            .iter()
+            .find(|report| report.name == "docker")
+            .expect("docker is reported");
+        let operations: Vec<&str> = docker
+            .capabilities
+            .iter()
+            .map(|capability| capability.operation.as_str())
+            .collect();
+        assert!(operations.contains(&"pause and resume"), "{operations:?}");
+        assert!(operations.contains(&"resource limits"), "{operations:?}");
+        assert!(operations.contains(&"port forwarding"), "{operations:?}");
+        assert!(operations.contains(&"proxied egress"), "{operations:?}");
+    }
+
+    #[tokio::test]
+    async fn introspection_marks_exactly_the_selected_backend() {
+        let reports = super::introspect(&Config::default()).await;
+        let selected: Vec<&str> = reports
+            .iter()
+            .filter(|report| report.selected)
+            .map(|report| report.name.as_str())
+            .collect();
+        assert_eq!(selected, vec![super::selected_name(&Config::default())]);
+
+        let docker = reports
+            .iter()
+            .find(|report| report.name == "docker")
+            .expect("docker is reported");
+        assert!(
+            docker.readiness.is_some() || docker.error.is_some(),
+            "a backend report says how it ran or why it could not"
+        );
     }
 }
