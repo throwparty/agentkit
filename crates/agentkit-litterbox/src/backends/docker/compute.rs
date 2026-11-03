@@ -740,13 +740,19 @@ impl Compute for DockerCompute {
 
 fn build_tar(src_path: &Path) -> Result<Vec<u8>, SandboxError> {
     let mut builder = Builder::new(Vec::new());
-    if src_path.is_dir() {
+    let metadata = fs::symlink_metadata(src_path)?;
+    if metadata.is_dir() {
         append_dir(&mut builder, src_path, src_path)?;
-    } else {
+    } else if metadata.is_file() {
         let name = src_path
             .file_name()
             .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid path"))?;
         builder.append_path_with_name(src_path, name)?;
+    } else {
+        return Err(SandboxError::Config(format!(
+            "refusing to transfer a non-regular path: {}",
+            src_path.display()
+        )));
     }
     builder.finish()?;
     Ok(builder.into_inner()?)
@@ -764,10 +770,13 @@ fn append_dir(builder: &mut Builder<Vec<u8>>, root: &Path, dir: &Path) -> Result
             .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid path"))?;
         has_entries = true;
 
-        if path.is_dir() {
+        // `file_type` does not follow links: a symlink in the workspace is
+        // neither transferred nor read through.
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
             builder.append_dir(relative, &path)?;
             append_dir(builder, root, &path)?;
-        } else if path.is_file() {
+        } else if file_type.is_file() {
             builder.append_path_with_name(&path, relative)?;
         }
     }
@@ -807,6 +816,26 @@ fn extract_tar(dest_path: &Path, tar: &[u8]) -> Result<(), SandboxError> {
         // Skip if stripping results in empty path (e.g., if path was exactly "src")
         if stripped_path.as_os_str().is_empty() {
             continue;
+        }
+
+        // An archive is agent-controlled: only regular files and directories
+        // may land on the host, and nothing may resolve above the staging root.
+        let entry_type = entry.header().entry_type();
+        if !(entry_type.is_file() || entry_type.is_dir()) {
+            return Err(SandboxError::Config(format!(
+                "archive contains a non-regular entry: {}",
+                stripped_path.display()
+            )));
+        }
+        if stripped_path.is_absolute()
+            || stripped_path
+                .components()
+                .any(|component| matches!(component, std::path::Component::ParentDir))
+        {
+            return Err(SandboxError::Config(format!(
+                "archive entry escapes the staging root: {}",
+                stripped_path.display()
+            )));
         }
 
         let dest = dest_path.join(stripped_path);
@@ -902,5 +931,88 @@ mod tests {
         let compute = DockerCompute::connect()?;
         compute.ensure_image("busybox:latest").await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod transfer_tests {
+    use std::fs;
+
+    use super::{build_tar, extract_tar};
+
+    fn append_symlink(builder: &mut tar::Builder<Vec<u8>>, name: &str, target: &str) {
+        let mut header = tar::Header::new_gnu();
+        header.set_entry_type(tar::EntryType::Symlink);
+        header.set_size(0);
+        header.set_mode(0o644);
+        header.set_cksum();
+        builder
+            .append_link(&mut header, name, target)
+            .expect("append symlink");
+    }
+
+    #[test]
+    fn extract_rejects_symlinks_and_writes_nothing() {
+        let mut builder = tar::Builder::new(Vec::new());
+        append_symlink(&mut builder, "evil", "/etc/passwd");
+        let archive = builder.into_inner().expect("finish tar");
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let error = extract_tar(dir.path(), &archive).expect_err("symlink rejected");
+        assert!(
+            error.to_string().contains("non-regular"),
+            "unexpected error: {error}"
+        );
+        assert!(!dir.path().join("evil").exists());
+    }
+
+    #[test]
+    fn extract_rejects_parent_traversal() {
+        let mut builder = tar::Builder::new(Vec::new());
+        let mut header = tar::Header::new_gnu();
+        header.set_size(1);
+        header.set_mode(0o644);
+        // The builder refuses to write a `..` path, so the name is set raw.
+        let name = b"../escape";
+        header.as_old_mut().name[..name.len()].copy_from_slice(name);
+        header.set_cksum();
+        builder
+            .append(&header, &b"x"[..])
+            .expect("append traversal entry");
+        let archive = builder.into_inner().expect("finish tar");
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let error = extract_tar(dir.path(), &archive).expect_err("traversal rejected");
+        assert!(
+            error.to_string().contains("escapes"),
+            "unexpected error: {error}"
+        );
+        assert!(!dir.path().parent().unwrap().join("escape").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn upload_skips_symlinks_without_reading_the_target() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        fs::write(dir.path().join("real.txt"), "data").expect("write");
+        std::os::unix::fs::symlink("/etc/passwd", dir.path().join("link")).expect("symlink");
+
+        let archive = build_tar(dir.path()).expect("build tar");
+        let mut reader = tar::Archive::new(std::io::Cursor::new(archive));
+        let names: Vec<String> = reader
+            .entries()
+            .expect("entries")
+            .map(|entry| {
+                entry
+                    .expect("entry")
+                    .path()
+                    .expect("path")
+                    .display()
+                    .to_string()
+            })
+            .collect();
+
+        assert!(names.iter().any(|name| name.ends_with("real.txt")));
+        assert!(!names.iter().any(|name| name.ends_with("link")));
     }
 }

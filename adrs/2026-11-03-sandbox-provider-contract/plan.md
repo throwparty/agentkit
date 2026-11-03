@@ -35,6 +35,7 @@ src/
 └── mcp.rs                MCP server
 ```
 
+
 ```mermaid
 flowchart TD
     CLI["main.rs (CLI)"] --> CONTRACT["sandbox (contract)"]
@@ -121,13 +122,13 @@ Parsing goes through `toml::Value` first. A record with `container_id` and no `b
 ### Decisions and rejections
 
 1. The backend set is compiled in, listed in `backends/mod.rs`. A runtime registry or plugin loader would hide which mechanisms a given binary contains. Adding a backend is one entry plus one module; the contract does not change.
-1. Facets are supertraits reached through `Arc` coercions, not a parallel family of objects. One implementation object, several vtable views, and no second place where a backend's state lives.
-1. Per-backend configuration is typed once, in the backend. The core holds a map from backend name to `toml::Value` and never deserialises a mechanism's keys; `DockerConfig` lives in `backends/docker/config.rs`, carries `deny_unknown_fields`, and is the only place that knows what it accepts. Validation is the backend's too, because a required setting is a property of the mechanism.
-1. No metadata migration. The record type changes; legacy files are reported and left on disk for the user to remove.
-1. The conformance suite is an in-crate test module, not a published crate. Tests in this repository are modules selected by package and target, and a test-only crate would need a feature flag to stay out of the binary.
-1. `agentkit-path` is renamed to `agentkit-common` and carries two things: the platform directories, whose `data_dir` for this component already matches the existing layout so no state moves, and the exit-code taxonomy, so every component that adopts it numbers the same failure the same way. It stays dependency-free: anything needing serde, tokio or a platform binding does not belong in it. Litterbox adopts it here; switchboard, tackle and credentials take the rename mechanically and adopt the taxonomy when next touched.
-1. Exit codes are that shared taxonomy rather than a litterbox invention: 0 success, 1 failed, 2 reserved for CLI usage, 3 not found, 4 conflict, 5 unsupported, 6 denied, 7 unavailable. The mapping to MCP error classes sits beside the taxonomy in the same module.
-1. The branch-and-compute pairing moves out of the backend into `src/sandboxes/`. Rejected: letting a backend depend on SCM, which would either relax FR-024 or make every mechanism re-implement branch creation, rollback and bare-repo cleanup. The backend receives a prepared workspace source and knows nothing about branches; the orchestrator owns the rollback that pairs with it, so atomicity splits along the same line as the code.
+2. Facets are supertraits reached through `Arc` coercions, not a parallel family of objects. One implementation object, several vtable views, and no second place where a backend's state lives.
+3. Per-backend configuration is typed once, in the backend. The core holds a map from backend name to `toml::Value` and never deserialises a mechanism's keys; `DockerConfig` lives in `backends/docker/config.rs`, carries `deny_unknown_fields`, and is the only place that knows what it accepts. Validation is the backend's too, because a required setting is a property of the mechanism.
+4. No metadata migration. The record type changes; legacy files are reported and left on disk for the user to remove.
+5. The conformance suite is an in-crate test module, not a published crate. Tests in this repository are modules selected by package and target, and a test-only crate would need a feature flag to stay out of the binary.
+6. `agentkit-path` is renamed to `agentkit-common` and carries two things: the platform directories, whose `data_dir` for this component already matches the existing layout so no state moves, and the exit-code taxonomy, so every component that adopts it numbers the same failure the same way. It stays dependency-free: anything needing serde, tokio or a platform binding does not belong in it. Litterbox adopts it here; switchboard, tackle and credentials take the rename mechanically and adopt the taxonomy when next touched.
+7. Exit codes are that shared taxonomy rather than a litterbox invention: 0 success, 1 failed, 2 reserved for CLI usage, 3 not found, 4 conflict, 5 unsupported, 6 denied, 7 unavailable. The mapping to MCP error classes sits beside the taxonomy in the same module.
+8. The branch-and-compute pairing moves out of the backend into `src/sandboxes/`. Rejected: letting a backend depend on SCM, which would either relax FR-024 or make every mechanism re-implement branch creation, rollback and bare-repo cleanup. The backend receives a prepared workspace source and knows nothing about branches; the orchestrator owns the rollback that pairs with it, so atomicity splits along the same line as the code.
 
 ## Technologies
 
@@ -150,11 +151,13 @@ The only thing a caller needs to know about a sandbox
 
 Defines Sandbox (FR-001), the identity rule that a name denotes one sandbox in one backend (FR-002), Scope for repository versus machine enumeration, and the error taxonomy (FR-011). Depends on nothing else in the crate; every other module may depend on it.
 
+
 ### Facets
 
 Optional operations a mechanism may or may not have
 
-Lifecycle, Limits and Forwarding as supertraits of Sandbox (FR-004). Implemented by the backend, exposed by the registry as Option\<Arc<dyn Trait>>, and reported as capabilities so the CLI can explain an absence instead of failing obscurely (FR-005).
+Lifecycle, Limits and Forwarding as supertraits of Sandbox (FR-004). Implemented by the backend, exposed by the registry as Option<Arc<dyn Trait>>, and reported as capabilities so the CLI can explain an absence instead of failing obscurely (FR-005).
+
 
 ### Reports
 
@@ -162,11 +165,13 @@ Structured answers to what can and cannot be done here
 
 Readiness with per-primitive Check entries carrying state, reason, remedy and fallback (FR-006, NFR-003); Capability entries per operation; EgressPosture as denied, direct or proxied (FR-011). Every field is typed, so acceptance can assert on it rather than on prose.
 
+
 ### Environment descriptor
 
 The environment with its provenance
 
 Environment carries variables plus Provenance: origins and kind of change, never values (FR-008). Workspace path is reported here, and mapping only ever touches references to the workspace (FR-009). The backends that need to repoint HOME, TMPDIR or NIX_BUILD_TOP record it; Docker records that it changed nothing.
+
 
 ### Record store
 
@@ -174,11 +179,13 @@ Where a sandbox is remembered between processes
 
 A stored envelope holding the contract record, the branch the orchestrator created and the SCM mode, so neither the contract nor a backend carries SCM vocabulary (FR-020, FR-025). Legacy files parse to a distinguishable state rather than an error, so list can report them and nothing can operate on them (AC-006). Replaces the container_id field and both fabrication paths.
 
+
 ### Sandbox orchestration
 
 The one place a branch meets compute
 
 Lives in src/sandboxes. Resolves the project, creates the branch, archives HEAD, stages the workspace, asks the registry for the backend, calls create, persists the record and removes the branch when create fails (FR-025, FR-015); delete removes compute then branch, each half idempotent; pause, resume and exec load the record and dispatch to the backend or its facet. The CLI and the MCP server call this module rather than assembling a sandbox themselves.
+
 
 ### Backend registry
 
@@ -186,11 +193,13 @@ The one construction point
 
 A compiled-in set of backends, selection from configuration or the per-invocation flag (FR-022, FR-007), and a Selected value holding the core trait object plus whichever facet objects the mechanism supports. Selecting an absent or unready backend fails here with that backend's readiness report (FR-022).
 
+
 ### Docker backend
 
 The first real mechanism
 
 DockerBackend implements Sandbox, Lifecycle and Forwarding; receives a prepared workspace source and neither creates nor deletes a branch; keeps Docker's vocabulary in its own configuration, messages and errors (FR-016, FR-023); reports direct egress because the default bridge shares the host network (FR-011, AC-009); implements the forwarding facet with a loopback bind taken from user configuration (FR-013).
+
 
 ### Docker compute
 
@@ -198,11 +207,13 @@ The Docker API surface
 
 The existing compute module moved under the backend with behaviour unchanged: image ensure and pull, container create, exec, upload, download, pause, resume, delete, inspect and list (FR-023). The name-prefix enumeration used by pause --all-repos moves here.
 
+
 ### Configuration
 
 User and project configuration
 
 Two files plus a local override, resolved in order (FR-021, FR-022). Backend selection is user-only; project files may declare ports and setup but not a mechanism. Per-backend sections are toml::Value in the core and typed inside the backend, so a backend rejects keys it does not define and the core never learns them. Directories come from agentkit-common.
+
 
 ### CLI
 
@@ -210,11 +221,13 @@ The user-facing surface
 
 list, pause, resume, delete, shell, stdio and docgen keep their names; container vocabulary leaves their help, output and errors (FR-016). Every command goes through the orchestrator rather than assembling a sandbox from the registry and the store. pause and resume go through the lifecycle facet objects and report unsupported when absent. A new backends command lists available and selected backends with readiness and capability entries as a table, with --json for scripts and tests (FR-017); its final naming is settled here: backends, no arguments, no MCP equivalent. Exit codes come from the shared taxonomy in agentkit-common rather than from literals in each handler.
 
+
 ### MCP server
 
 The agent-facing surface
 
 Tool names, arguments and result shapes for read, write, patch, bash, ls, glob, grep and sandbox-create stay as they are; responses lose container ids and gain name, backend, status, egress and provenance by variable name (FR-019). Tools reach the orchestrator, never a backend or the store directly. No tool accepts a backend setting, and no response carries an environment value.
+
 
 ### MCP tool mapping
 
@@ -222,11 +235,13 @@ Neutral failures on the agent surface
 
 One mapping from the error taxonomy to MCP error classes (FR-011, AC-015): not found, conflict, unsupported and denied are invalid_params with the structured reason; failed is internal_error. Written once, not per backend.
 
+
 ### Bulk operations
 
 pause across a repository or a machine
 
 The repository scope enumerates from SCM branches, the machine scope from each backend's list; both then use the lifecycle facet or report it unsupported (FR-018). A sandbox that vanishes mid-batch is skipped (EC-008), which replaces the current container-missing special case.
+
 
 ### Architecture lint
 
@@ -234,11 +249,13 @@ The calling conventions, enforced
 
 Scopes for sandbox, backends, backends::docker, config, persistence, cli and mcp, with deny rules for every edge the diagram does not draw (FR-024, NFR-008): the contract may import nothing internal, a backend may import the contract only, the CLI and MCP may not import a backend module, persistence may import the contract only. A negative fixture in hack/ proves a violating import fails before the rules are relied on (AC-018).
 
+
 ### Conformance suite
 
 The gate a second backend must pass
 
 A generic exercise over Sandbox and its facets, run once against TestBackend as a unit test and once against Docker under the existing LITTERBOX_DOCKER_TESTS opt-in, with no backend-specific branch in the suite (AC-001, NFR-005). It asserts create, enumerate, exec, upload, download, inspect, delete, unsupported reports and atomic rollback.
+
 
 ## Data Flow
 
@@ -258,6 +275,7 @@ Introspection: litterbox backends builds every compiled-in backend, asks each fo
 
 Legacy records: a metadata file with a container id and no backend is detected on read, listed as unknown with a remedy, and refused by every operation. Nothing is migrated (AC-006).
 
+
 ## Deployment
 
 One binary, unchanged distribution: `cargo build -p agentkit-litterbox` and the existing goreleaser configuration. Docker remains the default backend, so an existing user who upgrades and changes nothing gets the same behaviour, with one exception that is accepted pre-1.0: sandbox metadata written by an earlier release is reported rather than adopted, so an existing sandbox is re-created rather than reattached. Project configuration changes once: `setup-command` moves from `[docker]` to `[project]`, and the binary fails with a message naming the new key rather than silently ignoring the old one. The repository's own `.litterbox.toml` is migrated in the same change rather than left to fail, and the sample and documentation that show the old shape move with it.
@@ -269,3 +287,4 @@ Future improvement, explicitly out of scope: the backend set is compiled in. If 
 Continuous integration already runs `arch-lint check` in the build-and-test workflow, so the new scopes and deny rules are enforced by the job that exists; the negative fixture runs beside it as a shell script in `hack/` and is wired into `just lint`. Cargo tests stay module-scoped and selectable by package and target; the Docker conformance run keeps the existing `LITTERBOX_DOCKER_TESTS` opt-in, and no new backend is built by this ADR, so the macOS job is unaffected.
 
 Documentation: the generated CLI and MCP references are regenerated; the hand-written configuration reference under `docs/docs/user/litterbox/reference/` gains the user file, the per-backend section and the setup-command move, and a short backends page explains choosing a mechanism and reading a readiness report.
+

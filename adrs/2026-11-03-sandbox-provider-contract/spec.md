@@ -1,8 +1,9 @@
 # Sandbox Provider Contract
 
-**Status:** draft **Created:** 2026-11-03 **Author:** adrian
+**Status:** draft  **Created:** 2026-11-03  **Author:** adrian
 
 Litterbox confines agent commands in Docker containers. The trait that abstracts compute is not neutral: `SandboxProvider` (crates/agentkit-litterbox/src/sandbox/mod.rs) names containers, taking a `container_id` and returning a Docker-shaped `ContainerInspection`, and `SandboxMetadata` persists a `container_id` field that metadata_store writes to TOML. The CLI and the MCP server each build `DockerSandboxProvider` independently (main.rs:427, mcp.rs:561), and two bulk paths (main.rs:252 for `pause --all-envs`, main.rs:276 for `pause --all-repos`) call `DockerCompute` directly and bypass the provider. Three spikes established that the kernel's own facilities confine the same workload without a container runtime: bubblewrap reached through Linux user namespaces (adrs/2026-10-31-linux-bwrap-sandbox, adrs/2026-10-31-linux-bwrap-lifecycle) and the `sandbox_init` entry point with a Seatbelt profile on macOS (adrs/2026-10-31-darwin-app-sandbox). They also established that mechanisms differ in kind rather than degree. A bubblewrap sandbox is held open in pid, net, mount and user namespaces and joined with `setns`, so pause, resume and resource limits have a sandbox-level meaning through a cgroup scope; without cgroup delegation, pause falls back to a stop-and-rescan fixpoint that bounds nothing. A Seatbelt profile is applied per process, so there is no sandbox-level state and no freeze or limits, every command runs on the host's pids and network stack, and pause exists only over a process group, which a `setsid` child escapes. Egress needs a proxy in both cases, and the two do not share a transport: a network namespace has no route to the host, so a host-side proxy is not reachable over the network stack at all (linux-bwrap-sandbox/findings.md), while the macOS profile grants only the `localhost` and `*` host tokens (darwin-app-sandbox/findings.md). A shell without any of these mechanisms is also a legitimate choice. A backend is a mechanism, not an operating system: bubblewrap needs Linux namespaces and a writable `/proc`, which a Windows host can provide through WSL, so what a backend requires is a primitive, not the name of the host. Several backends may therefore run on one host, each with its own requirements, its own vocabulary and its own configuration, and the choice between them belongs to the person whose machine runs the code rather than to the project being built. Litterbox needs a contract that says only what the CLI and the MCP server must be able to do to any backend, nothing about how a backend does it, and enough structure for a caller to know which optional operations a backend offers before it relies on one.
+
 
 ## Problem
 
@@ -32,6 +33,7 @@ Litterbox's provider abstraction is Docker's vocabulary wearing a generic name. 
 - Renaming MCP tools that agents already call
 - Migrating sandbox metadata written by a previous release
 - Performance work on sandbox creation or command execution
+
 
 ## Functional Requirements
 
@@ -358,63 +360,54 @@ A backend can be created from a workspace source and deleted without touching SC
 Where the host blocks what a mechanism needs, such as unprivileged user namespaces, whether natively or through an environment hosted on another operating system, readiness reports unsupported with the exact primitive, how to satisfy it, and what happens if it is not satisfied, and nothing falls back to an unconfined run.
 
 **Slug:** `mechanism-requirement-unmet`
-
 ### EC-002: Shared: Delegation Absent
 
 Where the host does not delegate what a mechanism needs for limits, limits are reported degraded with what the fallback cannot bound, and the default is to refuse rather than to run unbounded.
 
 **Slug:** `delegation-absent`
-
 ### EC-003: Shared: Primitive Missing, Old Or Withdrawn
 
 A mechanism whose primitive is absent, below the required version, or withdrawn by a later SDK or release is reported as unavailable with the floor and the remedy, before any sandbox is created, and the backend never degrades to an unconfined run.
 
 **Slug:** `primitive-missing-or-old`
-
 ### EC-004: Shared: Backend Switched
 
 Selecting a different backend while sandboxes exist leaves those sandboxes belonging to the backend that created them; each is reported with its backend, and operating on one through another backend is refused with both names rather than misinterpreted.
 
 **Slug:** `backend-switched`
-
 ### EC-005: Shared: Workspace Bound Elsewhere
 
 When the workspace is presented at a path other than the one the environment was captured with, only workspace references are translated, and a translation that would rewrite a system path is a defect.
 
 **Slug:** `workspace-relocated`
-
 ### EC-006: Shared: Host Paths In The Environment
 
 An environment from the host that names a path outside the sandbox view is reported, never silently granted and never silently dropped, so the failure is a missing path the user can see rather than a variable that quietly points nowhere.
 
 **Slug:** `host-path-in-environment`
-
 ### EC-007: Shared: Sandbox Missing
 
 A name whose record exists but whose sandbox no longer does is reported as missing, and deleting it again succeeds, including the second removal of its branch.
 
 **Slug:** `sandbox-missing`
-
 ### EC-008: Shared: Bulk Operation Races A Delete
 
 An enumeration racing a delete treats the vanished sandbox as already gone and finishes the rest, rather than aborting the batch.
 
 **Slug:** `bulk-and-delete-race`
-
 ### EC-009: Shared: Unconfined Egress Reported As Direct
 
 A backend whose sandbox shares the host network, as Docker's default bridge does, reports direct egress; a caller that expected confinement sees it in the inspection rather than inferring it from silence.
 
 **Slug:** `direct-egress-reported`
-
 ### EC-010: Shared: Project Asks For A Backend
 
 A project configuration that names a backend or sets confinement is ignored for that purpose and reported, so the user's choice stands and the attempt is visible rather than quietly overridden.
 
 **Slug:** `project-asks-for-backend`
-
 ### EC-011: Shared: Two Backends On One Host
 
 Where more than one backend can run on this host, each is listed, configured and reported independently; neither is assumed to be the host's answer, and selecting one does not disable the other for sandboxes it already hosts.
 
 **Slug:** `two-backends-one-host`
+
