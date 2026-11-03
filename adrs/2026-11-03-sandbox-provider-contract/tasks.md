@@ -275,7 +275,7 @@ Refuse non-regular entries in both transfer directions: a downloaded tar contain
 | Depends On |  |
 | References | workspace-transfer,fail-closed |
 
-### T-022: Validate identifiers before path use
+### T-022: [x] Validate identifiers before path use
 
 Slugify and validate the configured project slug before it becomes a path, refuse a record whose project_slug differs from the resolved project with both names, and report the resolved metadata directory.
 

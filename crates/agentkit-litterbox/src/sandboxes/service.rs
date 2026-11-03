@@ -36,7 +36,7 @@ pub struct Listing {
 impl Sandboxes {
     /// Open the project the current directory belongs to.
     pub fn open(config: Config) -> Result<Self, SandboxError> {
-        let project_slug = resolve_project_slug(&config);
+        let project_slug = resolve_project_slug(&config)?;
         let mode = config.git.snapshot_mode.unwrap_or_default();
         let scm = open_scm(&config, &project_slug, mode)?;
 
@@ -209,6 +209,13 @@ impl Sandboxes {
     }
 
     async fn select_for(&self, record: &SandboxRecord) -> Result<Selected, Error> {
+        if record.project_slug != self.project_slug {
+            return Err(Error::failed(format!(
+                "sandbox '{}' belongs to project '{}', not '{}'",
+                record.name, record.project_slug, self.project_slug
+            )));
+        }
+
         let selected = backends::selected_name(&self.config);
         if record.backend != selected {
             return Err(unsupported(
@@ -251,16 +258,31 @@ fn port(port: &crate::config::PortRequest) -> RequestedPort {
 }
 
 /// The project slug from configuration, or the directory name.
-pub fn resolve_project_slug(config: &Config) -> String {
-    config.project.slug.clone().unwrap_or_else(|| {
-        std::env::current_dir()
-            .ok()
-            .as_ref()
-            .and_then(|dir| dir.file_name())
-            .and_then(|name| name.to_str())
-            .map(crate::domain::slugify)
-            .unwrap_or_else(|| "unknown".to_string())
-    })
+///
+/// A configured slug becomes a path component, so it is validated rather than
+/// trusted: a value the slug rules would change is refused, naming the setting.
+pub fn resolve_project_slug(config: &Config) -> Result<String, SandboxError> {
+    let Some(configured) = &config.project.slug else {
+        return Ok(directory_slug());
+    };
+
+    let slug = crate::domain::slugify_name(configured)?;
+    if &slug != configured {
+        return Err(SandboxError::Config(format!(
+            "project.slug '{configured}' is not a valid slug; use '{slug}'"
+        )));
+    }
+    Ok(slug)
+}
+
+fn directory_slug() -> String {
+    std::env::current_dir()
+        .ok()
+        .as_ref()
+        .and_then(|dir| dir.file_name())
+        .and_then(|name| name.to_str())
+        .map(crate::domain::slugify)
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 fn open_scm(
@@ -450,13 +472,26 @@ mod tests {
             },
             ..Config::default()
         };
-        assert_eq!(resolve_project_slug(&config), "chosen");
+        assert_eq!(resolve_project_slug(&config).expect("slug"), "chosen");
     }
 
     #[test]
     fn an_absent_slug_falls_back_to_the_directory_name() {
-        let slug = resolve_project_slug(&Config::default());
+        let slug = resolve_project_slug(&Config::default()).expect("slug");
         assert!(!slug.is_empty());
         assert!(!slug.contains('.'));
+    }
+
+    #[test]
+    fn a_configured_slug_that_is_a_path_is_refused() {
+        let config = Config {
+            project: ProjectConfig {
+                slug: Some("../../etc".to_string()),
+                setup_command: None,
+            },
+            ..Config::default()
+        };
+        let error = resolve_project_slug(&config).expect_err("path slug refused");
+        assert!(error.to_string().contains("project.slug"), "{error}");
     }
 }

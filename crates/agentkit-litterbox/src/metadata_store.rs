@@ -236,6 +236,11 @@ impl LoadedSandbox {
     }
 }
 
+/// The directory holding one project's records.
+pub fn directory(project_slug: &str) -> PathBuf {
+    base_path(project_slug, load_metadata_dir().as_deref())
+}
+
 /// Persist a sandbox record.
 pub fn store_sandbox(project_slug: &str, stored: &StoredSandbox) -> Result<(), SandboxError> {
     let dir = base_path(project_slug, load_metadata_dir().as_deref());

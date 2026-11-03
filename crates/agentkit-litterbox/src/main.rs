@@ -169,6 +169,11 @@ async fn handle_list(backend: Option<String>) -> ExitCode {
         Err(error) => return report(error),
     };
 
+    println!(
+        "records {}",
+        agentkit_litterbox::metadata_store::directory(sandboxes.project_slug()).display()
+    );
+
     for name in &listing.legacy {
         println!("{name} legacy-record");
     }
