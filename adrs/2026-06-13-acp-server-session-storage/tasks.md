@@ -1,6 +1,10 @@
 ---
-
-## status: in-progress created: 2026-06-13 updated: 2026-06-13 author: adrian decision: pending
+status: in-progress
+created: 2026-06-13
+updated: 2026-06-13
+author: adrian
+decision: pending
+---
 
 # Tasks: ACP Server Session Storage
 

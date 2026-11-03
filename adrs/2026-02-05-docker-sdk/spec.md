@@ -1,6 +1,6 @@
 ---
-
-## status: accepted
+status: accepted
+---
 
 # ADR: Docker SDK for Rust
 

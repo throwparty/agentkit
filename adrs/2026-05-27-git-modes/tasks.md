@@ -1,6 +1,9 @@
 ---
-
-## status: planning created: 2026-05-27 updated: 2026-06-04 author: adrian
+status: planning
+created: 2026-05-27
+updated: 2026-06-04
+author: adrian
+---
 
 # ADR: git-modes — Implementation Tasks
 

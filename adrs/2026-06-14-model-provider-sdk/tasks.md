@@ -1,6 +1,10 @@
 ---
-
-## status: draft created: 2026-06-14 updated: 2026-06-14 author: adrian decision: pending
+status: draft
+created: 2026-06-14
+updated: 2026-06-14
+author: adrian
+decision: pending
+---
 
 # Tasks: Model Provider SDK — Sample Crates
 

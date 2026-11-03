@@ -1,5 +1,10 @@
 ---
-## status: draft created: 2026-07-15 updated: 2026-07-16 author: adrian decision: pending
+status: draft
+created: 2026-07-15
+updated: 2026-07-16
+author: adrian
+decision: pending
+---
 
 # Tasks: OpenTelemetry Implementation for Rust Services
 
