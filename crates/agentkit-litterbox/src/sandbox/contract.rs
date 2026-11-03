@@ -14,7 +14,7 @@ use futures_util::future::BoxFuture;
 /// The record carries only the identity every surface needs and a payload the
 /// backend that created it understands. A backend's own identifier lives in
 /// `data`, never in the record's identity.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SandboxRecord {
     /// The sandbox name, unique within a project.
     pub name: String,

@@ -122,7 +122,7 @@ Add backends/mod.rs listing the compiled-in set, resolving selection from config
 | Depends On | T-005, T-008, T-009 |
 | References | single-construction-point,backend-selection,one-construction-point,backend-readiness,readiness-refuses,mechanism-requirement-unmet,two-backends-one-host |
 
-### T-011: Record store with branch and backend
+### T-011: [x] Record store with branch and backend
 
 Store an envelope holding the contract record, the branch the orchestrator created and the SCM mode, so neither the contract nor a backend carries SCM vocabulary. Detect legacy records through toml::Value and report them; delete metadata_for_slug and the resolve fallback so nothing is fabricated from a name.
 
