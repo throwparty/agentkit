@@ -131,11 +131,14 @@ dependencies = [
  "rmcp",
  "schemars 1.2.3",
  "serde",
+ "serde_json",
  "tar",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "toml",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

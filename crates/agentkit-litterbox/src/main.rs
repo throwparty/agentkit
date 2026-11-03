@@ -76,6 +76,14 @@ enum Commands {
         force: bool,
     },
 
+    /// Report the backends available on this machine, their readiness and their
+    /// capabilities.
+    Backends {
+        /// Emit structured JSON instead of a table.
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Execute a command in a sandbox
     Shell {
         /// Name of the sandbox to run the command in
@@ -118,6 +126,7 @@ async fn main() -> ExitCode {
         Commands::Resume { name } => handle_resume(backend, name).await,
         Commands::Delete { name, force } => handle_delete(backend, name, force).await,
         Commands::Shell { name, command } => handle_shell(backend, name, command).await,
+        Commands::Backends { json } => handle_backends(backend, json).await,
         Commands::Docgen { kind } => handle_docgen(kind),
     }
 }
@@ -329,6 +338,31 @@ async fn handle_shell(backend: Option<String>, name: String, command: Vec<String
     } else {
         ExitCode::from(1)
     }
+}
+
+async fn handle_backends(backend: Option<String>, json: bool) -> ExitCode {
+    let config = match load_config(backend) {
+        Ok(config) => config,
+        Err(error) => return report(error),
+    };
+
+    let reports = backends::introspect(&config).await;
+
+    if json {
+        match serde_json::to_string_pretty(&reports) {
+            Ok(text) => println!("{text}"),
+            Err(error) => return report(Error::failed(error.to_string())),
+        }
+        return ExitCode::from(0);
+    }
+
+    for report in &reports {
+        for line in report.lines() {
+            println!("{line}");
+        }
+    }
+
+    ExitCode::from(0)
 }
 
 fn handle_docgen(kind: DocgenCommand) -> ExitCode {
