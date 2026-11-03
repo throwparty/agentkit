@@ -1,6 +1,10 @@
 ---
-
-## status: planning created: 2026-05-27 updated: 2026-06-04 author: adrian decision: pending
+status: planning
+created: 2026-05-27
+updated: 2026-06-04
+author: adrian
+decision: pending
+---
 
 # ADR: git-modes — Direct vs. Remote Git Snapshots
 

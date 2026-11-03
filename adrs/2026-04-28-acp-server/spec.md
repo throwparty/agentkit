@@ -1,6 +1,10 @@
 ---
-
-## status: draft created: 2026-04-28 updated: 2026-04-29 author: adrian decision: pending
+status: draft
+created: 2026-04-28
+updated: 2026-04-29
+author: adrian
+decision: pending
+---
 
 # ACP Server Specification
 

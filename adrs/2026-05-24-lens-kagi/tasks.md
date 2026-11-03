@@ -1,6 +1,10 @@
 ---
-
-## status: implemented created: 2026-05-24 updated: 2026-05-24 author: adrian decision: accepted
+status: implemented
+created: 2026-05-24
+updated: 2026-05-24
+author: adrian
+decision: accepted
+---
 
 # `lens-kagi` Tasks
 

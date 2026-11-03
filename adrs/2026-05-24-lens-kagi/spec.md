@@ -1,6 +1,10 @@
 ---
-
-## status: draft created: 2026-05-24 updated: 2026-05-24 author: adrian decision: pending
+status: draft
+created: 2026-05-24
+updated: 2026-05-24
+author: adrian
+decision: pending
+---
 
 # `lens-kagi` Feature Specification
 

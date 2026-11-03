@@ -1,6 +1,6 @@
 ---
-
-## status: accepted
+status: accepted
+---
 
 # Feature Specification: Port Forwarding for Sandbox Containers
 

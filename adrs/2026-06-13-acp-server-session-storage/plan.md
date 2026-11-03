@@ -1,6 +1,10 @@
 ---
-
-## status: draft created: 2026-06-13 updated: 2026-06-13 author: adrian decision: pending
+status: draft
+created: 2026-06-13
+updated: 2026-06-13
+author: adrian
+decision: pending
+---
 
 # ACP Server Session Storage Implementation Plan
 

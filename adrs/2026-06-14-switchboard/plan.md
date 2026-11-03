@@ -1,6 +1,10 @@
 ---
-
-## status: accepted created: 2026-06-14 updated: 2026-06-14 author: adrian decision: accepted
+status: accepted
+created: 2026-06-14
+updated: 2026-06-14
+author: adrian
+decision: accepted
+---
 
 # Plan: Switchboard — Cost-Aware Model Provider Proxy
 

@@ -1,6 +1,10 @@
 ---
-
-## status: draft created: 2026-04-29 updated: 2026-06-08 author: adrian decision: pending
+status: draft
+created: 2026-04-29
+updated: 2026-06-08
+author: adrian
+decision: pending
+---
 
 # ACP Server Tasks
 
