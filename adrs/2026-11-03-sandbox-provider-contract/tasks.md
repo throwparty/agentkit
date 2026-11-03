@@ -86,7 +86,7 @@ Implement Sandbox for DockerBackend over a prepared Workspace: create by uploadi
 | Depends On | T-006 |
 | References | docker-conformance,backend-neutral-contract,egress-posture,port-forwarding,create-atomicity,workspace-transfer,environment-provenance,workspace-path-mapping,fail-closed,provenance-visible,egress-typed,ports-honest,create-leaves-nothing,workspace-relocated,direct-egress-reported,branch-compute-pairing |
 
-### T-008: Docker configuration and readiness
+### T-008: [x] Docker configuration and readiness
 
 Add backends/docker/config.rs with DockerConfig typed there and deny_unknown_fields, parsed from its own section. Move image validation out of config_loader and answer readiness with the daemon and image state, each with a reason and a remedy.
 
