@@ -34,8 +34,10 @@ includes = [
 ]
 
 [formatter.rust]
-command = "rustfmt"
-options = ["--edition", "2024"]
+# Rustfmt's 2024 style edition sorts imports differently from the 2021 style
+# edition, and this workspace mixes both. The wrapper picks the edition from
+# each file's nearest Cargo.toml so treefmt matches `cargo fmt`.
+command = "hack/fmt/rustfmt.sh"
 includes = ["*.rs"]
 
 [formatter.toml-sort]
