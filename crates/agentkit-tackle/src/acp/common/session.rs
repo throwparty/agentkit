@@ -105,10 +105,7 @@ pub(crate) async fn begin_prompt_turn(
 /// The session-creation metadata: the selected actor plus any
 /// version-specific keys (v2's `additionalDirectories`). Kept pure so the
 /// merge is testable without a store.
-pub(crate) fn session_metadata(
-    actor: Option<&str>,
-    extra: Option<serde_json::Value>,
-) -> String {
+pub(crate) fn session_metadata(actor: Option<&str>, extra: Option<serde_json::Value>) -> String {
     let mut metadata = serde_json::json!({
         "actor": actor.unwrap_or("default"),
     });

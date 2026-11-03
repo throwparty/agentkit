@@ -8,8 +8,8 @@ use agentkit_tackle::agent_client_protocol::schema::v1::{
     AuthenticateRequest, ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest,
     TextContent,
 };
-use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::schema::v2;
+use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::{
     AcpAgent, Agent, Client, ConnectionTo, V2ConnectionTo,
 };

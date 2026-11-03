@@ -412,7 +412,11 @@ impl Registry {
     pub fn manifest(&self) -> String {
         let mut lines = vec!["Invokables available to you (invoke them as tools):".to_owned()];
         for invokable in self.model_invokables() {
-            lines.push(format!("- {}: {}", invokable.name(), invokable.description()));
+            lines.push(format!(
+                "- {}: {}",
+                invokable.name(),
+                invokable.description()
+            ));
         }
         lines.push(
             "Never emit slash-command syntax (for example `/name` or `/!tool`) as literal text."

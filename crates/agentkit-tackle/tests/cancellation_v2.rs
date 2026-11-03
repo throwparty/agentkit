@@ -4,7 +4,7 @@
 use agentkit_tackle::agent_client_protocol::schema::v2;
 use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::{
-    AcpAgent, Agent, Client, V2ConnectionTo, on_receive_notification,
+    on_receive_notification, AcpAgent, Agent, Client, V2ConnectionTo,
 };
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -334,8 +334,10 @@ async fn a_cancelled_turn_releases_the_lease_for_the_next_prompt() {
                 .await?;
             let session_id = session.session_id.clone();
 
-            let prompt =
-                connection.send_request(v2::PromptRequest::new(session_id.clone(), vec![text("HANG")]));
+            let prompt = connection.send_request(v2::PromptRequest::new(
+                session_id.clone(),
+                vec![text("HANG")],
+            ));
             connection.send_notification(v2::CancelSessionNotification::new(session_id.clone()))?;
             prompt.block_task().await?;
             let idles = wait_for_idles(&seen, 1).await;
@@ -402,7 +404,10 @@ async fn cancel_after_completion_is_a_noop() {
             let session_id = session.session_id.clone();
 
             connection
-                .send_request(v2::PromptRequest::new(session_id.clone(), vec![text("hello")]))
+                .send_request(v2::PromptRequest::new(
+                    session_id.clone(),
+                    vec![text("hello")],
+                ))
                 .block_task()
                 .await?;
             let idles = wait_for_idles(&seen, 1).await;

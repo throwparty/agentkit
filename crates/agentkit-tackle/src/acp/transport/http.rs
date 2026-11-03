@@ -232,8 +232,10 @@ async fn handle_events(
     AxumState(server): AxumState<HttpServerState>,
     headers: HeaderMap,
     Query(params): Query<HashMap<String, String>>,
-) -> Result<Sse<impl futures::Stream<Item = Result<SseEvent, std::convert::Infallible>>>, axum::http::StatusCode>
-{
+) -> Result<
+    Sse<impl futures::Stream<Item = Result<SseEvent, std::convert::Infallible>>>,
+    axum::http::StatusCode,
+> {
     if !authorised(&headers, &server.token) {
         return Err(axum::http::StatusCode::UNAUTHORIZED);
     }
@@ -339,9 +341,8 @@ pub async fn run_http(
     token: Option<String>,
 ) -> agent_client_protocol::Result<()> {
     if token.is_none() && !is_loopback(bind) {
-        return Err(agent_client_protocol::Error::internal_error().data(format!(
-            "refusing to bind {bind} without --http-token"
-        )));
+        return Err(agent_client_protocol::Error::internal_error()
+            .data(format!("refusing to bind {bind} without --http-token")));
     }
     let token: Option<Arc<str>> = token.map(Arc::from);
     let server_state = HttpServerState {

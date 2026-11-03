@@ -1,15 +1,13 @@
 //! v2 wire helpers: session-id mapping and foreground state emission.
 
-use agent_client_protocol::schema::v2::{SessionId, SessionUpdate, StateUpdate, UpdateSessionNotification};
 use agent_client_protocol::role::acp::Client;
+use agent_client_protocol::schema::v2::{
+    SessionId, SessionUpdate, StateUpdate, UpdateSessionNotification,
+};
 use agent_client_protocol::V2ConnectionTo;
 
 /// Sends one foreground `state_update` for a session.
-pub(crate) fn send_state(
-    cx: &V2ConnectionTo<Client>,
-    session: &SessionId,
-    state: StateUpdate,
-) {
+pub(crate) fn send_state(cx: &V2ConnectionTo<Client>, session: &SessionId, state: StateUpdate) {
     let _ = cx.send_notification(UpdateSessionNotification::new(
         session.clone(),
         SessionUpdate::StateUpdate(state),

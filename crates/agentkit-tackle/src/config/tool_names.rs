@@ -84,7 +84,10 @@ mod tests {
     use crate::invokables::tool_name::ToolNameSchemeName;
     use std::collections::BTreeMap;
 
-    fn endpoint(tool_names: ToolNamesConfig, models: BTreeMap<String, ModelConfig>) -> EndpointConfig {
+    fn endpoint(
+        tool_names: ToolNamesConfig,
+        models: BTreeMap<String, ModelConfig>,
+    ) -> EndpointConfig {
         EndpointConfig {
             base_url: "http://localhost/v1".to_owned(),
             wire_format: WireFormat::OpenaiChatCompletions,
@@ -104,8 +107,9 @@ mod tests {
 
     #[test]
     fn default_is_strict_for_openai_chat() {
-        let scheme = resolve_tool_names("test", &endpoint(Default::default(), BTreeMap::new()), "m")
-            .unwrap();
+        let scheme =
+            resolve_tool_names("test", &endpoint(Default::default(), BTreeMap::new()), "m")
+                .unwrap();
         assert_eq!(scheme.name(), "strict");
         assert_eq!(scheme.max_length(), 64);
     }
@@ -138,7 +142,8 @@ mod tests {
     fn pattern_without_custom_is_rejected() {
         let mut config = names(ToolNameSchemeName::Strict);
         config.pattern = Some("^[a-z]+$".to_owned());
-        let error = resolve_tool_names("test", &endpoint(config, BTreeMap::new()), "m").unwrap_err();
+        let error =
+            resolve_tool_names("test", &endpoint(config, BTreeMap::new()), "m").unwrap_err();
         assert!(matches!(
             error,
             ToolNamesConfigError::PatternWithoutCustom { .. }

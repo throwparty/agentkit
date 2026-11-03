@@ -16,8 +16,6 @@ use crate::agent::prompt::{
 use crate::agent::runtime::TurnRuntime;
 use crate::agent::{compaction, TurnStop};
 use crate::invokables::client_tools::{ClientToolExecutor, Executed};
-use std::future::Future;
-use std::pin::Pin;
 use crate::scripts::host::NoticeSink;
 use crate::state::TackleState;
 use crate::store::SessionId;
@@ -29,6 +27,8 @@ use agent_client_protocol::schema::v2::{
     UpdateSessionNotification, UsageUpdate, UserMessage,
 };
 use agent_client_protocol::{Error, Responder, V2ConnectionTo};
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 /// `session/prompt`: the insertion response is the user message id; the turn
@@ -58,14 +58,7 @@ pub(super) async fn handle_prompt(
         return responder.respond_with_error(Error::request_cancelled());
     }
 
-    match begin_prompt_turn(
-        &state,
-        session_id.clone(),
-        blocks.clone(),
-        owner.as_str(),
-    )
-    .await
-    {
+    match begin_prompt_turn(&state, session_id.clone(), blocks.clone(), owner.as_str()).await {
         Ok(begun) => {
             run_prompt_after_begin(state, negotiation, cx, owner, request, responder, begun).await
         }
@@ -83,8 +76,7 @@ pub(super) async fn handle_prompt(
                 "queued prompt waits for the active turn"
             );
             cx.spawn(async move {
-                let deadline =
-                    tokio::time::Instant::now() + std::time::Duration::from_secs(60);
+                let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(60);
                 loop {
                     if matches!(
                         futures::poll!(Box::pin(request_cancellation.cancelled())),
@@ -120,16 +112,15 @@ pub(super) async fn handle_prompt(
                                 holder = %holder,
                                 "prompt refused: session actively owned"
                             );
-                            return responder.respond_with_error(
-                                Error::internal_error().data(serde_json::json!({
+                            return responder.respond_with_error(Error::internal_error().data(
+                                serde_json::json!({
                                     "error": "session-actively-owned",
                                     "owner": holder,
-                                })),
-                            )
+                                }),
+                            ));
                         }
                         Err(BeginError::Store(err)) => {
-                            return responder
-                                .respond_with_error(Error::internal_error().data(err))
+                            return responder.respond_with_error(Error::internal_error().data(err))
                         }
                     }
                     if tokio::time::Instant::now() >= deadline {
@@ -138,12 +129,12 @@ pub(super) async fn handle_prompt(
                             session = %session_id,
                             "queued prompt timed out waiting for the active turn"
                         );
-                        return responder.respond_with_error(
-                            Error::internal_error().data(serde_json::json!({
+                        return responder.respond_with_error(Error::internal_error().data(
+                            serde_json::json!({
                                 "error": "session-busy",
                                 "reason": "timed out waiting for the active turn",
-                            })),
-                        );
+                            }),
+                        ));
                     }
                     tokio::time::sleep(std::time::Duration::from_millis(25)).await;
                 }
@@ -221,14 +212,15 @@ async fn run_prompt_after_begin(
     cx.send_notification(UpdateSessionNotification::new(
         request.session_id.clone(),
         SessionUpdate::UserMessage(
-            UserMessage::new(agent_client_protocol::schema::v2::MessageId::new(user_message_id))
-                .content(prompt_blocks),
+            UserMessage::new(agent_client_protocol::schema::v2::MessageId::new(
+                user_message_id,
+            ))
+            .content(prompt_blocks),
         ),
     ))
     .map_err(|err| Error::internal_error().data(err.to_string()))?;
 
-    let is_compaction =
-        compaction::is_compaction_command(&state.definitions(), &first_text);
+    let is_compaction = compaction::is_compaction_command(&state.definitions(), &first_text);
     let dispatch = decide(&first_text, is_compaction);
     let context_size = session_row
         .as_ref()
@@ -272,14 +264,8 @@ async fn run_prompt_after_begin(
         );
         let outcome = match dispatch {
             Dispatch::Fork => {
-                let result = run_fork(
-                    &state,
-                    &turn_cx,
-                    &wire_session,
-                    &store_session,
-                    &turn.id,
-                )
-                .await;
+                let result =
+                    run_fork(&state, &turn_cx, &wire_session, &store_session, &turn.id).await;
                 state.db.release_lease(&store_session, &owner).await.ok();
                 match result {
                     Ok(()) => Ok(TurnStop::EndTurn),
@@ -409,23 +395,24 @@ async fn run_prompt_after_begin(
                 .await
             }
         };
-        let stop = match outcome {
-            Ok(TurnStop::EndTurn | TurnStop::ContextLength) => StopReason::EndTurn,
-            Ok(TurnStop::MaxTurnRequests) => StopReason::MaxTurnRequests,
-            Ok(TurnStop::Cancelled) => StopReason::Cancelled,
-            Err(_) if cancellation.is_cancelled() => StopReason::Cancelled,
-            Err(err) => {
-                tracing::warn!(
-                    version = "v2",
-                    session = %wire_session,
-                    error = %err,
-                    "v2 turn failed"
-                );
-                StopReason::Error(ErrorStopReason::new().error(
-                    agent_client_protocol::schema::v2::Error::internal_error().data(err),
-                ))
-            }
-        };
+        let stop =
+            match outcome {
+                Ok(TurnStop::EndTurn | TurnStop::ContextLength) => StopReason::EndTurn,
+                Ok(TurnStop::MaxTurnRequests) => StopReason::MaxTurnRequests,
+                Ok(TurnStop::Cancelled) => StopReason::Cancelled,
+                Err(_) if cancellation.is_cancelled() => StopReason::Cancelled,
+                Err(err) => {
+                    tracing::warn!(
+                        version = "v2",
+                        session = %wire_session,
+                        error = %err,
+                        "v2 turn failed"
+                    );
+                    StopReason::Error(ErrorStopReason::new().error(
+                        agent_client_protocol::schema::v2::Error::internal_error().data(err),
+                    ))
+                }
+            };
         tracing::info!(
             version = "v2",
             session = %wire_session,
@@ -470,9 +457,8 @@ fn message_upsert(message_id: MessageId, patch: MessagePatch) -> AgentMessage {
     let message = AgentMessage::new(message_id);
     match patch {
         MessagePatch::Omit => message,
-        MessagePatch::Clear => {
-            message.content(agent_client_protocol::schema::MaybeUndefined::<Vec<ContentBlock>>::Null)
-        }
+        MessagePatch::Clear => message
+            .content(agent_client_protocol::schema::MaybeUndefined::<Vec<ContentBlock>>::Null),
         MessagePatch::Replace(blocks) => message.content(blocks),
     }
 }
@@ -498,12 +484,7 @@ fn announce_stored_message(
     message: &crate::store::Message,
 ) {
     let blocks = serde_json::from_str::<Vec<ContentBlock>>(&message.content).unwrap_or_default();
-    announce_agent_message(
-        cx,
-        wire_session,
-        MessageId::new(message.id.clone()),
-        blocks,
-    );
+    announce_agent_message(cx, wire_session, MessageId::new(message.id.clone()), blocks);
 }
 
 /// The ephemeral `/context` report: build the same system prompt, tool
@@ -715,8 +696,7 @@ mod tests {
             TextContent::new("replacement"),
         )]));
         assert_eq!(
-            update["update"]["content"][0]["text"],
-            "replacement",
+            update["update"]["content"][0]["text"], "replacement",
             "replace carries the new blocks: {update}"
         );
     }

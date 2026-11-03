@@ -85,4 +85,3 @@ impl Default for ConnectionNegotiation {
 impl TerminalTracker for ConnectionNegotiation {
     fn track(&self, _session: &SessionId, _created: Option<String>, _finished: Option<String>) {}
 }
-

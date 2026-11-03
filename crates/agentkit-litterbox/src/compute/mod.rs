@@ -135,8 +135,11 @@ impl DockerCompute {
     }
 
     fn connect_with_defaults() -> Result<Docker, SandboxError> {
-        Docker::connect_with_local_defaults()
-            .map_err(|source| SandboxError::Compute(ComputeError::Connection { source: backend_error(source) }))
+        Docker::connect_with_local_defaults().map_err(|source| {
+            SandboxError::Compute(ComputeError::Connection {
+                source: backend_error(source),
+            })
+        })
     }
 
     pub async fn ensure_image(&self, image: &str) -> Result<(), SandboxError> {
@@ -157,7 +160,11 @@ impl DockerCompute {
         let mut stream = self.client.create_image(options, None, None);
 
         while let Some(item) = stream.next().await {
-            item.map_err(|source| SandboxError::Compute(ComputeError::ImagePull { source: backend_error(source) }))?;
+            item.map_err(|source| {
+                SandboxError::Compute(ComputeError::ImagePull {
+                    source: backend_error(source),
+                })
+            })?;
         }
 
         Ok(())
@@ -213,12 +220,20 @@ impl DockerCompute {
             .client
             .create_container(options, config)
             .await
-            .map_err(|source| SandboxError::Compute(ComputeError::ContainerProvision { source: backend_error(source) }))?;
+            .map_err(|source| {
+                SandboxError::Compute(ComputeError::ContainerProvision {
+                    source: backend_error(source),
+                })
+            })?;
 
         self.client
             .start_container(&response.id, None)
             .await
-            .map_err(|source| SandboxError::Compute(ComputeError::ContainerProvision { source: backend_error(source) }))?;
+            .map_err(|source| {
+                SandboxError::Compute(ComputeError::ContainerProvision {
+                    source: backend_error(source),
+                })
+            })?;
 
         Ok(response.id)
     }
@@ -231,7 +246,11 @@ impl DockerCompute {
             .client
             .inspect_container(container_id, None)
             .await
-            .map_err(|source| SandboxError::Compute(ComputeError::ContainerInspect { source: backend_error(source) }))?;
+            .map_err(|source| {
+                SandboxError::Compute(ComputeError::ContainerInspect {
+                    source: backend_error(source),
+                })
+            })?;
         let env = inspect
             .config
             .and_then(|config| config.env)
@@ -278,13 +297,15 @@ impl DockerCompute {
 
     pub async fn list(&self, name_prefix: &str) -> Result<Vec<SandboxSummary>, SandboxError> {
         let options = Some(ListContainersOptionsBuilder::default().all(true).build());
-        let containers =
-            self.client
-                .list_containers(options)
-                .await
-                .map_err(|source| SandboxError::Compute(ComputeError::ContainerList {
+        let containers = self
+            .client
+            .list_containers(options)
+            .await
+            .map_err(|source| {
+                SandboxError::Compute(ComputeError::ContainerList {
                     source: backend_error(source),
-                }))?;
+                })
+            })?;
 
         Ok(containers
             .into_iter()
@@ -327,7 +348,9 @@ impl DockerCompute {
             Err(bollard::errors::Error::DockerResponseServerError {
                 status_code: 409, ..
             }) => Ok(()),
-            Err(source) => Err(SandboxError::Compute(ComputeError::ContainerPause { source: backend_error(source) })),
+            Err(source) => Err(SandboxError::Compute(ComputeError::ContainerPause {
+                source: backend_error(source),
+            })),
         }
     }
 
@@ -337,7 +360,9 @@ impl DockerCompute {
             Err(bollard::errors::Error::DockerResponseServerError {
                 status_code: 409, ..
             }) => Ok(()),
-            Err(source) => Err(SandboxError::Compute(ComputeError::ContainerResume { source: backend_error(source) })),
+            Err(source) => Err(SandboxError::Compute(ComputeError::ContainerResume {
+                source: backend_error(source),
+            })),
         }
     }
 
@@ -357,7 +382,9 @@ impl DockerCompute {
             Err(bollard::errors::Error::DockerResponseServerError {
                 status_code: 404, ..
             }) => Ok(()),
-            Err(source) => Err(SandboxError::Compute(ComputeError::ContainerDelete { source: backend_error(source) })),
+            Err(source) => Err(SandboxError::Compute(ComputeError::ContainerDelete {
+                source: backend_error(source),
+            })),
         }
     }
 
@@ -380,7 +407,11 @@ impl DockerCompute {
             .client
             .create_exec(container_id, exec_options)
             .await
-            .map_err(|source| SandboxError::Compute(ComputeError::ContainerExec { source: backend_error(source) }))?;
+            .map_err(|source| {
+                SandboxError::Compute(ComputeError::ContainerExec {
+                    source: backend_error(source),
+                })
+            })?;
 
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
@@ -389,12 +420,18 @@ impl DockerCompute {
             .client
             .start_exec(&exec.id, None::<StartExecOptions>)
             .await
-            .map_err(|source| SandboxError::Compute(ComputeError::ContainerExec { source: backend_error(source) }))?;
+            .map_err(|source| {
+                SandboxError::Compute(ComputeError::ContainerExec {
+                    source: backend_error(source),
+                })
+            })?;
 
         if let StartExecResults::Attached { mut output, .. } = results {
             while let Some(item) = output.next().await {
                 match item.map_err(|source| {
-                    SandboxError::Compute(ComputeError::ContainerExec { source: backend_error(source) })
+                    SandboxError::Compute(ComputeError::ContainerExec {
+                        source: backend_error(source),
+                    })
                 })? {
                     LogOutput::StdOut { message } | LogOutput::Console { message } => {
                         stdout.extend_from_slice(&message)
@@ -405,11 +442,11 @@ impl DockerCompute {
             }
         }
 
-        let inspect = self
-            .client
-            .inspect_exec(&exec.id)
-            .await
-            .map_err(|source| SandboxError::Compute(ComputeError::ContainerExec { source: backend_error(source) }))?;
+        let inspect = self.client.inspect_exec(&exec.id).await.map_err(|source| {
+            SandboxError::Compute(ComputeError::ContainerExec {
+                source: backend_error(source),
+            })
+        })?;
         let exit_code = inspect
             .exit_code
             .unwrap_or(1)
@@ -459,7 +496,11 @@ impl DockerCompute {
         self.client
             .upload_to_container(container_id, options, body)
             .await
-            .map_err(|source| SandboxError::Compute(ComputeError::ContainerUpload { source: backend_error(source) }))
+            .map_err(|source| {
+                SandboxError::Compute(ComputeError::ContainerUpload {
+                    source: backend_error(source),
+                })
+            })
     }
 
     async fn download_tar(
@@ -476,7 +517,9 @@ impl DockerCompute {
         let mut buffer = Vec::new();
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|source| {
-                SandboxError::Compute(ComputeError::ContainerDownload { source: backend_error(source) })
+                SandboxError::Compute(ComputeError::ContainerDownload {
+                    source: backend_error(source),
+                })
             })?;
             buffer.extend_from_slice(&chunk);
         }
@@ -561,8 +604,11 @@ fn connect_with_host(host: &str) -> Result<Docker, SandboxError> {
         "unix" => {
             #[cfg(unix)]
             {
-                Docker::connect_with_socket(rest, 120, API_DEFAULT_VERSION)
-                    .map_err(|source| SandboxError::Compute(ComputeError::Connection { source: backend_error(source) }))
+                Docker::connect_with_socket(rest, 120, API_DEFAULT_VERSION).map_err(|source| {
+                    SandboxError::Compute(ComputeError::Connection {
+                        source: backend_error(source),
+                    })
+                })
             }
             #[cfg(not(unix))]
             {
@@ -576,8 +622,11 @@ fn connect_with_host(host: &str) -> Result<Docker, SandboxError> {
         }
         "tcp" => {
             let endpoint = format!("http://{}", rest);
-            Docker::connect_with_http(&endpoint, 120, API_DEFAULT_VERSION)
-                .map_err(|source| SandboxError::Compute(ComputeError::Connection { source: backend_error(source) }))
+            Docker::connect_with_http(&endpoint, 120, API_DEFAULT_VERSION).map_err(|source| {
+                SandboxError::Compute(ComputeError::Connection {
+                    source: backend_error(source),
+                })
+            })
         }
         _ => DockerCompute::connect_with_defaults(),
     }
@@ -788,8 +837,14 @@ mod tests {
 
     #[test]
     fn summary_names_drop_the_docker_leading_slash() {
-        assert_eq!(strip_leading_slash("/litterbox-repo-slug"), "litterbox-repo-slug");
-        assert_eq!(strip_leading_slash("litterbox-repo-slug"), "litterbox-repo-slug");
+        assert_eq!(
+            strip_leading_slash("/litterbox-repo-slug"),
+            "litterbox-repo-slug"
+        );
+        assert_eq!(
+            strip_leading_slash("litterbox-repo-slug"),
+            "litterbox-repo-slug"
+        );
     }
 
     #[test]
@@ -804,7 +859,9 @@ mod tests {
     #[test]
     fn docker_host_env_used_without_context_env() {
         let source = select_endpoint_source(None, Some("unix:///tmp/env.sock".to_string()));
-        assert!(matches!(source, EndpointSource::HostEnv { host } if host == "unix:///tmp/env.sock"));
+        assert!(
+            matches!(source, EndpointSource::HostEnv { host } if host == "unix:///tmp/env.sock")
+        );
     }
 
     #[test]

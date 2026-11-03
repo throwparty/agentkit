@@ -5,7 +5,7 @@
 use agentkit_tackle::agent_client_protocol::schema::v2;
 use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::{
-    AcpAgent, Agent, Client, ConnectionTo, V2ConnectionTo, on_receive_notification,
+    on_receive_notification, AcpAgent, Agent, Client, ConnectionTo, V2ConnectionTo,
 };
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -298,7 +298,6 @@ async fn v1_and_v2_negotiate_independently() {
         .await;
     assert!(v2.is_ok(), "v2 negotiation");
 }
-
 
 async fn wait_for_compaction(seen: &Arc<Mutex<Vec<Seen>>>) -> Option<v2::CompactionStatus> {
     for _ in 0..200 {
@@ -788,9 +787,12 @@ async fn v2_direct_tool_invocation_runs_without_the_model() {
 
 async fn wait_for_agent_text(seen: &Arc<Mutex<Vec<Seen>>>, needle: &str) -> bool {
     for _ in 0..200 {
-        if seen.lock().unwrap().iter().any(
-            |entry| matches!(entry, Seen::AgentText(text) if text.contains(needle)),
-        ) {
+        if seen
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|entry| matches!(entry, Seen::AgentText(text) if text.contains(needle)))
+        {
             return true;
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
@@ -1013,7 +1015,9 @@ struct SlowModel;
 
 impl Respond for SlowModel {
     fn respond(&self, request: &Request) -> ResponseTemplate {
-        ScriptedModel.respond(request).set_delay(Duration::from_millis(150))
+        ScriptedModel
+            .respond(request)
+            .set_delay(Duration::from_millis(150))
     }
 }
 
@@ -1090,7 +1094,12 @@ async fn v2_concurrent_prompts_queue_instead_of_failing() {
                 }
                 tokio::time::sleep(Duration::from_millis(25)).await;
             }
-            assert_eq!(idles, 2, "both queued turns reach idle: {:?}", seen.lock().unwrap());
+            assert_eq!(
+                idles,
+                2,
+                "both queued turns reach idle: {:?}",
+                seen.lock().unwrap()
+            );
             Ok(())
         })
         .await
@@ -1143,10 +1152,7 @@ async fn v2_fork_is_seeded_and_replays_on_resume() {
                 .block_task()
                 .await?;
             let fork = connection
-                .send_request(v2::ForkSessionRequest::new(
-                    source.session_id,
-                    cwd.clone(),
-                ))
+                .send_request(v2::ForkSessionRequest::new(source.session_id, cwd.clone()))
                 .block_task()
                 .await?;
 
@@ -1532,7 +1538,6 @@ async fn v2_resume_replays_ordered_ids_and_rejects_unknown_cursors() {
         .expect("v2 resume replay");
 }
 
-
 #[tokio::test(flavor = "multi_thread")]
 async fn v2_close_and_delete_cancel_in_flight_turns() {
     let dir = tempfile::tempdir().unwrap();
@@ -1587,7 +1592,10 @@ async fn v2_close_and_delete_cancel_in_flight_turns() {
             prompt.block_task().await?;
             let idles = wait_for_idles(&seen, 1).await;
             assert!(
-                matches!(idles.first(), Some(Seen::Idle(Some(v2::StopReason::Cancelled)))),
+                matches!(
+                    idles.first(),
+                    Some(Seen::Idle(Some(v2::StopReason::Cancelled)))
+                ),
                 "close cancels the turn: {idles:?}"
             );
             let listed = connection
@@ -1618,7 +1626,10 @@ async fn v2_close_and_delete_cancel_in_flight_turns() {
             prompt.block_task().await?;
             let idles = wait_for_idles(&seen, 2).await;
             assert!(
-                matches!(idles.get(1), Some(Seen::Idle(Some(v2::StopReason::Cancelled)))),
+                matches!(
+                    idles.get(1),
+                    Some(Seen::Idle(Some(v2::StopReason::Cancelled)))
+                ),
                 "delete cancels the turn: {idles:?}"
             );
             let listed = connection
@@ -1638,10 +1649,7 @@ async fn v2_close_and_delete_cancel_in_flight_turns() {
         .expect("v2 close/delete");
 }
 
-async fn wait_for_idles(
-    seen: &Arc<Mutex<Vec<Seen>>>,
-    count: usize,
-) -> Vec<Seen> {
+async fn wait_for_idles(seen: &Arc<Mutex<Vec<Seen>>>, count: usize) -> Vec<Seen> {
     for _ in 0..400 {
         {
             let seen = seen.lock().unwrap();
@@ -1737,7 +1745,6 @@ async fn v2_initialize_advertises_capabilities_and_additional_directories() {
         .expect("v2 capabilities and additional directories");
 }
 
-
 #[tokio::test(flavor = "multi_thread")]
 async fn v2_failure_after_insertion_keeps_the_message_and_reports_the_error() {
     let dir = tempfile::tempdir().unwrap();
@@ -1808,9 +1815,10 @@ async fn v2_failure_after_insertion_keeps_the_message_and_reports_the_error() {
                 "the failure detail rides the stop reason: {error:?}"
             );
             assert!(
-                seen.lock().unwrap().iter().any(
-                    |entry| matches!(entry, Seen::User(id) if id == &message_id)
-                ),
+                seen.lock()
+                    .unwrap()
+                    .iter()
+                    .any(|entry| matches!(entry, Seen::User(id) if id == &message_id)),
                 "the inserted user message keeps its id: {:?}",
                 seen.lock().unwrap()
             );
@@ -1843,8 +1851,7 @@ impl Respond for ElicitModel {
                 r#"data: {"id":"c1","object":"chat.completion.chunk","created":0,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#,
                 "data: [DONE]",
             ];
-            ResponseTemplate::new(200)
-                .set_body_raw(lines.join("\n\n") + "\n", "text/event-stream")
+            ResponseTemplate::new(200).set_body_raw(lines.join("\n\n") + "\n", "text/event-stream")
         } else {
             let lines = [
                 r#"data: {"id":"c1","object":"chat.completion.chunk","created":0,"model":"m","choices":[{"index":0,"delta":{"role":"assistant"}}]}"#.to_owned(),
@@ -1854,8 +1861,7 @@ impl Respond for ElicitModel {
                 r#"data: {"id":"c1","object":"chat.completion.chunk","created":0,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}"#.to_owned(),
                 "data: [DONE]".to_owned(),
             ];
-            ResponseTemplate::new(200)
-                .set_body_raw(lines.join("\n\n") + "\n", "text/event-stream")
+            ResponseTemplate::new(200).set_body_raw(lines.join("\n\n") + "\n", "text/event-stream")
         }
     }
 }

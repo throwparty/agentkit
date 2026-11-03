@@ -82,10 +82,7 @@ fn render(session_id: &SessionId, event: ReplayEvent) -> Vec<UpdateSessionNotifi
             }
         }
     };
-    vec![UpdateSessionNotification::new(
-        session_id.clone(),
-        update,
-    )]
+    vec![UpdateSessionNotification::new(session_id.clone(), update)]
 }
 
 #[cfg(test)]

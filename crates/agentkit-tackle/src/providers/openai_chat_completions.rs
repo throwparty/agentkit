@@ -106,12 +106,7 @@ pub fn provider_for(
             )
         }
     };
-    RigProvider::openai_completions(
-        &endpoint.base_url,
-        credential.expose_secret(),
-        model,
-        names,
-    )
+    RigProvider::openai_completions(&endpoint.base_url, credential.expose_secret(), model, names)
 }
 
 impl ModelProvider for RigProvider {

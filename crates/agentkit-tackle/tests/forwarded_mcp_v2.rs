@@ -5,7 +5,7 @@
 use agentkit_tackle::agent_client_protocol::schema::v2;
 use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::{
-    AcpAgent, Agent, Client, V2ConnectionTo, on_receive_notification, on_receive_request,
+    on_receive_notification, on_receive_request, AcpAgent, Agent, Client, V2ConnectionTo,
 };
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -226,9 +226,9 @@ async fn a_forwarded_mcp_server_is_advertised_and_callable() {
                     .or_else(|| request.options.first());
                 match chosen {
                     Some(option) => responder.respond(v2::RequestPermissionResponse::new(
-                        v2::RequestPermissionOutcome::Selected(
-                            v2::SelectedPermissionOutcome::new(option.option_id.clone()),
-                        ),
+                        v2::RequestPermissionOutcome::Selected(v2::SelectedPermissionOutcome::new(
+                            option.option_id.clone(),
+                        )),
                     )),
                     None => responder.respond(v2::RequestPermissionResponse::new(
                         v2::RequestPermissionOutcome::Cancelled,

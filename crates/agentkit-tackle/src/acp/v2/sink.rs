@@ -161,7 +161,10 @@ mod tests {
         let wire = announce(call);
         assert_eq!(wire.tool_call_id, ToolCallId::new("call-1"));
         assert!(matches!(&wire.title, MaybeUndefined::Value(t) if t == "Read a.txt"));
-        assert!(matches!(wire.status, MaybeUndefined::Value(WireStatus::InProgress)));
+        assert!(matches!(
+            wire.status,
+            MaybeUndefined::Value(WireStatus::InProgress)
+        ));
     }
 
     #[test]

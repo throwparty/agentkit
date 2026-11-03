@@ -2,10 +2,10 @@
 //! `delete`, and `set_config_option`, served from the same store and
 //! ownership leases as v1.
 
+use crate::acp::common::session as common_session;
 use crate::agent::config_options::{
     self, ConfigOption, ConfigOptionCategory, ConfigOptionKind, SelectOption,
 };
-use crate::acp::common::session as common_session;
 use crate::agent::fork::{self, fork_access};
 use crate::agent::script_loop;
 use crate::content::timestamp;
@@ -15,21 +15,19 @@ use crate::store::ListFilter;
 use agent_client_protocol::role::acp::Client;
 use agent_client_protocol::schema::v2::{
     AbsolutePath, AvailableCommandsUpdate, CloseSessionRequest, CloseSessionResponse,
-    ContentBlock, Cost, DeleteSessionRequest, DeleteSessionResponse, ForkSessionRequest,
-    ForkSessionResponse, IdleStateUpdate, ListSessionsRequest, ListSessionsResponse, MessageId,
-    NewSessionRequest, NewSessionResponse, Notice, NoticeSeverity, ReplayFrom, ResumeSessionRequest,
-    ResumeSessionResponse,
-    ConfigOptionUpdate, SessionConfigId, SessionConfigOption, SessionConfigOptionCategory,
-    SessionConfigOptionValue,
-    SessionConfigSelectOption, SessionConfigValueId, SessionInfo, SessionUpdate,
-    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, StateUpdate,
-    UpdateSessionNotification, UsageUpdate, UserMessage,
+    ConfigOptionUpdate, ContentBlock, Cost, DeleteSessionRequest, DeleteSessionResponse,
+    ForkSessionRequest, ForkSessionResponse, IdleStateUpdate, ListSessionsRequest,
+    ListSessionsResponse, MessageId, NewSessionRequest, NewSessionResponse, Notice, NoticeSeverity,
+    ReplayFrom, ResumeSessionRequest, ResumeSessionResponse, SessionConfigId, SessionConfigOption,
+    SessionConfigOptionCategory, SessionConfigOptionValue, SessionConfigSelectOption,
+    SessionConfigValueId, SessionInfo, SessionUpdate, SetSessionConfigOptionRequest,
+    SetSessionConfigOptionResponse, StateUpdate, UpdateSessionNotification, UsageUpdate,
+    UserMessage,
 };
 use agent_client_protocol::{Error, Responder, V2ConnectionTo};
 use std::sync::Arc;
 
 use super::{store_session_id, wire_session_id};
-
 
 /// Sends exactly one usage snapshot for a live session: the effective model's
 /// window, the assembled-context estimate, and the cumulative cost when known.
@@ -86,10 +84,7 @@ fn wire_option(option: &ConfigOption) -> SessionConfigOption {
     let choices: Vec<SessionConfigSelectOption> = options
         .iter()
         .map(|SelectOption { value, label }| {
-            SessionConfigSelectOption::new(
-                SessionConfigValueId::new(value.clone()),
-                label.clone(),
-            )
+            SessionConfigSelectOption::new(SessionConfigValueId::new(value.clone()), label.clone())
         })
         .collect();
     SessionConfigOption::select(
@@ -192,13 +187,7 @@ pub(super) async fn handle_new_session(
             SessionUpdate::Notice(Notice::new(NoticeSeverity::Warning, text)),
         ));
     }
-    send_usage_snapshot(
-        &state,
-        &cx,
-        &wire_session_id(&session.id),
-        &session.id,
-    )
-    .await?;
+    send_usage_snapshot(&state, &cx, &wire_session_id(&session.id), &session.id).await?;
     Ok(())
 }
 
@@ -237,13 +226,12 @@ pub(super) async fn handle_list_sessions(
             if !session.title.is_empty() {
                 info = info.title(session.title.clone());
             }
-            info.additional_directories = serde_json::from_str::<serde_json::Value>(
-                &session.metadata,
-            )
-            .ok()
-            .and_then(|meta| meta.get("additionalDirectories").cloned())
-            .and_then(|value| serde_json::from_value::<Vec<AbsolutePath>>(value).ok())
-            .unwrap_or_default();
+            info.additional_directories =
+                serde_json::from_str::<serde_json::Value>(&session.metadata)
+                    .ok()
+                    .and_then(|meta| meta.get("additionalDirectories").cloned())
+                    .and_then(|value| serde_json::from_value::<Vec<AbsolutePath>>(value).ok())
+                    .unwrap_or_default();
             info
         })
         .collect();
@@ -290,9 +278,10 @@ pub(super) async fn handle_delete_session(
     negotiation.wait_cancelled(&store_session).await;
     if let Err(err) = state.db.delete_session(&store_session).await {
         if let crate::store::StoreError::LeaseHeld { owner, .. } = &err {
-            return responder.respond_with_error(Error::internal_error().data(
-                serde_json::json!({ "error": "session-actively-owned", "owner": owner }),
-            ));
+            return responder
+                .respond_with_error(Error::internal_error().data(
+                    serde_json::json!({ "error": "session-actively-owned", "owner": owner }),
+                ));
         }
         return responder.respond_with_error(Error::internal_error().data(err.to_string()));
     }
@@ -335,9 +324,8 @@ pub(super) async fn handle_resume_session(
         }
         None => {}
         Some(_) => {
-            return responder.respond_with_error(
-                Error::invalid_params().data("unsupported replay cursor"),
-            );
+            return responder
+                .respond_with_error(Error::invalid_params().data("unsupported replay cursor"));
         }
     }
 
@@ -397,13 +385,7 @@ pub(super) async fn handle_fork_session(
             .config_options(wire_options(&selectors.options))
             .available_commands(super::commands::available_commands(&state, &negotiation).await),
     )?;
-    send_usage_snapshot(
-        &state,
-        &cx,
-        &wire_session_id(&fork.id),
-        &fork.id,
-    )
-    .await
+    send_usage_snapshot(&state, &cx, &wire_session_id(&fork.id), &fork.id).await
 }
 
 /// `session/set_config_option`: apply a model or actor switch and return the

@@ -56,9 +56,18 @@ mod tests {
         assert!(matches!(decide("/fork", false), Dispatch::Fork));
         assert!(matches!(decide("/fork now", false), Dispatch::Fork));
         assert!(matches!(decide("/forkfoo", false), Dispatch::Model));
-        assert!(matches!(decide("/!mcp.echo.echo {}", false), Dispatch::Direct(_)));
-        assert!(matches!(decide("/mcp status", false), Dispatch::RuntimeCommand));
-        assert!(matches!(decide("/editor fs true", false), Dispatch::RuntimeCommand));
+        assert!(matches!(
+            decide("/!mcp.echo.echo {}", false),
+            Dispatch::Direct(_)
+        ));
+        assert!(matches!(
+            decide("/mcp status", false),
+            Dispatch::RuntimeCommand
+        ));
+        assert!(matches!(
+            decide("/editor fs true", false),
+            Dispatch::RuntimeCommand
+        ));
         assert!(matches!(decide("/context", false), Dispatch::Context));
         assert!(matches!(decide("/compact", true), Dispatch::Compaction));
         assert!(matches!(decide("/compact", false), Dispatch::Model));

@@ -112,7 +112,8 @@ pub(crate) fn agent(
         .on_receive_notification(
             {
                 let negotiation = negotiation.clone();
-                async move |notification: CancelSessionNotification, _connection: V2ConnectionTo<Client>| {
+                async move |notification: CancelSessionNotification,
+                            _connection: V2ConnectionTo<Client>| {
                     let store_session = super::store_session_id(&notification.session_id);
                     tracing::info!(
                         version = "v2",
@@ -205,8 +206,13 @@ pub(crate) fn agent(
                 async move |request: SetSessionConfigOptionRequest,
                             responder,
                             connection: V2ConnectionTo<Client>| {
-                    super::sessions::handle_set_config(state.clone(), connection, request, responder)
-                        .await
+                    super::sessions::handle_set_config(
+                        state.clone(),
+                        connection,
+                        request,
+                        responder,
+                    )
+                    .await
                 }
             },
             agent_client_protocol::on_receive_request!(),

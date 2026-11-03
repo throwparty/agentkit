@@ -21,8 +21,8 @@ pub use load::{
     resolve_script_sources, retain_project_entries,
 };
 pub use schema::{
-    Auth, ClientToolsConfig, Config, ConfigError, Defaults, EndpointConfig, Loaded, McpServerConfig,
-    ModelConfig, ModelsConfig, ScriptConfig, SessionsConfig, ToolNamesConfig, TurnsConfig,
-    WireFormat,
+    Auth, ClientToolsConfig, Config, ConfigError, Defaults, EndpointConfig, Loaded,
+    McpServerConfig, ModelConfig, ModelsConfig, ScriptConfig, SessionsConfig, ToolNamesConfig,
+    TurnsConfig, WireFormat,
 };
 pub use tool_names::{resolve_tool_names, ToolNamesConfigError};

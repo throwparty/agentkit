@@ -70,7 +70,9 @@ impl PermissionRequester for AcpPermissionRequester {
         let mut tool_call = ToolCallUpdate::new(ToolCallId::new(tool_call_id))
             .name(request.invokable.clone())
             .title(title.clone())
-            .kind(super::sink::wire_kind(titles::tool_kind(&request.invokable)));
+            .kind(super::sink::wire_kind(titles::tool_kind(
+                &request.invokable,
+            )));
         if let Some(reason) = &request.ask_reason {
             tool_call = tool_call.content(vec![ToolCallContent::Content(Box::new(Content::new(
                 ContentBlock::Text(TextContent::new(reason.clone())),

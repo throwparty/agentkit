@@ -14,7 +14,7 @@ use agentkit_tackle::agent_client_protocol::{
 };
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::sync::{Notify, oneshot};
+use tokio::sync::{oneshot, Notify};
 use wiremock::matchers::method;
 use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 
