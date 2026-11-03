@@ -2,15 +2,15 @@
 
 Map complete: 22 tickets, none open. Detail in `evidence/`, decisions in `map.toon`.
 
-**Next:** `adr.specify` `sandbox-provider-contract` with a brief only. Then capture,
-linux, darwin, proxy in parallel. Proxy is the longest pole for a usable sandbox:
-without it both native backends are offline-only.
+**Next:** `adr.plan` `sandbox-provider-contract`. Then nix-devshell-env-capture,
+the bubblewrap backend and the Seatbelt backend in parallel. Proxy is the longest
+pole for a usable sandbox: without it both native backends are offline-only.
 
 ## ADRs
 
 ```mermaid
 flowchart LR
-    contract["sandbox-provider-contract"] --> capture[devenv-environment-capture]
+    contract["sandbox-provider-contract"] --> capture[nix-devshell-env-capture]
     contract --> linux[linux-bwrap-provider]
     contract --> darwin[darwin-sandbox-provider]
     contract --> proxy[egress-proxy]
@@ -95,8 +95,8 @@ evaluates. Withhold it.
 
 ## Contract notes
 
-- Facets are platform-specific (`posix`, `linux`, `darwin`, later `win32`). The
-  core trait holds only the invariants.
+- Facets are capability families a mechanism implements; a backend is not tied
+  to a host platform. The core trait holds only the invariants.
 - Readiness at provider and facet level, each returning reason and remedy.
 - Missing facet: compile error. Runtime-unavailable: startup error, never a
   silent downgrade.

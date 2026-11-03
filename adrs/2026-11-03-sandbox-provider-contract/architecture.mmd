@@ -1,0 +1,18 @@
+flowchart TD
+    CLI["main.rs (CLI)"] --> CONTRACT["sandbox (contract)"]
+    CLI --> REGISTRY["backends (registry)"]
+    CLI --> PERSIST["metadata_store"]
+    CLI --> CONFIG["config"]
+
+    MCP["mcp.rs (MCP server)"] --> CONTRACT
+    MCP --> REGISTRY
+    MCP --> PERSIST
+    MCP --> CONFIG
+
+    REGISTRY --> CONTRACT
+    REGISTRY --> DOCKER["backends::docker"]
+    DOCKER --> CONTRACT
+    PERSIST --> CONTRACT
+
+    CONFIG --> APPATH["agentkit-path"]
+    DOCKER --> BOLLARD["bollard"]
