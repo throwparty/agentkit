@@ -56,12 +56,12 @@ Add report.rs and environment.rs: Readiness with per-primitive Check entries, Ca
 
 ### T-005: [x] Facet traits and the compile-time gate
 
-Add facets.rs with Lifecycle, Limits and Forwarding as supertraits of Sandbox, plus LimitsSpec and Forward. Include a compile_fail test showing a lifecycle call is rejected on a core-only type.
+Add facets.rs with Lifecycle, Limits and Forwarding as supertraits of Sandbox, plus ResourceLimits and Forward. Include a compile_fail doctest showing a lifecycle call is rejected on a core-only type.
 
 
 | Field | Value |
 |-------|-------|
-| Success Criteria | A compile_fail test fails for a lifecycle call on a type implementing only Sandbox; one Arc coerces into both Arc<dyn Sandbox> and Arc<dyn Lifecycle>; clippy is clean. |
+| Success Criteria | A compile_fail doctest fails for a lifecycle call on a type implementing only Sandbox; one Arc coerces into both Arc<dyn Sandbox> and Arc<dyn Lifecycle>; clippy is clean. |
 | Complexity | 🟡 Medium |
 | Effort | 2-3h |
 | Depends On | T-002 |
@@ -82,16 +82,16 @@ Relocate compute/mod.rs to backends/docker/compute.rs, container naming and host
 
 ### T-007: Docker backend on the contract
 
-Implement Sandbox for DockerBackend: create with setup and rollback, list for both scopes, exec, upload, download, inspect, delete, readiness and capabilities. Report direct egress, unchanged environment provenance, the workspace path and forwards with their bind address. Implement Lifecycle and Forwarding.
+Implement Sandbox for DockerBackend over a prepared Workspace: create by uploading the staged tree and running setup, with rollback; list for both scopes; exec, upload, download, inspect, delete, readiness and capabilities. Report direct egress, unchanged environment provenance, the workspace path and forwards with their bind address. Implement Lifecycle and Forwarding. Create no branch and delete none.
 
 
 | Field | Value |
 |-------|-------|
-| Success Criteria | Every existing provider test is ported with unchanged assertions and passes; inspect reports direct egress; a failed setup leaves no container and no branch; a forwarded port reports the configured bind address; a confinement or setup failure is distinguishable from a command that exited non-zero; a workspace bound elsewhere translates only workspace references. |
+| Success Criteria | Every existing provider test is ported with unchanged assertions except those that asserted branch creation or deletion, which move to the orchestrator; inspect reports direct egress; a failed setup leaves no container; a forwarded port reports the configured bind address; no SCM call is reachable from the backend. |
 | Complexity | 🔴 High |
 | Effort | 6-8h |
 | Depends On | T-006 |
-| References | docker-conformance,backend-neutral-contract,egress-posture,port-forwarding,create-atomicity,workspace-transfer,environment-provenance,workspace-path-mapping,fail-closed,provenance-visible,egress-typed,ports-honest,create-leaves-nothing,workspace-relocated,direct-egress-reported |
+| References | docker-conformance,backend-neutral-contract,egress-posture,port-forwarding,create-atomicity,workspace-transfer,environment-provenance,workspace-path-mapping,fail-closed,provenance-visible,egress-typed,ports-honest,create-leaves-nothing,workspace-relocated,direct-egress-reported,branch-compute-pairing |
 
 ### T-008: Docker configuration and readiness
 
@@ -132,22 +132,35 @@ Add backends/mod.rs listing the compiled-in set, resolving selection from config
 | Depends On | T-005, T-008, T-009 |
 | References | single-construction-point,backend-selection,one-construction-point,backend-readiness,readiness-refuses,mechanism-requirement-unmet,two-backends-one-host |
 
-### T-011: Record store with backend field
+### T-011: Record store with branch and backend
 
-Replace SandboxMetadata with SandboxRecord carrying name, backend, project, branch, mode and a backend-owned payload. Detect legacy records through toml::Value and report them; delete metadata_for_slug and the resolve fallback so nothing is fabricated from a name.
+Store an envelope holding the contract record, the branch the orchestrator created and the SCM mode, so neither the contract nor a backend carries SCM vocabulary. Detect legacy records through toml::Value and report them; delete metadata_for_slug and the resolve fallback so nothing is fabricated from a name.
 
 
 | Field | Value |
 |-------|-------|
-| Success Criteria | A round-trip test; the pre-change fixture yields an unknown record addressing no sandbox; no path synthesises a record; a record naming another backend is refused with both names, and a sandbox remains addressable only by the backend that created it after the selection changes. |
+| Success Criteria | A round-trip test; the pre-change fixture yields an unknown record addressing no sandbox; no path synthesises a record; a record naming another backend is refused with both names and stays addressable only by the backend that created it. |
 | Complexity | 🟡 Medium |
 | Effort | 3-4h |
 | Depends On | T-002 |
-| References | sandbox-record,sandbox-identity,legacy-record-not-adopted,backend-mismatch-refused,sandbox-missing,backend-switched |
+| References | sandbox-record,sandbox-identity,legacy-record-not-adopted,backend-mismatch-refused,sandbox-missing,backend-switched,branch-compute-pairing |
 
-### T-012: CLI on the contract
+### T-012: Sandbox orchestration
 
-Route list, pause, resume, delete and shell through the registry and the record store; address sandboxes by name; derive status from the backend; remove container vocabulary from help, output and errors while keeping command and flag names.
+Add src/sandboxes/: resolve the project, create the branch, archive HEAD, stage the tree, build the backend through the registry, call create with the workspace source, persist the record and remove the branch when create fails. Provide delete that removes compute then branch, idempotently, and exec, upload, download, inspect and pause or resume dispatched through the facets.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | A failed create leaves no branch; a delete whose compute is gone still removes the branch; a second delete succeeds; the orchestrator is the only module that creates or deletes a branch; the CLI and MCP call it rather than assembling a sandbox themselves. |
+| Complexity | 🔴 High |
+| Effort | 4-6h |
+| Depends On | T-007, T-010, T-011 |
+| References | branch-compute-pairing,create-atomicity,pairing-owned-in-one-place,sandbox-identity,sandbox-missing |
+
+### T-013: CLI on the orchestrator
+
+Route list, pause, resume, delete and shell through the orchestrator; address sandboxes by name; derive status from the backend; remove container vocabulary from help, output and errors while keeping command and flag names.
 
 
 | Field | Value |
@@ -155,10 +168,10 @@ Route list, pause, resume, delete and shell through the registry and the record 
 | Success Criteria | Generic command help and output contain no container or Docker term; pause without the lifecycle facet reports unsupported with reason and remedy; status uses the contract vocabulary; exit codes come from the shared taxonomy. |
 | Complexity | 🔴 High |
 | Effort | 4-6h |
-| Depends On | T-003, T-010, T-011 |
-| References | cli-surface,sandbox-status,backend-neutral-contract,neutral-errors |
+| Depends On | T-003, T-012 |
+| References | cli-surface,sandbox-status,backend-neutral-contract,neutral-errors,backend-switched |
 
-### T-013: Bulk pause and resume through the contract
+### T-014: Bulk pause and resume through the contract
 
 Drive pause --all-envs from SCM branches and pause --all-repos from each backend's list, both through the lifecycle facet, skipping sandboxes that vanish mid-batch.
 
@@ -168,10 +181,10 @@ Drive pause --all-envs from SCM branches and pause --all-repos from each backend
 | Success Criteria | Both flags behave as before under Docker; a sandbox deleted mid-batch does not abort the run; no bulk path holds a backend directly; an absent facet is reported once rather than per sandbox. |
 | Complexity | 🟡 Medium |
 | Effort | 2-3h |
-| Depends On | T-012 |
+| Depends On | T-013 |
 | References | bulk-operations-via-contract,bulk-pause-via-contract,bulk-and-delete-race |
 
-### T-014: Backend introspection command
+### T-015: Backend introspection command
 
 Add a backends command listing every compiled-in backend, marking the selected one, and printing readiness and capability entries, with --json emitting the same structure. Expose nothing equivalent over MCP.
 
@@ -181,38 +194,38 @@ Add a backends command listing every compiled-in backend, marking the selected o
 | Success Criteria | Table and JSON output are tested; an unavailable backend shows its primitive, reason and remedy; no MCP tool returns the report. |
 | Complexity | 🟡 Medium |
 | Effort | 2-3h |
-| Depends On | T-010, T-012 |
+| Depends On | T-010, T-013 |
 | References | backend-introspection,capability-report,introspection-works |
 
-### T-015: MCP on the contract
+### T-016: MCP on the orchestrator
 
-Update response shapes to name, backend, status, egress and provenance by variable name; make the ports query return forwards with bind or a structured unsupported; map errors from the shared taxonomy; accept no backend settings as tool arguments.
+Update response shapes to name, backend, status, egress and provenance by variable name; route every tool through the orchestrator; make the ports query return forwards with bind or a structured unsupported; map errors from the shared taxonomy; accept no backend settings as tool arguments.
 
 
 | Field | Value |
 |-------|-------|
-| Success Criteria | A test enumerates the tool and argument names and finds them unchanged; no response carries a container id or an environment value; the ports query on a backend without forwarding fails unsupported. |
+| Success Criteria | A test enumerates the tool and argument names and finds them unchanged; no response carries a container id or an environment value; the ports query on a backend without forwarding fails unsupported; no tool reaches a backend or the store directly. |
 | Complexity | 🔴 High |
 | Effort | 4-6h |
-| Depends On | T-003, T-010, T-011 |
+| Depends On | T-003, T-012 |
 | References | mcp-surface,mcp-tool-names-stable,ports-honest,neutral-errors |
 
-### T-016: Conformance suite
+### T-017: Conformance suite
 
-Add a test-only conformance module with a TestBackend implementing the contract and one facet, and a generic exercise over create, enumerate, exec, upload, download, inspect, delete, the unsupported path and create rollback. Run it for TestBackend always and for Docker under the existing opt-in.
+Add a test-only conformance module with a TestBackend implementing the contract and one facet, and a generic exercise over create from a prepared workspace, enumerate, exec, upload, download, inspect, delete, the unsupported path and create rollback. Run it for TestBackend always and for Docker under the existing opt-in.
 
 
 | Field | Value |
 |-------|-------|
-| Success Criteria | The suite contains no backend-specific branch; Docker passes it with LITTERBOX_DOCKER_TESTS set; TestBackend exercises the unsupported path; each backend's tests remain selectable by module. |
+| Success Criteria | The suite contains no backend-specific branch and needs no SCM; Docker passes it with LITTERBOX_DOCKER_TESTS set; TestBackend exercises the unsupported path; each backend's tests remain selectable by module. |
 | Complexity | 🟡 Medium |
 | Effort | 3-5h |
-| Depends On | T-005, T-007, T-010 |
+| Depends On | T-005, T-007, T-012 |
 | References | conformance-suite,docker-suite-unchanged,test-selection,docker-conformance |
 
-### T-017: Architecture lint rules and negative fixture
+### T-018: Architecture lint rules and negative fixture
 
-Add scopes and deny rules to arch-lint.toml for sandbox, backends, backends::docker, config, persistence, cli and mcp: the contract imports nothing internal, a backend imports the contract only, the CLI and MCP import no backend module, persistence imports the contract only. Add hack/arch-lint-negative.sh that introduces a violating import, expects the check to fail, and restores the tree.
+Add scopes and deny rules to arch-lint.toml for sandbox, backends, backends::docker, sandboxes, config, persistence, cli and mcp: the contract imports nothing internal, a backend imports the contract only, only the orchestrator imports SCM, persistence and the registry, the CLI and MCP import no backend module, persistence imports the contract only. Add hack/arch-lint-negative.sh that introduces a violating import, expects the check to fail, and restores the tree.
 
 
 | Field | Value |
@@ -220,10 +233,10 @@ Add scopes and deny rules to arch-lint.toml for sandbox, backends, backends::doc
 | Success Criteria | The clean tree passes arch-lint; the negative fixture fails as expected and the script succeeds only when it does; just lint runs it; the existing workflow step enforces the rules. |
 | Complexity | 🟡 Medium |
 | Effort | 2-3h |
-| Depends On | T-012, T-015 |
-| References | module-boundaries,architecture-lint,boundaries-fail-the-build,one-construction-point |
+| Depends On | T-013, T-016 |
+| References | module-boundaries,architecture-lint,boundaries-fail-the-build,one-construction-point,pairing-owned-in-one-place |
 
-### T-018: Docs and repository configuration
+### T-019: Docs and repository configuration
 
 Migrate this repository's .litterbox.toml to the new shape, update the configuration reference for the user file, the per-backend section and the setup-command location, add a page on choosing a backend and reading a readiness report, and regenerate the CLI and MCP references.
 
@@ -233,19 +246,19 @@ Migrate this repository's .litterbox.toml to the new shape, update the configura
 | Success Criteria | The repository config validates under the new binary; the docs show the user file and per-backend sections; no page states a Docker-only concept as general; regenerated references produce no diff. |
 | Complexity | 🟡 Medium |
 | Effort | 2-4h |
-| Depends On | T-009, T-014, T-015 |
+| Depends On | T-009, T-015, T-016 |
 | References | documentation-parity,vocabulary-ownership,cli-surface,mcp-surface |
 
-### T-019: Parity sweep and dead code removal
+### T-020: Parity sweep and dead code removal
 
 Remove what the contract supersedes: the old provider trait, SandboxMetadata, the compute accessor and the naming helpers on the public surface. Run the full suite, clippy and the lint, and confirm the generic surfaces carry no mechanism vocabulary.
 
 
 | Field | Value |
 |-------|-------|
-| Success Criteria | Clippy with -D warnings is clean; the full suite passes; no dead code allows bypassing the registry; a grep of generic surfaces finds no container, image or Docker term outside the Docker backend. |
+| Success Criteria | Clippy with -D warnings is clean; the full suite passes; no dead code allows bypassing the orchestrator; a grep of generic surfaces finds no container, image or Docker term outside the Docker backend. |
 | Complexity | 🟢 Low |
 | Effort | 1-2h |
-| Depends On | T-016, T-017, T-018 |
+| Depends On | T-017, T-018, T-019 |
 | References | docker-parity,vocabulary-ownership,module-boundaries,no-new-dependency |
 
