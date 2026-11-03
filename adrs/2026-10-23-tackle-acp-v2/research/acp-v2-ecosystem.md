@@ -120,9 +120,9 @@ This matters for three reasons:
 
 1. **It is the architecture our plan proposes, shipped.** One process, per-connection v1/v2
    selection, both surfaces live — a stronger reference than OpenCode's closed PR.
-2. **It exercises draft surfaces we had scoped narrowly**, including `session/fork` and
+1. **It exercises draft surfaces we had scoped narrowly**, including `session/fork` and
    `providers/*`, and the `_session/steering` and `_session/goal` unstable extensions.
-3. **It conformance-tests.** Release `v2.0.0` cites "resolve ACP v1 conformance failures
+1. **It conformance-tests.** Release `v2.0.0` cites "resolve ACP v1 conformance failures
    found by acp-tck" — there is an ACP Test Compatibility Kit (see [testing tooling](#testing-tooling)).
 
 It also accepts **client-provided MCP servers over command-based stdio config and HTTP
@@ -130,8 +130,7 @@ transport**, and documents a comprehensive "AIR v2 client contract" for JetBrain
 
 ### Goose
 
-**v1 only, and deliberately so.** PR `#12580` (merged 2026-10-01) fixed a real bug: `goose
-acp` was echoing the client's offered `protocolVersion` (including `2`) into an
+**v1 only, and deliberately so.** PR `#12580` (merged 2026-10-01) fixed a real bug: `goose acp` was echoing the client's offered `protocolVersion` (including `2`) into an
 `InitializeResponse` built from v1 schema types, so v2-offering clients got a self-inconsistent
 body and failed with `missing field 'info'`. The fix stamps `ProtocolVersion::LATEST` (v1)
 instead. The PR states plainly that Goose "implements only v1" and that "the v2 schema is an
@@ -256,13 +255,13 @@ it — so the fork surface tackle implements for v2 parity is independently exer
 
 1. **v1 remains the surface essentially every deployed client uses.** v2 today is Zed behind
    a flag. The ADR's "v2 additive, v1 preserved" posture is the only one that serves users.
-2. **The client-tooling replacement is aspirational.** See above — this is the sharpest
+1. **The client-tooling replacement is aspirational.** See above — this is the sharpest
    finding and should be stated as a known loss, not papered over.
-3. **Codex's adapter, not OpenCode's PR, is the architectural reference.** It is shipped,
+1. **Codex's adapter, not OpenCode's PR, is the architectural reference.** It is shipped,
    dual-version, and conformance-tested; it validates the plan's per-connection router and
    its decision to treat `session/fork` as a best-effort draft surface.
-4. **Adopt `acp-tck` where possible** instead of bespoke conformance fixtures.
-5. **Draft volatility is real.** Alpha schema churn and `unstable_protocol_v2` mean the v2
+1. **Adopt `acp-tck` where possible** instead of bespoke conformance fixtures.
+1. **Draft volatility is real.** Alpha schema churn and `unstable_protocol_v2` mean the v2
    surface can move; staying on the pinned SDK and marking draft surfaces is the right hedge.
 
 ## Open questions

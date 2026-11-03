@@ -6,19 +6,17 @@
 
 Add `invokables/tool_name.rs` with `InvokableName`, `WireToolName`, `NamespaceSeparator`, `ToolNameScheme`, and `StrictToolNameScheme`. Implement dot-to-`__` namespace encoding, invalid-character replacement with `_`, the configured maximum length, the 8-hex SHA-256 suffix, decode, and precise errors for empty or impossible names.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | Unit tests cover the readable default, literal single and double underscores, non-ASCII input, empty names, and limits too small for a prefix plus hash. The same input and scheme always produce the same wire name. |
 | Complexity | 🔴 High |
 | Effort | 4-6h |
-| Depends On |  |
+| Depends On | |
 | References | canonical-and-wire-separation,tool-name-scheme,readable-encoding,determinism,readable-default,ambiguous-underscores,empty-name,limit-too-small,non-ascii-name,no-silent-drops |
 
 ### T-002: [x] Remaining schemes and custom pattern
 
 Add `GeminiToolNameScheme`, `MetaToolNameScheme`, `CohereToolNameScheme`, and `CustomToolNameScheme`. Encode and decode per scheme, including Gemini leading-character and dot rules, Meta single-dot handling, Cohere leading-digit rejection, and a custom pattern with optional maximum length.
-
 
 | Field | Value |
 |-------|-------|
@@ -32,7 +30,6 @@ Add `GeminiToolNameScheme`, `MetaToolNameScheme`, `CohereToolNameScheme`, and `C
 
 Implement `ToolNameMap` with forward and reverse maps. Support forward entries for current model-invokable names and for history tool call and result names. `encode` allocates a unique wire name and appends a hash suffix on collision or truncation. `decode` consults only the current model-invokable set and returns `None` for unknown wire names.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | Collisions and truncation produce distinct stable names; history names encode; unknown decode returns `None`; the map is request-local; dispatch cannot resolve a name outside the current set. |
@@ -44,7 +41,6 @@ Implement `ToolNameMap` with forward and reverse maps. Support forward entries f
 ### T-004: [x] Registry render entry point
 
 Add `RenderedTools { tools, manifest, names }` and `Registry::render_tools(scheme)`. Render model-invokable tools and the system-prompt manifest with wire names. Keep direct invocation, ACP command advertisement, and dispatch on canonical names.
-
 
 | Field | Value |
 |-------|-------|
@@ -58,7 +54,6 @@ Add `RenderedTools { tools, manifest, names }` and `Registry::render_tools(schem
 
 Add `ToolNamesConfig`, `ModelConfig`, and `ToolNameSchemeName`. Replace `EndpointConfig.models` with a normalized map that accepts both `models = [...]` and `models.<name>` tables. Add endpoint-level `tool_names` and per-model `models.<name>.tool_names`.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | Both model forms parse to the same map. Existing list-form configurations still load. Unknown fields and invalid scheme names fail with the endpoint and model named. `pattern` without `custom` fails validation. |
@@ -70,7 +65,6 @@ Add `ToolNamesConfig`, `ModelConfig`, and `ToolNameSchemeName`. Replace `Endpoin
 ### T-006: [x] Scheme resolution and precedence
 
 Add `config/tool_names.rs` with `resolve_tool_names(endpoint, model)`. Resolve model override over endpoint override over wire-format default. Validate `custom` plus `pattern`, reject unimplemented surface schemes, and return a precise error naming the endpoint and model.
-
 
 | Field | Value |
 |-------|-------|
@@ -84,7 +78,6 @@ Add `config/tool_names.rs` with `resolve_tool_names(endpoint, model)`. Resolve m
 
 Resolve the scheme in `prepare_turn` after `model_ref` is known. Call `Registry::render_tools`, pass the `ToolNameMap` into `provider_for`, and carry wire-named tools and system prompt in `LoopInputs`. Update the `/context` builders in ACP v1 and v2 to use the same rendered tools and manifest.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | A turn uses the selected scheme; `/context` reports the same wire names as the model request; direct invocation paths remain canonical; no caller builds tools without a scheme. |
@@ -96,7 +89,6 @@ Resolve the scheme in `prepare_turn` after `model_ref` is known. Call `Registry:
 ### T-008: [x] Provider history encoding and response decoding
 
 Store the `ToolNameMap` on `RigProvider`. Change `rig::to_rig_message` to encode historical tool call and result names and `rig::tool_calls_of` to decode model tool calls. Leave unknown wire names unchanged so the existing unknown-invokable path handles them.
-
 
 | Field | Value |
 |-------|-------|
@@ -110,7 +102,6 @@ Store the `ToolNameMap` on `RigProvider`. Change `rig::to_rig_message` to encode
 
 Update `agent/config_options.rs` to use normalized map keys for the static model fallback. Update `cli/auth.rs`, `agent/script_loop.rs`, provider tests, and any `EndpointConfig` construction from `models: Vec::new()` to the default map. Preserve discovery failure notices.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | Model discovery failure still falls back to the configured static list. Notices are unchanged. All constructors compile and existing config tests pass with the list form. |
@@ -122,7 +113,6 @@ Update `agent/config_options.rs` to use normalized map keys for the static model
 ### T-010: [x] Lossy rewrite warnings
 
 Emit `tracing::warn!()` only for truncation and hash suffixes. Include the canonical name, wire name, endpoint, model, and surface. Deduplicate per endpoint, model, and canonical name. Routine dot and invalid-character rewrites stay silent.
-
 
 | Field | Value |
 |-------|-------|
@@ -136,7 +126,6 @@ Emit `tracing::warn!()` only for truncation and hash suffixes. Include the canon
 
 Add a turn-level test with a dotted MCP tool through a strict endpoint. Verify the model is offered a safe name, the tool executes, storage and telemetry contain only canonical names, the manifest matches the tools, unknown calls pass through, and an impossible name fails without dropping the tool.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | The integration test passes against a recorded strict endpoint. No wire name appears in the session DAG. The unknown-call and impossible-name paths return the specified errors. |
@@ -149,7 +138,6 @@ Add a turn-level test with a dotted MCP tool through a strict endpoint. Verify t
 
 Update `docs/docs/user/tackle/reference/config.mdx` with endpoint and per-model `tool_names`, list and table model forms, precedence, and the custom pattern escape hatch. Update `docs/docs/user/tackle/tools.mdx` with wire naming, warnings, and strict-provider behavior.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | The docs include working TOML examples for list-form models, table-form models, endpoint defaults, per-model overrides, and custom patterns. The tools page explains canonical versus wire names and the warning behavior. |
@@ -157,4 +145,3 @@ Update `docs/docs/user/tackle/reference/config.mdx` with endpoint and per-model 
 | Effort | 1-2h |
 | Depends On | T-006,T-008 |
 | References | endpoint-and-model-configuration,surface-defaults,custom-scheme-and-pattern,lossy-rewrite-warnings,backward-compatibility |
-

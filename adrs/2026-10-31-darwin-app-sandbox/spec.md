@@ -1,9 +1,8 @@
 # Darwin App Sandbox Spike
 
-**Status:** implemented  **Created:** 2026-10-31  **Author:** adrian
+**Status:** implemented **Created:** 2026-10-31 **Author:** adrian
 
 Litterbox confines agent commands inside an OCI container reached over the Docker API. On macOS there is no OCI runtime and no kernel namespace facility: docker, colima, podman machine and Apple container all boot a Linux VM first, which makes the container runtime a heavyweight external dependency for anyone who just wants to run agent-written code on their own laptop. macOS has a kernel-enforced per-process sandbox, driven by the sandbox profile language (SBPL) and applied with `sandbox_init` or the `sandbox-exec` CLI. It is not the App Sandbox, which only applies to a signed application bundle. `sandbox_init` needs no entitlement, no Developer ID, and no notarisation. The primitive has no supported API, Apple rejected the named profiles for SDK 27 and later, and the language itself is undocumented, so its longevity is a live risk. The prototypes live under this ADR directory and are discarded with it. This ADR scopes two proof-of-concept applications rather than a shipping feature: one built on the nono library, one built directly against the sandbox facility with a helper binary of our own. They are compared on quality, ease of use, and maintainability rather than on a metrics table, and the findings become the input to a production ADR. The existing Litterbox interface is tightly coupled to Docker and is not assumed to be the right shape; each prototype is written free-standing, and evolving the interface is deferred. Requirement titles are prefixed with the artefact they belong to (Shared, Custom, Nono) because the renderer has no nested headings.
-
 
 ## Problem
 
@@ -31,7 +30,6 @@ On macOS, Litterbox cannot confine agent commands without a third-party VM-backe
 - Designing a configuration interface, CLI surface, or integration with the existing Litterbox interface
 - Signing, notarisation, or packaging
 - Supporting toolchains other than Rust
-
 
 ## Functional Requirements
 
@@ -322,59 +320,69 @@ The nono prototype runs the fixture workload and the hostile workload, and its r
 A command that calls `setsid` leaves the process group. It stays confined, because the sandbox is inherited and cannot be removed, but delete can no longer reap it. How often this happens with real tooling is recorded.
 
 **Slug:** `process-group-escape`
+
 ### EC-002: Shared: Workspace Inside Home
 
 The default workspace lives under the user's home directory. The workspace grant is a subtree exception to the home-directory write denial and must not widen to the parent.
 
 **Slug:** `workspace-inside-home`
+
 ### EC-003: Shared: Symlinked Paths
 
 `/tmp` is a symlink to `/private/tmp` and profile matching uses resolved paths. A path that resolves outside the workspace is rejected rather than silently allowed.
 
 **Slug:** `symlinked-paths`
+
 ### EC-004: Shared: Login Shells
 
 macOS terminals start sessions through setuid-root `login`, which a sandboxed process may never exec. Interactive shells that are not login shells work; `su` and `sudo` do not.
 
 **Slug:** `login-shells`
+
 ### EC-005: Shared: Setuid Binaries
 
 Exec of a setuid binary fails with a `forbidden-exec-sugid` denial. No prototype is expected to grant an exception; the point is to confirm the error is legible.
 
 **Slug:** `setuid-binaries`
+
 ### EC-006: Shared: Primitive Removed
 
 The header is deprecated, the named profiles are rejected when building against SDK 27 or later, and the language is undocumented. The Custom helper and nono both call `sandbox_init` directly and can declare the symbol themselves; if it disappears, the prototype reports unavailable rather than running commands unconfined.
 
 **Slug:** `primitive-removed`
+
 ### EC-007: Shared: Toolchain Not Installed
 
 There is no image and no package installation. A command whose toolchain is absent on the host fails with the host's own error; the sandbox does not provide it.
 
 **Slug:** `toolchain-not-installed`
+
 ### EC-008: Shared: Dotfiles
 
 Tools read dotfiles such as `~/.gitconfig` and `~/.cargo/registry`. Reads of the workspace and of an explicit read-only list are allowed, so a prototype that needs them must name them; the credential denials always win.
 
 **Slug:** `home-directory-paths-in-the-baseline`
+
 ### EC-009: Shared: Limits Of The Mechanism
 
 Enforcement happens at resource acquisition, so descriptors opened before the profile applies keep working. There is no mount or pid namespace, no CPU or memory quota, no uid separation, no syscall filtering, and hostname rules match resolved addresses. Anything the prototypes appear to provide beyond this is a wrapper, not the facility.
 
 **Slug:** `mechanism-limits`
+
 ### EC-010: Custom: Sandbox Init Error
 
 `sandbox_init` returns a message rather than an errno. The helper prints it verbatim to stderr, exits non-zero, and does not exec.
 
 **Slug:** `sandbox-init-returns-an-error`
+
 ### EC-011: Nono: Breaking Releases
 
 nono ships breaking releases at a high rate. Each prototype pins one version exactly and records what an upgrade would cost; no dependency is upgraded as a side effect of an unrelated bump.
 
 **Slug:** `nono-breaking-releases`
+
 ### EC-012: Nono: Fixed Policy
 
 nono generates the profile from its own capability model. Where a scenario needs a rule the model cannot express, the workaround lives outside the library and is recorded as debt rather than hidden.
 
 **Slug:** `nono-fixed-policy`
-

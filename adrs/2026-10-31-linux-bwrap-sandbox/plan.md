@@ -8,7 +8,6 @@ Five milestones, each producing evidence. M1 is the argv builder: a typed descri
 
 One Rust binary and one fixture under `adrs/2026-10-31-linux-bwrap-sandbox/poc`. The binary takes `--workspace`, repeatable `--read`, `--env` and `--omit`, plus `--new-session` and `--print-argv`, then `--` and a command. It canonicalises and validates every path, opens each grant once with no symlink resolution, builds the bwrap argv, checks the bwrap version, and runs bwrap with a status descriptor. The child inherits the namespaces and cannot leave them. The fixture runs as the child, so the harness confines the same workload on every run.
 
-
 ```mermaid
 graph TD
   H["Harness (typed view to argv)"] -->|execs| B["bwrap"]
@@ -42,13 +41,11 @@ View model and argv builder
 
 Owns a typed description of the view: workspace, read-only grants, environment and baseline groups. Canonicalises and validates every path, opens each grant once, applies the invariants the caller cannot widen, checks the bwrap version, renders the argv and runs bwrap with a status descriptor. Covers FR-011 to FR-020 and AC-010 to AC-014.
 
-
 ### poc/fixture
 
 Workload definition
 
 A Rust crate that builds and tests, plus a script that attempts a write outside the workspace, a read of a host credential file, an outbound connection, and a child process that repeats the write. Covers FR-001, FR-002 and AC-001 to AC-004.
-
 
 ### poc/run.sh
 
@@ -56,13 +53,11 @@ Workload and hostile run
 
 Materialises the fixture into a workspace and runs build, test, run and the hostile checks under the harness, exiting non-zero if any check leaks. Covers FR-003, FR-004 and AC-001 to AC-004.
 
-
 ### poc/lifecycle.sh
 
 Lifecycle harness
 
 Pauses, resumes and group-kills a live loop, fails if the pid is not its own process-group leader, and counts survivors by sentinel. Covers FR-005 and AC-005 to AC-006.
-
 
 ### poc/failclosed.sh
 
@@ -70,13 +65,11 @@ Fail-closed harness
 
 Runs the harness with a missing workspace, host-home grants, protected-path grants, a symlink escape, a missing bwrap and an untrusted bwrap, asserting exact exit codes, an absent sentinel and a positive control. Covers FR-016 and AC-007.
 
-
 ### poc/all.sh
 
 Aggregate entrypoint
 
 Builds and unit-tests the harness, then runs every script and the timing measurement in one pass. Covers NFR-004.
-
 
 ### poc/portability.sh
 
@@ -84,13 +77,11 @@ User namespace probe
 
 Runs the unprivileged user namespace probe on the host and records the result. Covers NFR-008 and AC-013.
 
-
 ### poc/timing.py
 
 Cost measurement
 
 Times argv construction plus bwrap plus exec against a bare exec baseline, reporting median and p95. Covers NFR-003.
-
 
 ### findings.md
 
@@ -98,13 +89,10 @@ The deliverable
 
 Per question: observed behaviour, the exact argv or error, the gap, and the open risk for a production implementation. Written as findings are made. Covers FR-006, FR-008, FR-009 and AC-009.
 
-
 ## Data Flow
 
 The fixture runs as the confined child of bwrap. The harness parses arguments, canonicalises and opens each grant, builds the view and its argv, checks the version, and starts bwrap with a status descriptor; bwrap creates the namespaces, assembles the mount view, drops capabilities and execs the command. The child inherits the view and cannot widen it. Observations are collected outside the sandbox: exit code, stderr, errno from the denied syscall or the absence of a path, and whether the write landed on the host. Each observation records the exit code, the errno and the view that produced it; the argv is printed on failure.
 
-
 ## Deployment
 
 None. The harness is a throwaway binary under the ADR directory, sits outside the Cargo workspace and is referenced by no Litterbox crate. It is removed with the ADR once the findings are accepted.
-

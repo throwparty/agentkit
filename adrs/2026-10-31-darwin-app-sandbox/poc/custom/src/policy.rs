@@ -93,7 +93,11 @@ impl fmt::Display for PathError {
                 write!(formatter, "{} contains a parent component", path.display())
             }
             Self::Escapes(path) => {
-                write!(formatter, "{} resolves outside the workspace", path.display())
+                write!(
+                    formatter,
+                    "{} resolves outside the workspace",
+                    path.display()
+                )
             }
             Self::Unresolvable { path, source } => {
                 write!(formatter, "{} does not resolve: {source}", path.display())
@@ -190,7 +194,8 @@ impl Policy {
     }
 
     pub fn tag(mut self, tag: &str) -> Result<Self, String> {
-        if tag.is_empty() || tag.len() > 64
+        if tag.is_empty()
+            || tag.len() > 64
             || !tag
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
@@ -223,7 +228,10 @@ impl Policy {
     pub fn render(&self) -> String {
         let mut blocks: Vec<String> = vec![
             "(version 1)".to_string(),
-            form("deny default", &[format!("(with message \"{}\")", self.tag)]),
+            form(
+                "deny default",
+                &[format!("(with message \"{}\")", self.tag)],
+            ),
             baseline_block(),
             self.metadata_rule(),
         ];
@@ -239,7 +247,11 @@ impl Policy {
     /// was retested after the change.
     fn metadata_rule(&self) -> String {
         let mut filters = vec!["(literal \"/\")".to_string()];
-        filters.extend(BASELINE_READ.iter().map(|path| format!("(subpath \"{path}\")")));
+        filters.extend(
+            BASELINE_READ
+                .iter()
+                .map(|path| format!("(subpath \"{path}\")")),
+        );
         for path in std::iter::once(&self.workspace)
             .chain(self.reads.iter())
             .chain(self.writes.iter())
@@ -266,21 +278,40 @@ impl Policy {
         }
         ancestors.sort();
         ancestors.dedup();
-        filters.extend(ancestors.iter().map(|path| format!("(literal {})", quote(path))));
+        filters.extend(
+            ancestors
+                .iter()
+                .map(|path| format!("(literal {})", quote(path))),
+        );
 
         form("allow file-read-metadata", &filters)
     }
 
     fn grant_rules(&self) -> Vec<String> {
         let mut reads = vec!["(literal \"/\")".to_string()];
-        reads.extend(self.reads.iter().map(|path| format!("(subpath {})", quote(path))));
+        reads.extend(
+            self.reads
+                .iter()
+                .map(|path| format!("(subpath {})", quote(path))),
+        );
         reads.push(format!("(subpath {})", quote(&self.workspace)));
-        reads.extend(self.writes.iter().map(|path| format!("(subpath {})", quote(path))));
+        reads.extend(
+            self.writes
+                .iter()
+                .map(|path| format!("(subpath {})", quote(path))),
+        );
         let mut writes = vec!["(literal \"/dev/null\")".to_string()];
         writes.push(format!("(subpath {})", quote(&self.workspace)));
-        writes.extend(self.writes.iter().map(|path| format!("(subpath {})", quote(path))));
+        writes.extend(
+            self.writes
+                .iter()
+                .map(|path| format!("(subpath {})", quote(path))),
+        );
 
-        vec![form("allow file-read*", &reads), form("allow file-write*", &writes)]
+        vec![
+            form("allow file-read*", &reads),
+            form("allow file-write*", &writes),
+        ]
     }
 
     /// Rules the caller cannot override. Emitted last: later rules win.
@@ -306,7 +337,11 @@ impl Policy {
 
 fn baseline_block() -> String {
     let reads: Vec<String> = std::iter::once("(literal \"/\")".to_string())
-        .chain(BASELINE_READ.iter().map(|path| format!("(subpath \"{path}\")")))
+        .chain(
+            BASELINE_READ
+                .iter()
+                .map(|path| format!("(subpath \"{path}\")")),
+        )
         .collect();
     let services: Vec<String> = MACH_SERVICES
         .iter()
@@ -316,7 +351,10 @@ fn baseline_block() -> String {
     [
         "(allow process-exec)".to_string(),
         "(allow process-fork)".to_string(),
-        form("allow process-info*", &["(target same-sandbox)".to_string()]),
+        form(
+            "allow process-info*",
+            &["(target same-sandbox)".to_string()],
+        ),
         form("allow signal", &["(target same-sandbox)".to_string()]),
         form("allow file-read*", &reads),
         // The Rust runtime reads sysctls to size thread stacks; without this it
@@ -353,10 +391,12 @@ fn grant_path(path: &Path, workspace: Option<&Path>) -> Result<PathBuf, PathErro
         return Err(PathError::ParentTraversal(path.to_path_buf()));
     }
 
-    let resolved = path.canonicalize().map_err(|source| PathError::Unresolvable {
-        path: path.to_path_buf(),
-        source,
-    })?;
+    let resolved = path
+        .canonicalize()
+        .map_err(|source| PathError::Unresolvable {
+            path: path.to_path_buf(),
+            source,
+        })?;
 
     if let Some(workspace) = workspace {
         // A path that lives under the workspace must resolve under it. Walk the

@@ -97,10 +97,10 @@ state.
 ## Open risks
 
 1. Cgroup freeze requires a systemd user manager with cgroup delegation. Delegation absence is not detected: the scope start fails and the probe exits non-zero; the caller then selects the process-group fallback, which has no limits and shares the caller's session.
-2. `systemctl --user thaw` is the correct verb; `unfreeze` does not exist.
-3. A frozen unit cannot be stopped; cleanup must thaw first.
-4. Memory limits surface as an OOM kill or failed scope, so a policy limit looks like a workload failure.
-5. `TasksMax` counts bwrap, the harness and the shell; the limit needs headroom.
-6. Scope names use the pid; concurrent runs need a random suffix in production.
-7. The scope launcher adds about 24ms median (Cost); `systemd-run` and `systemctl` startup dominate the difference.
-8. Hosts without systemd get the reduced-protection mode: process-group lifecycle, no session isolation and no limits.
+1. `systemctl --user thaw` is the correct verb; `unfreeze` does not exist.
+1. A frozen unit cannot be stopped; cleanup must thaw first.
+1. Memory limits surface as an OOM kill or failed scope, so a policy limit looks like a workload failure.
+1. `TasksMax` counts bwrap, the harness and the shell; the limit needs headroom.
+1. Scope names use the pid; concurrent runs need a random suffix in production.
+1. The scope launcher adds about 24ms median (Cost); `systemd-run` and `systemctl` startup dominate the difference.
+1. Hosts without systemd get the reduced-protection mode: process-group lifecycle, no session isolation and no limits.

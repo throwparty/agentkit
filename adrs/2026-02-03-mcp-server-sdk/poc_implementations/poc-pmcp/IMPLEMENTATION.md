@@ -218,18 +218,18 @@ cargo pmcp deploy               # Deploy to AWS/GCP/Cloudflare
 
 ## Comparison: pmcp vs rmcp
 
-| Feature               | rmcp                           | pmcp                          |
+| Feature | rmcp | pmcp |
 | --------------------- | ------------------------------ | ----------------------------- |
-| **STDIO support**     | ✅ Primary, fully working      | ✅ Working (main branch only) |
-| **HTTP support**      | ❌ None                        | ✅ Primary with SSE           |
-| **Macros**            | ✅ `#[tool]`, `#[tool_router]` | ❌ Trait-based handlers       |
-| **Cloud deployment**  | ❌ Manual                      | ✅ `cargo pmcp deploy`        |
-| **OAuth**             | ❌ None                        | ✅ Cognito, OIDC, DCR         |
-| **Hot reload**        | ❌ None                        | ✅ `cargo pmcp dev`           |
-| **Test generation**   | ❌ Manual                      | ✅ `--generate-scenarios`     |
-| **Boilerplate**       | Low (macros)                   | Medium (traits + auth)        |
-| **Use case**          | Local tools, simple servers    | Production cloud services     |
-| **Crates.io release** | ✅ Latest works                | ❌ Broken, use git main       |
+| **STDIO support** | ✅ Primary, fully working | ✅ Working (main branch only) |
+| **HTTP support** | ❌ None | ✅ Primary with SSE |
+| **Macros** | ✅ `#[tool]`, `#[tool_router]` | ❌ Trait-based handlers |
+| **Cloud deployment** | ❌ Manual | ✅ `cargo pmcp deploy` |
+| **OAuth** | ❌ None | ✅ Cognito, OIDC, DCR |
+| **Hot reload** | ❌ None | ✅ `cargo pmcp dev` |
+| **Test generation** | ❌ Manual | ✅ `--generate-scenarios` |
+| **Boilerplate** | Low (macros) | Medium (traits + auth) |
+| **Use case** | Local tools, simple servers | Production cloud services |
+| **Crates.io release** | ✅ Latest works | ❌ Broken, use git main |
 
 ## pmcp Strengths
 

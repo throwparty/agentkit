@@ -42,10 +42,10 @@ We need a basic harness for an AI agent using the Agent Client Protocol (ACP). T
 
 ### Transport Options
 
-| Transport | Endpoint                                | Behavior                                                                 |
+| Transport | Endpoint | Behavior |
 | --------- | --------------------------------------- | ------------------------------------------------------------------------ |
-| `stdio`   | stdin/stdout                            | Line-delimited JSON messages, single client, server blocks on read/write |
-| `http`    | `{--bind}:{--http-port}` (default 3811) | Streamable HTTP with JSON-RPC, JSON request/response                     |
+| `stdio` | stdin/stdout | Line-delimited JSON messages, single client, server blocks on read/write |
+| `http` | `{--bind}:{--http-port}` (default 3811) | Streamable HTTP with JSON-RPC, JSON request/response |
 
 **Port Configuration:**
 
@@ -633,20 +633,20 @@ Client sends notification to cancel ongoing operations.
 
 ### Static Response Behavior
 
-| Method                      | Response Type           | Behavior                                                      |
+| Method | Response Type | Behavior |
 | --------------------------- | ----------------------- | ------------------------------------------------------------- |
-| `initialize`                | response                | Static capabilities and protocol version                      |
-| `authenticate`              | error                   | Return `-32601 Method not found` (no auth methods advertised) |
-| `session/new`               | response                | Return unique session ID and modes                            |
-| `session/load`              | error                   | Return error (loadSession capability false)                   |
-| `session/resume`            | response                | Return empty result `{}` (session restored)                   |
-| `session/list`              | response                | Return list of active sessions                                |
-| `session/close`             | response                | Close session, return `{}`                                    |
-| `session/set_mode`          | response                | Store mode on session, return `{}`                            |
-| `session/set_config_option` | error                   | Return `-32601 Method not found` (config out of scope)        |
-| `session/prompt`            | response + notification | Echo user message, respond with `end_turn`                    |
-| `session/cancel`            | notification            | Process cancellation, respond to original prompt              |
-| unknown                     | error                   | Return `-32601 Method not found`                              |
+| `initialize` | response | Static capabilities and protocol version |
+| `authenticate` | error | Return `-32601 Method not found` (no auth methods advertised) |
+| `session/new` | response | Return unique session ID and modes |
+| `session/load` | error | Return error (loadSession capability false) |
+| `session/resume` | response | Return empty result `{}` (session restored) |
+| `session/list` | response | Return list of active sessions |
+| `session/close` | response | Close session, return `{}` |
+| `session/set_mode` | response | Store mode on session, return `{}` |
+| `session/set_config_option` | error | Return `-32601 Method not found` (config out of scope) |
+| `session/prompt` | response + notification | Echo user message, respond with `end_turn` |
+| `session/cancel` | notification | Process cancellation, respond to original prompt |
+| unknown | error | Return `-32601 Method not found` |
 
 **Acceptance Criteria:**
 
@@ -660,21 +660,21 @@ Client sends notification to cancel ongoing operations.
 
 All methods defined by the ACP spec (from `acp-spec/schema.mdx`). Methods marked "agent" are handled by the server; methods marked "client" are called by the agent on the client (not implemented in this harness).
 
-| Method                       | Direction      | Status             | Notes                                                     |
+| Method | Direction | Status | Notes |
 | ---------------------------- | -------------- | ------------------ | --------------------------------------------------------- |
-| `initialize`                 | agent → client | ✅ implemented     | Protocol version negotiation, capability exchange         |
-| `authenticate`               | agent → client | ❌ not implemented | Auth not required (empty `authMethods`)                   |
-| `session/new`                | agent → client | ✅ implemented     | Creates session, returns UUID                             |
-| `session/load`               | agent → client | ❌ not implemented | Returns error `-32602` (loadSession capability is false)  |
-| `session/resume`             | agent → client | ❌ not implemented | Returns `{}` if session exists, error if not              |
-| `session/list`               | agent → client | ❌ not implemented | Returns list of active sessions                           |
-| `session/close`              | agent → client | ✅ implemented     | Closes session, returns `{}`                              |
-| `session/prompt`             | agent → client | ✅ implemented     | Echoes user message, returns `end_turn`                   |
-| `session/cancel`             | agent → client | ❌ not implemented | Notification; responds to pending prompt with `cancelled` |
-| `session/set_mode`           | agent → client | ❌ not implemented | Changes session mode                                      |
-| `session/set_config_option`  | agent → client | ❌ not implemented | Changes session config                                    |
-| `session/update`             | agent → client | ✅ implemented     | Notification streamed to client during prompt turn        |
-| `session/request_permission` | client → agent | ❌ not implemented | Agent requests user permission for tool calls             |
-| `fs/read_text_file`          | client → agent | ❌ not implemented | Client-side file read                                     |
-| `fs/write_text_file`         | client → agent | ❌ not implemented | Client-side file write                                    |
-| `terminal/*`                 | client → agent | ❌ not implemented | Client-side terminal management                           |
+| `initialize` | agent → client | ✅ implemented | Protocol version negotiation, capability exchange |
+| `authenticate` | agent → client | ❌ not implemented | Auth not required (empty `authMethods`) |
+| `session/new` | agent → client | ✅ implemented | Creates session, returns UUID |
+| `session/load` | agent → client | ❌ not implemented | Returns error `-32602` (loadSession capability is false) |
+| `session/resume` | agent → client | ❌ not implemented | Returns `{}` if session exists, error if not |
+| `session/list` | agent → client | ❌ not implemented | Returns list of active sessions |
+| `session/close` | agent → client | ✅ implemented | Closes session, returns `{}` |
+| `session/prompt` | agent → client | ✅ implemented | Echoes user message, returns `end_turn` |
+| `session/cancel` | agent → client | ❌ not implemented | Notification; responds to pending prompt with `cancelled` |
+| `session/set_mode` | agent → client | ❌ not implemented | Changes session mode |
+| `session/set_config_option` | agent → client | ❌ not implemented | Changes session config |
+| `session/update` | agent → client | ✅ implemented | Notification streamed to client during prompt turn |
+| `session/request_permission` | client → agent | ❌ not implemented | Agent requests user permission for tool calls |
+| `fs/read_text_file` | client → agent | ❌ not implemented | Client-side file read |
+| `fs/write_text_file` | client → agent | ❌ not implemented | Client-side file write |
+| `terminal/*` | client → agent | ❌ not implemented | Client-side terminal management |

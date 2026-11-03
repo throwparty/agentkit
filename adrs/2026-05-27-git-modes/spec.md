@@ -175,81 +175,81 @@ project_slug = "myproject"
 
 ### 7.1 Functional Requirements
 
-| ID    | Requirement                                                                                                                                           | Priority |
+| ID | Requirement | Priority |
 | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| FR-1  | `snapshot-mode = "direct"`: all operations on the user's repository (no bare clone, no path resolution via §5.1)                                      | Must     |
-| FR-2  | `snapshot-mode = "remote"`: bare clone at the path resolved in §5.1, shallow `--depth 1`, filesystem path is the index                                | Must     |
-| FR-3  | Remote mode installs a `litterbox` remote into the user's repo, pointing to the bare clone path                                                       | Must     |
-| FR-4  | Remote mode `sandbox-create` creates a `litterbox/<slug>` branch inside the bare clone                                                                | Must     |
-| FR-5  | Remote mode `commit_snapshot` writes to the bare clone's branch, not the host repo                                                                    | Must     |
-| FR-6  | Remote mode `delete` removes the branch from the bare clone; if last sandbox, removes the bare clone. The `litterbox` remote is never removed         | Must     |
-| FR-7  | Remote mode: if the bare clone is missing or corrupt, Litterbox re-creates it automatically                                                           | Should   |
-| FR-8  | Direct mode: all operations are read/write against the host repo (no index writes)                                                                    | Must     |
-| FR-9  | Remote mode: the bare clone uses the `git2` library, not external `git` CLI                                                                           | Must     |
-| FR-10 | Remote mode: `snapshot-mode` defaults to `"remote"`, backward-compatible with existing `"direct"`                                                     | Must     |
-| FR-11 | Sandbox metadata is persisted at creation time and loaded on every subsequent operation; no runtime git probing or config re-reading for mode binding | Must     |
+| FR-1 | `snapshot-mode = "direct"`: all operations on the user's repository (no bare clone, no path resolution via §5.1) | Must |
+| FR-2 | `snapshot-mode = "remote"`: bare clone at the path resolved in §5.1, shallow `--depth 1`, filesystem path is the index | Must |
+| FR-3 | Remote mode installs a `litterbox` remote into the user's repo, pointing to the bare clone path | Must |
+| FR-4 | Remote mode `sandbox-create` creates a `litterbox/<slug>` branch inside the bare clone | Must |
+| FR-5 | Remote mode `commit_snapshot` writes to the bare clone's branch, not the host repo | Must |
+| FR-6 | Remote mode `delete` removes the branch from the bare clone; if last sandbox, removes the bare clone. The `litterbox` remote is never removed | Must |
+| FR-7 | Remote mode: if the bare clone is missing or corrupt, Litterbox re-creates it automatically | Should |
+| FR-8 | Direct mode: all operations are read/write against the host repo (no index writes) | Must |
+| FR-9 | Remote mode: the bare clone uses the `git2` library, not external `git` CLI | Must |
+| FR-10 | Remote mode: `snapshot-mode` defaults to `"remote"`, backward-compatible with existing `"direct"` | Must |
+| FR-11 | Sandbox metadata is persisted at creation time and loaded on every subsequent operation; no runtime git probing or config re-reading for mode binding | Must |
 
 ### 7.2 Non-Functional Requirements
 
-| ID     | Requirement                                                                                                                 | Priority |
+| ID | Requirement | Priority |
 | ------ | --------------------------------------------------------------------------------------------------------------------------- | -------- |
-| NFR-1  | Direct mode: no additional disk space beyond the user's repository                                                          | Must     |
-| NFR-2  | Remote mode: no additional disk space beyond one bare clone per project (typically \<< project size)                        | Must     |
-| NFR-3  | Remote mode: no network round-trips after initial clone for subsequent sandboxes                                            | Must     |
-| NFR-4  | Remote mode: bare clone creation must not block or race with other `create` calls                                           | Must     |
-| NFR-5  | Direct mode: if the host repo changes (e.g. user commits), the working copy stays in sync                                   | Must     |
-| NFR-6  | Remote mode: if the host repo changes (e.g. user commits), the bare clone may become stale — handled gracefully on re-clone | Should   |
-| NFR-7  | Existing sandbox metadata (`SandboxMetadata`) remains compatible — no breaking API change for the MCP client                | Must     |
-| NFR-8  | Installing the `litterbox` remote must not conflict with existing remotes (skip if already present)                         | Must     |
-| NFR-9  | Metadata file writes use advisory `flock` with `EAGAIN` retry for multi-instance safety                                     | Must     |
-| NFR-10 | Absent metadata file is handled gracefully as legacy Direct mode; no crash or incorrect behavior                            | Must     |
+| NFR-1 | Direct mode: no additional disk space beyond the user's repository | Must |
+| NFR-2 | Remote mode: no additional disk space beyond one bare clone per project (typically \<< project size) | Must |
+| NFR-3 | Remote mode: no network round-trips after initial clone for subsequent sandboxes | Must |
+| NFR-4 | Remote mode: bare clone creation must not block or race with other `create` calls | Must |
+| NFR-5 | Direct mode: if the host repo changes (e.g. user commits), the working copy stays in sync | Must |
+| NFR-6 | Remote mode: if the host repo changes (e.g. user commits), the bare clone may become stale — handled gracefully on re-clone | Should |
+| NFR-7 | Existing sandbox metadata (`SandboxMetadata`) remains compatible — no breaking API change for the MCP client | Must |
+| NFR-8 | Installing the `litterbox` remote must not conflict with existing remotes (skip if already present) | Must |
+| NFR-9 | Metadata file writes use advisory `flock` with `EAGAIN` retry for multi-instance safety | Must |
+| NFR-10 | Absent metadata file is handled gracefully as legacy Direct mode; no crash or incorrect behavior | Must |
 
 ### 7.3 Acceptance Criteria
 
-| AC    | Description                                                                                                                                                           | Verification                                                                       |
+| AC | Description | Verification |
 | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| AC-1  | `snapshot-mode = "direct"`: sandbox branches live in the user's repo                                                                                                  | `git branch` shows `litterbox/<slug>`                                              |
-| AC-2  | `snapshot-mode = "remote"`: bare clone exists at the path resolved in §5.1                                                                                            | File exists check                                                                  |
-| AC-3  | `snapshot-mode = "remote"`: the bare clone's `litterbox/<slug>` branch exists and points to a valid commit                                                            | `git2` branch lookup                                                               |
-| AC-4  | `snapshot-mode = "remote"`: a `commit_snapshot_from_staging` after mutation results in a new commit on the bare clone's branch                                        | `git log` verifies chain                                                           |
-| AC-5  | `snapshot-mode = "remote"`: a `litterbox` remote exists in the user's repo pointing to the bare clone                                                                 | `git remote get-url litterbox`                                                     |
-| AC-6  | `snapshot-mode = "remote"`: repeated `sandbox-create` for the same project does not re-clone the bare repo                                                            | Single clone on first call                                                         |
-| AC-7  | `snapshot-mode = "remote"`: corrupt bare clone self-heals (destroy + re-clone shallow)                                                                                | Corrupt a file, call `create`, verify it works                                     |
-| AC-8  | `snapshot-mode = "remote"`: sandbox metadata includes the project slug so the sandbox server can derive the bare clone path                                           | `SandboxMetadata` fields                                                           |
-| AC-9  | `snapshot-mode = "remote"`: `delete` removes the bare clone if this was the last sandbox for the project; the `litterbox` remote persists                             | `git remote get-url litterbox` returns the (stale) URL; bare clone path is deleted |
-| AC-10 | `snapshot-mode = "remote"`: bare clone is shallow (depth 1) by default; re-clone after corruption uses depth 1                                                        | `git rev-parse --is-shallow`                                                       |
-| AC-11 | `snapshot-mode = "remote"`: the `litterbox` remote installs if not present, does nothing if already present                                                           | No duplicate remote entries on repeated creates                                    |
-| AC-12 | `snapshot-mode = "remote"`: project slug derived from config or defaults to basename of VCS root dir                                                                  | Path exists at expected location                                                   |
-| AC-13 | `snapshot-mode = "remote"`: rebases in the user's repo do not break fetch/merge from the remote                                                                       | User can fetch our branch and merge even after their own history changed           |
-| AC-14 | `snapshot-mode = "remote"`: after aggressive GC prunes the shallow root, a simple `git fetch origin litterbox/<slug>` restores it                                     | Re-fetch re-establishes the base commit                                            |
-| AC-15 | `snapshot-mode = "remote"`: changing config to `"direct"` after sandbox creation does not affect existing sandbox operations — mode is loaded from persisted metadata | Create sandbox, change config, call `read`/`bash` — succeeds with original mode    |
-| AC-16 | `snapshot-mode = "direct"`: no metadata file written (backward compat), `resolve_sandbox_metadata` falls back to legacy reconstruction                                | No file in metadata dir                                                            |
+| AC-1 | `snapshot-mode = "direct"`: sandbox branches live in the user's repo | `git branch` shows `litterbox/<slug>` |
+| AC-2 | `snapshot-mode = "remote"`: bare clone exists at the path resolved in §5.1 | File exists check |
+| AC-3 | `snapshot-mode = "remote"`: the bare clone's `litterbox/<slug>` branch exists and points to a valid commit | `git2` branch lookup |
+| AC-4 | `snapshot-mode = "remote"`: a `commit_snapshot_from_staging` after mutation results in a new commit on the bare clone's branch | `git log` verifies chain |
+| AC-5 | `snapshot-mode = "remote"`: a `litterbox` remote exists in the user's repo pointing to the bare clone | `git remote get-url litterbox` |
+| AC-6 | `snapshot-mode = "remote"`: repeated `sandbox-create` for the same project does not re-clone the bare repo | Single clone on first call |
+| AC-7 | `snapshot-mode = "remote"`: corrupt bare clone self-heals (destroy + re-clone shallow) | Corrupt a file, call `create`, verify it works |
+| AC-8 | `snapshot-mode = "remote"`: sandbox metadata includes the project slug so the sandbox server can derive the bare clone path | `SandboxMetadata` fields |
+| AC-9 | `snapshot-mode = "remote"`: `delete` removes the bare clone if this was the last sandbox for the project; the `litterbox` remote persists | `git remote get-url litterbox` returns the (stale) URL; bare clone path is deleted |
+| AC-10 | `snapshot-mode = "remote"`: bare clone is shallow (depth 1) by default; re-clone after corruption uses depth 1 | `git rev-parse --is-shallow` |
+| AC-11 | `snapshot-mode = "remote"`: the `litterbox` remote installs if not present, does nothing if already present | No duplicate remote entries on repeated creates |
+| AC-12 | `snapshot-mode = "remote"`: project slug derived from config or defaults to basename of VCS root dir | Path exists at expected location |
+| AC-13 | `snapshot-mode = "remote"`: rebases in the user's repo do not break fetch/merge from the remote | User can fetch our branch and merge even after their own history changed |
+| AC-14 | `snapshot-mode = "remote"`: after aggressive GC prunes the shallow root, a simple `git fetch origin litterbox/<slug>` restores it | Re-fetch re-establishes the base commit |
+| AC-15 | `snapshot-mode = "remote"`: changing config to `"direct"` after sandbox creation does not affect existing sandbox operations — mode is loaded from persisted metadata | Create sandbox, change config, call `read`/`bash` — succeeds with original mode |
+| AC-16 | `snapshot-mode = "direct"`: no metadata file written (backward compat), `resolve_sandbox_metadata` falls back to legacy reconstruction | No file in metadata dir |
 
 ### 7.4 Edge Cases
 
-| Case                                                                         | Handling                                                                                                                                                                                                                |
+| Case | Handling |
 | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| User repo already has `litterbox/*` branches from a prior run (direct mode)  | Remote mode's bare clone is independent. No overlap. Direct mode users keep their branches.                                                                                                                             |
-| Host repo is moved or deleted between sandboxes                              | Remote mode stores the bare clone path; it survives host repo moves. On first missing reference, re-clone from host.                                                                                                    |
-| Concurrency: two `sandbox-create` calls race to create the bare clone        | Use a lock file or mutex in `ThreadSafeScm`. Only one clone at a time.                                                                                                                                                  |
-| Host repo has many large files (git-lfs, large blobs)                        | Shallow clone (`--depth 1`) fetches blobs for one commit only. Large blobs on HEAD are fetched. Document as a known limitation.                                                                                         |
-| Snapshots reference commits that may have been pruned by `jj` or other tools | Remote mode's bare clone is independent. Direct mode shares the same history. As long as commits exist, snapshots work.                                                                                                 |
-| VcsStore path is on a different filesystem than user's repo                  | No special handling needed; `git clone` copies everything. Path is stored in metadata.                                                                                                                                  |
-| User has multiple sandboxes for the same project                             | All share the same bare clone and `litterbox` remote. Each gets its own `litterbox/<slug>` branch. The remote is never removed automatically; the bare clone is removed when all sandboxes for the project are deleted. |
-| Bare clone remote URL becomes invalid (host repo moved)                      | Remote stays as-is; `git push litterbox` will fail. Litterbox should detect this and offer to re-clone.                                                                                                                 |
-| User rebases or squashes history after initiating a remote sandbox           | Our branch retains its original base commit. If the user's history changed, our branch is a fork of their pre-rebase history. Merge/rebase works fine.                                                                  |
+| User repo already has `litterbox/*` branches from a prior run (direct mode) | Remote mode's bare clone is independent. No overlap. Direct mode users keep their branches. |
+| Host repo is moved or deleted between sandboxes | Remote mode stores the bare clone path; it survives host repo moves. On first missing reference, re-clone from host. |
+| Concurrency: two `sandbox-create` calls race to create the bare clone | Use a lock file or mutex in `ThreadSafeScm`. Only one clone at a time. |
+| Host repo has many large files (git-lfs, large blobs) | Shallow clone (`--depth 1`) fetches blobs for one commit only. Large blobs on HEAD are fetched. Document as a known limitation. |
+| Snapshots reference commits that may have been pruned by `jj` or other tools | Remote mode's bare clone is independent. Direct mode shares the same history. As long as commits exist, snapshots work. |
+| VcsStore path is on a different filesystem than user's repo | No special handling needed; `git clone` copies everything. Path is stored in metadata. |
+| User has multiple sandboxes for the same project | All share the same bare clone and `litterbox` remote. Each gets its own `litterbox/<slug>` branch. The remote is never removed automatically; the bare clone is removed when all sandboxes for the project are deleted. |
+| Bare clone remote URL becomes invalid (host repo moved) | Remote stays as-is; `git push litterbox` will fail. Litterbox should detect this and offer to re-clone. |
+| User rebases or squashes history after initiating a remote sandbox | Our branch retains its original base commit. If the user's history changed, our branch is a fork of their pre-rebase history. Merge/rebase works fine. |
 
 ## 8. Terminology
 
-| Term                 | Definition                                                                                                                                          |
+| Term | Definition |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Bare clone**       | A `git2::Repository` opened with `bare=true`. No working tree. Contains only `.git` data.                                                           |
-| **Host repo**        | The user's repository on disk. Read-only after initial clone (remote mode). Direct access in direct mode.                                           |
-| **Sandbox branch**   | A branch named `litterbox/<slug>` inside the repository. Each sandbox gets its own.                                                                 |
-| **Bare clone path**  | The filesystem path where the bare repository lives (e.g. `~/.local/state/agentkit/litterbox/vcs/git/<project-slug>/`).                             |
-| **litterbox remote** | A git remote in the user's repo pointing to the bare clone path. Enables `git push litterbox <branch>` to publish sandbox changes.                  |
-| **Project slug**     | Identifier used to derive the bare clone path. Set explicitly in config, or defaults to the basename of the VCS root directory.                     |
-| **Direct mode**      | Original behavior — all `Scm` operations on the user's repository directly.                                                                         |
-| **Remote mode**      | New behavior — bare clone at a project-specific path, isolated writes, `litterbox` remote installed into the user's repo.                           |
-| **Snapshot**         | A full-tree commit in the sandbox branch. Parent reference is for ordering, not delta computation.                                                  |
-| **Metadata file**    | A TOML file at `~/.local/state/agentkit/litterbox/metadata/<project>/<slug>.toml` containing the sandbox's `SandboxMetadata`. One file per sandbox. |
+| **Bare clone** | A `git2::Repository` opened with `bare=true`. No working tree. Contains only `.git` data. |
+| **Host repo** | The user's repository on disk. Read-only after initial clone (remote mode). Direct access in direct mode. |
+| **Sandbox branch** | A branch named `litterbox/<slug>` inside the repository. Each sandbox gets its own. |
+| **Bare clone path** | The filesystem path where the bare repository lives (e.g. `~/.local/state/agentkit/litterbox/vcs/git/<project-slug>/`). |
+| **litterbox remote** | A git remote in the user's repo pointing to the bare clone path. Enables `git push litterbox <branch>` to publish sandbox changes. |
+| **Project slug** | Identifier used to derive the bare clone path. Set explicitly in config, or defaults to the basename of the VCS root directory. |
+| **Direct mode** | Original behavior — all `Scm` operations on the user's repository directly. |
+| **Remote mode** | New behavior — bare clone at a project-specific path, isolated writes, `litterbox` remote installed into the user's repo. |
+| **Snapshot** | A full-tree commit in the sandbox branch. Parent reference is for ordering, not delta computation. |
+| **Metadata file** | A TOML file at `~/.local/state/agentkit/litterbox/metadata/<project>/<slug>.toml` containing the sandbox's `SandboxMetadata`. One file per sandbox. |

@@ -1,9 +1,9 @@
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::resource::{
     EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector,
 };
+use opentelemetry_sdk::Resource;
 use std::time::Duration;
 
 pub struct OtelSetup {

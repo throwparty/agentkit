@@ -14,7 +14,7 @@ decision: pending
 >
 > **Total estimated effort**: ~13 days (9 tasks, in parallel where dependencies allow).
 
----
+______________________________________________________________________
 
 ### Phase 1: Foundation
 
@@ -42,7 +42,7 @@ decision: pending
 
 **Rollout**: Part of PR adding the crate.
 
----
+______________________________________________________________________
 
 #### T2: SearchEngine Trait
 
@@ -70,7 +70,7 @@ decision: pending
 
 **Rollout**: No runtime impact; pure API definition.
 
----
+______________________________________________________________________
 
 ### Phase 2: Core Modules (Parallelizable)
 
@@ -111,7 +111,7 @@ decision: pending
 
 **Rollout**: Requires `--brave-api-key` to function; `list-search-engines` reports `configured: false` until key provided.
 
----
+______________________________________________________________________
 
 #### T4: CLI Config Parsing
 
@@ -141,7 +141,7 @@ decision: pending
 
 **Rollout**: No runtime impact; CLI parsing only.
 
----
+______________________________________________________________________
 
 #### T5: Security Module
 
@@ -178,7 +178,7 @@ decision: pending
 
 **Rollout**: Security feature; no rollback needed but must not block valid fetches.
 
----
+______________________________________________________________________
 
 #### T6: Cache Module (Look-aside)
 
@@ -212,7 +212,7 @@ decision: pending
 
 **Rollout**: No runtime impact unless cache TTL causes unexpected staleness.
 
----
+______________________________________________________________________
 
 #### T7: Fetcher Module
 
@@ -251,7 +251,7 @@ decision: pending
 
 **Rollout**: No rollback needed; fetcher is a simple HTTP client with markdown conversion.
 
----
+______________________________________________________________________
 
 ### Phase 3: Integration
 
@@ -290,7 +290,7 @@ decision: pending
 
 **Rollout**: All three tools must work together; requires full integration testing.
 
----
+______________________________________________________________________
 
 #### T9: Main Entry Point
 
@@ -340,7 +340,7 @@ decision: pending
 
 **Rollout**: Final integration step; requires all previous tasks.
 
----
+______________________________________________________________________
 
 ### Task Dependency Graph
 

@@ -6,19 +6,17 @@
 
 Add `tokio-util` as a direct dependency in `crates/agentkit-tackle/Cargo.toml` with its `rt` feature. Add `cancellations: Mutex<BTreeMap<String, CancellationToken>>` to `ConnectionNegotiation` in `acp_v1/negotiation.rs`, plus `register(session) -> (CancellationToken, CancelRegistration)` and a `cancel(session)` lookup. `CancelRegistration` is a drop guard that removes the session's entry, so cleanup happens on every exit path.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | Unit tests: registering a session yields a token; `cancel` triggers it; dropping the guard removes the entry; cancelling twice and cancelling after the guard drops are no-ops; `cargo test -p agentkit-tackle` passes |
 | Complexity | 🟢 Low |
 | Effort | 2-3h |
-| Depends On |  |
+| Depends On | |
 | References | single-primitive,no-new-dependency-tree,cleanup-on-cancel |
 
 ### T-002: [x] Thread the token into the turn
 
 Add a `cancellation: CancellationToken` field to `TurnRuntime` in `agent/runtime.rs` and set it from the registered token in `acp_v1/support.rs::turn_runtime`. Thread it through `run_prompt_turn` to `run_turn_loop` and into `run_turn`. No behavioural change yet: the token is carried but not observed.
-
 
 | Field | Value |
 |-------|-------|
@@ -32,7 +30,6 @@ Add a `cancellation: CancellationToken` field to `TurnRuntime` in `agent/runtime
 
 In `agent/turn.rs::run_turn`, accumulate streamed text in a shared buffer (the `on_delta` closure appends to it as well as forwarding) and wrap the `provider.stream_completion` await in a biased `tokio::select!` against `token.cancelled()`. On cancel persist the buffered partial text under `message_id`, then return `TurnOutcome { stop: TurnStop::Cancelled }`. Check `token.is_cancelled()` at the top of each loop iteration and select the tool-call await, so a cancelled turn issues no further request. Add `TurnStop::Cancelled` in `agent/outcome.rs`.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | A stub provider that never completes, with a cancelled token, makes `run_turn` return `Cancelled` promptly and persist the partial text; a token cancelled between requests stops the loop without issuing a new request; an already-completed token does not disturb a normal turn; existing turn tests pass |
@@ -44,7 +41,6 @@ In `agent/turn.rs::run_turn`, accumulate streamed text in a shared buffer (the `
 ### T-004: [x] Register the token around the spawned turn
 
 In `acp_v1/prompt.rs`, create and register a token for the spawned model turn before `cx.spawn`, and hold the `CancelRegistration` guard inside the spawned task so the entry is removed when the turn ends. Direct `/!` invocations and the fast command intercepts (fork, `/mcp`, `/editor`, `/context`, compaction) are not registered: they do not observe the token, so a registration would be inert.
-
 
 | Field | Value |
 |-------|-------|
@@ -58,7 +54,6 @@ In `acp_v1/prompt.rs`, create and register a token for the spawned model turn be
 
 Map `TurnStop::Cancelled` to `StopReason::Cancelled` in the `run_model_turn_case` response match in `acp_v1/prompt.rs`. Confirm the cancelled path still reports session info, fires the detached hooks, releases the lease, and removes the registry entry.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | A cancelled turn's `session/prompt` response carries `stopReason: cancelled`; the session's lease is free immediately after; exactly one response is sent and no content or tool-call update follows it |
@@ -70,7 +65,6 @@ Map `TurnStop::Cancelled` to `StopReason::Cancelled` in the `run_model_turn_case
 ### T-006: [x] session/cancel handler
 
 Register an `on_receive_notification` handler for `CancelNotification` (`session/cancel`) in the `acp_v1/server.rs` builder. The handler resolves the store session id, looks up the token in the connection registry, and cancels it; unknown sessions are ignored.
-
 
 | Field | Value |
 |-------|-------|
@@ -84,7 +78,6 @@ Register an `on_receive_notification` handler for `CancelNotification` (`session
 
 In `acp_v1/sessions.rs::handle_close_session`, cancel the session's token before the existing close work (store close, grant clear, terminal release). The close request still returns its normal response.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | An integration test sends `session/close` while a prompt is in flight: the prompt resolves cancelled, the close response still arrives, and the session remains listable with grants cleared and terminals released; close on an idle session is unchanged |
@@ -96,7 +89,6 @@ In `acp_v1/sessions.rs::handle_close_session`, cancel the session's token before
 ### T-008: [x] $/cancel_request bridge
 
 In `acp_v1/prompt.rs::run_model_turn_case`, capture `responder.cancellation()` before the responder moves into the spawned task, and cancel the same token when that marker fires, bridging the SDK's per-request cancellation.
-
 
 | Field | Value |
 |-------|-------|
@@ -110,7 +102,6 @@ In `acp_v1/prompt.rs::run_model_turn_case`, capture `responder.cancellation()` b
 
 Extend the existing in-process ACP integration harness with cancellation coverage: cancel during a streamed turn, cancel during a tool call including an open permission request, close during a turn, and the cancellation race. Assert no content or tool-call update arrives after the cancelled response, the lease is released, and cancelling a turn stops a nested agent loop it spawned.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | The new tests run offline; `cargo test -p agentkit-tackle` passes; they fail if a late update follows the response, if the lease is not released, or if a cancelled tool call still completes |
@@ -122,7 +113,6 @@ Extend the existing in-process ACP integration harness with cancellation coverag
 ### T-010: [x] Golden-transcript cancel coverage
 
 Add transcript steps covering a cancelled turn and a close during a turn to `crates/agentkit-tackle/tests/acp_v1_conformance.rs` and `tests/transcripts`, keeping the existing subset-match semantics.
-
 
 | Field | Value |
 |-------|-------|
@@ -136,7 +126,6 @@ Add transcript steps covering a cancelled turn and a close during a turn to `cra
 
 Ensure the deterministic test model exercises `$/cancel_request` if the current sentinel flow does not, run `just tackle conformance`, and confirm `ACP-CANCEL-001`, `ACP-CANCEL-002`, `ACP-CLOSE-002` and `ACP-JSONRPC-007` pass rather than skip. Reseed `crates/agentkit-tackle/tests/conformance/baseline.txt` with `just tackle seed-baseline` and review the diff.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | The four requirements report PASS in `target/conformance/report.json`; the seeded baseline no longer lists them; `just tackle check-baseline` reports no new failures and no drift |
@@ -144,4 +133,3 @@ Ensure the deterministic test model exercises `$/cancel_request` if the current 
 | Effort | 2-3h |
 | Depends On | T-009,T-010 |
 | References | cancel-conformance,close-conformance,cancel-request-conformance,baseline-tightened |
-

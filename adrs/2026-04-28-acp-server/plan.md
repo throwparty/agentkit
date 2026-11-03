@@ -233,10 +233,10 @@ struct Session {
 
 These are distinct methods per ACP spec:
 
-| Method           | Capability                   | Behavior                                                        |
+| Method | Capability | Behavior |
 | ---------------- | ---------------------------- | --------------------------------------------------------------- |
-| `session/load`   | `loadSession`                | Replays conversation history via `session/update` notifications |
-| `session/resume` | `sessionCapabilities.resume` | Restores session context, does NOT replay history               |
+| `session/load` | `loadSession` | Replays conversation history via `session/update` notifications |
+| `session/resume` | `sessionCapabilities.resume` | Restores session context, does NOT replay history |
 
 - Basic harness does NOT support either (no conversation history to restore)
 - `session/load` returns `-32602` (loadSession capability is false)
@@ -246,31 +246,31 @@ These are distinct methods per ACP spec:
 
 Each handler returns a predetermined response:
 
-| Handler                     | Response                                           | Notes                                                              |
+| Handler | Response | Notes |
 | --------------------------- | -------------------------------------------------- | ------------------------------------------------------------------ |
-| `initialize`                | Static capabilities + version                      | `loadSession: false`, no auth                                      |
-| `authenticate`              | Error `-32601`                                     | Method not found (no auth methods advertised)                      |
-| `session/new`               | `SessionId::new_v4()` + modes                      | Echo `cwd` back in result                                          |
-| `session/load`              | Error `-32602`                                     | `loadSession` not supported                                        |
-| `session/resume`            | Empty result `{}` + `session/update` notifications | Replay dummy echo conversation via notifications, then return `{}` |
-| `session/list`              | List of active sessions                            | No filtering needed                                                |
-| `session/close`             | Empty result `{}`                                  | Remove session, no error if missing                                |
-| `session/set_mode`          | Empty result `{}`                                  | Store mode on session object                                       |
-| `session/set_config_option` | Error `-32601`                                     | Method not found (config out of scope)                             |
-| `session/prompt`            | Echo + `end_turn`                                  | Sends `session/update` with user message text, then `end_turn`     |
-| `session/cancel`            | Notification + `cancelled`                         | Sends cancellation notice, then responds to original prompt        |
+| `initialize` | Static capabilities + version | `loadSession: false`, no auth |
+| `authenticate` | Error `-32601` | Method not found (no auth methods advertised) |
+| `session/new` | `SessionId::new_v4()` + modes | Echo `cwd` back in result |
+| `session/load` | Error `-32602` | `loadSession` not supported |
+| `session/resume` | Empty result `{}` + `session/update` notifications | Replay dummy echo conversation via notifications, then return `{}` |
+| `session/list` | List of active sessions | No filtering needed |
+| `session/close` | Empty result `{}` | Remove session, no error if missing |
+| `session/set_mode` | Empty result `{}` | Store mode on session object |
+| `session/set_config_option` | Error `-32601` | Method not found (config out of scope) |
+| `session/prompt` | Echo + `end_turn` | Sends `session/update` with user message text, then `end_turn` |
+| `session/cancel` | Notification + `cancelled` | Sends cancellation notice, then responds to original prompt |
 
 ## Error Handling
 
 ### JSON-RPC 2.0 Error Codes
 
-| Code   | Name             | When                                             |
+| Code | Name | When |
 | ------ | ---------------- | ------------------------------------------------ |
-| -32700 | Parse error      | Invalid JSON or not a valid message object       |
-| -32600 | Invalid Request  | Missing `jsonrpc`, `method`, or invalid `params` |
-| -32601 | Method not found | Unknown method name                              |
-| -32602 | Invalid params   | Missing required params or type mismatch         |
-| -32603 | Internal error   | Unexpected handler error                         |
+| -32700 | Parse error | Invalid JSON or not a valid message object |
+| -32600 | Invalid Request | Missing `jsonrpc`, `method`, or invalid `params` |
+| -32601 | Method not found | Unknown method name |
+| -32602 | Invalid params | Missing required params or type mismatch |
+| -32603 | Internal error | Unexpected handler error |
 
 ### Transport-Level Errors
 
@@ -282,22 +282,22 @@ Each handler returns a predetermined response:
 
 ### Unit Tests (`tests/unit/`)
 
-| Test                  | File                           | What it validates                               |
+| Test | File | What it validates |
 | --------------------- | ------------------------------ | ----------------------------------------------- |
-| JSON-RPC parsing      | `jsonrpc_tests.rs`             | Valid/invalid JSON-RPC messages round-trip      |
-| Initialize handler    | `handlers/initialize_tests.rs` | Response structure matches spec                 |
-| Session CRUD          | `session/store_tests.rs`       | Create, list, close sessions                    |
-| Prompt echo           | `handlers/prompt_tests.rs`     | session/update notification + end_turn response |
-| Error formatting      | `error_tests.rs`               | Correct JSON-RPC error codes and messages       |
-| Session ID generation | `types_tests.rs`               | UUIDv4 uniqueness                               |
+| JSON-RPC parsing | `jsonrpc_tests.rs` | Valid/invalid JSON-RPC messages round-trip |
+| Initialize handler | `handlers/initialize_tests.rs` | Response structure matches spec |
+| Session CRUD | `session/store_tests.rs` | Create, list, close sessions |
+| Prompt echo | `handlers/prompt_tests.rs` | session/update notification + end_turn response |
+| Error formatting | `error_tests.rs` | Correct JSON-RPC error codes and messages |
+| Session ID generation | `types_tests.rs` | UUIDv4 uniqueness |
 
 ### Integration Tests (`tests/integration/`)
 
-| Test                 | What it validates                                     |
+| Test | What it validates |
 | -------------------- | ----------------------------------------------------- |
-| `stdio_roundtrip.rs` | Send messages via stdin, verify stdout output         |
-| `http_roundtrip.rs`  | Internal HTTP client sends request, verifies response |
-| `lifecycle.rs`       | Full ACP lifecycle: initialize → new → prompt → close |
+| `stdio_roundtrip.rs` | Send messages via stdin, verify stdout output |
+| `http_roundtrip.rs` | Internal HTTP client sends request, verifies response |
+| `lifecycle.rs` | Full ACP lifecycle: initialize → new → prompt → close |
 
 ### Test Harness
 
@@ -334,10 +334,10 @@ cargo test --test stdio_roundtrip
 
 ## Risks and Mitigations
 
-| Risk                                 | Impact      | Mitigation                                                     |
+| Risk | Impact | Mitigation |
 | ------------------------------------ | ----------- | -------------------------------------------------------------- |
-| Single-threaded message processing   | Concurrency | Tokio single-threaded runtime per connection; not multi-client |
-| Stdio buffer blocking on slow client | Deadlock    | Non-blocking writes; handle WriteError gracefully              |
+| Single-threaded message processing | Concurrency | Tokio single-threaded runtime per connection; not multi-client |
+| Stdio buffer blocking on slow client | Deadlock | Non-blocking writes; handle WriteError gracefully |
 
 ## Deployment
 

@@ -36,13 +36,11 @@ Per-turn cancellation token
 
 Add `tokio_util` as a direct dependency with its rt feature. A `CancellationToken` is created per turn and cloned into the turn runtime. Cancellation is signalled once by whichever trigger fires first; the token is idempotent, so repeated or post-completion cancels are no-ops.
 
-
 ### registry
 
 Connection-scoped registration
 
 Add `cancellations: Mutex<BTreeMap<String, CancellationToken>>` to `ConnectionNegotiation`, beside `terminals`, plus `register(session) -> (CancellationToken, CancelRegistration)` and lookup. `CancelRegistration` is an RAII guard that removes the entry on drop, so every exit path (cancel, end_turn, error, connection drop) cleans up. Keyed by store session id.
-
 
 ### turn-runtime
 
@@ -50,13 +48,11 @@ Thread the token into the loop
 
 Add a `cancellation: CancellationToken` field to `TurnRuntime` in `agent/runtime.rs` and set it in `acp_v1/support.rs::turn_runtime`. `run_prompt_turn` passes it to `run_turn_loop`, which passes it to `run_turn`. This keeps the token out of the already-long argument lists.
 
-
 ### turn-observation
 
 Observe cancellation in the loop
 
 In `agent/turn.rs::run_turn`, accumulate streamed text in a shared buffer (the `on_delta` closure appends to it as well as forwarding), then wrap the `provider.stream_completion` await in a biased `tokio::select!` against `token.cancelled()`. On cancel, persist the buffered partial text as an assistant message under `message_id` and return `TurnOutcome { stop: Cancelled }`; the shared buffer avoids a borrow conflict with the still-live stream future. Check `token.is_cancelled()` at the top of each loop iteration and select the tool-call await, so a cancelled turn issues no further request and stops an in-flight tool call. Dropping the stream future drops the reqwest body, closing the connection.
-
 
 ### cancel-notification
 
@@ -64,13 +60,11 @@ session/cancel handler
 
 In the `acp_v1/server.rs` builder, register `on_receive_notification` for `CancelNotification`. The handler resolves the store session id, looks up the token in the connection registry, and cancels it. Unknown sessions are ignored; the notification has no response.
 
-
 ### close-cancel
 
 session/close integration
 
 In `acp_v1/sessions.rs::handle_close_session`, cancel the session's token before the existing close work (store close, grant clear, terminal release). The close request still returns its normal empty response; the in-flight prompt resolves cancelled from its own task.
-
 
 ### cancel-request-bridge
 
@@ -78,13 +72,11 @@ $/cancel_request bridge
 
 In `acp_v1/prompt.rs::run_model_turn_case`, capture `responder.cancellation()` before moving the responder into the spawned task, and have the task cancel the same token when that marker fires. The SDK sets the marker on `$/cancel_request` before handlers run, so this needs no registry.
 
-
 ### stop-reason
 
 Map to ACP stop reason
 
 Add `TurnStop::Cancelled` in `agent/outcome.rs` (re-exported from `agent/mod.rs`) and map it to `StopReason::Cancelled` in `acp_v1/prompt.rs`. `end_turn`, `max_turn_requests`, and `context_length` mappings are unchanged.
-
 
 ### finalization
 
@@ -92,13 +84,11 @@ Graceful turn close
 
 A cancelled turn follows the ordinary tail of `run_prompt_turn`: report session info, fire detached compaction and titling hooks, release the lease, and respond. The registration guard removes the token. No late content or tool-call update is emitted after the response.
 
-
 ### conformance-baseline
 
 Close the gaps and reseed
 
 Extend the deterministic test model flow if needed so `$/cancel_request` is exercised rather than skipped. Run `just tackle conformance`, confirm ACP-CANCEL-001, ACP-CANCEL-002, ACP-CLOSE-002 and ACP-JSONRPC-007 pass, then reseed `crates/agentkit-tackle/tests/conformance/baseline.txt` and confirm no drift.
-
 
 ## Data Flow
 
@@ -108,8 +98,6 @@ Signal: session/cancel notification, or session/close request, or $/cancel_reque
 
 Race: a cancel after the response is a no-op because the token is gone and the response already sent; a cancel racing completion resolves through the biased select to exactly one outcome.
 
-
 ## Deployment
 
 No deployment change. Cancellation is entirely in-process; no schema migration, configuration key, transport change, or client capability is added. stdio and HTTP connections behave identically, and a disconnected client needs no cancellation because its spawned turn is dropped with the connection.
-

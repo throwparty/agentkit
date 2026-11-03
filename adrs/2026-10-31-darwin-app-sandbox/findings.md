@@ -36,13 +36,13 @@ Smaller than expected, once four things are right:
 1. `(allow file-read* (literal "/"))` and `(allow file-read-metadata)`. Without
    either, **every exec dies with SIGABRT and no output at all** — not a denial,
    not an error.
-2. The read baseline must include the toolchain's closure. A baseline of `/usr`,
+1. The read baseline must include the toolchain's closure. A baseline of `/usr`,
    `/System`, `/Library`, `/bin` breaks every Nix binary, because coreutils
    `dlopen`s a sibling store path and aborts in dyld. It also needs the active
    developer directory, or the linker cannot find the SDK.
-3. `(allow file-write* (literal "/dev/null"))`. Without it every `> /dev/null`
+1. `(allow file-write* (literal "/dev/null"))`. Without it every `> /dev/null`
    fails and a harness that redirects its own output reports false negatives.
-4. `TMPDIR` must exist and be inside the workspace. The Nix cc wrapper creates
+1. `TMPDIR` must exist and be inside the workspace. The Nix cc wrapper creates
    scratch there and fails if the parent is missing.
 
 ## Capability surface: what is emitted, and what is not
@@ -168,24 +168,24 @@ is Linux: one dependency covering Landlock and macOS.
 1. `sandbox_init` is deprecated and undocumented. SDK 27 still ships the header;
    the named profiles are already rejected. `sandbox-exec` still exists on 27.2
    but was not cross-checked here.
-2. A symlink in a rule path makes the rule inert. Every rule path must be
+1. A symlink in a rule path makes the rule inert. Every rule path must be
    `realpath`ed; this is load-bearing, not hygiene.
-3. Rename-shaped bypasses are covered by denying `file-write*` on the
+1. Rename-shaped bypasses are covered by denying `file-write*` on the
    credential path, not by `file-write-unlink` alone. Verified: a hard link
    from `~/.ssh/id_ed25519` into the workspace fails with EPERM because the
    kernel checks the source vnode, while the same link between two files inside
    the workspace succeeds. Volume isolation is therefore not required for this
    vector, and a read-only deny would not have been enough.
-4. Hostname-based egress does not work. External network access needs a proxy.
-5. Orphaned processes that leave the process group cannot be reaped by handle.
-6. The read baseline is host-specific, including the Nix store and the Xcode
+1. Hostname-based egress does not work. External network access needs a proxy.
+1. Orphaned processes that leave the process group cannot be reaped by handle.
+1. The read baseline is host-specific, including the Nix store and the Xcode
    developer directory.
-7. `mach-lookup` is now an enumerated list, but the list was derived from one
+1. `mach-lookup` is now an enumerated list, but the list was derived from one
    workload on one host. Adding a toolchain will add services; the list has to
    be treated as data, not a constant.
-8. The credential deny names fourteen classes of store, not every store. A home
+1. The credential deny names fourteen classes of store, not every store. A home
    read grant still exposes whatever is not named, and that list has to be kept
    current as toolchains change.
-9. Descriptors above stdio are closed by sweeping 3–1024; `closefrom` is not
+1. Descriptors above stdio are closed by sweeping 3–1024; `closefrom` is not
    available in this SDK, so a supervisor holding a higher descriptor could leak
    it after 1024.

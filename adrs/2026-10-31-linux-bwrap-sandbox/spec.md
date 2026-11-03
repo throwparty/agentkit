@@ -1,9 +1,8 @@
 # Linux Bubblewrap Sandbox Spike
 
-**Status:** implemented  **Created:** 2026-10-31  **Author:** adrian
+**Status:** implemented **Created:** 2026-10-31 **Author:** adrian
 
 Bubblewrap builds its sandbox from unprivileged user namespaces with no root and no daemon. The host Nix store can be shared read-only; content addressing gives integrity and deduplication, and the store is assumed to contain no private data. An unshared network namespace is loopback-only, so destination filtering is a proxy problem. Confinement needs no virtualisation. Lifecycle works through process groups: the harness becomes a session leader, and a setsid escape stays confined but cannot be addressed. Unprivileged user namespaces are available on the spike host; cross-distribution and LSM policy are out of scope. This ADR scopes the bubblewrap proof-of-concept and establishes the minimal view for a real Nix-built workload. Enforcement is by mount visibility and namespace membership, so every capability must be expressed as a mount or a namespace flag. Requirement titles carry a Shared or Bwrap prefix because the renderer has no nested headings. The prototype lives under this ADR directory and is discarded with it. macOS, the Nix devShell provider and the Litterbox interface are out of scope.
-
 
 ## Problem
 
@@ -31,7 +30,6 @@ On Linux, Litterbox cannot confine agent commands without a container runtime, a
 - Reaping processes that leave their process group
 - Virtualisation or VM-backed containers
 - Signing, packaging or distribution
-
 
 ## Functional Requirements
 
@@ -304,54 +302,63 @@ A change to the argv builder that alters the emitted arguments fails a fixture t
 Where unprivileged user namespaces are unavailable, the harness records the exact failure and never falls back to an unconfined run.
 
 **Slug:** `userns-restricted`
+
 ### EC-002: Shared: Bwrap Missing Or Old
 
 If bwrap is absent or below the version floor the harness reports the required version and exits non-zero.
 
 **Slug:** `bwrap-missing-or-old`
+
 ### EC-003: Shared: Proc Mount Failure
 
 If /proc cannot be mounted the harness fails.
 
 **Slug:** `proc-mount-failure`
+
 ### EC-004: Shared: Setuid Binaries
 
 A sandboxed process cannot gain privilege through a setuid binary; the error is confirmed legible.
 
 **Slug:** `setuid-binaries`
+
 ### EC-005: Shared: Device Nodes
 
 Only the device nodes the harness creates are present; host devices sit outside the view.
 
 **Slug:** `device-nodes`
+
 ### EC-006: Shared: Symlinked Paths
 
 Paths are canonicalised because /tmp and other paths may be symlinks. A path resolving outside the workspace is rejected.
 
 **Slug:** `symlinked-paths`
+
 ### EC-007: Shared: Process Group Escape
 
 A command that calls setsid leaves the process group. It stays confined because the namespace cannot be removed, but delete can no longer reap it. The behaviour is recorded.
 
 **Slug:** `process-group-escape`
+
 ### EC-008: Shared: Cgroup Namespace Unavailable
 
 Where a cgroup namespace cannot be created, the harness records whether it continues without it and why.
 
 **Slug:** `cgroup-namespace-unavailable`
+
 ### EC-009: Shared: NixOS System Profile
 
 On NixOS the system profile and the current-system symlink must be in the view for basic tools to run. On other distributions the path is absent and the addition is skipped.
 
 **Slug:** `nixos-system-profile`
+
 ### EC-010: Shared: Nested Bwrap
 
 User namespace nesting may or may not be permitted. The harness records whether a sandboxed bwrap can create a further sandbox.
 
 **Slug:** `nested-bwrap`
+
 ### EC-011: Shared: Zombie Reaping
 
 bwrap reaps its own children. The harness records what happens to grandchildren orphaned by a command that exits.
 
 **Slug:** `zombie-reaping`
-

@@ -22,7 +22,7 @@ test result: ok. 141 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 Deleting the spike is:
 
 1. `rm -rf adrs/2026-10-31-darwin-app-sandbox/poc`
-2. Keep `spec.toon`, `plan.toon`, `tasks.toon`, `findings.md` and their
+1. Keep `spec.toon`, `plan.toon`, `tasks.toon`, `findings.md` and their
    markdown: these are the ADR. `findings.md` is the deliverable, not scratch.
 
 Nothing else references the prototypes, nothing is installed, no service is

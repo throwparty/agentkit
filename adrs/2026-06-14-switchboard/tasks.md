@@ -8,8 +8,7 @@ decision: accepted
 
 # Tasks: Switchboard — Cost-Aware Model Provider Proxy
 
-Each task is an independently testable unit. Tasks can be implemented in any order except where noted. No task depends on the HTTP server being complete — each has its own test harness.
----
+## Each task is an independently testable unit. Tasks can be implemented in any order except where noted. No task depends on the HTTP server being complete — each has its own test harness.
 
 ## T1: Config Types and TOML Loading
 
@@ -38,16 +37,16 @@ Each task is an independently testable unit. Tasks can be implemented in any ord
 
 ### Tests
 
-| Test                               | What it validates                  |
+| Test | What it validates |
 | ---------------------------------- | ---------------------------------- |
-| `config_parse_valid`               | Minimal TOML produces valid config |
-| `config_parse_duplicate_identity`  | Duplicate identity rejected        |
-| `config_parse_bad_enum`            | Unknown enum variant fails         |
-| `config_oauth_endpoints`           | `[auth.oauth]` parses correctly    |
-| `config_models_override`           | `[models.*]` overrides parsed      |
-| `config_credential_helper_default` | Default is `None`                  |
+| `config_parse_valid` | Minimal TOML produces valid config |
+| `config_parse_duplicate_identity` | Duplicate identity rejected |
+| `config_parse_bad_enum` | Unknown enum variant fails |
+| `config_oauth_endpoints` | `[auth.oauth]` parses correctly |
+| `config_models_override` | `[models.*]` overrides parsed |
+| `config_credential_helper_default` | Default is `None` |
 
----
+______________________________________________________________________
 
 ## T2: Model Metadata Crate and Merge Logic
 
@@ -72,15 +71,15 @@ Each task is an independently testable unit. Tasks can be implemented in any ord
 
 ### Tests
 
-| Test                      | What it validates                           |
+| Test | What it validates |
 | ------------------------- | ------------------------------------------- |
-| `models_load_snapshot`    | Bundled snapshot deserializes without error |
-| `models_merge_override`   | TOML override wins over bundled value       |
-| `models_lookup_found`     | Known model returns metadata                |
-| `models_lookup_missing`   | Unknown model returns `None`                |
-| `models_provider_pricing` | Provider pricing overlay works              |
+| `models_load_snapshot` | Bundled snapshot deserializes without error |
+| `models_merge_override` | TOML override wins over bundled value |
+| `models_lookup_found` | Known model returns metadata |
+| `models_lookup_missing` | Unknown model returns `None` |
+| `models_provider_pricing` | Provider pricing overlay works |
 
----
+______________________________________________________________________
 
 ## T3: Routing Algorithm (Pure Function)
 
@@ -118,19 +117,19 @@ fn select_provider(
 
 ### Tests
 
-| Test                                       | What it validates              |
+| Test | What it validates |
 | ------------------------------------------ | ------------------------------ |
-| `routing_prefers_subscription`             | Subscription > pay-as-you-go   |
-| `routing_falls_through_on_quota_exhausted` | Degraded sub → payg            |
-| `routing_ranks_by_cost`                    | Cheaper payg wins              |
-| `routing_tiebreaker_identity`              | Lexical tiebreak               |
-| `routing_model_not_available`              | Unknown model → error          |
-| `routing_no_credential`                    | Unconfigured provider excluded |
-| `routing_session_affinity`                 | Same session → same provider   |
-| `routing_session_breaks_on_degradation`    | Degraded → re-route            |
-| `routing_all_degraded`                     | All degraded → error           |
+| `routing_prefers_subscription` | Subscription > pay-as-you-go |
+| `routing_falls_through_on_quota_exhausted` | Degraded sub → payg |
+| `routing_ranks_by_cost` | Cheaper payg wins |
+| `routing_tiebreaker_identity` | Lexical tiebreak |
+| `routing_model_not_available` | Unknown model → error |
+| `routing_no_credential` | Unconfigured provider excluded |
+| `routing_session_affinity` | Same session → same provider |
+| `routing_session_breaks_on_degradation` | Degraded → re-route |
+| `routing_all_degraded` | All degraded → error |
 
----
+______________________________________________________________________
 
 ## T4: Credential Helper Protocol
 
@@ -157,19 +156,19 @@ fn select_provider(
 
 ### Tests
 
-| Test                             | What it validates                   |
+| Test | What it validates |
 | -------------------------------- | ----------------------------------- |
-| `credential_helper_get`          | Mock helper stdout parsed correctly |
-| `credential_helper_store`        | Helper invoked with correct stdin   |
-| `credential_helper_not_found`    | Missing helper → fallback           |
-| `credential_helper_nonzero_exit` | Helper error → fallback             |
-| `credential_env_var`             | Env var read correctly              |
-| `credential_env_missing`         | Missing env var → None              |
-| `credential_resolution_order`    | Helper > env var > unconfigured     |
-| `credential_none_type`           | `auth.type = "none"` skips all      |
-| `credential_token_expiry`        | Expiry check works                  |
+| `credential_helper_get` | Mock helper stdout parsed correctly |
+| `credential_helper_store` | Helper invoked with correct stdin |
+| `credential_helper_not_found` | Missing helper → fallback |
+| `credential_helper_nonzero_exit` | Helper error → fallback |
+| `credential_env_var` | Env var read correctly |
+| `credential_env_missing` | Missing env var → None |
+| `credential_resolution_order` | Helper > env var > unconfigured |
+| `credential_none_type` | `auth.type = "none"` skips all |
+| `credential_token_expiry` | Expiry check works |
 
----
+______________________________________________________________________
 
 ## T5: Credential Helper Binaries
 
@@ -199,17 +198,17 @@ fn select_provider(
 
 ### Tests
 
-| Test                       | What it validates                |
+| Test | What it validates |
 | -------------------------- | -------------------------------- |
-| `keychain_get_store_erase` | Full lifecycle via keychain      |
-| `keychain_get_not_found`   | Missing entry exits 1            |
-| `file_get_store_erase`     | Full lifecycle via file          |
-| `file_permissions`         | File created with 0600           |
-| `file_directory_creation`  | `~/.agentkit/` created with 0700 |
-| `helper_invalid_json`      | Bad stdin → exit 2               |
-| `helper_missing_args`      | No identity → exit 2             |
+| `keychain_get_store_erase` | Full lifecycle via keychain |
+| `keychain_get_not_found` | Missing entry exits 1 |
+| `file_get_store_erase` | Full lifecycle via file |
+| `file_permissions` | File created with 0600 |
+| `file_directory_creation` | `~/.agentkit/` created with 0700 |
+| `helper_invalid_json` | Bad stdin → exit 2 |
+| `helper_missing_args` | No identity → exit 2 |
 
----
+______________________________________________________________________
 
 ## T6: Session Manager (In-Memory + SQLite)
 
@@ -253,19 +252,19 @@ trait SessionManager: Send + Sync {
 
 ### Tests
 
-| Test                        | What it validates                         |
+| Test | What it validates |
 | --------------------------- | ----------------------------------------- |
-| `session_lookup_missing`    | Unknown session → None                    |
-| `session_assign_and_lookup` | Assign then lookup returns correct data   |
-| `session_assign_upsert`     | Second assign updates existing row        |
-| `session_update_tokens`     | Token counters accumulate                 |
-| `session_increment_switch`  | Switch count increments, provider changes |
-| `session_routing_event`     | Event inserted and queryable              |
-| `session_db_corruption`     | Corrupt DB → fallback, rename, recreate   |
-| `session_memory_impl`       | Memory impl passes all trait tests        |
-| `session_sqlite_impl`       | SQLite impl passes all trait tests        |
+| `session_lookup_missing` | Unknown session → None |
+| `session_assign_and_lookup` | Assign then lookup returns correct data |
+| `session_assign_upsert` | Second assign updates existing row |
+| `session_update_tokens` | Token counters accumulate |
+| `session_increment_switch` | Switch count increments, provider changes |
+| `session_routing_event` | Event inserted and queryable |
+| `session_db_corruption` | Corrupt DB → fallback, rename, recreate |
+| `session_memory_impl` | Memory impl passes all trait tests |
+| `session_sqlite_impl` | SQLite impl passes all trait tests |
 
----
+______________________________________________________________________
 
 ## T7: Quota State Machine and Header Parsing
 
@@ -297,22 +296,22 @@ trait SessionManager: Send + Sync {
 
 ### Tests
 
-| Test                           | What it validates                               |
+| Test | What it validates |
 | ------------------------------ | ----------------------------------------------- |
-| `quota_headers_openai`         | OpenAI headers parsed                           |
-| `quota_headers_anthropic`      | Anthropic headers parsed                        |
-| `quota_headers_missing`        | Missing headers → None                          |
-| `quota_429_retry_after`        | 429 with retry-after degrades for that duration |
-| `quota_429_insufficient_quota` | Permanent degradation                           |
-| `quota_429_default`            | 429 without headers → 60s                       |
-| `quota_401_permanent`          | 401 → permanent                                 |
-| `quota_5xx_backoff`            | 5xx with exponential backoff                    |
-| `quota_timeout_backoff`        | Timeout with backoff                            |
-| `quota_success_clears`         | 200 clears degradation                          |
-| `quota_subscription_429`       | Subscription 429 → 5h cooldown                  |
-| `quota_degradation_expired`    | Past degraded_until → re-enabled                |
+| `quota_headers_openai` | OpenAI headers parsed |
+| `quota_headers_anthropic` | Anthropic headers parsed |
+| `quota_headers_missing` | Missing headers → None |
+| `quota_429_retry_after` | 429 with retry-after degrades for that duration |
+| `quota_429_insufficient_quota` | Permanent degradation |
+| `quota_429_default` | 429 without headers → 60s |
+| `quota_401_permanent` | 401 → permanent |
+| `quota_5xx_backoff` | 5xx with exponential backoff |
+| `quota_timeout_backoff` | Timeout with backoff |
+| `quota_success_clears` | 200 clears degradation |
+| `quota_subscription_429` | Subscription 429 → 5h cooldown |
+| `quota_degradation_expired` | Past degraded_until → re-enabled |
 
----
+______________________________________________________________________
 
 ## T8: Request Translation (Chat Completions ↔ Responses API)
 
@@ -355,19 +354,19 @@ Output: { choices: [{index: 0, message: {role, content}, finish_reason: "stop"}]
 
 ### Tests
 
-| Test                               | What it validates                   |
+| Test | What it validates |
 | ---------------------------------- | ----------------------------------- |
-| `translate_request_basic`          | Messages → input conversion         |
-| `translate_request_system_message` | System → instructions               |
-| `translate_request_streaming`      | Streaming passthrough               |
-| `translate_request_params`         | temperature, max_tokens passthrough |
-| `translate_request_adds_fields`    | store, reasoning added              |
-| `translate_response_basic`         | Output → choices conversion         |
-| `translate_response_usage`         | Usage passthrough                   |
-| `translate_response_streaming`     | Streaming input rejected            |
-| `translate_unknown_role`           | Unknown role → error                |
+| `translate_request_basic` | Messages → input conversion |
+| `translate_request_system_message` | System → instructions |
+| `translate_request_streaming` | Streaming passthrough |
+| `translate_request_params` | temperature, max_tokens passthrough |
+| `translate_request_adds_fields` | store, reasoning added |
+| `translate_response_basic` | Output → choices conversion |
+| `translate_response_usage` | Usage passthrough |
+| `translate_response_streaming` | Streaming input rejected |
+| `translate_unknown_role` | Unknown role → error |
 
----
+______________________________________________________________________
 
 ## T9: Auth Login OAuth Flow
 
@@ -411,20 +410,20 @@ Output: { choices: [{index: 0, message: {role, content}, finish_reason: "stop"}]
 
 ### Tests
 
-| Test                              | What it validates                  |
+| Test | What it validates |
 | --------------------------------- | ---------------------------------- |
-| `auth_login_pkce`                 | PKCE verifier + challenge correct  |
-| `auth_login_authorize_url`        | URL contains all required params   |
-| `auth_login_callback`             | Callback received, state validated |
-| `auth_login_token_exchange`       | Code exchanged for tokens          |
-| `auth_login_store`                | Tokens stored via helper           |
-| `auth_login_missing_oauth_config` | Missing config → error             |
-| `auth_token_command`              | Prints correct env var             |
-| `auth_status_command`             | Shows provider states              |
-| `auth_logout_command`             | Calls helper erase                 |
-| `token_refresh`                   | Expired → refresh → store          |
+| `auth_login_pkce` | PKCE verifier + challenge correct |
+| `auth_login_authorize_url` | URL contains all required params |
+| `auth_login_callback` | Callback received, state validated |
+| `auth_login_token_exchange` | Code exchanged for tokens |
+| `auth_login_store` | Tokens stored via helper |
+| `auth_login_missing_oauth_config` | Missing config → error |
+| `auth_token_command` | Prints correct env var |
+| `auth_status_command` | Shows provider states |
+| `auth_logout_command` | Calls helper erase |
+| `token_refresh` | Expired → refresh → store |
 
----
+______________________________________________________________________
 
 ## T10: HTTP Server, Route Dispatch, and Integration
 
@@ -469,23 +468,23 @@ The server:
 
 ### Tests
 
-| Test                        | What it validates                             |
+| Test | What it validates |
 | --------------------------- | --------------------------------------------- |
-| `server_starts`             | Binary starts and binds                       |
-| `route_dispatch_by_path`    | Path prefix selects correct handler           |
-| `route_unknown_path`        | 404 for unknown paths                         |
-| `proxy_completes_request`   | Full round-trip via wiremock                  |
-| `proxy_streams_response`    | SSE streaming via wiremock                    |
-| `proxy_429_retry`           | First provider 429 → retry with second        |
-| `proxy_all_degraded_503`    | All degraded → 503                            |
-| `proxy_session_persistence` | Session → restart SQLite → same provider      |
-| `proxy_model_list`          | GET /openai/v1/models returns merged list     |
-| `proxy_health`              | GET /health returns provider states           |
-| `proxy_codex_translation`   | Chat Completions → Responses API via wiremock |
-| `proxy_credential_helper`   | Request with helper-based credential          |
-| `server_graceful_shutdown`  | SIGTERM shuts down cleanly                    |
+| `server_starts` | Binary starts and binds |
+| `route_dispatch_by_path` | Path prefix selects correct handler |
+| `route_unknown_path` | 404 for unknown paths |
+| `proxy_completes_request` | Full round-trip via wiremock |
+| `proxy_streams_response` | SSE streaming via wiremock |
+| `proxy_429_retry` | First provider 429 → retry with second |
+| `proxy_all_degraded_503` | All degraded → 503 |
+| `proxy_session_persistence` | Session → restart SQLite → same provider |
+| `proxy_model_list` | GET /openai/v1/models returns merged list |
+| `proxy_health` | GET /health returns provider states |
+| `proxy_codex_translation` | Chat Completions → Responses API via wiremock |
+| `proxy_credential_helper` | Request with helper-based credential |
+| `server_graceful_shutdown` | SIGTERM shuts down cleanly |
 
----
+______________________________________________________________________
 
 ## Sequencing
 

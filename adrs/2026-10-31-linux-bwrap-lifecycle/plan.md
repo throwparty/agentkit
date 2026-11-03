@@ -24,13 +24,11 @@ Cgroup lifecycle
 
 Starts the harness in a named scope with --new-session, freezes it, thaws it and stops the scope. Covers FR-001, FR-002 and AC-001, AC-002.
 
-
 ### poc/limits.sh
 
 Resource limits
 
 Runs a memory hog and a thread hog under MemoryMax and TasksMax, asserting both fail. Covers FR-003 and AC-003, AC-004.
-
 
 ### poc/lifecycle.sh
 
@@ -38,20 +36,16 @@ Fallback lifecycle
 
 The spike's process-group freeze, kept for hosts without a usable user manager. Covers FR-004, AC-005 and EC-001.
 
-
 ### findings.md
 
 The deliverable
 
 Records which path ran, the cgroup properties, the failure modes, the costs and the remaining risks. Covers FR-006.
 
-
 ## Data Flow
 
 The launcher creates a transient scope, systemd places the harness and its descendants in the scope cgroup, and the harness builds the unchanged bwrap argv. Freeze and limits act on the cgroup; the process-group fallback signals the harness's group. Observations are the loop file size while frozen, the exit status of the hog, the scope's cgroup properties and the launcher cost.
 
-
 ## Deployment
 
 None. The launchers are throwaway scripts under this ADR. They are removed with the ADR once the findings are accepted.
-

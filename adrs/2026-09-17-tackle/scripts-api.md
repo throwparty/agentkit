@@ -69,22 +69,22 @@ event = #{ turns_since_title, session, actor }
 
 Available to **all** scripts:
 
-| Function                | Returns                                            | Notes                                                                       |
+| Function | Returns | Notes |
 | ----------------------- | -------------------------------------------------- | --------------------------------------------------------------------------- |
 | `history_search(query)` | array of `#{ role, content, turn_id, created_at }` | Read-only search over the current session's messages; row- and byte-capped. |
-| `context_usage()`       | `#{ used, size }`                                  | Current context utilisation for the session.                                |
-| `log(message)`          | `()`                                               | Structured line to stderr, prefixed with the script name.                   |
+| `context_usage()` | `#{ used, size }` | Current context utilisation for the session. |
+| `log(message)` | `()` | Structured line to stderr, prefixed with the script name. |
 
 Available to **behaviour** scripts only (policy engines physically lack them):
 
-| Function                                             | Returns                                  | Notes                                                                                                                                                                                                                                                                                  |
+| Function | Returns | Notes |
 | ---------------------------------------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `fork_session(opts)`                                 | `#{ session_id, agent }`                 | `opts = #{ ephemeral: bool, actor: "name" }`. Forks the current session; ephemeral forks share the DAG, are never revert points, and attribute usage to the parent. An unknown actor is a script error (graceful degradation).                                                         |
-| `send_prompt(session_id, text)`                      | `()`                                     | Drives a prompt through that session's normal agent loop — model-mediated, pipeline-gated. Scripts never invoke tools directly.                                                                                                                                                        |
-| `await_completion(session_id, timeout_secs)`         | `#{ stop_reason, final_message, usage }` | Blocks until the session's turn completes or the timeout expires (error). `final_message` is the text of the final assistant message.                                                                                                                                                  |
-| `insert_seed(text)`                                  | `()`                                     | Inserts a harness-authored seed message into the forked session (session_forked scripts only).                                                                                                                                                                                         |
-| `record_compaction(summary, first_retained_turn_id)` | `()`                                     | Appends a compaction turn. `first_retained_turn_id` = the oldest turn kept verbatim (keep-recent compaction); pass `()` to elide everything before the summary. The harness clamps the value to be newer than any older compaction turn on the chain. Reversible by deleting the turn. |
-| `set_session_title(title)`                           | `()`                                     | Emits ACP `session_info_update`.                                                                                                                                                                                                                                                       |
+| `fork_session(opts)` | `#{ session_id, agent }` | `opts = #{ ephemeral: bool, actor: "name" }`. Forks the current session; ephemeral forks share the DAG, are never revert points, and attribute usage to the parent. An unknown actor is a script error (graceful degradation). |
+| `send_prompt(session_id, text)` | `()` | Drives a prompt through that session's normal agent loop — model-mediated, pipeline-gated. Scripts never invoke tools directly. |
+| `await_completion(session_id, timeout_secs)` | `#{ stop_reason, final_message, usage }` | Blocks until the session's turn completes or the timeout expires (error). `final_message` is the text of the final assistant message. |
+| `insert_seed(text)` | `()` | Inserts a harness-authored seed message into the forked session (session_forked scripts only). |
+| `record_compaction(summary, first_retained_turn_id)` | `()` | Appends a compaction turn. `first_retained_turn_id` = the oldest turn kept verbatim (keep-recent compaction); pass `()` to elide everything before the summary. The harness clamps the value to be newer than any older compaction turn on the chain. Reversible by deleting the turn. |
+| `set_session_title(title)` | `()` | Emits ACP `session_info_update`. |
 
 **Never exposed**: tool invocation (scripts drive the model instead), the grant store (read or write), filesystem, network.
 

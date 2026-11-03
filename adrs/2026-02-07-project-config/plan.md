@@ -24,22 +24,26 @@ The sandboxing implementation will be updated to retrieve necessary configuratio
 This module will encapsulate all configuration-related logic.
 
 - **`Config` Struct:**
+
   - A Rust struct that defines the expected structure of the configuration.
   - Will use `#[derive(Deserialize)]` from `serde` to enable automatic deserialization from TOML.
   - Fields like `project_slug`, `docker_image`, `docker_setup_command` will be defined.
   - `Option<T>` will be used for fields that might be absent in individual TOML files but are required in the final merged configuration, allowing for a two-stage validation (initial deserialization, then final validation).
 
 - **`load_file(path: &Path) -> Result<Config, ConfigError>`:**
+
   - Reads the content of a specified TOML file.
   - Parses the content into a `Config` struct using `toml::from_str`.
   - Returns a `Result` indicating success or a `ConfigError` (e.g., `FileNotFound`, `ParseError`).
 
 - **`merge(base: Config, overlay: Config) -> Config`:**
+
   - Takes two `Config` structs as input.
   - Creates a new `Config` struct where values from `overlay` take precedence over `base`.
   - This will involve iterating through fields and applying the override logic.
 
 - **`load_final() -> Result<Config, ConfigError>`:**
+
   - The primary public interface for retrieving the configuration.
   - Attempts to load `.litterbox.toml`. If not found, it returns an error (EC1).
   - Attempts to load `.litterbox.local.toml`. If not found, it proceeds with an empty local config.

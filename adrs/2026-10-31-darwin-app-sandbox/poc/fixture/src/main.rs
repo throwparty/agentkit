@@ -86,12 +86,13 @@ fn hostile() -> i32 {
     // false for both.
     match std::fs::metadata(&ssh_key) {
         Ok(_) => {
-            failures += check("read-ssh-key", None, || {
-                std::fs::read(&ssh_key).map(|_| ())
-            }) as i32;
+            failures += check("read-ssh-key", None, || std::fs::read(&ssh_key).map(|_| ())) as i32;
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            println!("read-ssh-key: error (fixture absent: {})", ssh_key.display());
+            println!(
+                "read-ssh-key: error (fixture absent: {})",
+                ssh_key.display()
+            );
             failures += 1;
         }
         Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {

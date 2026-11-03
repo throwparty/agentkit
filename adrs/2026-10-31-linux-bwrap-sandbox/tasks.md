@@ -6,19 +6,17 @@
 
 Create `adrs/2026-10-31-linux-bwrap-sandbox/poc` with `bwrap` and `fixture` subdirectories. Each Cargo.toml carries an empty `[workspace]` table so neither crate joins the agentkit workspace, and no agentkit crate references them.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | `cargo metadata` at the repo root does not list either package; removing the ADR directory leaves the workspace buildable. |
 | Complexity | 🟢 Low |
 | Effort | 0.5h |
-| Depends On |  |
+| Depends On | |
 | References | spike-only |
 
 ### T-002: [x] Typed view and argv builder
 
 Represent the view as types: workspace, read-only paths, writable paths, environment, and a fixed namespace set. Render bwrap argv from the model, and keep the builder free of shell interpolation.
-
 
 | Field | Value |
 |-------|-------|
@@ -32,7 +30,6 @@ Represent the view as types: workspace, read-only paths, writable paths, environ
 
 Canonicalise every path with `std::fs::canonicalize` before rendering, reject relative paths and paths escaping the workspace, and apply invariants the caller cannot widen: no host home, store read-only, workspace the only writable tree, network namespace always unshared.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | A symlinked path renders resolved; a path escaping the workspace is rejected; a request to mount the host home or the store read-write is refused. |
@@ -44,7 +41,6 @@ Canonicalise every path with `std::fs::canonicalize` before rendering, reject re
 ### T-004: [x] Version floor and fail closed
 
 Parse `bwrap --version`, refuse to run below the floor required by the emitted flags, and exit non-zero without execing when bwrap is missing, untrusted or setup fails.
-
 
 | Field | Value |
 |-------|-------|
@@ -58,7 +54,6 @@ Parse `bwrap --version`, refuse to run below the floor required by the emitted f
 
 A small Rust crate that builds and tests, materialised into the workspace before each run.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | `cargo build` and `cargo test` both succeed inside the sandbox with the store readable and the workspace writable. |
@@ -70,7 +65,6 @@ A small Rust crate that builds and tests, materialised into the workspace before
 ### T-006: [x] Hostile checks
 
 Add the adversarial half of the fixture: a write outside the workspace, a write inside the host home, a read of a credential file, an outbound connection, and a child process that repeats the write. Each check reports whether the write landed.
-
 
 | Field | Value |
 |-------|-------|
@@ -84,7 +78,6 @@ Add the adversarial half of the fixture: a write outside the workspace, a write 
 
 Run the fixture under the harness with the initial bind set and record the raw output, the argv, and every failure.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | The fixture crate builds and tests; all hostile checks are blocked; every failure is listed with the missing path or namespace that caused it. |
@@ -96,7 +89,6 @@ Run the fixture under the harness with the initial bind set and record the raw o
 ### T-008: [x] Baseline iteration
 
 Add the paths a Nix-built toolchain needs, discovered by failure: the store, the system profile on NixOS, the dynamic linker, and the certificate, hosts and resolver files. Attribute each addition to the observation that required it.
-
 
 | Field | Value |
 |-------|-------|
@@ -110,7 +102,6 @@ Add the paths a Nix-built toolchain needs, discovered by failure: the store, the
 
 Prove the store is read-only, the host home is absent from the view, and host processes are invisible and unsignalable.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | Writing to the store fails while executing from it succeeds; the host home path does not resolve; a kill against a host pid fails. |
@@ -122,7 +113,6 @@ Prove the store is read-only, the host home is absent from the view, and host pr
 ### T-010: [x] Lifecycle
 
 Make each sandbox its own session and process group and exercise pause, resume and delete against a command that keeps working. Count survivors after the kill.
-
 
 | Field | Value |
 |-------|-------|
@@ -136,7 +126,6 @@ Make each sandbox its own session and process group and exercise pause, resume a
 
 Establish what an operator sees when a command is blocked: errno in the child, whether the path is absent or permission-denied, and what bwrap or the kernel logged.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | A written note states what is observable, what is not, and how a blocked command is distinguished from one that failed for its own reasons. |
@@ -148,7 +137,6 @@ Establish what an operator sees when a command is blocked: errno in the child, w
 ### T-012: [x] User namespace probe
 
 Run the unprivileged user namespace probe on the host and record the exact command and result. Cross-distribution and LSM policy are out of scope by decision.
-
 
 | Field | Value |
 |-------|-------|
@@ -162,7 +150,6 @@ Run the unprivileged user namespace probe on the host and record the exact comma
 
 Time argv construction plus bwrap plus exec against a bare exec baseline and record median and p95.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | A table reports both figures with the baseline column and the number of runs. |
@@ -174,7 +161,6 @@ Time argv construction plus bwrap plus exec against a bare exec baseline and rec
 ### T-014: [x] Golden arguments
 
 Store the rendered argv for a small set of views as fixtures and compare byte for byte.
-
 
 | Field | Value |
 |-------|-------|
@@ -188,7 +174,6 @@ Store the rendered argv for a small set of views as fixtures and compare byte fo
 
 Exercise the edge cases that are cheap to confirm: a setuid binary, a device node outside the view, a nested bwrap, an unavailable cgroup namespace, and a command that exits leaving grandchildren.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | Each case has a recorded observation and, where the behaviour is a limitation, a line in the findings. |
@@ -200,7 +185,6 @@ Exercise the edge cases that are cheap to confirm: a setuid binary, a device nod
 ### T-016: [x] Findings and assessment
 
 Write `findings.md`: per goal, the observation with the raw output, the gap, and the open risk. Add the qualitative judgement of the argv builder, configuration effort and maintainability.
-
 
 | Field | Value |
 |-------|-------|
@@ -214,7 +198,6 @@ Write `findings.md`: per goal, the observation with the raw output, the gap, and
 
 Confirm the harness is unreachable from the rest of the suite, then record what would have to be removed to discard the spike.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | No agentkit crate references the prototype, the Docker path still builds and its tests pass, and the removal steps are written down. |
@@ -222,4 +205,3 @@ Confirm the harness is unreachable from the rest of the suite, then record what 
 | Effort | 1h |
 | Depends On | T-016 |
 | References | no-behaviour-change-elsewhere,docker-path-unaffected,spike-only,primitive-longevity |
-

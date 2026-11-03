@@ -1,6 +1,6 @@
 # Tackle: ACP v2 Server Support
 
-**Status:** draft  **Created:** 2026-10-23  **Author:** adrian
+**Status:** draft **Created:** 2026-10-23 **Author:** adrian
 
 Tackle ships an ACP v1 server: the crate pins agent-client-protocol 3.5.0 and implements the stable v1 surface plus RFD-shaped fork, compaction, and notices gated behind client-advertised unstable capabilities (adrs/2026-09-17-tackle). That specification recorded ACP v2 as a non-goal (version-negotiation boundary only); this ADR revisits that decision.
 
@@ -8,12 +8,11 @@ ACP v2 has been published as a Draft since 2026-07-20. It is a consolidation rel
 
 Zed leads v2 client support behind its acp-beta feature flag and falls back to v1 when negotiation fails; the broader client ecosystem speaks v1, and the migration guide expects v1-only peers to remain common for some time. On the agent side the ACP organisation's own codex-acp adapter already speaks v1 and unstable v2 from one process, negotiated per connection, while Goose implements v1 only by deliberate choice. Proprietary clients are out of scope for this analysis. The pinned SDK already contains the complete stable v2 schema and runtime behind the unstable_protocol_v2 feature (Agent.v2, V2Builder, V2ConnectionTo, typed handlers for every baseline method), and session/fork behind unstable_session_fork; no SDK work is required to implement the baseline.
 
-The v2 removal of the client filesystem and terminal surface is the significant risk. v1 reflects the client's fs and terminal RPCs to the model as client.* tools; v2 deletes that surface and directs clients to expose file access and command execution as an MCP server passed on session/new or session/resume. No client is observed doing so: clients forward the user's own MCP servers, which is a different thing, so a v1 client moving to v2 loses its client.* tooling unless it also ships an editor-capabilities MCP server. Tackle already connects client-provided mcpServers (MCP server forwarding). MCP-over-ACP is a separate draft (mcp/message, type acp) that tunnels MCP inside the ACP connection and is not required here. Reviewing how each v2 client replaces the removed surface is therefore a deliverable, not an afterthought.
+The v2 removal of the client filesystem and terminal surface is the significant risk. v1 reflects the client's fs and terminal RPCs to the model as client.\* tools; v2 deletes that surface and directs clients to expose file access and command execution as an MCP server passed on session/new or session/resume. No client is observed doing so: clients forward the user's own MCP servers, which is a different thing, so a v1 client moving to v2 loses its client.\* tooling unless it also ships an editor-capabilities MCP server. Tackle already connects client-provided mcpServers (MCP server forwarding). MCP-over-ACP is a separate draft (mcp/message, type acp) that tunnels MCP inside the ACP connection and is not required here. Reviewing how each v2 client replaces the removed surface is therefore a deliverable, not an afterthought.
 
 Documentation lives under docs/docs/dev/tackle: protocol.mdx describes the wire surface and clients/ holds per-client notes (zed.mdx today).
 
 Tackle is now fully ACP v1 conformant against the pinned acp-tck suite: the runner (crates/agentkit-tackle/mod.just) drives the binary over stdio through a deterministic test model, diffs the report against a committed baseline, and runs in CI (.github/workflows/tackle.conformance.yaml). The MANDATORY baseline is empty; the cancellation and agent-information gaps were closed in adrs/2026-10-24-tackle-turn-cancellation. acp-tck also carries an opt-in v2 suite (--protocol-version 2) covering the v2 baseline, so it is the natural validation instrument for this ADR, and v2 conformance precedes any manual testing.
-
 
 ```mermaid
 flowchart TD
@@ -28,10 +27,9 @@ flowchart TD
 
 ```
 
-
 ## Problem
 
-Tackle serves ACP v1 only. Clients that request v2 negotiate down to v1 or disconnect, and Tackle cannot use v2's redesigned lifecycle. No per-version account of supported functionality exists, and the v2 removal of the client filesystem and terminal surface threatens workflows that depend on client.* tools without a documented replacement path.
+Tackle serves ACP v1 only. Clients that request v2 negotiate down to v1 or disconnect, and Tackle cannot use v2's redesigned lifecycle. No per-version account of supported functionality exists, and the v2 removal of the client filesystem and terminal surface threatens workflows that depend on client.\* tools without a documented replacement path.
 
 ## Goals
 
@@ -52,7 +50,6 @@ Tackle serves ACP v1 only. Clients that request v2 negotiate down to v1 or disco
 - Re-architecting the protocol-neutral core (agent, store, invokables, mcp)
 - An MCP-over-ACP transport
 - Shipping an MCP server that re-exposes client editor capabilities, which is the client's responsibility under v2
-
 
 ## Functional Requirements
 
@@ -166,7 +163,7 @@ elicitation/create is served when the client advertises a supported elicitation 
 
 ### FR-019: Client Capability Review
 
-Tackle reviews the ACP v2 client implementations to determine how each replaces the removed client filesystem and terminal surface, whether by forwarding an MCP server, by shipping one, or not at all, and what that means for the workflows client.* tools support today. The review is a deliverable, recorded in the client documentation and in research/acp-v2-ecosystem.md. Its primary question is whether any client exposes editor capabilities as an MCP server, the replacement v2 directs clients to and which none is known to provide today.
+Tackle reviews the ACP v2 client implementations to determine how each replaces the removed client filesystem and terminal surface, whether by forwarding an MCP server, by shipping one, or not at all, and what that means for the workflows client.\* tools support today. The review is a deliverable, recorded in the client documentation and in research/acp-v2-ecosystem.md. Its primary question is whether any client exposes editor capabilities as an MCP server, the replacement v2 directs clients to and which none is known to provide today.
 
 **Slug:** `client-capability-review`
 
@@ -331,44 +328,51 @@ Every Dispatch variant (Model, Fork, Direct, RuntimeCommand, Context, Compaction
 A client requesting a protocol version Tackle does not implement is rejected with -32022 and the connection is not initialized; a client requesting a higher major version is not silently downgraded.
 
 **Slug:** `unsupported-version`
+
 ### EC-002: No MCP Servers
 
 A v2 client that forwards no MCP servers and expects file or command tooling has no such tools advertised; the absence is reported in the first-turn status rather than failing the session.
 
 **Slug:** `v2-no-mcp-servers`
+
 ### EC-003: Unknown Enum Variants
 
 A v2 client sends or expects an unknown update, stop reason, or status value; Tackle treats it per the extensibility rules rather than failing the connection.
 
 **Slug:** `unknown-v2-variants`
+
 ### EC-004: Cancel Before Insertion
 
 A session/cancel arriving before the user message is inserted answers the pending session/prompt with -32800 and emits no user-message update.
 
 **Slug:** `cancel-before-insertion`
+
 ### EC-005: Failure After Insertion
 
 A turn that fails after insertion reports an idle state_update with the error stop reason and the failure, rather than an error response to session/prompt.
 
 **Slug:** `failure-after-insertion`
+
 ### EC-006: Draft Fork Unavailable
 
 A v2 client that does not call session/fork and does not use the /fork prompt creates no fork; nothing regresses relative to v1.
 
 **Slug:** `draft-fork-unavailable`
+
 ### EC-007: No Elicitation Support
 
 A v2 client advertising no elicitation mode is never sent elicitation/create; MCP elicitation falls back as in v1.
 
 **Slug:** `v2-no-elicitation`
+
 ### EC-008: Replay Across Restart
 
 A session resumed from a restarted process replays the same user-visible history and reports a current-state snapshot; agent and thought ids are not assumed stable.
 
 **Slug:** `replay-across-restart`
+
 ### EC-009: Client Tooling Absent
 
-A v2 client that had client.* file and command tooling under v1 finds no equivalent under v2 unless it forwards an editor-capabilities MCP server, which no client is known to do; the capability is simply absent and the absence is surfaced in the first-turn status rather than failing the session.
+A v2 client that had client.\* file and command tooling under v1 finds no equivalent under v2 unless it forwards an editor-capabilities MCP server, which no client is known to do; the capability is simply absent and the absence is surfaced in the first-turn status rather than failing the session.
 
 **Slug:** `client-tooling-absent`
-

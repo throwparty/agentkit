@@ -1,6 +1,6 @@
 use crate::setup::OtelSetup;
-use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider;
+use opentelemetry::KeyValue;
 
 pub fn emit_metrics(setup: &OtelSetup) {
     let meter = setup.meter_provider.meter("poc-otel");

@@ -50,12 +50,14 @@ This logic will be integrated within the `src/sandbox/mod.rs` module, specifical
 1. **Extend `SandboxConfig`**: The `SandboxConfig` struct (defined in `src/domain.rs`) will be extended to carry the parsed `PortsConfig` from the `config_loader`.
 
 1. **Host Port Allocation**: In `DockerSandboxProvider::create`, for each `ForwardedPort` from the `SandboxConfig`:
+
    - A utility function will dynamically find an available host port within the default range 3000-8000. This will involve attempting to bind to the port and immediately unbinding to check availability.
    - The allocated host port will be stored along with the `container_port` and slugified `name`.
 
 1. **Environment Variable Construction**: For each allocated host port and its corresponding slugified service name, an environment variable string will be generated: `LITTERBOX_FWD_PORT_<SLUGIFIED_SERVICE_NAME>=<HOST_PORT>`.
 
 1. **`SandboxMetadata` Extension**: The `SandboxMetadata` struct (returned by `provider.create()` and used by the MCP server) will be extended to include:
+
    - `forwarded_ports: Vec<ForwardedPortMapping>`: A list of objects, each containing `target`, `host_port`, `name`, and `env_var`.
 
 ### 3.3. `DockerSandboxProvider` Modifications (`src/sandbox/mod.rs`, `src/compute`)
@@ -64,17 +66,20 @@ The `src/compute/mod.rs` file will need modifications to its `ContainerSpec` str
 
 1. **Extend `src/compute/mod.rs::ContainerSpec`**:
    Add the following fields to the `ContainerSpec` struct:
+
    - `pub env: Vec<String>`: A list of environment variable strings in `KEY=VALUE` form.
    - `pub port_bindings: HashMap<String, Vec<bollard::models::PortBinding>>`: A map from container port (e.g., "8080/tcp") to a list of `bollard::models::PortBinding` structs.
 
 1. **Modify `src/compute/mod.rs::DockerCompute::create_container`**:
    This function will be updated to utilize the new fields in `ContainerSpec`.
+
    - When constructing the `bollard::models::ContainerCreateBody`:
      - The `env` field of `ContainerCreateBody` will be populated from `spec.env` when non-empty.
      - A `bollard::models::HostConfig` will be created. Its `port_bindings` field will be populated from `spec.port_bindings` when non-empty. The `HostConfig` will then be assigned to the `HostConfig` field of `ContainerCreateBody`.
 
 1. **`DockerSandboxProvider::create` in `src/sandbox/mod.rs`**:
    This method will be updated to:
+
    - Access the `PortsConfig` from the `SandboxConfig`.
    - Perform host port allocation and environment variable generation (as described in section 3.2).
    - Construct the `Vec<String>` for `env` to be passed to `ContainerSpec`.

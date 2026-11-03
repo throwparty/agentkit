@@ -77,8 +77,7 @@ set and resolvable, so the home guard cannot fail open. bwrap itself is resolved
 once to a canonical absolute path, checked root-owned and not group or world
 writable, and that path is what runs.
 
-Each grant is opened once with `openat2(O_PATH, RESOLVE_NO_SYMLINKS |
-RESOLVE_NO_MAGICLINKS)` and held as a descriptor. bwrap mounts
+Each grant is opened once with `openat2(O_PATH, RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS)` and held as a descriptor. bwrap mounts
 `/proc/self/fd/N`, so the object validated is the object mounted; a path
 swapped after validation cannot change what the sandbox sees. The command's
 exit comes from bwrap's `--json-status-fd`: a setup failure that never starts
@@ -262,14 +261,14 @@ failure.
 ## Open risks
 
 1. User namespaces are required. A host that restricts them fails at bwrap start; the harness exits non-zero and never runs the command.
-2. Egress beyond loopback needs a proxy. bwrap offers a namespace, not a destination filter.
-3. The kernel is shared. A kernel exploit escapes the sandbox.
-4. The store is read-only, so `nix build` inside the sandbox fails by design.
-5. There are no cgroup limits. A command can consume host CPU and memory; the follow-up ADR covers limits and cgroup freeze.
-6. `--disable-userns` blocks workloads that create their own user namespaces, such as some browsers. A per-workload decision may be needed.
-7. `--new-session` is off by default for lifecycle control. A command shares the caller's session unless the flag is set; the follow-up ADR covers session creation with cgroup freeze.
-8. The setup-failure exit path catches failures before bwrap writes `child-pid`; a mount failure after that (forced with a seccomp `mount` block) surfaces as exit 1. A readiness signal from the command side would close the gap.
-9. The NixOS VM test covers userns denial and setuid; Ubuntu 24.04 covers AppArmor and runs the harness; Fedora 44 covers SELinux. A crafted setuid binary and a proc failure were exercised in the distro guests.
-10. The attribution result is workload-specific: a fixture with C dependencies or network needs will require more of the baseline.
-11. The environment allowlist is a heuristic. The Nix provider's activation capture will replace it with the variables the devShell declares plus a secret-name denylist.
-12. The harness requires a root-owned bwrap on PATH. A user-owned copy is skipped in favour of a later trusted candidate; a PATH with only untrusted copies fails with the install guidance.
+1. Egress beyond loopback needs a proxy. bwrap offers a namespace, not a destination filter.
+1. The kernel is shared. A kernel exploit escapes the sandbox.
+1. The store is read-only, so `nix build` inside the sandbox fails by design.
+1. There are no cgroup limits. A command can consume host CPU and memory; the follow-up ADR covers limits and cgroup freeze.
+1. `--disable-userns` blocks workloads that create their own user namespaces, such as some browsers. A per-workload decision may be needed.
+1. `--new-session` is off by default for lifecycle control. A command shares the caller's session unless the flag is set; the follow-up ADR covers session creation with cgroup freeze.
+1. The setup-failure exit path catches failures before bwrap writes `child-pid`; a mount failure after that (forced with a seccomp `mount` block) surfaces as exit 1. A readiness signal from the command side would close the gap.
+1. The NixOS VM test covers userns denial and setuid; Ubuntu 24.04 covers AppArmor and runs the harness; Fedora 44 covers SELinux. A crafted setuid binary and a proc failure were exercised in the distro guests.
+1. The attribution result is workload-specific: a fixture with C dependencies or network needs will require more of the baseline.
+1. The environment allowlist is a heuristic. The Nix provider's activation capture will replace it with the variables the devShell declares plus a secret-name denylist.
+1. The harness requires a root-owned bwrap on PATH. A user-owned copy is skipped in favour of a later trusted candidate; a PATH with only untrusted copies fails with the install guidance.

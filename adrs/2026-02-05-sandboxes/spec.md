@@ -61,6 +61,7 @@ The primary goals for the sandbox abstraction in Litterbox are to:
 ## 3. Functional Requirements
 
 - **FR1: Sandbox Creation (`sandbox-create`)**
+
   - **FR1.1**: The system SHALL create a unique sandbox environment upon request via the `sandbox-create(name)` MCP tool.
   - **FR1.2**: The sandbox environment SHALL be initialized based on the current `HEAD` of the repository where the `sandbox-create` command is issued.
   - **FR1.3**: A new Git branch SHALL be created for each sandbox, named `litterbox/<slug>`, branching off `HEAD`.
@@ -74,21 +75,25 @@ The primary goals for the sandbox abstraction in Litterbox are to:
   - **FR1.11**: Container names SHALL be prefixed with the repository root basename, slugified, and follow `litterbox-<repo>-<slug>` to avoid cross-project collisions.
 
 - **FR2: Sandbox Pausing and Resuming (`litterbox pause`, `litterbox resume`)**
+
   - **FR2.1**: The `litterbox pause <ENV_NAME>` CLI subcommand SHALL gracefully pause the specified sandbox container, preserving its state for later resumption.
   - **FR2.2**: The `litterbox pause --all-envs` CLI subcommand SHALL gracefully pause all active sandbox containers associated with the current repository.
   - **FR2.3**: The `litterbox pause --all-repos` CLI subcommand SHALL gracefully pause all active sandbox containers managed by Litterbox across all configured repositories.
   - **FR2.4**: The `litterbox resume <ENV_NAME>` CLI subcommand SHALL resume a paused sandbox container, restoring its state.
 
 - **FR3: Sandbox Deletion (`litterbox delete`)**
+
   - **FR3.1**: The `litterbox delete <ENV_NAME>` CLI subcommand SHALL terminate and completely remove the specified sandbox container.
   - **FR3.2**: The `litterbox delete <ENV_NAME>` CLI subcommand SHALL delete the Git branch associated with the sandbox.
   - **FR3.3**: The `litterbox delete <ENV_NAME>` CLI subcommand SHALL clean up all host-side resources (e.g., network configurations, temporary storage) associated with the sandbox.
 
 - **FR4: Isolation**
+
   - **FR4.1 (Compute Isolation)**: Agents' command execution SHALL be strictly isolated within their respective containers, preventing direct execution on the host.
   - **FR4.2 (Storage Isolation)**: Agents SHALL operate exclusively on a copy of the source code within their container. There MUST be no direct access or bind mounts to the host filesystem.
 
 - **FR5: Source Code Management within Sandbox**
+
   - **FR5.1**: The content of the sandbox at creation time SHALL be an exact copy of the project source code from the `HEAD` of the repository.
   - **FR5.2**: Changes made by an agent within the sandbox container's filesystem SHALL NOT be automatically synced back to the host filesystem.
   - **FR5.3**: Only changes to tracked files that are visible in a `git diff` within the sandbox's dedicated branch SHALL be considered for `litterbox apply` or `litterbox merge` operations.
@@ -102,6 +107,7 @@ The primary goals for the sandbox abstraction in Litterbox are to:
 ## 5. Acceptance Criteria
 
 - **AC1: Sandbox Creation**
+
   - **AC1.1**: A call to `sandbox-create("my-new-feature")` successfully provisions a new sandbox, and subsequent `litterbox list` shows "my-new-feature" as an active sandbox.
   - **AC1.2**: After `sandbox-create`, `git branch` on the host shows a new branch named `litterbox/my-new-feature` that is a direct descendant of `HEAD`.
   - **AC1.3**: Inside the created container, the project directory contains an exact copy of the source code from `HEAD` at the time of creation.
@@ -111,23 +117,27 @@ The primary goals for the sandbox abstraction in Litterbox are to:
   - **AC1.7**: The created container name includes the repo prefix and slug (e.g., `litterbox/my-repo` and `my-feature` results in `litterbox-my-repo-my-feature`).
 
 - **AC2: Sandbox Pausing and Resuming**
+
   - **AC2.1**: Running `litterbox pause my-sandbox` stops the associated container, and `litterbox list` shows its status as "paused". Running `litterbox resume my-sandbox` restarts it, and its state is preserved.
   - **AC2.2**: Running `litterbox pause --all-envs` pauses all sandboxes in the current repository, and `litterbox list` reflects their "paused" status.
   - **AC2.3**: Running `litterbox pause --all-repos` pauses all sandboxes managed by Litterbox, and `litterbox list` across all repositories reflects their "paused" status.
   - **AC2.4**: Running `litterbox resume my-sandbox` on a paused sandbox returns it to an "active" state, and `litterbox list` reflects the updated status.
 
 - **AC3: Sandbox Deletion**
+
   - **AC3.1**: Running `litterbox delete my-sandbox` removes the container, and `litterbox list` no longer shows "my-sandbox".
   - **AC3.2**: After `litterbox delete my-sandbox`, `git branch` on the host no longer lists `litterbox/my-sandbox`.
   - **AC3.3**: After `litterbox delete my-sandbox`, no temporary files, network interfaces, or other host resources related to "my-sandbox" remain.
 
 - **AC4: Isolation**
+
   - **AC4.1**: An agent attempting to execute a command like `ls /host/root` from within the sandbox SHALL fail with a permission denied error or similar, and not expose host filesystem contents.
   - **AC4.2**: An agent attempting to modify a file outside its copied project directory (e.g., `/etc/passwd` within the container) SHALL fail, and no changes are reflected on the host.
 
 ## 6. Edge Cases and Error Handling
 
 - **Sandbox Creation (`sandbox-create`)**
+
   - **Duplicate Name**: If `sandbox-create` is called with a name that already exists, it SHALL return a clear error message (e.g., "Error: Sandbox 'my-sandbox' already exists. Please choose a different name.").
   - **Invalid Name**: If `sandbox-create` is called with an empty, excessively long, or otherwise invalid name after slugification, it SHALL return an error (e.g., "Error: Invalid sandbox name. Slugified names must be 1-63 characters and contain only [a-z0-9-].").
   - **Container Provisioning Failure**: If the underlying container runtime (e.g., Docker) fails to provision the container, `sandbox-create` SHALL report the error, and no partial sandbox state (container or Git branch) should be left behind.
@@ -135,16 +145,19 @@ The primary goals for the sandbox abstraction in Litterbox are to:
   - **Startup Command Failure**: If the startup command fails (returns a non-zero exit code), `sandbox-create` SHALL report this failure, and the sandbox should be marked as "failed setup" or similar, not "ready". The agent should be informed of the setup failure.
 
 - **Sandbox Pausing (`litterbox pause`)**
+
   - **Non-existent Sandbox**: If `litterbox pause` is called with a non-existent sandbox name, it SHALL return an error (e.g., "Error: Sandbox 'non-existent-sandbox' not found.").
   - **Already Paused Sandbox**: If `litterbox pause` is called on an already paused sandbox, the operation SHALL be idempotent and report that the sandbox is already paused, without error.
   - **Container Runtime Issues**: If the underlying container runtime encounters an error during pausing, `litterbox pause` SHALL report the error and attempt to gracefully handle the situation (e.g., force stop if graceful pause fails).
 
 - **Sandbox Resuming (`litterbox resume`)**
+
   - **Non-existent Sandbox**: If `litterbox resume` is called with a non-existent sandbox name, it SHALL return an error (e.g., "Error: Sandbox 'non-existent-sandbox' not found.").
   - **Already Active Sandbox**: If `litterbox resume` is called on an already active sandbox, the operation SHALL be idempotent and report that the sandbox is already active, without error.
   - **Container Runtime Issues**: If the underlying container runtime encounters an error during resumption, `litterbox resume` SHALL report the error and indicate whether the sandbox is still paused.
 
 - **Sandbox Deletion (`litterbox delete`)**
+
   - **Non-existent Sandbox**: If `litterbox delete` is called with a non-existent sandbox name, it SHALL return an error (e.g., "Error: Sandbox 'non-existent-sandbox' not found.").
   - **Sandbox in Use**: If `litterbox delete` is called on an actively running sandbox with an agent interacting with it, the CLI MAY prompt for confirmation or offer a `--force` option to terminate it. By default, it should prevent deletion of active sandboxes.
   - **Partial Deletion**: If any step of the deletion process (container removal, branch deletion, resource cleanup) fails, the system SHALL report the failure and indicate which resources might still be present, allowing for manual intervention or retry.

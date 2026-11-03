@@ -15,81 +15,81 @@ After implementing and testing 5 Rust MCP server SDKs, **rmcp v0.14.0 (official 
 1. **prism-mcp-rs** - Too new (5 months old, unproven)
 1. **hyper-mcp** - REJECTED (WASM sandbox blocks filesystem access)
 
----
+______________________________________________________________________
 
 ## Comparison Matrix
 
 ### Test Results Summary
 
-| SDK               | Initialize | List Tools | Write Absolute     | Reject Relative | Overall        |
+| SDK | Initialize | List Tools | Write Absolute | Reject Relative | Overall |
 | ----------------- | ---------- | ---------- | ------------------ | --------------- | -------------- |
-| **rmcp**          | ✅         | ✅         | ✅                 | ✅              | **4/4 PASS**   |
-| **hyper-mcp**     | ✅         | ✅         | ❌ Blocked by WASM | ⚠️ Cannot test  | **2/4 FAIL**   |
-| **pmcp**          | ✅         | ✅         | ✅                 | ✅              | **4/4 PASS**\* |
-| **ultrafast-mcp** | ✅         | ✅         | ✅                 | ✅              | **4/4 PASS**\* |
-| **prism-mcp-rs**  | ✅         | ✅         | ✅                 | ✅              | **4/4 PASS**   |
+| **rmcp** | ✅ | ✅ | ✅ | ✅ | **4/4 PASS** |
+| **hyper-mcp** | ✅ | ✅ | ❌ Blocked by WASM | ⚠️ Cannot test | **2/4 FAIL** |
+| **pmcp** | ✅ | ✅ | ✅ | ✅ | **4/4 PASS**\* |
+| **ultrafast-mcp** | ✅ | ✅ | ✅ | ✅ | **4/4 PASS**\* |
+| **prism-mcp-rs** | ✅ | ✅ | ✅ | ✅ | **4/4 PASS** |
 
 \* Requires unreleased code (git dependency or local patch)
 
 ### Production Readiness
 
-| Criterion                   | rmcp         | hyper-mcp           | pmcp                 | ultrafast-mcp            | prism-mcp-rs        |
+| Criterion | rmcp | hyper-mcp | pmcp | ultrafast-mcp | prism-mcp-rs |
 | --------------------------- | ------------ | ------------------- | -------------------- | ------------------------ | ------------------- |
-| **Stable Release**          | ✅ v0.14.0   | ✅ v0.2.3           | ❌ v1.9.4 broken     | ❌ v202506018.1.0 broken | ⚠️ v1.1.2 (5mo old) |
-| **Works from crates.io**    | ✅ Yes       | N/A (WASM)          | ❌ No (stdio broken) | ❌ No (feature bug)      | ✅ Yes              |
-| **Official SDK**            | ✅ Anthropic | ❌ No               | ❌ No                | ❌ No                    | ❌ No               |
-| **Maturity**                | Established  | Established         | Established          | Unknown                  | **5 months**        |
-| **Community**               | Very High    | High                | High                 | Medium                   | **42 stars**        |
-| **Production Track Record** | ✅ Proven    | ✅ Proven           | ✅ Proven            | ⚠️ Unknown               | ❌ **Unproven**     |
-| **Use Case Match**          | ✅ Perfect   | ❌ **WASM sandbox** | ✅ Good              | ✅ Good                  | ✅ Good             |
+| **Stable Release** | ✅ v0.14.0 | ✅ v0.2.3 | ❌ v1.9.4 broken | ❌ v202506018.1.0 broken | ⚠️ v1.1.2 (5mo old) |
+| **Works from crates.io** | ✅ Yes | N/A (WASM) | ❌ No (stdio broken) | ❌ No (feature bug) | ✅ Yes |
+| **Official SDK** | ✅ Anthropic | ❌ No | ❌ No | ❌ No | ❌ No |
+| **Maturity** | Established | Established | Established | Unknown | **5 months** |
+| **Community** | Very High | High | High | Medium | **42 stars** |
+| **Production Track Record** | ✅ Proven | ✅ Proven | ✅ Proven | ⚠️ Unknown | ❌ **Unproven** |
+| **Use Case Match** | ✅ Perfect | ❌ **WASM sandbox** | ✅ Good | ✅ Good | ✅ Good |
 
 ### Implementation Comparison
 
-| Aspect                | rmcp                         | hyper-mcp        | pmcp                        | ultrafast-mcp                     | prism-mcp-rs             |
+| Aspect | rmcp | hyper-mcp | pmcp | ultrafast-mcp | prism-mcp-rs |
 | --------------------- | ---------------------------- | ---------------- | --------------------------- | --------------------------------- | ------------------------ |
-| **Lines of Code**     | 89                           | 121              | 74                          | 117                               | 90                       |
-| **API Style**         | Macros                       | Plugin functions | Traits                      | Traits                            | Builder+Traits           |
-| **Boilerplate**       | **Low**                      | Medium           | Medium                      | Medium-High                       | Medium                   |
-| **Schema Generation** | ✅ Auto (schemars)           | ❌ Manual JSON   | ❌ Manual                   | ❌ Manual JSON                    | ❌ Manual JSON           |
-| **Argument Parsing**  | ✅ Type-safe `Parameters<T>` | Manual from JSON | Manual from Value           | Manual from ToolCall              | Manual from HashMap      |
-| **Error Handling**    | `McpError::invalid_params()` | `anyhow::Error`  | `pmcp::Error::validation()` | `MCPError::serialization_error()` | `McpError::validation()` |
-| **Dependencies**      | ~80 crates                   | 7 (WASM)         | ~90 crates                  | ~85 crates                        | **160 crates**           |
+| **Lines of Code** | 89 | 121 | 74 | 117 | 90 |
+| **API Style** | Macros | Plugin functions | Traits | Traits | Builder+Traits |
+| **Boilerplate** | **Low** | Medium | Medium | Medium-High | Medium |
+| **Schema Generation** | ✅ Auto (schemars) | ❌ Manual JSON | ❌ Manual | ❌ Manual JSON | ❌ Manual JSON |
+| **Argument Parsing** | ✅ Type-safe `Parameters<T>` | Manual from JSON | Manual from Value | Manual from ToolCall | Manual from HashMap |
+| **Error Handling** | `McpError::invalid_params()` | `anyhow::Error` | `pmcp::Error::validation()` | `MCPError::serialization_error()` | `McpError::validation()` |
+| **Dependencies** | ~80 crates | 7 (WASM) | ~90 crates | ~85 crates | **160 crates** |
 
 ### Developer Experience
 
-| Feature                   | rmcp                           | hyper-mcp            | pmcp                   | ultrafast-mcp | prism-mcp-rs             |
+| Feature | rmcp | hyper-mcp | pmcp | ultrafast-mcp | prism-mcp-rs |
 | ------------------------- | ------------------------------ | -------------------- | ---------------------- | ------------- | ------------------------ |
-| **Learning Curve**        | Medium                         | High                 | Medium                 | Medium        | Low-Medium               |
-| **Documentation Quality** | Good                           | Excellent            | Excellent              | Excellent     | Good                     |
-| **Macro Magic**           | ✅ `#[tool]`, `#[tool_router]` | ❌ None              | ❌ None                | ❌ None       | ❌ None                  |
-| **Type Safety**           | Excellent                      | Good                 | Good                   | Excellent     | Good                     |
-| **Error Messages**        | Cryptic (macros)               | Clear                | Clear                  | Clear         | Clear                    |
-| **Hot Reload**            | ❌                             | ✅ hyper-mcp runtime | ✅ `cargo pmcp dev`    | ❌            | ⚠️ Advertised (unproven) |
-| **Cloud Deploy**          | ❌ Manual                      | ✅ OCI registry      | ✅ `cargo pmcp deploy` | ❌            | ⚠️ Advertised (unproven) |
+| **Learning Curve** | Medium | High | Medium | Medium | Low-Medium |
+| **Documentation Quality** | Good | Excellent | Excellent | Excellent | Good |
+| **Macro Magic** | ✅ `#[tool]`, `#[tool_router]` | ❌ None | ❌ None | ❌ None | ❌ None |
+| **Type Safety** | Excellent | Good | Good | Excellent | Good |
+| **Error Messages** | Cryptic (macros) | Clear | Clear | Clear | Clear |
+| **Hot Reload** | ❌ | ✅ hyper-mcp runtime | ✅ `cargo pmcp dev` | ❌ | ⚠️ Advertised (unproven) |
+| **Cloud Deploy** | ❌ Manual | ✅ OCI registry | ✅ `cargo pmcp deploy` | ❌ | ⚠️ Advertised (unproven) |
 
 ### Build Characteristics
 
-| Metric                | rmcp       | hyper-mcp     | pmcp       | ultrafast-mcp | prism-mcp-rs |
+| Metric | rmcp | hyper-mcp | pmcp | ultrafast-mcp | prism-mcp-rs |
 | --------------------- | ---------- | ------------- | ---------- | ------------- | ------------ |
-| **Clean Build Time**  | ~30s       | ~30s          | ~35s       | ~32s          | ~33s         |
-| **Incremental Build** | ~2s        | ~4.65s        | ~3s        | ~2.5s         | ~2.8s        |
-| **Binary Size**       | ~2.1MB     | 391KB (WASM)  | ~2.4MB     | ~2.3MB        | ~2.2MB       |
-| **Binary Type**       | Standalone | WASM plugin   | Standalone | Standalone    | Standalone   |
-| **Target**            | Native     | wasm32-wasip1 | Native     | Native        | Native       |
+| **Clean Build Time** | ~30s | ~30s | ~35s | ~32s | ~33s |
+| **Incremental Build** | ~2s | ~4.65s | ~3s | ~2.5s | ~2.8s |
+| **Binary Size** | ~2.1MB | 391KB (WASM) | ~2.4MB | ~2.3MB | ~2.2MB |
+| **Binary Type** | Standalone | WASM plugin | Standalone | Standalone | Standalone |
+| **Target** | Native | wasm32-wasip1 | Native | Native | Native |
 
 ### Feature Set Comparison
 
-| Feature             | rmcp       | hyper-mcp       | pmcp             | ultrafast-mcp | prism-mcp-rs  |
+| Feature | rmcp | hyper-mcp | pmcp | ultrafast-mcp | prism-mcp-rs |
 | ------------------- | ---------- | --------------- | ---------------- | ------------- | ------------- |
-| **STDIO Transport** | ✅ Primary | ✅ Via runtime  | ✅ Secondary     | ✅ Primary    | ✅ Primary    |
-| **HTTP Transport**  | ❌         | ✅ SSE          | ✅ Primary (SSE) | ✅ Optional   | ✅ Optional   |
-| **WebSocket**       | ❌         | ❌              | ❌               | ✅ Optional   | ✅ Optional   |
-| **Authentication**  | ❌         | ✅ Plugin-based | ✅ OAuth/Cognito | ✅ Optional   | ⚠️ Advertised |
-| **Rate Limiting**   | ❌         | ✅ Via runtime  | ✅ Built-in      | ✅ Optional   | ⚠️ Advertised |
-| **Monitoring**      | ❌         | ✅ Via runtime  | ✅ Built-in      | ✅ Optional   | ⚠️ Advertised |
-| **Plugin System**   | ❌         | ✅ Core feature | ❌               | ❌            | ⚠️ Advertised |
+| **STDIO Transport** | ✅ Primary | ✅ Via runtime | ✅ Secondary | ✅ Primary | ✅ Primary |
+| **HTTP Transport** | ❌ | ✅ SSE | ✅ Primary (SSE) | ✅ Optional | ✅ Optional |
+| **WebSocket** | ❌ | ❌ | ❌ | ✅ Optional | ✅ Optional |
+| **Authentication** | ❌ | ✅ Plugin-based | ✅ OAuth/Cognito | ✅ Optional | ⚠️ Advertised |
+| **Rate Limiting** | ❌ | ✅ Via runtime | ✅ Built-in | ✅ Optional | ⚠️ Advertised |
+| **Monitoring** | ❌ | ✅ Via runtime | ✅ Built-in | ✅ Optional | ⚠️ Advertised |
+| **Plugin System** | ❌ | ✅ Core feature | ❌ | ❌ | ⚠️ Advertised |
 
----
+______________________________________________________________________
 
 ## Detailed Analysis
 
@@ -134,7 +134,7 @@ impl Server {
 
 **✅ RECOMMENDED** - Clear winner for Litterbox. Official support, stable, excellent ergonomics.
 
----
+______________________________________________________________________
 
 ### 2. 🥈 pmcp (Wait for Stable Release)
 
@@ -179,7 +179,7 @@ impl ToolHandler for WriteFileTool {
 
 **Timeline**: Monitor for new release, reconsider in 1-2 months if published.
 
----
+______________________________________________________________________
 
 ### 3. 🥉 ultrafast-mcp (Wait for Bugfix)
 
@@ -227,7 +227,7 @@ impl ToolHandler for WriteFileHandler {
 
 **Timeline**: Monitor PR #6, reconsider when fixed version published.
 
----
+______________________________________________________________________
 
 ### 4. prism-mcp-rs (Too New)
 
@@ -277,7 +277,7 @@ impl ToolHandler for WriteFileHandler {
 
 **Timeline**: Reconsider in 12-24 months if community grows and stability proven.
 
----
+______________________________________________________________________
 
 ### 5. hyper-mcp (REJECTED)
 
@@ -318,23 +318,23 @@ impl ToolHandler for WriteFileHandler {
 - Architectural mismatch cannot be resolved
 - Excellent SDK for different use cases (compute, transforms)
 
----
+______________________________________________________________________
 
 ## Protocol Compliance
 
 All tested SDKs implement MCP 2024-11-05 or newer:
 
-| SDK               | Protocol Version | Compliance Notes                             |
+| SDK | Protocol Version | Compliance Notes |
 | ----------------- | ---------------- | -------------------------------------------- |
-| **rmcp**          | 2024-11-05       | ✅ Full compliance (official implementation) |
-| **hyper-mcp**     | 2024-11-05       | ✅ Full compliance (tool discovery works)    |
-| **pmcp**          | 2024-11-05       | ✅ Full compliance (git main)                |
-| **ultrafast-mcp** | 2025-06-18       | ✅ Full compliance (latest spec)             |
-| **prism-mcp-rs**  | 2025-06-18       | ✅ Full compliance                           |
+| **rmcp** | 2024-11-05 | ✅ Full compliance (official implementation) |
+| **hyper-mcp** | 2024-11-05 | ✅ Full compliance (tool discovery works) |
+| **pmcp** | 2024-11-05 | ✅ Full compliance (git main) |
+| **ultrafast-mcp** | 2025-06-18 | ✅ Full compliance (latest spec) |
+| **prism-mcp-rs** | 2025-06-18 | ✅ Full compliance |
 
 **Note**: MCP Inspector testing was not performed as all SDKs demonstrated full protocol compliance through the test harness (initialize, tools/list, tools/call).
 
----
+______________________________________________________________________
 
 ## Final Decision
 
@@ -371,7 +371,7 @@ Per Task 3.4 in tasks.md:
 - **Archive**: `poc-pmcp/`, `poc-ultrafast-mcp/`, `poc-prism-mcp/` (working but blocked)
 - **Remove**: `poc-hyper-mcp/` (architecture mismatch, rejected)
 
----
+______________________________________________________________________
 
 ## Recommendations for Litterbox Project
 
@@ -400,7 +400,7 @@ serde = { version = "1.0", features = ["derive"] }
 tokio = { version = "1.49", features = ["full"] }
 ```
 
----
+______________________________________________________________________
 
 ## Conclusion
 

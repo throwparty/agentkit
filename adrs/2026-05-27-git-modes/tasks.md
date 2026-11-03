@@ -30,7 +30,7 @@ author: adrian
 
 **Rollback:** N/A (new module)
 
----
+______________________________________________________________________
 
 ## Task 2: VcsStore Bare Clone Creation (Shallow + Self-Healing)
 
@@ -56,7 +56,7 @@ author: adrian
 
 **Rollback:** N/A (new module)
 
----
+______________________________________________________________________
 
 ## Task 3: VcsStore Remote Installation/Removal
 
@@ -84,7 +84,7 @@ author: adrian
 
 **Rollback:** N/A (new module)
 
----
+______________________________________________________________________
 
 ## Task 4: GitScm Mode-Aware Implementation
 
@@ -118,7 +118,7 @@ author: adrian
 - Added `host_repo_path: Option<PathBuf>` to GitScm for remote mode. Required because `make_archive("HEAD")` must read from the host repo (the bare clone's HEAD is the initial shallow clone commit, not the user's working tree). Initial implementation omitted this entirely.
 - `head_commit` ACs were specified but not implemented — deferred as not critical for the initial flow.
 
----
+______________________________________________________________________
 
 ## Task 5: SandboxMetadata Extension
 
@@ -149,7 +149,7 @@ author: adrian
 
 - Initial implementation stored `bare_clone_path` (a filesystem path). Changed to `project_slug` (an identifier) to decouple compute from VCS path layout.
 
----
+______________________________________________________________________
 
 ## Task 5a: SandboxMetadata Persistence (MetadataStore)
 
@@ -182,7 +182,7 @@ author: adrian
 
 **Rollback:** N/A (additive change; existing sandboxes without metadata files fall back to legacy Direct mode)
 
----
+______________________________________________________________________
 
 ## Task 6: Configuration Wiring
 
@@ -213,7 +213,7 @@ author: adrian
 
 - Initial implementation parsed `snapshot-mode` and threaded the mode value to `ThreadSafeScm::open_with_mode_and_prefix()`, but `open_with_mode_and_prefix()` was called on `"."` — the user's repo, not the bare clone. No task specified that when mode is `Remote`, the SCM should be opened on the bare clone path instead. The VcsStore operations (clone_bare, install_remote) were never called from `build_provider_with_config()`. This was the largest integration gap across all tasks.
 
----
+______________________________________________________________________
 
 ## Task 6a: VcsStore → Provider Wiring (Glue)
 
@@ -242,7 +242,7 @@ author: adrian
 
 **Note:** This task was originally missing from the task list. The plan's data flow (§4.1 steps 5-7) describes the wiring in prose, but no task translated it to code. The initial implementation treated Tasks 1-3 and 4-6 as independent chains — the VcsStore module and the config/GitScm extensions were never connected. This gap caused remote mode to be a complete no-op (SCM opened on user's repo regardless of mode; clone_bare and install_remote never called).
 
----
+______________________________________________________________________
 
 ## Task 7: Delete Logic Update (Remote Mode)
 
@@ -269,7 +269,7 @@ author: adrian
 
 **Rollback:** N/A (additive change)
 
----
+______________________________________________________________________
 
 ## Task 8: Integration Tests & Verification
 
@@ -299,7 +299,7 @@ author: adrian
 
 **Rollback:** N/A (tests only)
 
----
+______________________________________________________________________
 
 ## Task 9: Documentation & Rollout
 
@@ -326,7 +326,7 @@ author: adrian
 
 **Rollback:** N/A (documentation only)
 
----
+______________________________________________________________________
 
 ## Task Dependencies Graph
 
@@ -352,25 +352,25 @@ Task 4 (GitScm mode) ───────────────────�
 
 Each phase is independently deployable; direct mode remains unchanged throughout.
 
----
+______________________________________________________________________
 
 ## Acceptance Criteria Traceability
 
-| AC                                                                          | Task             | Status                                    |
+| AC | Task | Status |
 | --------------------------------------------------------------------------- | ---------------- | ----------------------------------------- |
-| AC-1: Direct mode branches in user's repo                                   | Task 4, 6, 6a, 8 | Implemented                               |
-| AC-2: Remote mode bare clone at resolved path                               | Task 1, 2, 6, 6a | Implemented                               |
-| AC-3: Remote mode branch exists with valid commit                           | Task 2, 4, 6a, 8 | Implemented (verified by reproducer test) |
-| AC-4: Remote mode commit_snapshot_from_staging works                        | Task 4, 6a, 8    | Implemented                               |
-| AC-5: Remote mode litterbox remote exists                                   | Task 3, 6a, 8    | Implemented (verified by reproducer test) |
-| AC-6: Remote mode no re-clone for same project                              | Task 2, 8        | Implemented                               |
-| AC-7: Remote mode self-heals corrupt clone                                  | Task 2, 8        | Implemented                               |
-| AC-8: Remote mode metadata includes project slug                            | Task 5, 6a, 8    | Implemented                               |
-| AC-9: Remote mode delete removes bare clone (last sandbox); remote persists | Task 7, 8        | Implemented                               |
-| AC-10: Remote mode shallow clone                                            | Task 2, 8        | Implemented                               |
-| AC-11: Remote mode remote idempotent install                                | Task 3, 8        | Implemented                               |
-| AC-12: Remote mode project slug resolves correctly                          | Task 1, 6, 6a, 8 | Implemented                               |
-| AC-13: Remote mode rebases don't break fetch/merge                          | Task 4, 8        | Not verified (manual test)                |
-| AC-14: Remote mode GC-pruned root recovers                                  | Task 2, 8        | Implemented (self_heal)                   |
-| AC-15: Mode binding across config changes                                   | Task 5a, 8       | New                                       |
-| AC-16: Legacy fallback for absent metadata                                  | Task 5a, 8       | New                                       |
+| AC-1: Direct mode branches in user's repo | Task 4, 6, 6a, 8 | Implemented |
+| AC-2: Remote mode bare clone at resolved path | Task 1, 2, 6, 6a | Implemented |
+| AC-3: Remote mode branch exists with valid commit | Task 2, 4, 6a, 8 | Implemented (verified by reproducer test) |
+| AC-4: Remote mode commit_snapshot_from_staging works | Task 4, 6a, 8 | Implemented |
+| AC-5: Remote mode litterbox remote exists | Task 3, 6a, 8 | Implemented (verified by reproducer test) |
+| AC-6: Remote mode no re-clone for same project | Task 2, 8 | Implemented |
+| AC-7: Remote mode self-heals corrupt clone | Task 2, 8 | Implemented |
+| AC-8: Remote mode metadata includes project slug | Task 5, 6a, 8 | Implemented |
+| AC-9: Remote mode delete removes bare clone (last sandbox); remote persists | Task 7, 8 | Implemented |
+| AC-10: Remote mode shallow clone | Task 2, 8 | Implemented |
+| AC-11: Remote mode remote idempotent install | Task 3, 8 | Implemented |
+| AC-12: Remote mode project slug resolves correctly | Task 1, 6, 6a, 8 | Implemented |
+| AC-13: Remote mode rebases don't break fetch/merge | Task 4, 8 | Not verified (manual test) |
+| AC-14: Remote mode GC-pruned root recovers | Task 2, 8 | Implemented (self_heal) |
+| AC-15: Mode binding across config changes | Task 5a, 8 | New |
+| AC-16: Legacy fallback for absent metadata | Task 5a, 8 | New |

@@ -1,6 +1,6 @@
 # Tackle Definition Packages
 
-**Status:** implemented  **Created:** 2026-10-21  **Author:** adrian
+**Status:** implemented **Created:** 2026-10-21 **Author:** adrian
 
 Tackle's definitions — personas, actors, and prompts — are single markdown files discovered from the user and project configuration layers, with project-layer definitions trust-gated per file (adrs/2026-09-17-tackle FR-010, FR-022, AC-010). Two limits have surfaced. A definition cannot carry resources, so a prompt that needs a supporting document or an invokable script has nowhere to put it. And definitions sourced from a shared location have no reproducible delivery mechanism.
 
@@ -9,7 +9,6 @@ The obvious way to deliver resources would be a harness-side virtual filesystem 
 Repository-resident configuration also brings benefits beyond reachability. It is shareable by default, so definitions travel with the project and a team gets the same personas and prompts with no separate distribution step. And it reduces the attack surface to something the agent already needs in order to be productive at all: the repository it is already reading and running.
 
 This amends parts of adrs/2026-09-17-tackle. FR-010 (Reusable Prompts) and FR-022 (Config Discovery) are amended by the directory shape and repository-only sourcing. AC-010 (Trust Gating) is superseded by the trust-boundary reframing.
-
 
 ## Problem
 
@@ -32,7 +31,6 @@ Definitions cannot carry resources, and there is no reproducible way to source t
 - Non-git source formats such as well-known discovery and archives
 - Per-definition version constraints beyond a source ref
 - A separate binary since the package manager is a tackle subcommand
-
 
 ## Functional Requirements
 
@@ -74,13 +72,13 @@ The repository manifest at .agentkit/tackle/definitions.toml declares sources an
 
 ### FR-007: Source Specifications
 
-Each [[source]] declares a required kind field with no default. kind = git carries a [source.git] table of url plus optional ref and path. kind = path carries a [source.path] table with dir pointing at a local directory for authoring and testing. The url field also accepts the PEP 508 git+ URL form.
+Each \[[source]\] declares a required kind field with no default. kind = git carries a [source.git] table of url plus optional ref and path. kind = path carries a [source.path] table with dir pointing at a local directory for authoring and testing. The url field also accepts the PEP 508 git+ URL form.
 
 **Slug:** `source-specifications`
 
 ### FR-008: Manifest Delegation
 
-A manifest may declare one or more [[extends]] entries that delegate to a remote definitions.toml resolved by the lock. Delegated manifests are union-merged with the local one. Duplicate names anywhere in the resolved set are a parse error and no override is permitted.
+A manifest may declare one or more \[[extends]\] entries that delegate to a remote definitions.toml resolved by the lock. Delegated manifests are union-merged with the local one. Duplicate names anywhere in the resolved set are a parse error and no override is permitted.
 
 **Slug:** `manifest-delegation`
 
@@ -203,34 +201,39 @@ With no prompt definitions and bounded scripts load in a repository while projec
 A get or verify without a lock fails closed naming tackle definitions get. The loader still loads the tree because it does not read the lock.
 
 **Slug:** `missing-lock`
+
 ### EC-002: Unreachable Source
 
 A source that cannot be fetched fails the operation with the source name and URL and leaves the tree and lock unchanged.
 
 **Slug:** `unreachable-source`
+
 ### EC-003: Local Path Source
 
 A kind = path source vendors from a local directory so a definition can be edited and tested before publishing to a git source.
 
 **Slug:** `local-path-source`
+
 ### EC-004: Builtin Override
 
 A package that replaces a built-in definition is surfaced as an override at first run exactly as a flat definition is.
 
 **Slug:** `builtin-override`
+
 ### EC-005: Flat And Directory Collision
 
 A flat definition and a directory definition with the same name in the same kind directory is a load error naming both paths.
 
 **Slug:** `flat-and-directory-collision`
+
 ### EC-006: User-Layer Package
 
 Definitions are repository-only. A definition directory placed in the user configuration directory is not loaded because its resources would be unreachable by the model.
 
 **Slug:** `user-layer-package`
+
 ### EC-007: Source Path Traversal
 
 A source definition path or source root that escapes the repository or source root is rejected at manifest parse time.
 
 **Slug:** `source-path-traversal`
-

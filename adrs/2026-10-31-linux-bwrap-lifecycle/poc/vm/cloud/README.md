@@ -23,7 +23,6 @@ is shared read-only over 9p; the guest cannot write the host checkout. QEMU is
 the trusted computing base for the probe, so the guest-to-host attack surface is
 QEMU itself.
 
-
 ## Ubuntu 24.04
 
 ```bash
@@ -106,4 +105,3 @@ readiness signal from the command side.
 
 Use a Fedora Cloud image with the same launcher and `lsm=selinux`; the probe
 prints `getenforce` and the namespace results.
-

@@ -25,7 +25,7 @@ decision: pending
 
 **Testing**: `cargo test` passes (no-op for now)
 
----
+______________________________________________________________________
 
 ## Task 2: CLI Argument Parsing
 
@@ -45,7 +45,7 @@ decision: pending
 
 **Testing**: Unit tests in `src/config.rs` for argument parsing
 
----
+______________________________________________________________________
 
 ## Task 3: JSON-RPC 2.0 Parser and Encoder
 
@@ -67,7 +67,7 @@ decision: pending
 
 **Testing**: `tests/unit/jsonrpc_tests.rs` with 10+ test cases covering valid/invalid input
 
----
+______________________________________________________________________
 
 ## Task 4: Session Manager (In-Memory Store)
 
@@ -89,7 +89,7 @@ decision: pending
 
 **Testing**: `src/session/store_tests.rs` covering CRUD operations, concurrency
 
----
+______________________________________________________________________
 
 ## Task 5: Transport Trait and Stdio Implementation
 
@@ -110,7 +110,7 @@ decision: pending
 
 **Testing**: `tests/integration/stdio_roundtrip.rs` spawning binary, sending messages, verifying output
 
----
+______________________________________________________________________
 
 ## Task 6: HTTP Transport
 
@@ -130,7 +130,7 @@ decision: pending
 
 **Testing**: `tests/integration/http_roundtrip.rs`
 
----
+______________________________________________________________________
 
 ## Task 7: Message Router
 
@@ -152,7 +152,7 @@ decision: pending
 
 **Testing**: Integration test routing all methods to correct handlers
 
----
+______________________________________________________________________
 
 ## Task 8: Handler Implementations
 
@@ -228,7 +228,7 @@ decision: pending
 
 **Testing**: `src/handlers/initialize_tests.rs`, `src/handlers/prompt_tests.rs`, `src/handlers/error_tests.rs`
 
----
+______________________________________________________________________
 
 ## Task 9: Application Lifecycle and Transport Selection
 
@@ -247,7 +247,7 @@ decision: pending
 
 **Testing**: Integration test starting each transport, sending initialize message, verifying response
 
----
+______________________________________________________________________
 
 ## Task 10: Integration Test Suite and CI Validation
 
@@ -269,7 +269,7 @@ decision: pending
 
 **Testing**: `cargo test` runs successfully; all tests pass
 
----
+______________________________________________________________________
 
 ## Implementation Order
 

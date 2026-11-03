@@ -37,10 +37,12 @@ schemars = "1.2.1"
 The implementation follows ultrafast-mcp's documented pattern:
 
 1. **Tool Handler**: Implement `ToolHandler` trait with two methods:
+
    - `handle_tool_call(&self, call: ToolCall) -> MCPResult<ToolResult>` - Execute tool logic
    - `list_tools(&self, request: ListToolsRequest) -> MCPResult<ListToolsResponse>` - List available tools
 
 1. **Server Setup**: Create `UltraFastServer` with:
+
    - `ServerInfo` (name, version, description)
    - `ServerCapabilities` (advertise tools capability)
    - Tool handler registered via `.with_tool_handler(Arc::new(handler))`
@@ -59,13 +61,13 @@ ultrafast-mcp provides:
 
 ### Comparison with rmcp
 
-| Feature       | ultrafast-mcp              | rmcp                               |
+| Feature | ultrafast-mcp | rmcp |
 | ------------- | -------------------------- | ---------------------------------- |
-| Macros        | No macros (trait-based)    | `#[tool_router]`, `#[tool]` macros |
-| Boilerplate   | Medium (manual trait impl) | Low (macros generate code)         |
-| Type safety   | Excellent                  | Excellent                          |
-| Documentation | Very comprehensive         | Good                               |
-| Complexity    | Higher (more explicit)     | Lower (macro magic)                |
+| Macros | No macros (trait-based) | `#[tool_router]`, `#[tool]` macros |
+| Boilerplate | Medium (manual trait impl) | Low (macros generate code) |
+| Type safety | Excellent | Excellent |
+| Documentation | Very comprehensive | Good |
+| Complexity | Higher (more explicit) | Lower (macro magic) |
 
 ## Test Results
 
@@ -221,17 +223,17 @@ ultrafast-mcp would be **worth reconsidering** if:
 
 ## Comparison: ultrafast-mcp vs rmcp
 
-| Feature                 | rmcp                           | ultrafast-mcp (patched)     |
+| Feature | rmcp | ultrafast-mcp (patched) |
 | ----------------------- | ------------------------------ | --------------------------- |
-| **STDIO support**       | ✅ Works out of box            | ✅ Works with patch         |
-| **Stable release**      | ✅ v0.14.0                     | ❌ v202506018.1.0 broken    |
-| **Macros**              | ✅ `#[tool]`, `#[tool_router]` | ❌ Manual traits            |
-| **Boilerplate**         | Low                            | Medium-High                 |
-| **Error handling**      | Good                           | Excellent (typed)           |
-| **Documentation**       | Good                           | Excellent                   |
-| **Production features** | Basic                          | Advanced (monitoring, auth) |
-| **Feature flags**       | Basic                          | Modular (stdio/http/oauth)  |
-| **Use case**            | Simple servers                 | Production services         |
+| **STDIO support** | ✅ Works out of box | ✅ Works with patch |
+| **Stable release** | ✅ v0.14.0 | ❌ v202506018.1.0 broken |
+| **Macros** | ✅ `#[tool]`, `#[tool_router]` | ❌ Manual traits |
+| **Boilerplate** | Low | Medium-High |
+| **Error handling** | Good | Excellent (typed) |
+| **Documentation** | Good | Excellent |
+| **Production features** | Basic | Advanced (monitoring, auth) |
+| **Feature flags** | Basic | Modular (stdio/http/oauth) |
+| **Use case** | Simple servers | Production services |
 
 ## Files
 

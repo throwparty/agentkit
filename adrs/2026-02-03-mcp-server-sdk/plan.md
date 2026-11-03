@@ -65,13 +65,13 @@ A structured comparison of identified SDKs to objectively measure them against t
 
 #### Evaluation Matrix
 
-| Criteria             | `rmcp`             | `hyper-mcp` | `pmcp`    | `ultrafast-mcp` |
+| Criteria | `rmcp` | `hyper-mcp` | `pmcp` | `ultrafast-mcp` |
 | :------------------- | :----------------- | :---------- | :-------- | :-------------- |
-| **Protocol Support** | Full (Official)    | Full        | Full      | Full            |
-| **Ergonomics**       | Excellent (Macros) | Good        | Excellent | High            |
-| **Security**         | Standard           | High (WASM) | Standard  | Standard        |
-| **Community**        | Very High          | High        | High      | Medium          |
-| **Reliability**      | High               | Medium      | High      | Medium          |
+| **Protocol Support** | Full (Official) | Full | Full | Full |
+| **Ergonomics** | Excellent (Macros) | Good | Excellent | High |
+| **Security** | Standard | High (WASM) | Standard | Standard |
+| **Community** | Very High | High | High | Medium |
+| **Reliability** | High | Medium | High | Medium |
 
 #### Justification
 

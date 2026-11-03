@@ -270,7 +270,7 @@ This task list tracks the evaluation of various Rust MCP SDKs to determine the b
     - **Archive**: `poc-pmcp/`, `poc-ultrafast-mcp/`, `poc-prism-mcp/` (functional but blocked for production)
     - **Remove**: `poc-hyper-mcp/` (architecture mismatch, rejected)
 
----
+______________________________________________________________________
 
 ## 4. Final Decision (2026-02-05)
 
@@ -338,13 +338,13 @@ tokio = { version = "1.49", features = ["full"] }
 
 ### Test Results Summary
 
-| SDK           | Initialize | List Tools | Write Absolute | Reject Relative | Production Ready     |
+| SDK | Initialize | List Tools | Write Absolute | Reject Relative | Production Ready |
 | ------------- | ---------- | ---------- | -------------- | --------------- | -------------------- |
-| **rmcp**      | ✅         | ✅         | ✅             | ✅              | ✅ **SELECTED**      |
-| pmcp          | ✅         | ✅         | ✅             | ✅              | ❌ Requires git main |
-| ultrafast-mcp | ✅         | ✅         | ✅             | ✅              | ❌ Requires patch    |
-| prism-mcp-rs  | ✅         | ✅         | ✅             | ✅              | ❌ Too new (5mo)     |
-| hyper-mcp     | ✅         | ✅         | ❌ Sandbox     | ⚠️ Blocked      | ❌ Rejected          |
+| **rmcp** | ✅ | ✅ | ✅ | ✅ | ✅ **SELECTED** |
+| pmcp | ✅ | ✅ | ✅ | ✅ | ❌ Requires git main |
+| ultrafast-mcp | ✅ | ✅ | ✅ | ✅ | ❌ Requires patch |
+| prism-mcp-rs | ✅ | ✅ | ✅ | ✅ | ❌ Too new (5mo) |
+| hyper-mcp | ✅ | ✅ | ❌ Sandbox | ⚠️ Blocked | ❌ Rejected |
 
 ### Next Steps
 

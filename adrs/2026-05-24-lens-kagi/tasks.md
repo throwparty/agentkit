@@ -50,43 +50,43 @@ decision: accepted
 
 ## Verification
 
-| Check                                   | Status |
+| Check | Status |
 | --------------------------------------- | ------ |
-| `cargo build` passes                    | ✅     |
-| `cargo test` passes (66 tests)          | ✅     |
-| `src/kagi/` parallel to `src/brave/`    | ✅     |
-| `--kagi-search-api-key` accepted        | ✅     |
-| Kagi registered in engine registry      | ✅     |
-| `list-search-engines` will include Kagi | ✅     |
+| `cargo build` passes | ✅ |
+| `cargo test` passes (66 tests) | ✅ |
+| `src/kagi/` parallel to `src/brave/` | ✅ |
+| `--kagi-search-api-key` accepted | ✅ |
+| Kagi registered in engine registry | ✅ |
+| `list-search-engines` will include Kagi | ✅ |
 
 ## Architecture Comparison: Brave vs Kagi
 
-| Aspect        | Brave                  | Kagi                    | Notes                                  |
+| Aspect | Brave | Kagi | Notes |
 | ------------- | ---------------------- | ----------------------- | -------------------------------------- |
-| Module path   | `src/brave/`           | `src/kagi/`             | Mirror structure                       |
-| Types         | `types.rs`             | `types.rs`              | Different schemas, parallel structure  |
-| Engine        | `engine.rs`            | `engine.rs`             | Parallel implementation                |
-| Options       | `BraveOptions`         | `KagiOptions`           | Both have `api_key`                    |
-| Engine struct | `BraveSearchEngine`    | `KagiSearchEngine`      | Both hold `api_key: Arc<str>`          |
-| Client        | `reqwest::Client`      | `reqwest::Client`       | Both 30s timeout                       |
-| Trait impl    | `SearchEngine`         | `SearchEngine`          | Same trait                             |
-| name()        | `brave`                | `kagi`                  | Unique names                           |
-| Error type    | `SearchError`          | `SearchError`           | Same variant names                     |
-| API endpoint  | `GET /api/v1/web`      | `POST /api/v1/search`   | Different methods                      |
-| Auth header   | `X-Subscription-Token` | `Authorization: Bearer` | Different auth                         |
-| Request body  | Query params           | JSON body               | Different request style                |
-| Pagination    | Brave: no pagination   | Kagi: no pagination     | Both `has_more=false`, `total_pages=1` |
+| Module path | `src/brave/` | `src/kagi/` | Mirror structure |
+| Types | `types.rs` | `types.rs` | Different schemas, parallel structure |
+| Engine | `engine.rs` | `engine.rs` | Parallel implementation |
+| Options | `BraveOptions` | `KagiOptions` | Both have `api_key` |
+| Engine struct | `BraveSearchEngine` | `KagiSearchEngine` | Both hold `api_key: Arc<str>` |
+| Client | `reqwest::Client` | `reqwest::Client` | Both 30s timeout |
+| Trait impl | `SearchEngine` | `SearchEngine` | Same trait |
+| name() | `brave` | `kagi` | Unique names |
+| Error type | `SearchError` | `SearchError` | Same variant names |
+| API endpoint | `GET /api/v1/web` | `POST /api/v1/search` | Different methods |
+| Auth header | `X-Subscription-Token` | `Authorization: Bearer` | Different auth |
+| Request body | Query params | JSON body | Different request style |
+| Pagination | Brave: no pagination | Kagi: no pagination | Both `has_more=false`, `total_pages=1` |
 
 ## Files Created/Modified
 
-| File                 | Action   | Notes                             |
+| File | Action | Notes |
 | -------------------- | -------- | --------------------------------- |
-| `src/kagi/mod.rs`    | Created  | Module exports                    |
-| `src/kagi/engine.rs` | Created  | KagiSearchEngine implementation   |
-| `src/kagi/types.rs`  | Created  | Kagi API types and errors         |
-| `src/config.rs`      | Modified | Added `kagi_search_api_key` field |
-| `src/mcp.rs`         | Modified | Added Kagi import + registration  |
-| `src/lib.rs`         | Modified | Added `pub mod kagi;`             |
+| `src/kagi/mod.rs` | Created | Module exports |
+| `src/kagi/engine.rs` | Created | KagiSearchEngine implementation |
+| `src/kagi/types.rs` | Created | Kagi API types and errors |
+| `src/config.rs` | Modified | Added `kagi_search_api_key` field |
+| `src/mcp.rs` | Modified | Added Kagi import + registration |
+| `src/lib.rs` | Modified | Added `pub mod kagi;` |
 
 ## No Changes Required
 

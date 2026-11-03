@@ -80,14 +80,14 @@ If no Rust library satisfies these requirements, we may consider WASM-interop wi
 
 We evaluated candidates against six weighted criteria:
 
-| #   | Criterion                  | Weight | Rationale                                                                                                                                                                      |
+| # | Criterion | Weight | Rationale |
 | --- | -------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| C1  | Usage/cost reporting       | High   | Needed for session-level cost tracking and budget enforcement. Must be auth-aware — cost depends on which auth method (subscription vs. pay-as-you-go) is used for the session |
-| C2  | Agent interaction modeling | High   | Tool calling, multi-turn, streaming are core to agent functionality                                                                                                            |
-| C3  | Multi-provider support     | High   | Avoid vendor lock-in; each provider has its own wire format (chat completions, messages API, Gemini API, etc.) and the library must abstract over them                         |
-| C4  | Provider extensibility     | Medium | We may need to add niche providers or custom wrappers                                                                                                                          |
-| C5  | Ecosystem fit              | Medium | Async runtime, active maintenance, WASM cross-compilation, community health                                                                                                    |
-| C6  | Load balancing             | Low    | Ability to distribute requests across multiple provider instances or fall back between providers. Currently a nice-to-have; may become core later                              |
+| C1 | Usage/cost reporting | High | Needed for session-level cost tracking and budget enforcement. Must be auth-aware — cost depends on which auth method (subscription vs. pay-as-you-go) is used for the session |
+| C2 | Agent interaction modeling | High | Tool calling, multi-turn, streaming are core to agent functionality |
+| C3 | Multi-provider support | High | Avoid vendor lock-in; each provider has its own wire format (chat completions, messages API, Gemini API, etc.) and the library must abstract over them |
+| C4 | Provider extensibility | Medium | We may need to add niche providers or custom wrappers |
+| C5 | Ecosystem fit | Medium | Async runtime, active maintenance, WASM cross-compilation, community health |
+| C6 | Load balancing | Low | Ability to distribute requests across multiple provider instances or fall back between providers. Currently a nice-to-have; may become core later |
 
 ## 4. Candidates
 
@@ -241,22 +241,22 @@ These candidates were evaluated and ruled out with minimal investigation due to 
 
 ## 5. Comparative Analysis
 
-| Criterion                 | rig                                                                     | llm                                         | multi-llm                 |
+| Criterion | rig | llm | multi-llm |
 | ------------------------- | ----------------------------------------------------------------------- | ------------------------------------------- | ------------------------- |
-| **C1: Usage reporting**   | ✅ Detailed (input/output/cached/reasoning/tool tokens, Add impl, OTel) | ⚠️ Basic (prompt_tokens, completion_tokens) | ⚠️ Feature-gated events   |
-| **C1: Cost reporting**    | ❌ (tokens only)                                                        | ❌                                          | ❌                        |
-| **C2: Tool calling**      | ✅ Multi-turn, typed, provider-managed tools                            | ✅ Unified tool calling                     | ✅ First-class            |
-| **C2: Streaming**         | ✅ SSE streaming                                                        | ✅ Per-provider streaming                   | ❌ Post-1.0               |
-| **C2: Multi-turn agents** | ✅ Agent type with multi-turn, memory                                   | ✅ Memory + agent builder                   | ❌                        |
-| **C3: Provider count**    | 24                                                                      | 12                                          | 4                         |
-| **C3: Provider breadth**  | ✅ OpenAI + Anthropic + Gemini + local (Ollama)                         | ✅ Same core set                            | ⚠️ Missing Gemini, others |
-| **C3: Subscription auth** | ✅ ChatGPT/Copilot OAuth                                                | ❌                                          | ❌                        |
-| **C4: Custom provider**   | ✅ Documented example, type-safe traits                                 | ✅ Basic traits                             | ✅ Basic traits           |
-| **C5: WASM**              | ✅ Core library                                                         | ❌                                          | ❌                        |
-| **C5: Stability**         | ⚠️ Pre-1.0 (v0.38)                                                      | ✅ v1.3.8                                   | ✅ v1.0.0                 |
-| **C5: Community**         | Large (7.6k ★, 848 forks)                                               | Medium (351 ★)                              | Tiny (single author)      |
-| **C5: Maintenance**       | Very active (multiple releases/month)                                   | Active                                      | Minimal                   |
-| **C6: Load balancing**    | ❌ (manual multi-client only)                                           | ❌                                          | ❌                        |
+| **C1: Usage reporting** | ✅ Detailed (input/output/cached/reasoning/tool tokens, Add impl, OTel) | ⚠️ Basic (prompt_tokens, completion_tokens) | ⚠️ Feature-gated events |
+| **C1: Cost reporting** | ❌ (tokens only) | ❌ | ❌ |
+| **C2: Tool calling** | ✅ Multi-turn, typed, provider-managed tools | ✅ Unified tool calling | ✅ First-class |
+| **C2: Streaming** | ✅ SSE streaming | ✅ Per-provider streaming | ❌ Post-1.0 |
+| **C2: Multi-turn agents** | ✅ Agent type with multi-turn, memory | ✅ Memory + agent builder | ❌ |
+| **C3: Provider count** | 24 | 12 | 4 |
+| **C3: Provider breadth** | ✅ OpenAI + Anthropic + Gemini + local (Ollama) | ✅ Same core set | ⚠️ Missing Gemini, others |
+| **C3: Subscription auth** | ✅ ChatGPT/Copilot OAuth | ❌ | ❌ |
+| **C4: Custom provider** | ✅ Documented example, type-safe traits | ✅ Basic traits | ✅ Basic traits |
+| **C5: WASM** | ✅ Core library | ❌ | ❌ |
+| **C5: Stability** | ⚠️ Pre-1.0 (v0.38) | ✅ v1.3.8 | ✅ v1.0.0 |
+| **C5: Community** | Large (7.6k ★, 848 forks) | Medium (351 ★) | Tiny (single author) |
+| **C5: Maintenance** | Very active (multiple releases/month) | Active | Minimal |
+| **C6: Load balancing** | ❌ (manual multi-client only) | ❌ | ❌ |
 
 ### 5.1 Key Insight: Auth-Aware Cost Tracking
 
@@ -478,21 +478,21 @@ If the requested model is not available from the configured provider, the SDK sh
 
 ## 10. Traceability
 
-| Requirement             | Covers | Verification artifact                                                                                                                          |
+| Requirement | Covers | Verification artifact |
 | ----------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| FR1 (multi-provider)    | C3     | Integration tests with OpenAI + Anthropic + Ollama                                                                                             |
-| FR2 (tool calling)      | C2     | Multi-turn agent test                                                                                                                          |
-| FR3 (streaming)         | C2     | Streaming response test                                                                                                                        |
-| FR4 (usage tracking)    | C1     | Assert non-zero token counts in response                                                                                                       |
-| FR5 (auth)              | C3, C5 | Client construction with various auth inputs                                                                                                   |
-| FR6 (custom provider)   | C4     | Implement a dummy provider in 200 lines                                                                                                        |
-| FR7 (memory)            | C2     | Multi-turn conversation history test                                                                                                           |
-| NFR1 (async)            | C5     | Compilation with tokio test                                                                                                                    |
-| NFR2 (binary size)      | C5     | Measure release binary with `du`                                                                                                               |
-| NFR3 (errors)           | C3     | Error type tests                                                                                                                               |
-| NFR4 (testability)      | C5     | Offline fixture tests pass in CI                                                                                                               |
-| C6 (load balancing)     | C6     | Multiple clients wrapping same provider trait                                                                                                  |
-| Sample crate validation | C1–C5  | Side-by-side comparison of rig and llm crates covering compile times, binary size, tool call round-trip, error messages, documentation quality |
+| FR1 (multi-provider) | C3 | Integration tests with OpenAI + Anthropic + Ollama |
+| FR2 (tool calling) | C2 | Multi-turn agent test |
+| FR3 (streaming) | C2 | Streaming response test |
+| FR4 (usage tracking) | C1 | Assert non-zero token counts in response |
+| FR5 (auth) | C3, C5 | Client construction with various auth inputs |
+| FR6 (custom provider) | C4 | Implement a dummy provider in 200 lines |
+| FR7 (memory) | C2 | Multi-turn conversation history test |
+| NFR1 (async) | C5 | Compilation with tokio test |
+| NFR2 (binary size) | C5 | Measure release binary with `du` |
+| NFR3 (errors) | C3 | Error type tests |
+| NFR4 (testability) | C5 | Offline fixture tests pass in CI |
+| C6 (load balancing) | C6 | Multiple clients wrapping same provider trait |
+| Sample crate validation | C1–C5 | Side-by-side comparison of rig and llm crates covering compile times, binary size, tool call round-trip, error messages, documentation quality |
 
 ## 11. Next Steps (Sample Crates)
 

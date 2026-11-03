@@ -88,7 +88,13 @@
             rev = "5023cf0a463c33fcd4fac0328847b349ee765b2b";
             hash = "sha256-qpktpL2WInzweUFSWFwJMhe1e0W1av9N0pZ9qnoUsA0=";
           };
-          cargoBuildOptions = opts: opts ++ [ "-p" "arch-lint-cli" ];
+          cargoBuildOptions =
+            opts:
+            opts
+            ++ [
+              "-p"
+              "arch-lint-cli"
+            ];
         };
         inherit (pkgs.lib) getExe getExe';
         mingwBinutils = pkgs.pkgsCross.mingwW64.buildPackages.binutils;

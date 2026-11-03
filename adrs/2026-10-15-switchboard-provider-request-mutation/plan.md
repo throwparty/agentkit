@@ -45,14 +45,14 @@ flowchart TB
 
 ## Technologies
 
-| Technology                                              | Role                                                      |
+| Technology | Role |
 | ------------------------------------------------------- | --------------------------------------------------------- |
 | rhai 1.26 (serde; sync; no_module; no_closure; no_time) | Sandboxed scripting engine; sync makes Engine Send + Sync |
-| serde_json 1                                            | JSON to rhai::Dynamic conversion via rhai::serde          |
-| thiserror 2                                             | ScriptError enum                                          |
-| tokio 1                                                 | spawn_blocking and timeout around script calls (existing) |
-| toml 1 / serde                                          | Provider mutations field and config parsing (existing)    |
-| axum 0.8 / reqwest 0.12                                 | Proxy pipeline (existing)                                 |
+| serde_json 1 | JSON to rhai::Dynamic conversion via rhai::serde |
+| thiserror 2 | ScriptError enum |
+| tokio 1 | spawn_blocking and timeout around script calls (existing) |
+| toml 1 / serde | Provider mutations field and config parsing (existing) |
+| axum 0.8 / reqwest 0.12 | Proxy pipeline (existing) |
 
 ## Components
 
@@ -80,9 +80,9 @@ impl ScriptEngine {
 pub fn new() -> Self;
 pub fn with_limits(limits: Limits) -> Self;
 pub fn limits(&self) -> &Limits;
-pub fn compile(&self, origin: impl Into<String>, source: &str) -> Result<CompiledScript, ScriptError>;
-pub fn compile_file(&self, path: &std::path::Path) -> Result<CompiledScript, ScriptError>;
-pub fn call(&self, script: &CompiledScript, function: &str, input: &serde_json::Value) -> Result<serde_json::Value, ScriptError>;
+pub fn compile(&self, origin: impl Into<String>, source: &str) -> Result\<CompiledScript, ScriptError>;
+pub fn compile_file(&self, path: &std::path::Path) -> Result\<CompiledScript, ScriptError>;
+pub fn call(&self, script: &CompiledScript, function: &str, input: &serde_json::Value) -> Result\<serde_json::Value, ScriptError>;
 }
 
 pub struct CompiledScript { origin: std::sync::Arc<str>, ast: rhai::AST }
@@ -142,15 +142,15 @@ The script mutates and returns the same map. Only headers and body are read back
 
 Apply scripts to an outbound request
 
-New module src/proxy/mutation.rs. MutationSet { engine: Arc<ScriptEngine>, scripts: Vec<CompiledScript> } with apply(&self, ctx: MutationContext, headers: &mut HeaderMap, body: &mut Vec<u8>) -> Result<(), MutationError>. MutationContext carries provider identity, surface, model, and session_id. apply() parses the current body as JSON (unit if not JSON), builds the request map, calls each script in declared order, reads back headers and body, validates header names and values, and serialises the body back to bytes. Errors are fatal: the request fails and no unmutated request is forwarded.
+New module src/proxy/mutation.rs. MutationSet { engine: Arc<ScriptEngine>, scripts: Vec<CompiledScript> } with apply(&self, ctx: MutationContext, headers: &mut HeaderMap, body: &mut Vec<u8>) -> Result\<(), MutationError>. MutationContext carries provider identity, surface, model, and session_id. apply() parses the current body as JSON (unit if not JSON), builds the request map, calls each script in declared order, reads back headers and body, validates header names and values, and serialises the body back to bytes. Errors are fatal: the request fails and no unmutated request is forwarded.
 
 ### Provider config
 
 Declare mutations per provider
 
-ProviderConfig: remove headers: HashMap<String, String> and user_agent: Option<String>; add mutations: Vec<PathBuf> with serde default. The loader resolves relative paths against the config file directory and rejects missing scripts at startup. Example:
+ProviderConfig: remove headers: HashMap\<String, String> and user_agent: Option<String>; add mutations: Vec<PathBuf> with serde default. The loader resolves relative paths against the config file directory and rejects missing scripts at startup. Example:
 
-[[providers]]
+\[[providers]\]
 identity = example_provider
 api_surface = openai-chat-completions
 base_url = https://api.example.com/v1
@@ -162,13 +162,13 @@ A provider with no mutations field behaves exactly as before. The switchboard sh
 
 Compile once and store
 
-main/server startup builds one ScriptEngine and compiles every provider's mutations once into a HashMap<String, MutationSet> stored in AppState. A missing file, parse error, or script without fn mutate(request) aborts startup with the provider identity and origin in the error. Compilation is not repeated per request.
+main/server startup builds one ScriptEngine and compiles every provider's mutations once into a HashMap\<String, MutationSet> stored in AppState. A missing file, parse error, or script without fn mutate(request) aborts startup with the provider identity and origin in the error. Compilation is not repeated per request.
 
 ### Forwarder and routes integration
 
 Run mutations before credentials
 
-routes.rs: delete the hardcoded tools and tool_choice rewrite and the unconditional body mutation. ForwardRequest replaces provider_user_agent and provider_headers with mutations: Option<&MutationSet> and surface. forward_request assembles out_headers (client headers minus hop-by-hop, default User-Agent), calls MutationSet::apply, then injects credentials last. Credential headers always win. Mutations run once per provider attempt, so failover to another provider re-runs that provider's mutations.
+routes.rs: delete the hardcoded tools and tool_choice rewrite and the unconditional body mutation. ForwardRequest replaces provider_user_agent and provider_headers with mutations: Option\<&MutationSet> and surface. forward_request assembles out_headers (client headers minus hop-by-hop, default User-Agent), calls MutationSet::apply, then injects credentials last. Credential headers always win. Mutations run once per provider attempt, so failover to another provider re-runs that provider's mutations.
 
 ### Tests
 

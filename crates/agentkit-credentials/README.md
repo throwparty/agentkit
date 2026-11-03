@@ -20,7 +20,7 @@ optional JSON body on stdin and answering on stdout with JSON carrying at
 least `access_token`. Each binary is independent; only the keychain binary
 depends on `keyring-core`.
 
-**Consumer side.** [`consumer`] is the client for that protocol, shared by
+**Consumer side.** \[`consumer`\] is the client for that protocol, shared by
 every component that resolves credentials:
 
 - `helper_binary_name`, `resolve_helper_path` — locate the helper (sibling

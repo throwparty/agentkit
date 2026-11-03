@@ -37,14 +37,14 @@ flowchart LR
 
 ## Technologies
 
-| Technology         | Role                                                                                                                  |
+| Technology | Role |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------- |
-| rmcp 3.3.0         | client candidate A (official modelcontextprotocol SDK); also the shared PoC reference server (server role)            |
-| rust-mcp-sdk 2.0.0 | client candidate B                                                                                                    |
-| mcp-server         | shared reference MCP server for the PoCs: rmcp 3.3.0 server role, current protocol era (2026-07-28), echo tool, stdio |
-| tokio              | async runtime for the harness and PoCs                                                                                |
-| serde_json         | JSON tool arguments and results                                                                                       |
-| rustls             | verified-by-default TLS for the streamable HTTP client (NFR-005)                                                      |
+| rmcp 3.3.0 | client candidate A (official modelcontextprotocol SDK); also the shared PoC reference server (server role) |
+| rust-mcp-sdk 2.0.0 | client candidate B |
+| mcp-server | shared reference MCP server for the PoCs: rmcp 3.3.0 server role, current protocol era (2026-07-28), echo tool, stdio |
+| tokio | async runtime for the harness and PoCs |
+| serde_json | JSON tool arguments and results |
+| rustls | verified-by-default TLS for the streamable HTTP client (NFR-005) |
 
 ## Components
 

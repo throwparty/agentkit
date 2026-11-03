@@ -49,15 +49,15 @@ flowchart TB
 
 ## Technologies
 
-| Technology                                    | Role                                              |
+| Technology | Role |
 | --------------------------------------------- | ------------------------------------------------- |
-| opentelemetry 0.32                            | OTel API (trace, metrics, logs)                   |
-| opentelemetry_sdk 0.32                        | SDK providers with batch processing and rt-tokio  |
-| opentelemetry-otlp 0.32                       | OTLP HTTP/protobuf exporters                      |
-| opentelemetry-stdout 0.32                     | Console exporter (spans, metrics, logs to stdout) |
-| tracing-opentelemetry 0.33                    | tracing span bridge to OTel traces                |
-| tracing 0.1 (attributes)                      | #[tracing::instrument] spans                      |
-| tracing-subscriber 0.3 (registry, env-filter) | Layered subscriber                                |
+| opentelemetry 0.32 | OTel API (trace, metrics, logs) |
+| opentelemetry_sdk 0.32 | SDK providers with batch processing and rt-tokio |
+| opentelemetry-otlp 0.32 | OTLP HTTP/protobuf exporters |
+| opentelemetry-stdout 0.32 | Console exporter (spans, metrics, logs to stdout) |
+| tracing-opentelemetry 0.33 | tracing span bridge to OTel traces |
+| tracing 0.1 (attributes) | #[tracing::instrument] spans |
+| tracing-subscriber 0.3 (registry, env-filter) | Layered subscriber |
 
 ## Components
 

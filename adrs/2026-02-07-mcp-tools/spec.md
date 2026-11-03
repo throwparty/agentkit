@@ -66,11 +66,11 @@ OpenCode [opencode-tools] uses MCP natively to expose a variety of local and rem
 
 This table focuses on the writing and mutation tools intended for implementation in `mcp-tools`.
 
-| Category       | Proposed Tools | Claude Code     | OpenAI Codex | OpenCode |
+| Category | Proposed Tools | Claude Code | OpenAI Codex | OpenCode |
 | :------------- | :------------- | :-------------- | :----------- | :------- |
-| **Execution**  | `bash`         | `bash`          | `shell`      | `bash`   |
-| **Full Write** | `write`        | `write_to_file` | `write`      | `write`  |
-| **Patching**   | `patch`        | `edit_file`     | `write`      | `patch`  |
+| **Execution** | `bash` | `bash` | `shell` | `bash` |
+| **Full Write** | `write` | `write_to_file` | `write` | `write` |
+| **Patching** | `patch` | `edit_file` | `write` | `patch` |
 
 ## 5. Functional Requirements
 

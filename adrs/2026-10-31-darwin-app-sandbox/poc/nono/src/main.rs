@@ -194,7 +194,15 @@ fn connect(value: &str) -> Result<String, String> {
 }
 
 fn child_environment(workspace: &Path) -> Vec<(String, String)> {
-    const FORWARD: &[&str] = &["PATH", "HOME", "LANG", "LC_ALL", "TERM", "USER", "LBX_RUN_LABEL"];
+    const FORWARD: &[&str] = &[
+        "PATH",
+        "HOME",
+        "LANG",
+        "LC_ALL",
+        "TERM",
+        "USER",
+        "LBX_RUN_LABEL",
+    ];
 
     let mut environment = Vec::new();
     for name in FORWARD {
@@ -305,14 +313,13 @@ fn main() {
 
     // Gap: nono's macOS profile does not grant writes to /dev/null, so every
     // shell redirection fails. Only a raw rule closes it.
-    capabilities =
-        match capabilities.platform_rule("(allow file-write* (literal \"/dev/null\"))") {
-            Ok(capabilities) => capabilities,
-            Err(err) => {
-                eprintln!("sandbox-nono: /dev/null rule rejected: {err}");
-                std::process::exit(FAIL_CLOSED);
-            }
-        };
+    capabilities = match capabilities.platform_rule("(allow file-write* (literal \"/dev/null\"))") {
+        Ok(capabilities) => capabilities,
+        Err(err) => {
+            eprintln!("sandbox-nono: /dev/null rule rejected: {err}");
+            std::process::exit(FAIL_CLOSED);
+        }
+    };
 
     // Gap: macOS has no per-host grant in the capability model
     // (`allow_tcp_connect` is Linux-only), so a connect grant needs SBPL too.
@@ -338,17 +345,21 @@ fn main() {
     // Gap 7: nono owns the profile, so the deny-default message cannot be set.
     // The flag is accepted for CLI parity and the omission is reported rather
     // than quietly ignored.
-    if args.tag.is_empty() || args.tag.len() > 64
+    if args.tag.is_empty()
+        || args.tag.len() > 64
         || !args
-        .tag
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            .tag
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
     {
         eprintln!("sandbox-nono: {} is not a valid tag", args.tag);
         std::process::exit(USAGE);
     }
     if args.tag != "litterbox" {
-        eprintln!("sandbox-nono: --tag {} not applied: nono owns the profile (gap 7)", args.tag);
+        eprintln!(
+            "sandbox-nono: --tag {} not applied: nono owns the profile (gap 7)",
+            args.tag
+        );
     }
 
     // Gap 8: the capability model has no credential invariants, so a caller
@@ -407,7 +418,9 @@ fn main() {
         std::process::exit(FAIL_CLOSED);
     }
     if unsafe { getsid(0) } != unsafe { getpid() } {
-        eprintln!("sandbox-nono: warning: no new session; job-control signals cross the sandbox boundary");
+        eprintln!(
+            "sandbox-nono: warning: no new session; job-control signals cross the sandbox boundary"
+        );
     }
 
     if let Err(err) = Sandbox::apply_auto(&capabilities) {

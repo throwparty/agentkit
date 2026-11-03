@@ -1,3 +1,7 @@
+[dependencies]
+
+[dev-dependencies]
+
 [package]
 name = "fixture"
 version = "0.0.0"
@@ -6,7 +10,3 @@ publish = false
 
 # Standalone: not a member of the agentkit workspace.
 [workspace]
-
-[dependencies]
-
-[dev-dependencies]

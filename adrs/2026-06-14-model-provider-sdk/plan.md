@@ -10,20 +10,20 @@ decision: confirmed (rig-core)
 
 ## 1. Requirements Traceability
 
-| Spec Requirement                                          | Plan Coverage                                                                                                      | Verification                                                                                              |
+| Spec Requirement | Plan Coverage | Verification |
 | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
-| **FR1** — Multi-provider completion via unified interface | §3.1 each crate configures a provider (OpenAI) using the library's own client types                                | Both crates complete a prompt with the OpenAI provider                                                    |
-| **FR2** — Tool calling round-trip                         | §3.2 each crate implements a static echo tool and agent loop                                                       | Tool result surfaces in model's final response                                                            |
-| **FR3** — Streaming                                       | **Out of scope for samples** (§11 spec)                                                                            | Not tested                                                                                                |
-| **FR4** — Token usage reporting                           | §3.4 usage inspected and logged after each turn in both crates                                                     | Non-zero token counts asserted in tests                                                                   |
-| **FR5** — Provider authentication                         | §3.3 per-provider client construction (API key, env var, no-auth)                                                  | Client builds without error given valid env; fails clearly without                                        |
-| **FR6** — Custom provider implementation                  | §4 documents implementing each library's native extensibility trait (rig's `CompletionModel`, llm's `LLMProvider`) | Walkthrough example fits under 200 lines for each library                                                 |
-| **FR7** — Conversation memory                             | §3.2 chat_history vector accumulated across turns in both crates                                                   | Multi-turn test asserts history grows                                                                     |
-| **NFR1** — Async runtime                                  | Tokio runtime throughout both crates                                                                               | Compilation check                                                                                         |
-| **NFR2** — Binary size                                    | §6.2 measured for both crates                                                                                      | Release binary \<15MB with one provider (each crate)                                                      |
-| **NFR3** — Error handling                                 | Each library's error types surfaced directly                                                                       | Distinct error variants for auth, rate limit, network                                                     |
-| **NFR4** — Testability                                    | §5 rig-sample uses cassettes; llm-sample uses wiremock; both have live integration gated                           | Offline tests pass in CI without network                                                                  |
-| Sample crate validation                                   | §6 side-by-side comparison                                                                                         | Comparison README documents compile times, binary size, tool call behaviour, error messages, docs quality |
+| **FR1** — Multi-provider completion via unified interface | §3.1 each crate configures a provider (OpenAI) using the library's own client types | Both crates complete a prompt with the OpenAI provider |
+| **FR2** — Tool calling round-trip | §3.2 each crate implements a static echo tool and agent loop | Tool result surfaces in model's final response |
+| **FR3** — Streaming | **Out of scope for samples** (§11 spec) | Not tested |
+| **FR4** — Token usage reporting | §3.4 usage inspected and logged after each turn in both crates | Non-zero token counts asserted in tests |
+| **FR5** — Provider authentication | §3.3 per-provider client construction (API key, env var, no-auth) | Client builds without error given valid env; fails clearly without |
+| **FR6** — Custom provider implementation | §4 documents implementing each library's native extensibility trait (rig's `CompletionModel`, llm's `LLMProvider`) | Walkthrough example fits under 200 lines for each library |
+| **FR7** — Conversation memory | §3.2 chat_history vector accumulated across turns in both crates | Multi-turn test asserts history grows |
+| **NFR1** — Async runtime | Tokio runtime throughout both crates | Compilation check |
+| **NFR2** — Binary size | §6.2 measured for both crates | Release binary \<15MB with one provider (each crate) |
+| **NFR3** — Error handling | Each library's error types surfaced directly | Distinct error variants for auth, rate limit, network |
+| **NFR4** — Testability | §5 rig-sample uses cassettes; llm-sample uses wiremock; both have live integration gated | Offline tests pass in CI without network |
+| Sample crate validation | §6 side-by-side comparison | Comparison README documents compile times, binary size, tool call behaviour, error messages, docs quality |
 
 ## 2. Architecture Overview
 
@@ -231,11 +231,11 @@ Both examples are verified by line count and by registering the custom provider 
 
 ### 5.1 Test Layers
 
-| Layer            | rig-sample                                                             | llm-sample                                            | Network required |
+| Layer | rig-sample | llm-sample | Network required |
 | ---------------- | ---------------------------------------------------------------------- | ----------------------------------------------------- | ---------------- |
-| Unit             | `cargo test` — message serialization, tool parsing, Usage accumulation | `cargo test` — same                                   | No               |
-| Offline          | rig cassette system — recorded HTTP fixtures replayed                  | `wiremock` — mock HTTP server with recorded responses | No               |
-| Live integration | `cargo test -- --ignored` — real OpenAI API                            | `cargo test -- --ignored` — real OpenAI API           | Yes              |
+| Unit | `cargo test` — message serialization, tool parsing, Usage accumulation | `cargo test` — same | No |
+| Offline | rig cassette system — recorded HTTP fixtures replayed | `wiremock` — mock HTTP server with recorded responses | No |
+| Live integration | `cargo test -- --ignored` — real OpenAI API | `cargo test -- --ignored` — real OpenAI API | Yes |
 
 ### 5.2 Offline Testing
 
@@ -325,32 +325,32 @@ async fn test_agent_turn_live() {
 
 After both crates are working, the comparison README (`samples/README.md`) documents:
 
-| Dimension                             | rig-sample         | llm-sample     |
+| Dimension | rig-sample | llm-sample |
 | ------------------------------------- | ------------------ | -------------- |
-| Lines of code (agent loop + tool def) | counted            | counted        |
-| Compile time (first `cargo build`)    | measured           | measured       |
-| Binary size (release, stripped)       | measured           | measured       |
-| Provider count available              | 24                 | 12+            |
-| Tool calling supported                | yes                | yes            |
-| Usage detail                          | 7 fields           | 2 fields       |
-| Offline testing                       | built-in cassettes | wiremock       |
-| WASM support                          | yes                | no             |
-| Version stability                     | pre-1.0 (0.38)     | stable (1.3.8) |
-| Documentation quality                 | assessed           | assessed       |
-| Error message quality                 | assessed           | assessed       |
+| Lines of code (agent loop + tool def) | counted | counted |
+| Compile time (first `cargo build`) | measured | measured |
+| Binary size (release, stripped) | measured | measured |
+| Provider count available | 24 | 12+ |
+| Tool calling supported | yes | yes |
+| Usage detail | 7 fields | 2 fields |
+| Offline testing | built-in cassettes | wiremock |
+| WASM support | yes | no |
+| Version stability | pre-1.0 (0.38) | stable (1.3.8) |
+| Documentation quality | assessed | assessed |
+| Error message quality | assessed | assessed |
 
 The comparison produces a final recommendation: either confirm the provisional rig selection or override it with llm.
 
 ## 7. Risk List
 
-| #   | Risk                                                                           | Likelihood | Impact                                                     | Mitigation                                                                                                       |
+| # | Risk | Likelihood | Impact | Mitigation |
 | --- | ------------------------------------------------------------------------------ | ---------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| R1  | rig pre-1.0 breaking change during development                                 | Medium     | Medium — would require adapting sample code                | Pin to exact version in Cargo.toml; samples are throwaway so impact is limited                                   |
-| R2  | llm's tool calling API differs enough from OpenAI expectations to cause issues | Medium     | Medium — may require provider-specific tool serialization  | Test both crates with same prompt; document differences in comparison README                                     |
-| R3  | rig's cassette infrastructure doesn't capture tool-call round-trips cleanly    | Low        | Medium — would lose offline testing for rig agent loop     | Fall back to wiremock for rig-sample too                                                                         |
-| R4  | llm has no cassette system, so offline testing requires more setup             | High       | Low — wiremock is straightforward                          | Document wiremock setup in crate README; fixture files committed to repo                                         |
-| R5  | OpenAI API quota exhausted, preventing live testing                            | Medium     | High — cannot verify real provider round-trip              | Use recorded cassettes for offline testing; add funded API key before final sign-off                             |
-| R6  | Comparison dimensions are subjective (docs quality, error messages)            | Medium     | Low — recommendation can still be made with objective data | Prefer objective metrics where possible (LoC, binary size, compile time); mark subjective assessments as opinion |
+| R1 | rig pre-1.0 breaking change during development | Medium | Medium — would require adapting sample code | Pin to exact version in Cargo.toml; samples are throwaway so impact is limited |
+| R2 | llm's tool calling API differs enough from OpenAI expectations to cause issues | Medium | Medium — may require provider-specific tool serialization | Test both crates with same prompt; document differences in comparison README |
+| R3 | rig's cassette infrastructure doesn't capture tool-call round-trips cleanly | Low | Medium — would lose offline testing for rig agent loop | Fall back to wiremock for rig-sample too |
+| R4 | llm has no cassette system, so offline testing requires more setup | High | Low — wiremock is straightforward | Document wiremock setup in crate README; fixture files committed to repo |
+| R5 | OpenAI API quota exhausted, preventing live testing | Medium | High — cannot verify real provider round-trip | Use recorded cassettes for offline testing; add funded API key before final sign-off |
+| R6 | Comparison dimensions are subjective (docs quality, error messages) | Medium | Low — recommendation can still be made with objective data | Prefer objective metrics where possible (LoC, binary size, compile time); mark subjective assessments as opinion |
 
 ## 8. Rollout and Rollback
 

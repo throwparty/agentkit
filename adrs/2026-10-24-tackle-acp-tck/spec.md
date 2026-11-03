@@ -1,9 +1,8 @@
 # Run acp-tck as a tackle conformance check
 
-**Status:** implemented  **Created:** 2026-10-24  **Author:** adrian
+**Status:** implemented **Created:** 2026-10-24 **Author:** adrian
 
 Tackle (adrs/2026-09-17-tackle) is an ACP v1 agent harness. Its NFR-006 requires strict ACP v1 stable compliance "verified by the conformance suite", which today is a single in-repo golden-transcript test (crates/agentkit-tackle/tests/acp_v1_conformance.rs) replaying one recorded lifecycle over raw JSON-RPC. The upstream Agent Client Protocol Test Compatibility Kit (acp-tck, https://github.com/agentclientprotocol/acp-tck) is an external, requirement-level conformance suite: it launches an agent as a stdio subprocess, drives the protocol, and reports each requirement as pass, fail, skipped, or not tested under a CONFORMANT or NOT CONFORMANT verdict. An audit of upstream usage found that acp-tck is run in CI only against deterministic, model-free fixture agents (the Rust SDK's testy and the Python SDK's echo_agent.py), that agent scorecards are diffed against a committed baseline rather than gated, and that no model-backed agent repository gates CI on the TCK; the MCP conformance suite follows the same known-failures-baseline pattern. Tackle needs a model endpoint to answer session/prompt at all, so an offline run needs a deterministic endpoint to exercise prompt and cancellation requirements without network, cost, or flake.
-
 
 ## Problem
 
@@ -26,7 +25,6 @@ Tackle has no external, requirement-level conformance signal. Its only protocol 
 - Shipping the deterministic test model binary in release artifacts or nix packages
 - Replacing or retiring the in-repo golden-transcript suite
 - Modifying acp-tck or contributing changes upstream
-
 
 ## Functional Requirements
 
@@ -185,29 +183,33 @@ cargo test still runs and passes the golden-transcript suite independently of ac
 Tackle fails to respond or crashes mid-run; the TCK still completes, every affected MANDATORY requirement is FAIL or NOT_TESTED, the report is written, and the baseline diff reports new failures rather than hanging.
 
 **Slug:** `agent-unresponsive`
+
 ### EC-002: Endpoint Port Unavailable
 
 The configured endpoint port is already bound; the orchestration recipe fails fast with a precise error naming the port and never hangs.
 
 **Slug:** `endpoint-port-unavailable`
+
 ### EC-003: acp-tck Unavailable
 
 The flake input fails to build or is missing; the orchestration recipe fails with a message that distinguishes a harness problem from a conformance failure.
 
 **Slug:** `tck-unavailable`
+
 ### EC-004: Baseline Absent
 
 No baseline file exists; the run fails with an error naming how to seed it from a first report, rather than passing silently.
 
 **Slug:** `baseline-absent`
+
 ### EC-005: Requirement Set Changes
 
 A pinned acp-tck update adds or removes requirement ids; newly introduced requirements are evaluated normally, and baseline ids that no longer exist are reported as stale and tolerated until the baseline is refreshed.
 
 **Slug:** `requirement-set-changes`
+
 ### EC-006: Cancellation Race
 
 The cancel does not land while the stream is in flight; cancellation requirements report SKIPPED, which the baseline records rather than counting as a conformance regression.
 
 **Slug:** `cancellation-race`
-

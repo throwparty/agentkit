@@ -6,19 +6,17 @@
 
 Create `adrs/2026-10-31-darwin-app-sandbox/poc` with `custom`, `nono` and `fixture` subdirectories. Each Cargo.toml carries an empty `[workspace]` table so neither crate joins the agentkit workspace, and no agentkit crate references them.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | `cargo metadata` at the repo root does not list either prototype package; removing the ADR directory leaves the workspace buildable. |
 | Complexity | 🟢 Low |
 | Effort | 0.5h |
-| Depends On |  |
+| Depends On | |
 | References | spike-only,shared-independent-prototypes |
 
 ### T-002: [x] Custom policy model
 
 Represent the policy as types: workspace path, read grants, write grants, connect grants, and a baseline. Canonicalise every path with `std::fs::canonicalize` before rendering, reject relative paths, and render SBPL from the model rather than by string concatenation at the call site.
-
 
 | Field | Value |
 |-------|-------|
@@ -32,7 +30,6 @@ Represent the policy as types: workspace path, read grants, write grants, connec
 
 Parse `--workspace`, repeatable `--read`, `--write`, `--connect`, then `--` and a command. Apply the profile and replace the process with the command; never return to the caller.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | Running with a grant for one path writes there and is refused outside it; an unknown argument exits non-zero without execing. |
@@ -44,7 +41,6 @@ Parse `--workspace`, repeatable `--read`, `--write`, `--connect`, then `--` and 
 ### T-004: [x] Baseline and invariants
 
 Add the read-only baseline for the dynamic linker and system paths, the deny-default stance, and the invariants the caller cannot override: writes only inside the workspace and explicit write grants, reads denied for credential directories, network denied unless granted.
-
 
 | Field | Value |
 |-------|-------|
@@ -58,7 +54,6 @@ Add the read-only baseline for the dynamic linker and system paths, the deny-def
 
 Call `sandbox_init`, print the returned message verbatim on failure and exit non-zero without execing. Record whether the binary is signed and what macOS reports for it.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | An unsigned local build confines a child process; a deliberately malformed profile produces the library's message rather than a silent abort. |
@@ -70,7 +65,6 @@ Call `sandbox_init`, print the returned message verbatim on failure and exit non
 ### T-006: [x] Golden profiles
 
 Store the rendered profile for a small set of inputs as fixtures and compare byte for byte, so a change to the emitter shows up as a fixture diff.
-
 
 | Field | Value |
 |-------|-------|
@@ -84,7 +78,6 @@ Store the rendered profile for a small set of inputs as fixtures and compare byt
 
 A small Rust crate that builds and tests, materialised into the workspace before each run. It is the workload both prototypes confine.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | `cargo build` and `cargo test` both succeed inside the custom sandbox with the toolchain readable and the workspace writable. |
@@ -96,7 +89,6 @@ A small Rust crate that builds and tests, materialised into the workspace before
 ### T-008: [x] Hostile checks
 
 Add the adversarial half of the fixture: a write outside the workspace, a write inside `$HOME`, a read of `~/.ssh`, an outbound connection, and a child process that repeats the write. Each check reports whether the write landed rather than whether an error was printed.
-
 
 | Field | Value |
 |-------|-------|
@@ -110,7 +102,6 @@ Add the adversarial half of the fixture: a write outside the workspace, a write 
 
 Run the fixture under the custom prototype and record the raw output, the profile, and anything that had to be added to make a real workload run.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | The fixture crate builds and tests, all hostile checks are denied, and every profile addition is attributed to the observation that required it. |
@@ -122,7 +113,6 @@ Run the fixture under the custom prototype and record the raw output, the profil
 ### T-010: [x] Nono prototype
 
 Link nono at an exactly pinned version, map workspace and grants onto `CapabilitySet`, apply, and exec. Filter the baseline for paths that do not exist, because nono rejects them.
-
 
 | Field | Value |
 |-------|-------|
@@ -136,7 +126,6 @@ Link nono at an exactly pinned version, map workspace and grants onto `Capabilit
 
 Record every requirement the capability model cannot express, with the reason, and note each place a raw platform rule was needed to get further. Attempt one per-host network grant and record whether the escape hatch closes the gap.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | The inventory names at least the `/dev/null` write grant and the macOS network limitation; each entry states whether it was worked around and how. |
@@ -148,7 +137,6 @@ Record every requirement the capability model cannot express, with the reason, a
 ### T-012: [x] Nono end-to-end run
 
 Run the identical fixture under the nono prototype and record the results beside the custom ones.
-
 
 | Field | Value |
 |-------|-------|
@@ -162,7 +150,6 @@ Run the identical fixture under the nono prototype and record the results beside
 
 Make each sandbox its own process group and exercise pause, resume and delete against a command that keeps working. Count surviving children after the kill.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | The written byte count is unchanged while paused, increases after resume, and no child survives the group kill; the same is recorded for any process that leaves the group. |
@@ -174,7 +161,6 @@ Make each sandbox its own process group and exercise pause, resume and delete ag
 ### T-014: [x] Egress grants
 
 Start a local server, grant exactly its address and port, and check that the granted connection succeeds while an ungranted port and an external host fail. No external network dependency.
-
 
 | Field | Value |
 |-------|-------|
@@ -188,7 +174,6 @@ Start a local server, grant exactly its address and port, and check that the gra
 
 Establish what an operator can see when a command is blocked: errno in the child, any system log message, and whether the denial can be attributed to a specific command.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | A written note states what is observable, what is not, and which of the two prototypes does better, with the commands used to check. |
@@ -200,7 +185,6 @@ Establish what an operator can see when a command is blocked: errno in the child
 ### T-016: [x] Findings and assessment
 
 Write `findings.md`: per goal, the observation with the raw output, the gap, and the open risk. Add the qualitative comparison of interface shape, configuration effort, and maintainability.
-
 
 | Field | Value |
 |-------|-------|
@@ -214,7 +198,6 @@ Write `findings.md`: per goal, the observation with the raw output, the gap, and
 
 Runs the helper with seven invalid inputs, a symlink escape and a dump into the workspace, asserting exact exit codes and that the command never ran.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | Every case exits 64 and the sentinel inside the workspace is absent. |
@@ -226,7 +209,6 @@ Runs the helper with seven invalid inputs, a symlink escape and a dump into the 
 ### T-019: [x] Credential harness
 
 Grants the whole home, places the workspace inside it, and asserts credential denial with a positive control.
-
 
 | Field | Value |
 |-------|-------|
@@ -240,7 +222,6 @@ Grants the whole home, places the workspace inside it, and asserts credential de
 
 Runs a resident command and asserts the profile text is absent from the process table while the command is visible.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | Profile absent, command visible. |
@@ -252,7 +233,6 @@ Runs a resident command and asserts the profile text is absent from the process 
 ### T-021: [x] Cost measurement
 
 Times apply-plus-exec against a bare exec baseline and records median and p95.
-
 
 | Field | Value |
 |-------|-------|
@@ -266,7 +246,6 @@ Times apply-plus-exec against a bare exec baseline and records median and p95.
 
 Confirm the prototypes are unreachable from the rest of the suite, then record what would have to be removed to discard the spike.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | No agentkit crate references the prototypes, the Docker path still builds and its tests pass, and the removal steps are written down. |
@@ -274,4 +253,3 @@ Confirm the prototypes are unreachable from the rest of the suite, then record w
 | Effort | 1h |
 | Depends On | T-016 |
 | References | no-behaviour-change-elsewhere,docker-path-unaffected,spike-only |
-

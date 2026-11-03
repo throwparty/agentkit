@@ -8,12 +8,12 @@
 
 ## Comparative Summary
 
-| Crate            | FR Coverage (Core)           | Maintenance               | API Style             | Runtime Dependency | PoC Status | Notes                                                 |
+| Crate | FR Coverage (Core) | Maintenance | API Style | Runtime Dependency | PoC Status | Notes |
 | ---------------- | ---------------------------- | ------------------------- | --------------------- | ------------------ | ---------- | ----------------------------------------------------- |
-| `bollard`        | Full (FR2/3/6/7/8/9)         | Active                    | Typed async API       | Docker API socket  | Passed     | Best overall fit for SDK needs.                       |
-| `docker-wrapper` | Full (FR2/3/6/7/8/9)         | Active                    | CLI builder async     | Docker CLI in PATH | Passed     | Great for CLI tools; higher latency per command.      |
-| `rs-docker`      | Full via PoC (hybrid)        | Stale (last release 2021) | Low-level sync API    | Docker API socket  | Ignored    | Unmaintained; PoC needed direct HTTP for correctness. |
-| `anchor`         | Partial (FR2/5/6 documented) | Early-stage 0.1.x         | Orchestration-focused | Docker API socket  | Not run    | Orchestration focus; exec/copy not documented.        |
+| `bollard` | Full (FR2/3/6/7/8/9) | Active | Typed async API | Docker API socket | Passed | Best overall fit for SDK needs. |
+| `docker-wrapper` | Full (FR2/3/6/7/8/9) | Active | CLI builder async | Docker CLI in PATH | Passed | Great for CLI tools; higher latency per command. |
+| `rs-docker` | Full via PoC (hybrid) | Stale (last release 2021) | Low-level sync API | Docker API socket | Ignored | Unmaintained; PoC needed direct HTTP for correctness. |
+| `anchor` | Partial (FR2/5/6 documented) | Early-stage 0.1.x | Orchestration-focused | Docker API socket | Not run | Orchestration focus; exec/copy not documented. |
 
 ## Detailed Observations
 
