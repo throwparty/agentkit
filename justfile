@@ -19,6 +19,7 @@ lint:
     just workflows lint
     cargo clippy --all-targets --all-features -- -D warnings
     arch-lint check
+    bash hack/arch-lint-negative.sh
 
 shellcheck:
     shellcheck $(git ls-files '*.sh' '*.bash' '*.bats')

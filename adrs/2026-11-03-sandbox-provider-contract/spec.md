@@ -1,6 +1,6 @@
 # Sandbox Provider Contract
 
-**Status:** draft **Created:** 2026-11-03 **Author:** adrian
+**Status:** implemented **Created:** 2026-11-03 **Author:** adrian
 
 Litterbox confines agent commands in Docker containers. The trait that abstracts compute is not neutral: `SandboxProvider` (crates/agentkit-litterbox/src/sandbox/mod.rs) names containers, taking a `container_id` and returning a Docker-shaped `ContainerInspection`, and `SandboxMetadata` persists a `container_id` field that metadata_store writes to TOML. The CLI and the MCP server each build `DockerSandboxProvider` independently (main.rs:427, mcp.rs:561), and two bulk paths (main.rs:252 for `pause --all-envs`, main.rs:276 for `pause --all-repos`) call `DockerCompute` directly and bypass the provider. Three spikes established that the kernel's own facilities confine the same workload without a container runtime: bubblewrap reached through Linux user namespaces (adrs/2026-10-31-linux-bwrap-sandbox, adrs/2026-10-31-linux-bwrap-lifecycle) and the `sandbox_init` entry point with a Seatbelt profile on macOS (adrs/2026-10-31-darwin-app-sandbox). They also established that mechanisms differ in kind rather than degree. A bubblewrap sandbox is held open in pid, net, mount and user namespaces and joined with `setns`, so pause, resume and resource limits have a sandbox-level meaning through a cgroup scope; without cgroup delegation, pause falls back to a stop-and-rescan fixpoint that bounds nothing. A Seatbelt profile is applied per process, so there is no sandbox-level state and no freeze or limits, every command runs on the host's pids and network stack, and pause exists only over a process group, which a `setsid` child escapes. Egress needs a proxy in both cases, and the two do not share a transport: a network namespace has no route to the host, so a host-side proxy is not reachable over the network stack at all (linux-bwrap-sandbox/findings.md), while the macOS profile grants only the `localhost` and `*` host tokens (darwin-app-sandbox/findings.md). A shell without any of these mechanisms is also a legitimate choice. A backend is a mechanism, not an operating system: bubblewrap needs Linux namespaces and a writable `/proc`, which a Windows host can provide through WSL, so what a backend requires is a primitive, not the name of the host. Several backends may therefore run on one host, each with its own requirements, its own vocabulary and its own configuration, and the choice between them belongs to the person whose machine runs the code rather than to the project being built. Litterbox needs a contract that says only what the CLI and the MCP server must be able to do to any backend, nothing about how a backend does it, and enough structure for a caller to know which optional operations a backend offers before it relies on one.
 
@@ -67,7 +67,7 @@ Each backend reports which facets and operations it provides, in its own vocabul
 
 ### FR-006: Core: Readiness
 
-A backend reports whether it can run on this host before a sandbox is created, and before an optional operation is used. The report is structured, not prose, and a reason names the primitive that is missing or degraded, its version floor where it has one, and a remedy. Degradation is reported to the caller and never silently substituted; where the degraded operation bounds the workload, the default is to refuse and proceed only on an explicit user configuration decision recorded in the report.
+A backend reports whether it can run on this host before a sandbox is created, and before an optional operation is used. The report is structured, not prose, and a reason names the primitive that is missing or degraded, its version floor where it has one, and a remedy. Degradation is reported to the caller and never silently substituted; where the degraded operation bounds the workload, the default is to refuse and proceed only on an explicit local configuration decision recorded in the report.
 
 **Slug:** `backend-readiness`
 
@@ -109,7 +109,7 @@ Failures are classified by meaning rather than by wire format: not found, confli
 
 ### FR-013: Core: Port Forwarding
 
-Port forwarding is an optional operation with three separate decisions: which ports a project wants forwarded, where they bind on the host, and who may ask for one. The project may declare that it expects a forwarded port. The host bind interface and the exposure are user configuration alone, default to loopback, and may not be requested through a tool, a command argument or project configuration. A forwarded port is reported with its bind address, and a backend without the forwarding facet fails the ports query as unsupported.
+Port forwarding is an optional operation with three separate decisions: which ports a project wants forwarded, where they bind on the host, and who may ask for one. The project may declare that it expects a forwarded port. The host bind interface and the exposure are local configuration alone, default to loopback, and may not be requested through a tool, a command argument or project configuration. A forwarded port is reported with its bind address, and a backend without the forwarding facet fails the ports query as unsupported.
 
 **Slug:** `port-forwarding`
 
@@ -157,7 +157,7 @@ The persisted record for a sandbox names the backend that hosts it and whatever 
 
 ### FR-021: Config: Backend Selection
 
-The backend in use is chosen by the person running the code, through user configuration or an explicit per-invocation selection, and never by project configuration, because the sandbox runs on their machine. Project configuration may declare what the project needs of a sandbox but cannot select a backend or set confinement. Selecting a backend that cannot run on this host fails at startup with its readiness reason and remedy, and never falls back to another backend.
+The backend in use is chosen by the person running the code, through the untracked local override or an explicit per-invocation selection, and never by project configuration, because the sandbox runs on their machine. Project configuration may declare what the project needs of a sandbox but cannot select a backend or set confinement. Selecting a backend that cannot run on this host fails at startup with its readiness reason and remedy, and never falls back to another backend.
 
 **Slug:** `backend-selection`
 
@@ -175,7 +175,7 @@ The Docker backend is re-expressed on the contract with its behaviour unchanged:
 
 ### FR-024: Arch: Module Boundaries
 
-The contract, each backend, the CLI, the MCP server and persistence are separate modules with declared dependencies: a backend may depend on the contract and the shared error and slug kernel, and on nothing else in Litterbox, and no backend may depend on another; the orchestration that pairs a branch with compute depends on the contract, the registry, SCM and persistence, and is the only module that performs that pairing; the CLI and the MCP server reach a backend through the orchestrator and the construction point rather than through its module; persistence depends on the contract's record types only. A rule broken fails the build.
+The contract, each backend, the CLI, the MCP server and persistence are separate modules with declared dependencies: a backend may depend on the contract and on nothing else in Litterbox, and no backend may depend on another; the orchestration that pairs a branch with compute depends on the contract, the registry, SCM and persistence, and is the only module that performs that pairing; the CLI and the MCP server reach a backend through the orchestrator and the construction point rather than through its module; persistence depends on the contract's record types only. A rule broken fails the build.
 
 **Slug:** `module-boundaries`
 
@@ -184,6 +184,12 @@ The contract, each backend, the CLI, the MCP server and persistence are separate
 A sandbox is a branch paired with compute, and the pairing lives in one orchestrator rather than in a backend. The orchestrator creates the branch, prepares the workspace, hands the backend a workspace source, persists the record, and removes the branch when the backend fails to create; delete removes the compute and then the branch, and a half that is already gone is not an error. A backend neither creates nor deletes a branch and is not told that one exists.
 
 **Slug:** `branch-compute-pairing`
+
+### FR-026: Configuration: Setup Consent
+
+A project's setup command runs only when the person running the code has granted consent: either the project's namespace is listed in allowed-projects, or allow-project-setup permits every project. Cloning a repository is never consent to execute its setup command, and a refusal names both settings.
+
+**Slug:** `setup-consent`
 
 ## Non-functional Requirements
 
@@ -263,7 +269,7 @@ With a mechanism's primitive absent, creating a sandbox exits non-zero with the 
 
 ### AC-005: Shared: Degradation Is Reported
 
-On a host without cgroup delegation, limits are reported degraded with the fallback named and what it cannot bound stated, and create refuses unless the user configured otherwise; a backend whose pause is process-group only reports that scope and the escape it does not close.
+On a host without cgroup delegation, limits are reported degraded with the fallback named and what it cannot bound stated, and create refuses unless the local override says otherwise; a backend whose pause is process-group only reports that scope and the escape it does not close.
 
 **Slug:** `degradation-reported`
 
@@ -329,7 +335,7 @@ Not found, conflict, unsupported, denied and failed map to distinct CLI exit cod
 
 ### AC-016: Shared: Ports Are Honest
 
-A forwarded port reports its loopback bind address; a non-loopback bind appears only when the user configured it; no tool argument or project file can set the bind interface; and a backend without the forwarding facet fails the ports query as unsupported.
+A forwarded port reports its loopback bind address; a non-loopback bind appears only when the local override sets it; no tool argument or project file can set the bind interface; and a backend without the forwarding facet fails the ports query as unsupported.
 
 **Slug:** `ports-honest`
 
@@ -350,6 +356,12 @@ A change that makes a backend depend on another backend, or the CLI depend on a 
 A backend can be created from a workspace source and deleted without touching SCM; a failed create leaves no branch; a delete whose compute is already gone still removes the branch; the orchestrator is the only module that creates or deletes a branch.
 
 **Slug:** `pairing-owned-in-one-place`
+
+### AC-020: Configuration: Setup Consent Is Per Repository
+
+With allow-project-setup false, a project whose namespace is listed in allowed-projects creates normally; an unlisted project with a setup command is refused with a message naming allowed-projects; allow-project-setup true permits every project.
+
+**Slug:** `setup-consent-per-repository`
 
 ## Edge Cases
 

@@ -1,9 +1,8 @@
-# Architecture rules for the ACP module boundary.
+# Architecture rules for the ACP and Litterbox module boundaries.
 #
-# `acp::common` is the shared, protocol-neutral layer. `acp::v1` and `acp::v2`
-# are sibling wire surfaces: each may depend on `acp::common`, and neither may
-# depend on the other. The transports are version-neutral and may depend only
-# on `acp::common`. See adrs/2026-10-23-tackle-acp-v2.
+# Two boundaries are declared: the ACP wire surfaces in agentkit-tackle
+# (adrs/2026-10-23-tackle-acp-v2) and the Litterbox provider contract
+# (adrs/2026-11-03-sandbox-provider-contract).
 
 preset = "minimal"
 
@@ -22,8 +21,93 @@ from = "acp-transport"
 to = ["acp-v1", "acp-v2"]
 message = "The transport must not depend on a protocol version; reach shared state through acp::common."
 
-# This gate enforces the ACP module boundary only; the built-in style rules are
-# not adopted here.
+[[deny-scope-dep]]
+from = "litterbox-contract"
+to = [
+  "litterbox-backend-docker",
+  "litterbox-registry",
+  "litterbox-orchestrator",
+  "litterbox-persistence",
+  "litterbox-cli",
+  "litterbox-mcp",
+  "litterbox-config",
+  "litterbox-scm",
+  "litterbox-vcs-store",
+  "litterbox-shared"
+]
+message = "the contract imports nothing internal; put conversions and adapters outside sandbox."
+
+[[deny-scope-dep]]
+from = "litterbox-backend-docker"
+to = [
+  "litterbox-registry",
+  "litterbox-orchestrator",
+  "litterbox-persistence",
+  "litterbox-cli",
+  "litterbox-mcp",
+  "litterbox-config",
+  "litterbox-scm",
+  "litterbox-vcs-store",
+  "litterbox-shared"
+]
+message = "a backend depends on the contract only; branches, records, commands and the shared kernel are not its business."
+
+[[deny-scope-dep]]
+from = "litterbox-registry"
+to = [
+  "litterbox-orchestrator",
+  "litterbox-persistence",
+  "litterbox-cli",
+  "litterbox-mcp",
+  "litterbox-scm",
+  "litterbox-vcs-store"
+]
+message = "the registry constructs a backend; it does not pair branches, persist records or serve surfaces."
+
+[[deny-scope-dep]]
+from = "litterbox-cli"
+to = ["litterbox-backend-docker", "litterbox-scm", "litterbox-vcs-store"]
+message = "the CLI reaches a backend through the orchestrator and the registry, never its module; branches and bare clones are the orchestrator's business."
+
+[[deny-scope-dep]]
+from = "litterbox-mcp"
+to = ["litterbox-backend-docker", "litterbox-scm", "litterbox-vcs-store"]
+message = "the MCP server reaches a backend through the orchestrator, never its module; branches and bare clones are the orchestrator's business."
+
+[[deny-scope-dep]]
+from = "litterbox-config"
+to = [
+  "litterbox-backend-docker",
+  "litterbox-registry",
+  "litterbox-orchestrator",
+  "litterbox-persistence",
+  "litterbox-cli",
+  "litterbox-mcp",
+  "litterbox-scm",
+  "litterbox-vcs-store"
+]
+message = "configuration describes settings; it does not reach a mechanism, a record, a branch or a surface."
+
+[[deny-scope-dep]]
+from = "litterbox-persistence"
+to = [
+  "litterbox-backend-docker",
+  "litterbox-registry",
+  "litterbox-orchestrator",
+  "litterbox-cli",
+  "litterbox-mcp",
+  "litterbox-config",
+  "litterbox-scm",
+  "litterbox-vcs-store",
+  "litterbox-shared"
+]
+message = "persistence depends on the contract's record types only."
+
+[[deny-scope-dep]]
+from = "litterbox-orchestrator"
+to = ["litterbox-backend-docker"]
+message = "the orchestrator selects a backend through the registry; it does not name a mechanism."
+
 [rules.no-unwrap-expect]
 enabled = false
 
@@ -42,3 +126,53 @@ paths = ["crates/agentkit-tackle/src/acp/v2/**"]
 [[scopes]]
 name = "acp-transport"
 paths = ["crates/agentkit-tackle/src/acp/transport/**"]
+
+[[scopes]]
+name = "litterbox-contract"
+paths = ["crates/agentkit-litterbox/src/sandbox/**"]
+
+[[scopes]]
+name = "litterbox-backend-docker"
+paths = ["crates/agentkit-litterbox/src/backends/docker/**"]
+
+[[scopes]]
+name = "litterbox-registry"
+paths = [
+  "crates/agentkit-litterbox/src/backends/mod.rs",
+  "crates/agentkit-litterbox/src/backends/registry.rs"
+]
+
+[[scopes]]
+name = "litterbox-orchestrator"
+paths = ["crates/agentkit-litterbox/src/orchestrator/**"]
+
+[[scopes]]
+name = "litterbox-persistence"
+paths = ["crates/agentkit-litterbox/src/metadata_store.rs"]
+
+[[scopes]]
+name = "litterbox-cli"
+paths = ["crates/agentkit-litterbox/src/cli.rs"]
+
+[[scopes]]
+name = "litterbox-mcp"
+paths = ["crates/agentkit-litterbox/src/mcp.rs"]
+
+[[scopes]]
+name = "litterbox-config"
+paths = [
+  "crates/agentkit-litterbox/src/config.rs",
+  "crates/agentkit-litterbox/src/config_loader.rs"
+]
+
+[[scopes]]
+name = "litterbox-scm"
+paths = ["crates/agentkit-litterbox/src/scm/**"]
+
+[[scopes]]
+name = "litterbox-vcs-store"
+paths = ["crates/agentkit-litterbox/src/vcs_store/**"]
+
+[[scopes]]
+name = "litterbox-shared"
+paths = ["crates/agentkit-litterbox/src/domain/**"]

@@ -20,6 +20,7 @@ jobs:
   test:
     name: Build and test
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     defaults:
       run:
         shell: nix develop ./nix --command bash -euo pipefail {0} # zizmor: ignore[misfeature]
@@ -53,13 +54,19 @@ jobs:
         run: cargo clippy --locked --all-targets --all-features
       - name: Check architecture boundary
         if: "!cancelled()"
-        run: arch-lint check
+        run: |
+          arch-lint check
+          bash hack/arch-lint-negative.sh
       - name: Check
         if: "!cancelled()"
         run: cargo check --locked
       - name: Test
         if: "!cancelled()"
         run: cargo test --locked
+      - name: Test (Docker sandbox)
+        if: "!cancelled()"
+        timeout-minutes: 30
+        run: LITTERBOX_DOCKER_TESTS=1 cargo test --locked -p agentkit-litterbox -- --ignored
       - name: Run audit
         if: "!cancelled()"
         run: cargo deny check
