@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+pub mod exit;
+
 /// Returns the platform-specific data directory for an AgentKit component.
 ///
 /// Creates a directory tree under the platform's standard data home:

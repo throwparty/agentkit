@@ -7,7 +7,7 @@ use std::path::PathBuf;
 pub fn config_dir(config_dir: Option<&PathBuf>) -> PathBuf {
     config_dir
         .cloned()
-        .unwrap_or_else(|| agentkit_path::config_dir("tackle"))
+        .unwrap_or_else(|| agentkit_common::config_dir("tackle"))
 }
 
 /// Resolves the effective session database path, honouring the subcommand
@@ -15,7 +15,7 @@ pub fn config_dir(config_dir: Option<&PathBuf>) -> PathBuf {
 pub fn db_path(db_path: Option<&PathBuf>) -> PathBuf {
     db_path
         .cloned()
-        .unwrap_or_else(|| agentkit_path::data_dir("tackle").join("sessions.db"))
+        .unwrap_or_else(|| agentkit_common::data_dir("tackle").join("sessions.db"))
 }
 
 /// Resolves the effective project configuration directory anchored at an

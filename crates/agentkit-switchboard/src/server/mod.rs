@@ -6,7 +6,7 @@ use crate::db;
 use crate::models::db::ModelDb;
 use crate::provider::registry::ProviderRegistry;
 use crate::session::sqlite::SqliteSessionManager;
-use agentkit_path::data_dir;
+use agentkit_common::data_dir;
 use std::path::PathBuf;
 use std::sync::Arc;
 

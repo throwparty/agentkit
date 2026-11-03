@@ -32,7 +32,7 @@ every component that resolves credentials:
 ## Dependencies
 
 - `serde_json` — helper JSON and the consumer's `Credential` parse
-- `agentkit-path` — the data directory the file helper writes to
+- `agentkit-common` — the data directory the file helper writes to
 - `keyring-core` (+ per-platform store) — the keychain helper only
 - `fs2` — file-helper locking
 

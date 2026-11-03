@@ -6,7 +6,7 @@ members = [
   "crates/agentkit-lens",
   "crates/agentkit-litterbox",
   "crates/agentkit-models",
-  "crates/agentkit-path",
+  "crates/agentkit-common",
   "crates/agentkit-script",
   "crates/agentkit-switchboard",
   "crates/agentkit-tackle"
