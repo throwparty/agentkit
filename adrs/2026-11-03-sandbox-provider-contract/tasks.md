@@ -134,7 +134,7 @@ Store an envelope holding the contract record, the branch the orchestrator creat
 | Depends On | T-002 |
 | References | sandbox-record,sandbox-identity,legacy-record-not-adopted,backend-mismatch-refused,sandbox-missing,backend-switched,branch-compute-pairing |
 
-### T-012: Sandbox orchestration
+### T-012: [x] Sandbox orchestration
 
 Add src/sandboxes/: resolve the project, create the branch, archive HEAD, stage the tree, build the backend through the registry, call create with the workspace source, persist the record and remove the branch when create fails. Provide delete that removes compute then branch, idempotently, and exec, upload, download, inspect and pause or resume dispatched through the facets.
 

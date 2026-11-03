@@ -6,5 +6,6 @@ pub mod legacy_provider;
 pub mod mcp;
 pub mod metadata_store;
 pub mod sandbox;
+pub mod sandboxes;
 pub mod scm;
 pub mod vcs_store;
