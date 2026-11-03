@@ -95,7 +95,7 @@ pub fn build(config: &Config) -> Result<Selected, Error> {
                 .cloned()
                 .unwrap_or(toml::Value::Table(Default::default()));
             let settings = crate::backends::docker::config::DockerConfig::from_section(&section)?
-                .settings()?;
+                .settings(&config.forwarding.bind)?;
             let compute = crate::backends::docker::compute::DockerCompute::connect()?;
             let backend = Arc::new(crate::backends::docker::DockerBackend::new(
                 compute, settings,

@@ -301,7 +301,7 @@ Roll back a container whose start failed instead of returning an id the backend 
 | Depends On |  |
 | References | create-atomicity,legacy-record-not-adopted,pairing-owned-in-one-place |
 
-### T-024: Configuration ownership
+### T-024: [x] Configuration ownership
 
 Thread the user's forwarding.bind into the backend settings, reject a setup-command under a backend section with a message naming [project], and make the backends command load only the user file so it works outside a project.
 

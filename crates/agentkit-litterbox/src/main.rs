@@ -369,10 +369,16 @@ async fn handle_shell(backend: Option<String>, name: String, command: Vec<String
 }
 
 async fn handle_backends(backend: Option<String>, json: bool) -> ExitCode {
-    let config = match load_config(backend) {
+    let mut config = match config_loader::load_user_only() {
         Ok(config) => config,
-        Err(error) => return report(error),
+        Err(error) => return report(Error::failed(error.to_string())),
     };
+    if let Some(backend) = backend {
+        config.backend = Some(backend);
+    }
+    for notice in &config.notices {
+        eprintln!("configuration: {notice}");
+    }
 
     let reports = backends::introspect(&config).await;
 
