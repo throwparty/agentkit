@@ -26,7 +26,7 @@ impl State {
 }
 
 /// What a fallback cannot do, when a degraded operation is used.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct Fallback {
     /// The fallback's name, in the backend's own vocabulary.
     pub name: String,
@@ -35,7 +35,7 @@ pub struct Fallback {
 }
 
 /// One primitive a backend needs, and whether this host provides it.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct Check {
     /// The primitive, named by the mechanism that needs it.
     pub primitive: String,
@@ -50,7 +50,7 @@ pub struct Check {
 }
 
 /// A backend's readiness on this host.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct Readiness {
     /// The backend that was asked.
     pub backend: String,
@@ -74,7 +74,7 @@ impl Readiness {
 }
 
 /// What a backend says about one optional operation.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct Capability {
     /// The operation, in the backend's own vocabulary.
     pub operation: String,
@@ -148,15 +148,25 @@ mod tests {
     }
 
     #[test]
-    fn egress_has_three_states_and_no_boolean() {
-        let postures = [
+    fn egress_serialises_as_three_distinct_states_and_no_boolean() {
+        let rendered: Vec<String> = [
             EgressPosture::Denied,
             EgressPosture::Direct,
             EgressPosture::Proxied {
                 endpoint: "unix:/run/litterbox/proxy.sock".to_string(),
             },
-        ];
-        assert_eq!(postures.len(), 3);
+        ]
+        .iter()
+        .map(|posture| serde_json::to_string(posture).expect("serialises"))
+        .collect();
+
+        assert_eq!(rendered.len(), 3);
+        assert_ne!(rendered[0], rendered[1]);
+        assert_ne!(rendered[1], rendered[2]);
+        assert!(
+            rendered.iter().all(|value| !value.contains("true")),
+            "egress is not a boolean: {rendered:?}"
+        );
     }
 
     #[test]

@@ -3,8 +3,9 @@
 //! The set is compiled in: `backends/registry.rs` is the only place a
 //! mechanism is selected or constructed.
 
-pub mod docker;
+pub(crate) mod docker;
 pub mod registry;
-pub mod report;
 
-pub use registry::{AVAILABLE, DEFAULT, Selected, build, introspect, select, selected_name};
+pub use registry::{
+    BackendReport, DEFAULT, available_names, build, introspect, select, select_as, selected_name,
+};
