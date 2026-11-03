@@ -89,7 +89,8 @@ pub(super) fn tool_calls_of(
                 Some(super::ModelToolCall {
                     id: call.id.to_string(),
                     name,
-                    arguments: serde_json::Value::Object(call.function.arguments.clone()).to_string(),
+                    arguments: serde_json::Value::Object(call.function.arguments.clone())
+                        .to_string(),
                 })
             }
             _ => None,

@@ -122,7 +122,6 @@ impl ConnectionNegotiation {
     }
 }
 
-
 impl crate::invokables::client_tools::TerminalTracker for ConnectionNegotiation {
     fn track(
         &self,

@@ -286,7 +286,10 @@ fn http_token_is_required_when_configured() {
     // The configured bearer token opens the connection.
     let (response, connection) = rpc(&agent, None, initialize());
     assert_eq!(response["result"]["protocolVersion"], 1, "{response}");
-    assert!(connection.is_some(), "an authorised initialize gets a connection id");
+    assert!(
+        connection.is_some(),
+        "an authorised initialize gets a connection id"
+    );
 }
 
 #[test]

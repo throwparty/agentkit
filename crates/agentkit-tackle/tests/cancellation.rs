@@ -250,8 +250,14 @@ impl Respond for SentinelledModel {
             .to_string()
         };
         let lines = [
-            format!("data: {}", chunk(serde_json::json!({ "role": "assistant" }), None)),
-            format!("data: {}", chunk(serde_json::json!({ "content": "ok" }), None)),
+            format!(
+                "data: {}",
+                chunk(serde_json::json!({ "role": "assistant" }), None)
+            ),
+            format!(
+                "data: {}",
+                chunk(serde_json::json!({ "content": "ok" }), None)
+            ),
             format!("data: {}", chunk(serde_json::json!({}), Some("stop"))),
             String::new(),
         ];

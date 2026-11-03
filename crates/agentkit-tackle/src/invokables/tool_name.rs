@@ -579,7 +579,11 @@ pub struct ToolNameContext {
 
 impl ToolNameContext {
     #[must_use]
-    pub fn new(endpoint: impl Into<String>, model: impl Into<String>, surface: impl Into<String>) -> Self {
+    pub fn new(
+        endpoint: impl Into<String>,
+        model: impl Into<String>,
+        surface: impl Into<String>,
+    ) -> Self {
         Self {
             endpoint: endpoint.into(),
             model: model.into(),
@@ -766,12 +770,8 @@ mod tests {
             let context = ToolNameContext::new("t010", "dedupe", "openai-chat-completions");
             for _ in 0..2 {
                 let scheme = Arc::new(StrictToolNameScheme::new(12));
-                let mut map = ToolNameMap::build(
-                    scheme,
-                    context.clone(),
-                    [name("mcp.t010.lossy")],
-                )
-                .unwrap();
+                let mut map =
+                    ToolNameMap::build(scheme, context.clone(), [name("mcp.t010.lossy")]).unwrap();
                 map.encode(&name("mcp.t010.lossy")).unwrap();
             }
         });
@@ -792,7 +792,10 @@ mod tests {
     fn strict_renders_namespace_dots_readably() {
         let scheme = StrictToolNameScheme::default();
         assert_eq!(
-            scheme.encode(&name("mcp.github.search_issues")).unwrap().as_str(),
+            scheme
+                .encode(&name("mcp.github.search_issues"))
+                .unwrap()
+                .as_str(),
             "mcp__github__search_issues"
         );
     }
@@ -801,7 +804,10 @@ mod tests {
     fn strict_preserves_literal_underscores() {
         let scheme = StrictToolNameScheme::default();
         assert_eq!(
-            scheme.encode(&name("mcp.github.search__issues")).unwrap().as_str(),
+            scheme
+                .encode(&name("mcp.github.search__issues"))
+                .unwrap()
+                .as_str(),
             "mcp__github__search__issues"
         );
     }
@@ -842,12 +848,8 @@ mod tests {
     #[test]
     fn collision_gets_a_distinct_hash_suffix() {
         let scheme = Arc::new(StrictToolNameScheme::default());
-        let mut map = ToolNameMap::build(
-            scheme,
-            context(),
-            [name("mcp.a.b-c"), name("mcp.a.b_c")],
-        )
-        .unwrap();
+        let mut map =
+            ToolNameMap::build(scheme, context(), [name("mcp.a.b-c"), name("mcp.a.b_c")]).unwrap();
         let first = map.encode(&name("mcp.a.b-c")).unwrap();
         let second = map.encode(&name("mcp.a.b_c")).unwrap();
         assert_ne!(first, second);
@@ -861,7 +863,10 @@ mod tests {
         let mut map = ToolNameMap::build(
             scheme,
             context(),
-            [name("mcp.github.search__issues"), name("mcp.github.search.issues")],
+            [
+                name("mcp.github.search__issues"),
+                name("mcp.github.search.issues"),
+            ],
         )
         .unwrap();
         let literal = map.encode(&name("mcp.github.search__issues")).unwrap();
@@ -912,7 +917,10 @@ mod tests {
     fn cohere_rejects_leading_digits_and_hyphens() {
         let scheme = CohereToolNameScheme::default();
         assert_eq!(
-            scheme.encode(&name("mcp.github.search-tool")).unwrap().as_str(),
+            scheme
+                .encode(&name("mcp.github.search-tool"))
+                .unwrap()
+                .as_str(),
             "mcp__github__search_tool"
         );
         assert_eq!(

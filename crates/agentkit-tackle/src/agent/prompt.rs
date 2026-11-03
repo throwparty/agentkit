@@ -10,7 +10,7 @@ use crate::agent::{compaction, titling, TurnOutcome, TurnStop};
 use crate::config::{resolve_tool_names, Config};
 use crate::content::{prompt_parts_of, timestamp};
 use crate::invokables::tool_name::{ToolNameContext, ToolNameScheme};
-use crate::invokables::{RenderedTools, Registry};
+use crate::invokables::{Registry, RenderedTools};
 use crate::providers::openai_chat_completions::{provider_for, RigProvider};
 use crate::providers::{ChatContent, ChatMessage, ModelToolCall, ToolCallOutcome, ToolDefinition};
 use crate::state::{LeaseHeartbeat, TackleState};
@@ -42,7 +42,8 @@ pub(crate) fn tool_names_for(
         .endpoints
         .get(endpoint_name)
         .ok_or_else(|| format!("model `{model_ref}` is not configured"))?;
-    let scheme = resolve_tool_names(endpoint_name, endpoint, model).map_err(|error| error.to_string())?;
+    let scheme =
+        resolve_tool_names(endpoint_name, endpoint, model).map_err(|error| error.to_string())?;
     Ok((
         scheme,
         ToolNameContext::new(endpoint_name, model, endpoint.wire_format.as_str()),

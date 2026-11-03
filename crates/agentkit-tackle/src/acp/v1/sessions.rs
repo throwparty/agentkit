@@ -83,13 +83,9 @@ pub(super) async fn handle_new_session(
     // MCP connections kick off asynchronously; session creation never blocks
     // on them. Client-forwarded servers (session/new's mcp_servers) register
     // and connect after the response, below.
-    let session = common_session::create_interactive(
-        &state,
-        &request.cwd.to_string_lossy(),
-        None,
-    )
-    .await
-    .map_err(|err| Error::internal_error().data(err))?;
+    let session = common_session::create_interactive(&state, &request.cwd.to_string_lossy(), None)
+        .await
+        .map_err(|err| Error::internal_error().data(err))?;
     // The project layer awaits trust: resolve consent on this connection (the
     // first session does) before the seed and selectors read the effective
     // configuration.
@@ -130,7 +126,8 @@ pub(super) async fn handle_new_session(
     // it without waiting for a replay.
     if let Ok(blocks) = serde_json::from_str::<Vec<ContentBlock>>(&seed_message.content) {
         for block in blocks {
-            let chunk = ContentChunk::new(block).message_id(MessageId::new(seed_message.id.clone()));
+            let chunk =
+                ContentChunk::new(block).message_id(MessageId::new(seed_message.id.clone()));
             cx.send_notification(SessionNotification::new(
                 wire_id.clone(),
                 SessionUpdate::UserMessageChunk(chunk),

@@ -26,11 +26,21 @@ const READ_MAX_FILE_BYTES: u64 = 1 << 20;
 const WALK_MAX_DEPTH: usize = 64;
 /// Directory names skipped by the recursive walk.
 const SKIPPED_DIRS: &[&str] = &[
-    ".cache", ".direnv", ".git", ".hg", ".jj", ".svn", "node_modules", "target",
+    ".cache",
+    ".direnv",
+    ".git",
+    ".hg",
+    ".jj",
+    ".svn",
+    "node_modules",
+    "target",
 ];
 
 #[derive(Debug, Parser)]
-#[command(name = "tackle-mcp-fs", about = "Test-only read-only filesystem MCP fixture")]
+#[command(
+    name = "tackle-mcp-fs",
+    about = "Test-only read-only filesystem MCP fixture"
+)]
 struct Args {
     /// Workspace root the tools are confined to (defaults to the current directory).
     #[arg(long)]
@@ -71,8 +81,8 @@ impl FsServer {
         args: &serde_json::Map<String, serde_json::Value>,
     ) -> Result<String, String> {
         let path = self.resolve(args.get("path").and_then(|value| value.as_str()))?;
-        let metadata = std::fs::metadata(&path)
-            .map_err(|err| format!("{}: {err}", path.display()))?;
+        let metadata =
+            std::fs::metadata(&path).map_err(|err| format!("{}: {err}", path.display()))?;
         if metadata.len() > READ_MAX_FILE_BYTES {
             return Err(format!(
                 "{}: file is too large ({} bytes)",
@@ -197,10 +207,7 @@ fn walk_depth(path: &Path, visit: &mut dyn FnMut(&Path), depth: usize) {
     entries.sort_by_key(|entry| entry.file_name());
     for entry in entries {
         let name = entry.file_name();
-        if entry
-            .file_type()
-            .map(|kind| kind.is_dir())
-            .unwrap_or(false)
+        if entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false)
             && SKIPPED_DIRS.iter().any(|skip| name == *skip)
         {
             continue;
@@ -297,7 +304,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let server = FsServer::new(dir.path().to_path_buf());
         assert!(server.resolve(Some("../escape")).is_err());
-        assert!(server.resolve(Some("inside")).is_err(), "missing paths fail");
+        assert!(
+            server.resolve(Some("inside")).is_err(),
+            "missing paths fail"
+        );
     }
 
     #[test]
@@ -318,11 +328,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
         std::fs::write(outside.path().join("secret"), "needle\n").unwrap();
-        std::os::unix::fs::symlink(
-            outside.path().join("secret"),
-            dir.path().join("link"),
-        )
-        .unwrap();
+        std::os::unix::fs::symlink(outside.path().join("secret"), dir.path().join("link")).unwrap();
         let server = FsServer::new(dir.path().to_path_buf());
         let args = serde_json::json!({ "pattern": "needle" });
         let args = args.as_object().unwrap().clone();

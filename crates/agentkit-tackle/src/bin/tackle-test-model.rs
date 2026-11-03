@@ -3,15 +3,15 @@
 //! it listens on loopback, derives every response from the request body,
 //! and never reaches the network.
 
-use axum::Json;
 use axum::extract::State;
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
+use axum::Json;
 use clap::Parser;
-use futures::{StreamExt, stream};
+use futures::{stream, StreamExt};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::convert::Infallible;
 use std::net::IpAddr;
 use std::process::ExitCode;

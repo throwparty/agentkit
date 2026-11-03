@@ -63,7 +63,11 @@ pub(super) async fn available_commands(
 }
 
 /// One `/mcp status` line.
-pub(super) fn mcp_status_line(name: &str, status: &crate::mcp::ServerStatus, enabled: bool) -> String {
+pub(super) fn mcp_status_line(
+    name: &str,
+    status: &crate::mcp::ServerStatus,
+    enabled: bool,
+) -> String {
     if !enabled {
         return format!("{name}: disabled");
     }

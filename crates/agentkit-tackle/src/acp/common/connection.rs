@@ -27,7 +27,12 @@ impl ConnectionSetup {
     /// Builds the connection's MCP pool and the editor seed from
     /// configuration.
     pub(crate) async fn load(state: &TackleState) -> Self {
-        let client_tools = state.config().config.client_tools.clone().unwrap_or_default();
+        let client_tools = state
+            .config()
+            .config
+            .client_tools
+            .clone()
+            .unwrap_or_default();
         let elicitation = Arc::new(DynamicElicitationSink::default());
         Self {
             editor_fs: client_tools.fs_enabled,

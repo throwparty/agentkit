@@ -74,7 +74,12 @@ async fn build_reply(
 ) -> Result<(String, String), String> {
     let (model_ref, window) = resolve_model_and_window(state, session_row).await?;
     let (scheme, context) = tool_names_for(&state.config().config, &model_ref)?;
-    let runtime = turn_runtime(negotiation, cx, wire_session.clone(), CancellationToken::new());
+    let runtime = turn_runtime(
+        negotiation,
+        cx,
+        wire_session.clone(),
+        CancellationToken::new(),
+    );
     let (_, rendered, system) = build_registry_and_system(
         &state.definitions(),
         actor_name,

@@ -8,9 +8,10 @@ use crate::agent::seed as first_run;
 use crate::mcp::{DynamicElicitationSink, Elicitation, ElicitationResponse, ElicitationSink};
 use crate::state::TackleState;
 use agent_client_protocol::schema::v1::{
-    AuthMethod, AuthMethodAgent, AuthenticateResponse, CreateElicitationRequest, ElicitationAction, ElicitationCapabilities,
-    ElicitationFormMode, ElicitationId, ElicitationMode, ElicitationRequestScope, ElicitationSchema,
-    ElicitationScope, ElicitationUrlMode, Implementation, InitializeRequest, InitializeResponse,
+    AuthMethod, AuthMethodAgent, AuthenticateResponse, CreateElicitationRequest, ElicitationAction,
+    ElicitationCapabilities, ElicitationFormMode, ElicitationId, ElicitationMode,
+    ElicitationRequestScope, ElicitationSchema, ElicitationScope, ElicitationUrlMode,
+    Implementation, InitializeRequest, InitializeResponse,
 };
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{Error, Responder};
@@ -109,11 +110,9 @@ fn elicitation_request(
     let id = uuid::Uuid::new_v4().to_string();
     let scope = ElicitationScope::Request(ElicitationRequestScope::new(id.clone()));
     let mode = match (elicitation.url, elicitation.requested_schema) {
-        (Some(url), _) if modes.supports_url() => ElicitationMode::Url(ElicitationUrlMode::new(
-            scope,
-            ElicitationId::new(id),
-            url,
-        )),
+        (Some(url), _) if modes.supports_url() => {
+            ElicitationMode::Url(ElicitationUrlMode::new(scope, ElicitationId::new(id), url))
+        }
         (None, Some(schema)) if modes.supports_form() => {
             let schema: ElicitationSchema = serde_json::from_value(schema).ok()?;
             ElicitationMode::Form(ElicitationFormMode::new(scope, schema))

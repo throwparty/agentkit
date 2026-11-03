@@ -66,8 +66,11 @@ fn conformant_report(name: &str, directory: &Path) -> PathBuf {
         }
     }
     let path = directory.join("conformant.json");
-    std::fs::write(&path, serde_json::to_string(&report).expect("serialize report"))
-        .expect("write report");
+    std::fs::write(
+        &path,
+        serde_json::to_string(&report).expect("serialize report"),
+    )
+    .expect("write report");
     path
 }
 
@@ -77,8 +80,11 @@ fn conformant_report_with_capability_failure(name: &str, directory: &Path) -> Pa
     let mut report = load_report(name);
     report["verdict"]["conformant"] = Value::Bool(true);
     let path = directory.join("capability-failure.json");
-    std::fs::write(&path, serde_json::to_string(&report).expect("serialize report"))
-        .expect("write report");
+    std::fs::write(
+        &path,
+        serde_json::to_string(&report).expect("serialize report"),
+    )
+    .expect("write report");
     path
 }
 
@@ -131,7 +137,11 @@ fn exit_code(output: &Output) -> i32 {
 fn known_failures_are_tolerated() {
     let dir = tempfile::tempdir().expect("tempdir");
     let report = conformant_report("report_minimal.json", dir.path());
-    let failures = ids_with_status(&load_report("report_minimal.json"), "MANDATORY", Some("FAIL"));
+    let failures = ids_with_status(
+        &load_report("report_minimal.json"),
+        "MANDATORY",
+        Some("FAIL"),
+    );
     let baseline = write_baseline(dir.path(), &failures);
 
     let output = run_checker(&report, &baseline);
@@ -156,7 +166,11 @@ fn not_conformant_verdict_fails() {
 fn new_mandatory_failure_is_detected() {
     let dir = tempfile::tempdir().expect("tempdir");
     let report = conformant_report("report_minimal.json", dir.path());
-    let mut failures = ids_with_status(&load_report("report_minimal.json"), "MANDATORY", Some("FAIL"));
+    let mut failures = ids_with_status(
+        &load_report("report_minimal.json"),
+        "MANDATORY",
+        Some("FAIL"),
+    );
     let missing = "ACME-MAND-002";
     assert!(failures.remove(missing));
     let baseline = write_baseline(dir.path(), &failures);
@@ -170,9 +184,17 @@ fn new_mandatory_failure_is_detected() {
 fn capability_failure_fails() {
     let dir = tempfile::tempdir().expect("tempdir");
     let report = conformant_report_with_capability_failure("report_minimal.json", dir.path());
-    assert!(ids_with_status(&load_report("report_minimal.json"), "CAPABILITY", Some("FAIL"))
-        .contains("ACME-CAP-001"));
-    let failures = ids_with_status(&load_report("report_minimal.json"), "MANDATORY", Some("FAIL"));
+    assert!(ids_with_status(
+        &load_report("report_minimal.json"),
+        "CAPABILITY",
+        Some("FAIL")
+    )
+    .contains("ACME-CAP-001"));
+    let failures = ids_with_status(
+        &load_report("report_minimal.json"),
+        "MANDATORY",
+        Some("FAIL"),
+    );
     let baseline = write_baseline(dir.path(), &failures);
 
     let output = run_checker(&report, &baseline);
@@ -185,7 +207,11 @@ fn now_passing_baseline_id_is_reported_as_drift() {
     let dir = tempfile::tempdir().expect("tempdir");
     let report = conformant_report("report_minimal.json", dir.path());
     let passing = "ACME-MAND-001";
-    let mut baseline_ids = ids_with_status(&load_report("report_minimal.json"), "MANDATORY", Some("FAIL"));
+    let mut baseline_ids = ids_with_status(
+        &load_report("report_minimal.json"),
+        "MANDATORY",
+        Some("FAIL"),
+    );
     baseline_ids.insert(passing.to_owned());
     let baseline = write_baseline(dir.path(), &baseline_ids);
 
@@ -200,7 +226,11 @@ fn stale_baseline_id_is_reported_and_tolerated() {
     let dir = tempfile::tempdir().expect("tempdir");
     let report = conformant_report("report_minimal.json", dir.path());
     let stale = "ACME-GONE-999";
-    let mut baseline_ids = ids_with_status(&load_report("report_minimal.json"), "MANDATORY", Some("FAIL"));
+    let mut baseline_ids = ids_with_status(
+        &load_report("report_minimal.json"),
+        "MANDATORY",
+        Some("FAIL"),
+    );
     baseline_ids.insert(stale.to_owned());
     let baseline = write_baseline(dir.path(), &baseline_ids);
 

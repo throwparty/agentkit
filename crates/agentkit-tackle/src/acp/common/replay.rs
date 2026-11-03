@@ -102,8 +102,12 @@ mod tests {
         assistant.message.id = "assistant-1".to_owned();
         let events = walk(&[user, assistant]);
         assert_eq!(events.len(), 2);
-        assert!(matches!(&events[0], ReplayEvent::Message { id, is_user: true, .. } if id == "user-1"));
-        assert!(matches!(&events[1], ReplayEvent::Message { id, is_user: false, .. } if id == "assistant-1"));
+        assert!(
+            matches!(&events[0], ReplayEvent::Message { id, is_user: true, .. } if id == "user-1")
+        );
+        assert!(
+            matches!(&events[1], ReplayEvent::Message { id, is_user: false, .. } if id == "assistant-1")
+        );
     }
 
     #[test]
@@ -121,7 +125,9 @@ mod tests {
         let events = walk(&[call, result, orphan]);
         assert_eq!(events.len(), 2);
         assert!(matches!(&events[0], ReplayEvent::ToolCall { id, .. } if id == "call-1"));
-        assert!(matches!(&events[1], ReplayEvent::ToolResult { call_id, .. } if call_id == "call-1"));
+        assert!(
+            matches!(&events[1], ReplayEvent::ToolResult { call_id, .. } if call_id == "call-1")
+        );
     }
 
     #[test]

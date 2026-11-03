@@ -73,9 +73,7 @@ pub struct Elicitation {
 /// collected them.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ElicitationResponse {
-    Accept {
-        content: Option<serde_json::Value>,
-    },
+    Accept { content: Option<serde_json::Value> },
     Decline,
     Cancel,
 }
@@ -87,9 +85,7 @@ pub trait ElicitationSink: Send + Sync + 'static {
     fn elicit(
         &self,
         elicitation: Elicitation,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = ElicitationResponse> + Send + '_>,
-    >;
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ElicitationResponse> + Send + '_>>;
 }
 
 /// A sink that starts fail-closed and can be pointed at the negotiated
@@ -111,9 +107,7 @@ impl ElicitationSink for DynamicElicitationSink {
     fn elicit(
         &self,
         elicitation: Elicitation,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = ElicitationResponse> + Send + '_>,
-    > {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ElicitationResponse> + Send + '_>> {
         let inner = self
             .inner
             .lock()
@@ -137,9 +131,7 @@ impl ElicitationSink for AutoDecline {
     fn elicit(
         &self,
         _elicitation: Elicitation,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = ElicitationResponse> + Send + '_>,
-    > {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ElicitationResponse> + Send + '_>> {
         Box::pin(async { ElicitationResponse::Decline })
     }
 }
@@ -192,8 +184,7 @@ impl ClientHandler for ForwardingHandler {
         let response = self.sink.elicit(elicitation).await;
         Ok(match response {
             ElicitationResponse::Accept { content } => match content {
-                Some(content) => ElicitResult::new(ElicitationAction::Accept)
-                    .with_content(content),
+                Some(content) => ElicitResult::new(ElicitationAction::Accept).with_content(content),
                 None => ElicitResult::new(ElicitationAction::Accept),
             },
             ElicitationResponse::Decline => ElicitResult::new(ElicitationAction::Decline),
@@ -397,7 +388,10 @@ impl McpPool {
                 Ok((name, value))
             })
             .collect::<Result<std::collections::HashMap<_, _>, String>>()?;
-        let config = rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(url.to_owned())
+        let config =
+            rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig::with_uri(
+                url.to_owned(),
+            )
             .custom_headers(custom_headers);
         let transport = rmcp::transport::StreamableHttpClientTransport::from_config(config);
         match connect_timeout(rmcp::service::serve_client(handler, transport)).await {
@@ -625,14 +619,12 @@ pub async fn connect_forwarded(
     if throwaways.is_empty() {
         return;
     }
-    let connected = futures::future::join_all(
-        throwaways
-            .into_iter()
-            .map(|(name, config, mut one)| async move {
-                one.connect(&name, &config).await;
-                one
-            }),
-    )
+    let connected = futures::future::join_all(throwaways.into_iter().map(
+        |(name, config, mut one)| async move {
+            one.connect(&name, &config).await;
+            one
+        },
+    ))
     .await;
     let mut pool = pool.lock().await;
     for one in connected {

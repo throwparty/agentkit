@@ -43,7 +43,8 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
     let incoming = Box::pin(
         futures::stream::once(async move { Ok::<String, std::io::Error>(first) })
             .chain(reader.lines()),
-    ) as std::pin::Pin<Box<dyn futures::Stream<Item = std::io::Result<String>> + Send>>;
+    )
+        as std::pin::Pin<Box<dyn futures::Stream<Item = std::io::Result<String>> + Send>>;
     let outgoing = Box::pin(futures::sink::unfold(
         stdout,
         async move |mut writer, line: String| {
@@ -52,7 +53,8 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
             writer.flush().await?;
             Ok::<_, std::io::Error>(writer)
         },
-    )) as std::pin::Pin<Box<dyn futures::Sink<String, Error = std::io::Error> + Send>>;
+    ))
+        as std::pin::Pin<Box<dyn futures::Sink<String, Error = std::io::Error> + Send>>;
 
     tokio::select! {
         result = run_acp_over(state, setup, Lines::new(outgoing, incoming)) => result,
@@ -79,10 +81,7 @@ fn malformed_initialize_response(line: &str) -> Option<String> {
     if valid {
         return None;
     }
-    let id = value
-        .get("id")
-        .cloned()
-        .unwrap_or(serde_json::Value::Null);
+    let id = value.get("id").cloned().unwrap_or(serde_json::Value::Null);
     Some(
         serde_json::json!({
             "jsonrpc": "2.0",

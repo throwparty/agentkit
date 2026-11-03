@@ -21,7 +21,9 @@ pub(super) fn replay_updates(
         .collect()
 }
 
-fn wire_block(block: &crate::acp::common::content::Block) -> agent_client_protocol::schema::v1::ContentBlock {
+fn wire_block(
+    block: &crate::acp::common::content::Block,
+) -> agent_client_protocol::schema::v1::ContentBlock {
     use agent_client_protocol::schema::v1::{ContentBlock, TextContent};
     match serde_json::from_value(block.to_value()) {
         Ok(block) => block,
@@ -63,8 +65,10 @@ fn render(session_id: &SessionId, event: ReplayEvent) -> Vec<SessionNotification
             is_error,
             content,
         } => {
-            let content: Vec<ToolCallContent> =
-                content.iter().map(|block| ToolCallContent::from(wire_block(block))).collect();
+            let content: Vec<ToolCallContent> = content
+                .iter()
+                .map(|block| ToolCallContent::from(wire_block(block)))
+                .collect();
             let status = if is_error {
                 ToolCallStatus::Failed
             } else {

@@ -3,7 +3,7 @@
 //! client cancellation. Each test starts the fixture on an ephemeral loopback
 //! port; no test reaches the network.
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
