@@ -288,7 +288,7 @@ Slugify and validate the configured project slug before it becomes a path, refus
 | Depends On |  |
 | References | sandbox-identity,sandbox-record,legacy-record-not-adopted |
 
-### T-023: Atomic create and legacy recovery
+### T-023: [x] Atomic create and legacy recovery
 
 Roll back a container whose start failed instead of returning an id the backend cannot clean up, and give a legacy record its file path plus a command that discards it.
 

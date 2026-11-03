@@ -162,6 +162,21 @@ impl Sandboxes {
         lifecycle.resume(&stored.sandbox).await
     }
 
+    /// Remove a record written by an earlier release, without touching compute.
+    pub fn discard_legacy(&self, name: &str) -> Result<std::path::PathBuf, Error> {
+        let name = self.valid_name(name)?;
+        match metadata_store::load_sandbox(&self.project_slug, &name)? {
+            Some(LoadedSandbox::Legacy { path }) => {
+                metadata_store::remove_sandbox(&self.project_slug, &name)?;
+                Ok(path)
+            }
+            Some(LoadedSandbox::Current(_)) => Err(Error::Conflict {
+                name: format!("{name} is a current record, not a legacy one"),
+            }),
+            None => Err(Error::NotFound { name }),
+        }
+    }
+
     /// Every sandbox in this project, current first.
     pub fn list(&self) -> Result<Listing, Error> {
         let mut listing = Listing::default();
@@ -198,9 +213,10 @@ impl Sandboxes {
         let name = self.valid_name(name)?;
         match metadata_store::load_sandbox(&self.project_slug, &name)? {
             Some(LoadedSandbox::Current(stored)) => Ok(stored),
-            Some(LoadedSandbox::Legacy { .. }) => Err(Error::failed(format!(
-                "sandbox '{name}' was created by an earlier release and is not supported; \
-                 remove its record and create it again"
+            Some(LoadedSandbox::Legacy { path }) => Err(Error::failed(format!(
+                "sandbox '{name}' has a record from an earlier release at {}; \
+                 run `litterbox delete --discard-legacy {name}` and create it again",
+                path.display()
             ))),
             None => Err(Error::NotFound {
                 name: name.to_string(),
