@@ -4,15 +4,12 @@ sidebar_position: 4
 
 # 📂 Setting up your project
 
-Create a file in the root of your project named `.litterbox.toml` with the content:
+Create `.agentkit/litterbox/config.toml` in your repository:
 
 ```toml
+[project]
 # Optional: override the default project slug (derived from directory name)
-# [project]
 # slug = "my-project"
-
-[docker]
-image = "busybox:latest"
 setup-command = "busybox httpd -h /src -p 0.0.0.0:8080"
 
 [[ports]]
@@ -20,11 +17,37 @@ name = "www"
 target = 8080
 ```
 
-For details on what configuration options are available, see the [configuration reference](reference/config).
+The sandbox's image is not a project setting: it belongs to the person running
+the code, in the untracked `.agentkit/litterbox/config.local.toml`:
+
+```toml
+backend = "docker"
+
+[backends.docker]
+# Pin by digest where possible: the image is the confinement boundary.
+image = "busybox@sha256:..." # or a tag you are willing to have change
+```
+
+The setup command only runs when the person running the code allows it. Cloning a
+repository is not consent to execute its shell command. Grant one repository by
+adding the namespace `litterbox list` prints to `allowed-projects` in the local
+override:
+
+```toml
+allowed-projects = ["my-project-1a2b3c4d"]
+```
+
+`allow-project-setup = true` is the machine-wide alternative: it permits the
+setup command of every repository, including ones you have not seen yet. Use it
+deliberately, not to unblock a single project.
+
+For details on what configuration options are available, see the [configuration
+reference](reference/config) and [backends](backends).
 
 When a new sandbox is created, Litterbox will:
 
 - Create a new branch named after the sandbox in your Git repository.
-- Copy the source code into `/src` inside the container.
+- Materialise the source code at the sandbox's workspace path.
 - Run the setup command to start the HTTP server.
-- Assign it a random port number that forwards traffic to the HTTP server running on port 8080 in the container.
+- Assign it a random host port that forwards to the HTTP server running on port
+  8080 in the sandbox.

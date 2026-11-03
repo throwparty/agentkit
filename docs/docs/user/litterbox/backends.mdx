@@ -1,0 +1,52 @@
+# 🧰 Backends
+
+A backend is a sandboxing mechanism: Docker today, with bubblewrap and the macOS
+Seatbelt sandbox designed for. A backend is not tied to a platform. It states the
+primitives it needs, and those primitives decide whether it can run on this
+machine.
+
+## Choosing one
+
+The backend is chosen by the person running the code, in the untracked local
+override, or for a single command:
+
+```toml
+# .agentkit/litterbox/config.local.toml
+backend = "docker"
+
+[backends.docker]
+image = "ubuntu:latest"
+```
+
+```bash
+litterbox --backend docker list
+```
+
+A project's `.agentkit/litterbox/config.toml` cannot select or configure a backend. If it tries,
+Litterbox reports the setting and ignores it: the sandbox runs on your machine,
+not the maintainer's.
+
+## Seeing what this machine can run
+
+```bash
+litterbox backends
+```
+
+The command lists every backend built into the binary, marks the selected one, and
+reports each one's readiness: available, degraded or unavailable, with the reason
+and what you can do about it. `--json` emits the same report for scripts.
+
+```
+* docker degraded
+    the Docker daemon: available
+    image ubuntu:latest: degraded (the image is not present and will be pulled on first use) -- pull the image ahead of time to avoid the first-create delay
+```
+
+A backend marked unavailable will refuse to run rather than fall back to another
+mechanism, and the error names what is missing.
+
+## Reading a sandbox
+
+`litterbox list` prints each sandbox with its status and the backend hosting it.
+`litterbox backends` is not exposed over MCP: an agent cannot change or probe how
+your machine confines code.

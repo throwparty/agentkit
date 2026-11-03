@@ -9,7 +9,7 @@ flowchart LR
         CR["agentkit-credentials"]
         MM["agentkit-models"]
         DG["agentkit-docgen"]
-        AP["agentkit-path"]
+        AP["agentkit-common"]
     end
 
     SB --> MM
@@ -23,7 +23,7 @@ Dependency highlights:
 - `agentkit-switchboard` depends on tokio, axum, reqwest, sqlx, serde, oauth2 — it does **not** depend on keyring or rig-core.
 - `agentkit-credentials` ships two binaries (`agentkit-credential-keychain` and `agentkit-credential-file`) sharing protocol types in a library module. Only the keychain binary depends on `keyring-core`.
 - `agentkit-models` bundles a models.dev snapshot at compile time via `build.rs`.
-- `agentkit-path` provides platform-consistent data directory paths shared across all crates.
+- `agentkit-common` provides platform-consistent data directory paths shared across all crates.
 
 ## Module map
 
