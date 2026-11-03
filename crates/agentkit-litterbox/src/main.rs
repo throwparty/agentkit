@@ -1,15 +1,15 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use agentkit_litterbox::compute::{DockerCompute, SandboxState};
+use agentkit_litterbox::backends::docker::compute::{DockerCompute, SandboxState};
+use agentkit_litterbox::backends::docker::{
+    DockerSandboxProvider, SandboxProvider, branch_name_for_slug, container_name_for_slug,
+};
 use agentkit_litterbox::domain::{
     ComputeError, SandboxError, SandboxMetadata, SandboxStatus, ScmMode, slugify_name,
 };
 use agentkit_litterbox::mcp;
 use agentkit_litterbox::metadata_store;
-use agentkit_litterbox::sandbox::{
-    DockerSandboxProvider, SandboxProvider, branch_name_for_slug, container_name_for_slug,
-};
 use agentkit_litterbox::scm::{Scm, ThreadSafeScm};
 use clap::{CommandFactory, Parser, Subcommand};
 

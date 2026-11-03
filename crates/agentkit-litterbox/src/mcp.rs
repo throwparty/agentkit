@@ -22,16 +22,16 @@ use std::io;
 #[cfg(test)]
 use std::path::PathBuf;
 
-use crate::compute::{ContainerInspection, DockerCompute};
+use crate::backends::docker::compute::{ContainerInspection, DockerCompute};
+use crate::backends::docker::{
+    DockerSandboxProvider, SandboxProvider, branch_name_for_slug, container_name_for_slug,
+};
 use crate::config_loader;
 use crate::domain::{
     ComputeError, ExecutionResult, ForwardedPort, ForwardedPortMapping, SandboxConfig,
     SandboxError, SandboxMetadata, SandboxStatus, ScmMode, slugify_name,
 };
 use crate::metadata_store;
-use crate::sandbox::{
-    DockerSandboxProvider, SandboxProvider, branch_name_for_slug, container_name_for_slug,
-};
 use crate::scm::{Scm, ThreadSafeScm};
 use crate::vcs_store::VcsStore;
 
@@ -1479,7 +1479,7 @@ fn parse_grep_output(output: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compute::{ContainerInspection, PortBindingSpec};
+    use crate::backends::docker::compute::{ContainerInspection, PortBindingSpec};
     use futures_util::future::BoxFuture;
     use git2::{ErrorCode, Oid, Repository, Signature};
     use std::fs;
