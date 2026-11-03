@@ -2,7 +2,7 @@ use std::io::Cursor;
 use std::path::Path;
 
 use crate::backends::docker::compute::{Compute, ContainerInspection, ContainerSpec};
-use crate::backends::docker::naming::build_forwarded_ports;
+use crate::backends::docker::forwarding::build_forwarded_ports;
 pub use crate::backends::docker::naming::container_name_for_slug;
 
 use futures_util::future::BoxFuture;
@@ -282,7 +282,7 @@ mod tests {
     use super::*;
     use std::net::TcpListener;
 
-    use crate::backends::docker::naming::{
+    use crate::backends::docker::forwarding::{
         DEFAULT_PORT_RANGE_END, DEFAULT_PORT_RANGE_START, allocate_host_port, env_var_for_slug,
     };
 

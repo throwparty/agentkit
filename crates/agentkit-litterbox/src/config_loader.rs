@@ -86,22 +86,8 @@ pub fn load_final() -> Result<Config, ConfigError> {
     // Merge: defaults <- project <- local
     let merged = merge(merge(defaults, base_config), local_config);
 
-    // Validate required keys
-    if merged.docker.image.as_deref().unwrap_or("").is_empty() {
-        return Err(ConfigError::MissingRequiredKey("docker.image".to_string()));
-    }
-    if merged
-        .docker
-        .setup_command
-        .as_deref()
-        .unwrap_or("")
-        .is_empty()
-    {
-        return Err(ConfigError::MissingRequiredKey(
-            "docker.setup-command".to_string(),
-        ));
-    }
-
+    // Backend settings are validated by the backend that owns them, not here;
+    // this layer only resolves the project's own configuration.
     validate_ports(&merged)?;
 
     Ok(merged)
