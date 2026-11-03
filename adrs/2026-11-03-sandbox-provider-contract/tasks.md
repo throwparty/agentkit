@@ -314,7 +314,7 @@ Thread the user's forwarding.bind into the backend settings, reject a setup-comm
 | Depends On |  |
 | References | port-forwarding,per-backend-config,backend-introspection |
 
-### T-025: Failure legibility and exit semantics
+### T-025: [x] Failure legibility and exit semantics
 
 Map a vanished sandbox in pause or resume to not found, print the reason beside an unknown status and exit non-zero, name the attempted operation in readiness errors, and namespace the sandboxed command's exit code so 3 to 7 stay reserved for the taxonomy.
 

@@ -401,16 +401,26 @@ impl Lifecycle for DockerBackend {
     fn pause<'a>(&'a self, sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async move {
             let data = DockerData::from_record(sandbox)?;
-            self.compute.pause_container(&data.container).await?;
-            Ok(())
+            match self.compute.pause_container(&data.container).await {
+                Ok(()) => Ok(()),
+                Err(error) if is_missing(&error) => Err(Error::NotFound {
+                    name: sandbox.name.clone(),
+                }),
+                Err(error) => Err(error.into()),
+            }
         })
     }
 
     fn resume<'a>(&'a self, sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async move {
             let data = DockerData::from_record(sandbox)?;
-            self.compute.resume_container(&data.container).await?;
-            Ok(())
+            match self.compute.resume_container(&data.container).await {
+                Ok(()) => Ok(()),
+                Err(error) if is_missing(&error) => Err(Error::NotFound {
+                    name: sandbox.name.clone(),
+                }),
+                Err(error) => Err(error.into()),
+            }
         })
     }
 }
@@ -449,6 +459,16 @@ fn is_name_conflict(error: &crate::domain::SandboxError) -> bool {
         error,
         SandboxError::Compute(ComputeError::ContainerProvision { source })
             if source.kind().is_conflict()
+    )
+}
+
+fn is_missing(error: &crate::domain::SandboxError) -> bool {
+    use crate::domain::{ComputeError, SandboxError};
+    matches!(
+        error,
+        SandboxError::Compute(
+            ComputeError::ContainerPause { source } | ComputeError::ContainerResume { source }
+        ) if source.kind().is_not_found()
     )
 }
 
