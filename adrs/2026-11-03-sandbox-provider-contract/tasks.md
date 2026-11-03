@@ -210,7 +210,7 @@ Update response shapes to name, backend, status, egress and provenance by variab
 | Depends On | T-003, T-012 |
 | References | mcp-surface,mcp-tool-names-stable,ports-honest,neutral-errors |
 
-### T-017: Conformance suite
+### T-017: [x] Conformance suite
 
 Add a test-only conformance module with a TestBackend implementing the contract and one facet, and a generic exercise over create from a prepared workspace, enumerate, exec, upload, download, inspect, delete, the unsupported path and create rollback. Run it for TestBackend always and for Docker under the existing opt-in.
 

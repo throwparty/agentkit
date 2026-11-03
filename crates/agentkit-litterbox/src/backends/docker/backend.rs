@@ -522,4 +522,15 @@ mod tests {
         backend.delete(&record).await?;
         Ok(())
     }
+
+    #[tokio::test]
+    async fn the_docker_backend_conforms() -> Result<(), Box<dyn std::error::Error>> {
+        if std::env::var("LITTERBOX_DOCKER_TESTS").is_err() {
+            return Ok(());
+        }
+
+        let backend = backend();
+        crate::sandbox::conformance::exercise(&backend).await?;
+        Ok(())
+    }
 }
