@@ -146,7 +146,7 @@ Add src/sandboxes/: resolve the project, create the branch, archive HEAD, stage 
 | Depends On | T-007, T-010, T-011 |
 | References | branch-compute-pairing,create-atomicity,pairing-owned-in-one-place,sandbox-identity,sandbox-missing |
 
-### T-013: CLI on the orchestrator
+### T-013: [x] CLI on the orchestrator
 
 Route list, pause, resume, delete and shell through the orchestrator; address sandboxes by name; derive status from the backend; remove container vocabulary from help, output and errors while keeping command and flag names.
 

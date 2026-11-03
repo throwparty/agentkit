@@ -1,16 +1,11 @@
-use std::path::Path;
 use std::process::ExitCode;
 
-use agentkit_litterbox::backends::docker::compute::{DockerCompute, SandboxState};
-use agentkit_litterbox::domain::{
-    ComputeError, SandboxError, SandboxMetadata, SandboxStatus, ScmMode, slugify_name,
-};
-use agentkit_litterbox::legacy_provider::{
-    DockerSandboxProvider, SandboxProvider, branch_name_for_slug, container_name_for_slug,
-};
+use agentkit_litterbox::backends;
+use agentkit_litterbox::config::Config;
+use agentkit_litterbox::config_loader;
 use agentkit_litterbox::mcp;
-use agentkit_litterbox::metadata_store;
-use agentkit_litterbox::scm::{Scm, ThreadSafeScm};
+use agentkit_litterbox::sandbox::contract::{Error, SandboxStatus, Scope};
+use agentkit_litterbox::sandboxes::Sandboxes;
 use clap::{CommandFactory, Parser, Subcommand};
 
 #[derive(Parser)]
@@ -18,10 +13,14 @@ use clap::{CommandFactory, Parser, Subcommand};
     author,
     version,
     about = "Litterbox - sandboxing tool for software engineering agents",
-    long_about = "Litterbox provides isolated sandbox environments combining SCM branches and containerized compute.\n\
-                  Each sandbox pairs a Git branch with a Docker container for safe, isolated development work."
+    long_about = "Litterbox provides isolated sandbox environments combining SCM branches and confined compute.\n\
+                  Each sandbox pairs a Git branch with a sandboxing mechanism for safe, isolated development work."
 )]
 struct Cli {
+    /// Select the backend for this invocation instead of the configured one.
+    #[arg(long, global = true)]
+    backend: Option<String>,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -29,22 +28,12 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// List all sandboxes in the current repository
-    ///
-    /// Shows all sandboxes with their current status (active, paused, missing, or error).
-    /// Status information requires Docker to be available; otherwise statuses show as unknown.
     List,
 
     /// Run the MCP (Model Control Protocol) server over stdio
-    ///
-    /// Starts the Litterbox MCP server, enabling communication with AI agents and tools
-    /// that support the Model Control Protocol. The server uses standard input/output
-    /// for communication.
     Stdio,
 
     /// Pause one or more sandboxes
-    ///
-    /// Pauses the container(s) associated with sandbox(es), preserving their state
-    /// while freeing up system resources. Paused sandboxes can be resumed later.
     Pause {
         /// Name of the sandbox to pause
         #[arg(
@@ -65,36 +54,28 @@ enum Commands {
         #[arg(
             long,
             conflicts_with = "all_envs",
-            help = "Pause all Litterbox containers system-wide"
+            help = "Pause all Litterbox sandboxes on this machine"
         )]
         all_repos: bool,
     },
 
     /// Resume a paused sandbox
-    ///
-    /// Resumes a previously paused sandbox, restoring its container to an active state.
     Resume {
         /// Name of the sandbox to resume
         name: String,
     },
 
     /// Delete a sandbox
-    ///
-    /// Removes both the sandbox's Git branch and container. Active sandboxes require
-    /// the --force flag to prevent accidental deletion.
     Delete {
         /// Name of the sandbox to delete
         name: String,
 
-        /// Force deletion even if the sandbox is active
+        /// Delete even if the sandbox is active
         #[arg(short, long)]
         force: bool,
     },
 
-    /// Execute a shell command in a sandbox
-    ///
-    /// Runs the specified command inside the sandbox's container and returns the output.
-    /// The command is executed in the sandbox's working directory.
+    /// Execute a command in a sandbox
     Shell {
         /// Name of the sandbox to run the command in
         name: String,
@@ -105,8 +86,6 @@ enum Commands {
     },
 
     /// Generate reference documentation
-    ///
-    /// Prints docs to stdout.
     #[command(hide = true)]
     Docgen {
         #[command(subcommand)]
@@ -126,145 +105,154 @@ enum DocgenCommand {
 #[tokio::main]
 async fn main() -> ExitCode {
     let cli = Cli::parse();
+    let backend = cli.backend;
     match cli.command {
-        Commands::List => handle_list().await,
+        Commands::List => handle_list(backend).await,
         Commands::Stdio => handle_stdio().await,
         Commands::Pause {
             name,
             all_envs,
             all_repos,
-        } => handle_pause(name, all_envs, all_repos).await,
-        Commands::Resume { name } => handle_resume(name).await,
-        Commands::Delete { name, force } => handle_delete(name, force).await,
-        Commands::Shell { name, command } => handle_shell(name, command).await,
+        } => handle_pause(backend, name, all_envs, all_repos).await,
+        Commands::Resume { name } => handle_resume(backend, name).await,
+        Commands::Delete { name, force } => handle_delete(backend, name, force).await,
+        Commands::Shell { name, command } => handle_shell(backend, name, command).await,
         Commands::Docgen { kind } => handle_docgen(kind),
     }
 }
 
+fn load_config(backend: Option<String>) -> Result<Config, Error> {
+    let mut config =
+        config_loader::load_final().map_err(|error| Error::failed(error.to_string()))?;
+    if let Some(backend) = backend {
+        config.backend = Some(backend);
+    }
+    for notice in &config.notices {
+        eprintln!("configuration: {notice}");
+    }
+    Ok(config)
+}
+
+fn project(config: Config) -> Result<Sandboxes, Error> {
+    Sandboxes::open(config).map_err(Error::from)
+}
+
 async fn handle_stdio() -> ExitCode {
-    // Load and print config for debugging
-    match agentkit_litterbox::config_loader::load_final() {
-        Ok(config) => {
-            eprintln!("Loaded configuration: {:#?}", config);
-        }
-        Err(error) => {
-            eprintln!("Warning: Failed to load config: {}", error);
-        }
-    }
-
     if let Err(error) = mcp::run_stdio().await {
-        return report_error("stdio", error);
+        return report(Error::failed(error.to_string()));
     }
     ExitCode::from(0)
 }
 
-async fn handle_list() -> ExitCode {
-    let scm = match ThreadSafeScm::open(Path::new(".")) {
-        Ok(scm) => scm,
-        Err(error) => return report_error("list", error),
+async fn handle_list(backend: Option<String>) -> ExitCode {
+    let config = match load_config(backend) {
+        Ok(config) => config,
+        Err(error) => return report(error),
     };
-    let repo_prefix = match scm.repo_prefix() {
-        Ok(prefix) => prefix,
-        Err(error) => return report_error("list", error),
-    };
-    let slugs = match scm.list_sandboxes() {
-        Ok(slugs) => slugs,
-        Err(error) => return report_error("list", error),
+    let sandboxes = match project(config) {
+        Ok(sandboxes) => sandboxes,
+        Err(error) => return report(error),
     };
 
-    let compute = match DockerCompute::connect() {
-        Ok(compute) => Some(compute),
-        Err(_) => {
-            eprintln!("list warning: docker unavailable; statuses shown as unknown");
-            None
-        }
+    let listing = match sandboxes.list() {
+        Ok(listing) => listing,
+        Err(error) => return report(error),
     };
 
-    let mut sandboxes = Vec::new();
-    for slug in slugs {
-        let status = match compute.as_ref() {
-            Some(compute) => {
-                let container = container_name_for_slug(&repo_prefix, &slug);
-                match compute.state(&container).await {
-                    Ok(SandboxState::Paused) => SandboxStatus::Paused,
-                    Ok(SandboxState::Running) => SandboxStatus::Active,
-                    Ok(SandboxState::Stopped) => SandboxStatus::Error("not running".to_string()),
-                    Ok(SandboxState::Missing) => {
-                        SandboxStatus::Error("missing container".to_string())
-                    }
-                    Err(error) => return report_error("list", error),
-                }
-            }
-            None => SandboxStatus::Error("docker unavailable".to_string()),
-        };
-        sandboxes.push(metadata_for_slug(&repo_prefix, &slug, status));
+    for name in &listing.legacy {
+        println!("{name} legacy-record");
     }
-
-    sandboxes.sort_by(|a, b| a.name.cmp(&b.name));
-    for sandbox in sandboxes {
-        println!("{} {}", sandbox.name, status_label(&sandbox.status));
+    for record in &listing.sandboxes {
+        let status = sandboxes
+            .status(&record.name)
+            .await
+            .unwrap_or(SandboxStatus::Unknown);
+        println!(
+            "{} {} {}",
+            record.name,
+            status_label(&status),
+            record.backend
+        );
     }
 
     ExitCode::from(0)
 }
 
-async fn handle_pause(name: Option<String>, all_envs: bool, all_repos: bool) -> ExitCode {
+async fn handle_pause(
+    backend: Option<String>,
+    name: Option<String>,
+    all_envs: bool,
+    all_repos: bool,
+) -> ExitCode {
+    let config = match load_config(backend) {
+        Ok(config) => config,
+        Err(error) => return report(error),
+    };
+
     if all_repos {
-        return handle_pause_all_repos().await;
+        return pause_everywhere(config).await;
     }
+
+    let sandboxes = match project(config) {
+        Ok(sandboxes) => sandboxes,
+        Err(error) => return report(error),
+    };
+
     if all_envs {
-        return handle_pause_all_envs().await;
+        let listing = match sandboxes.list() {
+            Ok(listing) => listing,
+            Err(error) => return report(error),
+        };
+        let mut paused = 0usize;
+        for record in &listing.sandboxes {
+            match sandboxes.pause(&record.name).await {
+                Ok(()) => paused += 1,
+                Err(error) if error.is_not_found() => {}
+                Err(error) => return report(error),
+            }
+        }
+        println!("Paused {paused} sandbox(es)");
+        return ExitCode::from(0);
     }
 
     let Some(name) = name else {
-        return report_error("pause", "missing sandbox name");
+        return report(Error::failed("a sandbox name is required"));
     };
-    let slug = match slugify_name(&name) {
-        Ok(slug) => slug,
-        Err(error) => return report_error("pause", error),
-    };
-    let repo_prefix = match repo_prefix() {
-        Ok(prefix) => prefix,
-        Err(error) => return report_error("pause", error),
-    };
-    let container = container_name_for_slug(&repo_prefix, &slug);
-    let provider = match build_provider() {
-        Ok(provider) => provider,
-        Err(error) => return report_error("pause", error),
-    };
-    if let Err(error) = provider.pause(&container).await {
-        return report_error("pause", error);
+
+    match sandboxes.pause(&name).await {
+        Ok(()) => {
+            println!("Paused {name}");
+            ExitCode::from(0)
+        }
+        Err(error) => report(error),
     }
-    let metadata = metadata_for_slug(&repo_prefix, &slug, SandboxStatus::Paused);
-    println!("Paused {metadata}");
-    ExitCode::from(0)
 }
 
-async fn handle_pause_all_envs() -> ExitCode {
-    let scm = match ThreadSafeScm::open(Path::new(".")) {
-        Ok(scm) => scm,
-        Err(error) => return report_error("pause --all-envs", error),
+async fn pause_everywhere(config: Config) -> ExitCode {
+    let selected = match backends::select(&config).await {
+        Ok(selected) => selected,
+        Err(error) => return report(error),
     };
-    let repo_prefix = match scm.repo_prefix() {
-        Ok(prefix) => prefix,
-        Err(error) => return report_error("pause --all-envs", error),
+    let Some(lifecycle) = selected.lifecycle.as_ref() else {
+        return report(Error::Unsupported {
+            operation: "pause".to_string(),
+            backend: backends::selected_name(&config).to_string(),
+            reason: "the mechanism has no sandbox-level pause".to_string(),
+            remedy: "stop the command instead".to_string(),
+        });
     };
-    let compute = match DockerCompute::connect() {
-        Ok(compute) => compute,
-        Err(error) => return report_error("pause --all-envs", error),
-    };
-    let slugs = match scm.list_sandboxes() {
-        Ok(slugs) => slugs,
-        Err(error) => return report_error("pause --all-envs", error),
+
+    let records = match selected.core.list(&Scope::Machine).await {
+        Ok(records) => records,
+        Err(error) => return report(error),
     };
 
     let mut paused = 0usize;
-    for slug in slugs {
-        let container = container_name_for_slug(&repo_prefix, &slug);
-        match compute.pause_container(&container).await {
+    for record in &records {
+        match lifecycle.pause(record).await {
             Ok(()) => paused += 1,
-            Err(error) if is_container_missing(&error) => {}
-            Err(error) => return report_error("pause --all-envs", error),
+            Err(error) if error.is_not_found() => {}
+            Err(error) => return report(error),
         }
     }
 
@@ -272,128 +260,67 @@ async fn handle_pause_all_envs() -> ExitCode {
     ExitCode::from(0)
 }
 
-async fn handle_pause_all_repos() -> ExitCode {
-    let compute = match DockerCompute::connect() {
-        Ok(compute) => compute,
-        Err(error) => return report_error("pause --all-repos", error),
+async fn handle_resume(backend: Option<String>, name: String) -> ExitCode {
+    let config = match load_config(backend) {
+        Ok(config) => config,
+        Err(error) => return report(error),
     };
-    let containers = match compute.list("litterbox-").await {
-        Ok(containers) => containers,
-        Err(error) => return report_error("pause --all-repos", error),
+    let sandboxes = match project(config) {
+        Ok(sandboxes) => sandboxes,
+        Err(error) => return report(error),
     };
 
-    let mut paused = 0usize;
-    for container in containers {
-        if !container.state.is_active() {
-            continue;
+    match sandboxes.resume(&name).await {
+        Ok(()) => {
+            println!("Resumed {name}");
+            ExitCode::from(0)
         }
-        match compute.pause_container(&container.id).await {
-            Ok(()) => paused += 1,
-            Err(error) if is_container_missing(&error) => {}
-            Err(error) => return report_error("pause --all-repos", error),
-        }
+        Err(error) => report(error),
     }
-
-    println!("Paused {paused} sandbox(es)");
-    ExitCode::from(0)
 }
 
-async fn handle_resume(name: String) -> ExitCode {
-    let slug = match slugify_name(&name) {
-        Ok(slug) => slug,
-        Err(error) => return report_error("resume", error),
+async fn handle_delete(backend: Option<String>, name: String, force: bool) -> ExitCode {
+    let config = match load_config(backend) {
+        Ok(config) => config,
+        Err(error) => return report(error),
     };
-    let repo_prefix = match repo_prefix() {
-        Ok(prefix) => prefix,
-        Err(error) => return report_error("resume", error),
+    let sandboxes = match project(config) {
+        Ok(sandboxes) => sandboxes,
+        Err(error) => return report(error),
     };
-    let container = container_name_for_slug(&repo_prefix, &slug);
-    let provider = match build_provider() {
-        Ok(provider) => provider,
-        Err(error) => return report_error("resume", error),
-    };
-    if let Err(error) = provider.resume(&container).await {
-        return report_error("resume", error);
+
+    match sandboxes.status(&name).await {
+        Ok(SandboxStatus::Active) if !force => {
+            return report(Error::Conflict {
+                name: format!("{name} is active; pass --force to delete it"),
+            });
+        }
+        Ok(_) | Err(Error::NotFound { .. }) => {}
+        Err(error) => return report(error),
     }
-    let metadata = metadata_for_slug(&repo_prefix, &slug, SandboxStatus::Active);
-    println!("Resumed {metadata}");
-    ExitCode::from(0)
+
+    match sandboxes.delete(&name).await {
+        Ok(()) => {
+            println!("Deleted {name}");
+            ExitCode::from(0)
+        }
+        Err(error) => report(error),
+    }
 }
 
-async fn handle_delete(name: String, force: bool) -> ExitCode {
-    let slug = match slugify_name(&name) {
-        Ok(slug) => slug,
-        Err(error) => return report_error("delete", error),
+async fn handle_shell(backend: Option<String>, name: String, command: Vec<String>) -> ExitCode {
+    let config = match load_config(backend) {
+        Ok(config) => config,
+        Err(error) => return report(error),
+    };
+    let sandboxes = match project(config) {
+        Ok(sandboxes) => sandboxes,
+        Err(error) => return report(error),
     };
 
-    // Resolve project slug from current directory (same logic as build_provider_with_config)
-    let project_slug = std::env::current_dir()
-        .ok()
-        .as_ref()
-        .and_then(|d| d.file_name())
-        .and_then(|n| n.to_str())
-        .map(agentkit_litterbox::domain::slugify)
-        .unwrap_or_else(|| "unknown".to_string());
-
-    // Load persisted metadata for correct mode binding
-    let metadata = match metadata_store::load(&project_slug, &slug) {
-        Ok(Some(meta)) => meta,
-        _ => {
-            // Legacy fallback: no metadata file = Direct mode
-            let repo_prefix = match repo_prefix() {
-                Ok(prefix) => prefix,
-                Err(error) => return report_error("delete", error),
-            };
-            metadata_for_slug(&repo_prefix, &slug, SandboxStatus::Active)
-        }
-    };
-
-    let compute = match DockerCompute::connect() {
-        Ok(compute) => compute,
-        Err(error) => return report_error("delete", error),
-    };
-
-    match compute.state(&metadata.container_id).await {
-        Ok(state) if state.is_active() && !force => {
-            return report_error("delete", "sandbox is active; use --force to delete");
-        }
-        Ok(_) => {}
-        Err(error) => return report_error("delete", error),
-    }
-
-    let provider = match build_provider() {
-        Ok(provider) => provider,
-        Err(error) => return report_error("delete", error),
-    };
-    if let Err(error) = provider.delete(&metadata).await {
-        return report_error("delete", error);
-    }
-
-    // Clean up metadata file
-    let _ = metadata_store::remove(&project_slug, &slug);
-
-    println!("Deleted {name}");
-    ExitCode::from(0)
-}
-
-async fn handle_shell(name: String, command: Vec<String>) -> ExitCode {
-    let slug = match slugify_name(&name) {
-        Ok(slug) => slug,
-        Err(error) => return report_error("shell", error),
-    };
-    let provider = match build_provider() {
-        Ok(provider) => provider,
-        Err(error) => return report_error("shell", error),
-    };
-    let repo_prefix = match repo_prefix() {
-        Ok(prefix) => prefix,
-        Err(error) => return report_error("shell", error),
-    };
-    let metadata = metadata_for_slug(&repo_prefix, &slug, SandboxStatus::Active);
-
-    let result = match provider.shell(&metadata, &command).await {
+    let result = match sandboxes.exec(&name, &command).await {
         Ok(result) => result,
-        Err(error) => return report_error("shell", error),
+        Err(error) => return report(error),
     };
 
     if !result.stdout.is_empty() {
@@ -403,7 +330,7 @@ async fn handle_shell(name: String, command: Vec<String>) -> ExitCode {
         eprint!("{}", result.stderr);
     }
     if result.exit_code != 0 {
-        eprintln!("shell failed: {result}");
+        eprintln!("command failed: {result}");
     }
 
     if result.exit_code == 0 {
@@ -424,47 +351,17 @@ fn handle_docgen(kind: DocgenCommand) -> ExitCode {
     ExitCode::from(0)
 }
 
-fn build_provider() -> Result<DockerSandboxProvider<ThreadSafeScm, DockerCompute>, SandboxError> {
-    let scm = ThreadSafeScm::open(Path::new("."))?;
-    let compute = DockerCompute::connect()?;
-    Ok(DockerSandboxProvider::new(scm, compute))
-}
-
-fn metadata_for_slug(repo_prefix: &str, slug: &str, status: SandboxStatus) -> SandboxMetadata {
-    SandboxMetadata {
-        name: slug.to_string(),
-        branch_name: branch_name_for_slug(slug),
-        container_id: container_name_for_slug(repo_prefix, slug),
-        status,
-        mode: ScmMode::Direct,
-        project_slug: repo_prefix.to_string(),
-        forwarded_ports: Vec::new(),
-    }
-}
-
-fn report_error(action: &str, error: impl std::fmt::Display) -> ExitCode {
-    eprintln!("{action} failed: {error}");
-    ExitCode::from(1)
-}
-
-fn repo_prefix() -> Result<String, SandboxError> {
-    ThreadSafeScm::open(Path::new("."))?.repo_prefix()
-}
-
 fn status_label(status: &SandboxStatus) -> String {
     match status {
         SandboxStatus::Active => "active".to_string(),
         SandboxStatus::Paused => "paused".to_string(),
-        SandboxStatus::Error(message) if message == "missing container" => "missing".to_string(),
-        SandboxStatus::Error(message) if message == "docker unavailable" => "unknown".to_string(),
-        SandboxStatus::Error(message) => format!("error: {message}"),
+        SandboxStatus::Missing => "missing".to_string(),
+        SandboxStatus::Unknown => "unknown".to_string(),
+        SandboxStatus::Error { reason } => format!("error: {reason}"),
     }
 }
 
-fn is_container_missing(error: &SandboxError) -> bool {
-    matches!(
-        error,
-        SandboxError::Compute(ComputeError::ContainerPause { source })
-            if source.kind().is_not_found()
-    )
+fn report(error: Error) -> ExitCode {
+    eprintln!("{error}");
+    ExitCode::from(error.exit_class().code())
 }
