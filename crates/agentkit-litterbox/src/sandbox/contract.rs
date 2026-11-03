@@ -111,7 +111,7 @@ impl fmt::Display for Execution {
 }
 
 /// A port this sandbox forwards to the host.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Forward {
     /// The port name the project declared.
     pub name: String,
@@ -206,43 +206,44 @@ impl Error {
 /// hold one value whatever backend the user selected.
 pub trait Sandbox {
     /// Create a sandbox and return its record.
-    fn create(&self, request: &CreateRequest) -> BoxFuture<'_, Result<SandboxRecord, Error>>;
-
+    fn create<'a>(
+        &'a self,
+        request: &'a CreateRequest,
+    ) -> BoxFuture<'a, Result<SandboxRecord, Error>>;
     /// Enumerate sandboxes in the given scope.
-    fn list(&self, scope: &Scope) -> BoxFuture<'_, Result<Vec<SandboxRecord>, Error>>;
-
+    fn list<'a>(&'a self, scope: &'a Scope) -> BoxFuture<'a, Result<Vec<SandboxRecord>, Error>>;
     /// Run one command.
-    fn exec(
-        &self,
-        sandbox: &SandboxRecord,
-        command: &[String],
-    ) -> BoxFuture<'_, Result<Execution, Error>>;
+    fn exec<'a>(
+        &'a self,
+        sandbox: &'a SandboxRecord,
+        command: &'a [String],
+    ) -> BoxFuture<'a, Result<Execution, Error>>;
 
     /// Copy a host path into the sandbox.
-    fn upload(
-        &self,
-        sandbox: &SandboxRecord,
-        source: &std::path::Path,
-        destination: &str,
-    ) -> BoxFuture<'_, Result<(), Error>>;
+    fn upload<'a>(
+        &'a self,
+        sandbox: &'a SandboxRecord,
+        source: &'a std::path::Path,
+        destination: &'a str,
+    ) -> BoxFuture<'a, Result<(), Error>>;
 
     /// Copy a sandbox path out to the host.
-    fn download(
-        &self,
-        sandbox: &SandboxRecord,
-        source: &str,
-        destination: &std::path::Path,
-    ) -> BoxFuture<'_, Result<(), Error>>;
+    fn download<'a>(
+        &'a self,
+        sandbox: &'a SandboxRecord,
+        source: &'a str,
+        destination: &'a std::path::Path,
+    ) -> BoxFuture<'a, Result<(), Error>>;
 
     /// Describe a sandbox without changing it.
-    fn inspect(&self, sandbox: &SandboxRecord) -> BoxFuture<'_, Result<Inspection, Error>>;
-
+    fn inspect<'a>(
+        &'a self,
+        sandbox: &'a SandboxRecord,
+    ) -> BoxFuture<'a, Result<Inspection, Error>>;
     /// Remove a sandbox and everything the backend created for it.
-    fn delete(&self, sandbox: &SandboxRecord) -> BoxFuture<'_, Result<(), Error>>;
-
+    fn delete<'a>(&'a self, sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>>;
     /// Report whether this backend can run here, and why not when it cannot.
-    fn readiness(&self) -> BoxFuture<'_, Result<crate::sandbox::report::Readiness, Error>>;
-
+    fn readiness<'a>(&'a self) -> BoxFuture<'a, Result<crate::sandbox::report::Readiness, Error>>;
     /// Report which optional operations this backend provides.
     fn capabilities(&self)
     -> BoxFuture<'_, Result<Vec<crate::sandbox::report::Capability>, Error>>;
@@ -259,49 +260,60 @@ mod tests {
     struct Stub;
 
     impl Sandbox for Stub {
-        fn create(&self, _request: &CreateRequest) -> BoxFuture<'_, Result<SandboxRecord, Error>> {
+        fn create<'a>(
+            &'a self,
+            _request: &'a CreateRequest,
+        ) -> BoxFuture<'a, Result<SandboxRecord, Error>> {
             Box::pin(async { Err(Error::failed("stub")) })
         }
 
-        fn list(&self, _scope: &Scope) -> BoxFuture<'_, Result<Vec<SandboxRecord>, Error>> {
+        fn list<'a>(
+            &'a self,
+            _scope: &'a Scope,
+        ) -> BoxFuture<'a, Result<Vec<SandboxRecord>, Error>> {
             Box::pin(async { Ok(Vec::new()) })
         }
 
-        fn exec(
-            &self,
-            _sandbox: &SandboxRecord,
-            _command: &[String],
-        ) -> BoxFuture<'_, Result<Execution, Error>> {
+        fn exec<'a>(
+            &'a self,
+            _sandbox: &'a SandboxRecord,
+            _command: &'a [String],
+        ) -> BoxFuture<'a, Result<Execution, Error>> {
             Box::pin(async { Err(Error::failed("stub")) })
         }
 
-        fn upload(
-            &self,
-            _sandbox: &SandboxRecord,
-            _source: &std::path::Path,
-            _destination: &str,
-        ) -> BoxFuture<'_, Result<(), Error>> {
+        fn upload<'a>(
+            &'a self,
+            _sandbox: &'a SandboxRecord,
+            _source: &'a std::path::Path,
+            _destination: &'a str,
+        ) -> BoxFuture<'a, Result<(), Error>> {
             Box::pin(async { Err(Error::failed("stub")) })
         }
 
-        fn download(
-            &self,
-            _sandbox: &SandboxRecord,
-            _source: &str,
-            _destination: &std::path::Path,
-        ) -> BoxFuture<'_, Result<(), Error>> {
+        fn download<'a>(
+            &'a self,
+            _sandbox: &'a SandboxRecord,
+            _source: &'a str,
+            _destination: &'a std::path::Path,
+        ) -> BoxFuture<'a, Result<(), Error>> {
             Box::pin(async { Err(Error::failed("stub")) })
         }
 
-        fn inspect(&self, _sandbox: &SandboxRecord) -> BoxFuture<'_, Result<Inspection, Error>> {
+        fn inspect<'a>(
+            &'a self,
+            _sandbox: &'a SandboxRecord,
+        ) -> BoxFuture<'a, Result<Inspection, Error>> {
             Box::pin(async { Err(Error::failed("stub")) })
         }
 
-        fn delete(&self, _sandbox: &SandboxRecord) -> BoxFuture<'_, Result<(), Error>> {
+        fn delete<'a>(&'a self, _sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>> {
             Box::pin(async { Ok(()) })
         }
 
-        fn readiness(&self) -> BoxFuture<'_, Result<crate::sandbox::report::Readiness, Error>> {
+        fn readiness<'a>(
+            &'a self,
+        ) -> BoxFuture<'a, Result<crate::sandbox::report::Readiness, Error>> {
             Box::pin(async {
                 Ok(crate::sandbox::report::Readiness {
                     backend: "stub".to_string(),

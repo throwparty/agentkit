@@ -23,13 +23,13 @@ use std::io;
 use std::path::PathBuf;
 
 use crate::backends::docker::compute::{ContainerInspection, DockerCompute};
-use crate::backends::docker::{
-    DockerSandboxProvider, SandboxProvider, branch_name_for_slug, container_name_for_slug,
-};
 use crate::config_loader;
 use crate::domain::{
     ComputeError, ExecutionResult, ForwardedPort, ForwardedPortMapping, SandboxConfig,
     SandboxError, SandboxMetadata, SandboxStatus, ScmMode, slugify_name,
+};
+use crate::legacy_provider::{
+    DockerSandboxProvider, SandboxProvider, branch_name_for_slug, container_name_for_slug,
 };
 use crate::metadata_store;
 use crate::scm::{Scm, ThreadSafeScm};

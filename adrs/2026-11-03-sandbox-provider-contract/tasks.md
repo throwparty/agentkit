@@ -74,7 +74,7 @@ Relocate compute/mod.rs to backends/docker/compute.rs, container naming and host
 | Depends On | |
 | References | docker-conformance,module-boundaries |
 
-### T-007: Docker backend on the contract
+### T-007: [x] Docker backend on the contract
 
 Implement Sandbox for DockerBackend over a prepared Workspace: create by uploading the staged tree and running setup, with rollback; list for both scopes; exec, upload, download, inspect, delete, readiness and capabilities. Report direct egress, unchanged environment provenance, the workspace path and forwards with their bind address. Implement Lifecycle and Forwarding. Create no branch and delete none.
 

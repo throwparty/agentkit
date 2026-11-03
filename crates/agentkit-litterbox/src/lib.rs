@@ -2,6 +2,7 @@ pub mod backends;
 pub mod config;
 pub mod config_loader;
 pub mod domain;
+pub mod legacy_provider;
 pub mod mcp;
 pub mod metadata_store;
 pub mod sandbox;
