@@ -117,7 +117,7 @@ async fn main() -> ExitCode {
     let backend = cli.backend;
     match cli.command {
         Commands::List => handle_list(backend).await,
-        Commands::Stdio => handle_stdio().await,
+        Commands::Stdio => handle_stdio(backend).await,
         Commands::Pause {
             name,
             all_envs,
@@ -147,8 +147,8 @@ fn project(config: Config) -> Result<Sandboxes, Error> {
     Sandboxes::open(config).map_err(Error::from)
 }
 
-async fn handle_stdio() -> ExitCode {
-    if let Err(error) = mcp::run_stdio().await {
+async fn handle_stdio(backend: Option<String>) -> ExitCode {
+    if let Err(error) = mcp::run_stdio(backend).await {
         return report(Error::failed(error.to_string()));
     }
     ExitCode::from(0)

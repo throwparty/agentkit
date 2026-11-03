@@ -9,9 +9,7 @@ use rmcp::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::Path;
-use tempfile;
 
 #[cfg(test)]
 use glob::glob as glob_paths;
@@ -22,18 +20,11 @@ use std::io;
 #[cfg(test)]
 use std::path::PathBuf;
 
-use crate::backends::docker::compute::{ContainerInspection, DockerCompute};
 use crate::config_loader;
-use crate::domain::{
-    ComputeError, ExecutionResult, ForwardedPort, ForwardedPortMapping, SandboxConfig,
-    SandboxError, SandboxMetadata, SandboxStatus, ScmMode, slugify_name,
-};
-use crate::legacy_provider::{
-    DockerSandboxProvider, SandboxProvider, branch_name_for_slug, container_name_for_slug,
-};
-use crate::metadata_store;
-use crate::scm::{Scm, ThreadSafeScm};
-use crate::vcs_store::VcsStore;
+use crate::orchestrator::SandboxIo;
+use crate::orchestrator::Sandboxes;
+use crate::sandbox::contract::{Error, Execution, Forward};
+use crate::sandbox::mapping::SurfaceClass;
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct SandboxCreateArgs {
@@ -92,9 +83,9 @@ pub struct GrepArgs {
     pub include: Option<String>,
 }
 
-#[derive(Clone)]
 pub struct SandboxServer {
     tool_router: ToolRouter<Self>,
+    project: std::sync::OnceLock<Sandboxes>,
 }
 
 impl Default for SandboxServer {
@@ -108,7 +99,18 @@ impl SandboxServer {
     pub fn new() -> Self {
         Self {
             tool_router: Self::tool_router(),
+            project: std::sync::OnceLock::new(),
         }
+    }
+
+    /// The project, built once for the life of the server.
+    fn project(&self) -> Result<&Sandboxes, McpError> {
+        if let Some(project) = self.project.get() {
+            return Ok(project);
+        }
+        let project = build_project()?;
+        let _ = self.project.set(project);
+        Ok(self.project.get().expect("just set"))
     }
 
     #[tool(
@@ -119,44 +121,10 @@ impl SandboxServer {
         &self,
         Parameters(args): Parameters<SandboxCreateArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let config = config_loader::load_final()
-            .map_err(|error| McpError::internal_error(error.to_string(), None))?;
-        let docker_section = config
-            .backends
-            .get("docker")
-            .cloned()
-            .unwrap_or(toml::Value::Table(Default::default()));
-        let docker = crate::backends::docker::config::DockerConfig::from_section(&docker_section)
-            .map_err(|error| McpError::internal_error(error.to_string(), None))?;
-        let image = docker.image.clone().ok_or_else(|| {
-            McpError::internal_error("backends.docker.image is not set".to_string(), None)
-        })?;
-        let forwarded_ports = config
-            .ports
-            .iter()
-            .map(|port| ForwardedPort {
-                name: port.name.clone(),
-                target: port.target,
-            })
-            .collect();
-        let project_slug = resolve_project_slug(&config);
-        let provider = build_provider_with_config(&config).map_err(map_error)?;
-        let sandbox_config = SandboxConfig {
-            image,
-            setup_command: config.project.setup_command.clone(),
-            forwarded_ports,
-        };
-        let metadata = provider
-            .create(&args.name, &sandbox_config)
-            .await
-            .map_err(map_error)?;
-        // Persist metadata for mode binding across config changes
-        let slug = slugify_name(&args.name).map_err(map_error)?;
-        if let Err(error) = metadata_store::store(&project_slug, &slug, &metadata) {
-            let _ = provider.delete(&metadata).await;
-            return Err(McpError::internal_error(error.to_string(), None));
-        }
-        let content = ContentBlock::json(metadata)
+        let project = self.project()?;
+        let record = project.create(&args.name).await.map_err(map_contract)?;
+        let inspection = project.inspect(&record.name).await.map_err(map_contract)?;
+        let content = ContentBlock::json(inspection)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
         Ok(CallToolResult::success(vec![content]))
     }
@@ -169,13 +137,11 @@ impl SandboxServer {
         &self,
         Parameters(args): Parameters<SandboxPortsArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let provider = build_provider().map_err(map_error)?;
-        let metadata = resolve_sandbox_metadata(&args.sandbox).map_err(map_error)?;
-        let inspection = provider
-            .inspect_container(&metadata.container_id)
+        let project = self.project()?;
+        let forwarded_ports = project
+            .forwards(&args.sandbox)
             .await
-            .map_err(|error| map_sandbox_error(&args.sandbox, error))?;
-        let forwarded_ports = forwarded_ports_from_inspection(&inspection);
+            .map_err(map_contract)?;
         let response = SandboxPortsResponse {
             name: args.sandbox,
             forwarded_ports,
@@ -190,11 +156,10 @@ impl SandboxServer {
         &self,
         Parameters(args): Parameters<ReadArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let provider = build_provider().map_err(map_error)?;
-        let metadata = resolve_sandbox_metadata(&args.sandbox).map_err(map_error)?;
-        let content = read_in_sandbox(&provider, &metadata, &args.path, args.offset, args.limit)
+        let project = self.project()?;
+        let content = read_in_sandbox(project, &args.sandbox, &args.path, args.offset, args.limit)
             .await
-            .map_err(|error| map_read_error(&args.sandbox, error))?;
+            .map_err(ToolError::into_mcp)?;
         let content = ContentBlock::text(content);
         Ok(CallToolResult::success(vec![content]))
     }
@@ -204,19 +169,21 @@ impl SandboxServer {
         &self,
         Parameters(args): Parameters<WriteArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let provider = build_provider().map_err(map_error)?;
-        let metadata = resolve_sandbox_metadata(&args.sandbox).map_err(map_error)?;
-        write_in_sandbox(&provider, &metadata, &args.path, &args.content)
+        let project = self.project()?;
+        write_in_sandbox(project, &args.sandbox, &args.path, &args.content)
             .await
-            .map_err(|error| map_write_error(&args.sandbox, error))?;
-        snapshot_after(
-            &provider,
-            &metadata,
-            &args.sandbox,
-            SnapshotTrigger::Write { path: args.path },
-        )
-        .await
-        .map_err(map_error)?;
+            .map_err(ToolError::into_mcp)?;
+        if let Err(error) = project
+            .snapshot(
+                &args.sandbox,
+                &snapshot_message(&SnapshotTrigger::Write { path: args.path }),
+            )
+            .await
+        {
+            // The file landed; a failed snapshot must not read as a failed
+            // write, or the caller will apply the edit twice.
+            tracing::warn!(sandbox = %args.sandbox, %error, "the write landed but the snapshot failed");
+        }
         Ok(CallToolResult::success(Vec::new()))
     }
 
@@ -228,19 +195,19 @@ impl SandboxServer {
         &self,
         Parameters(args): Parameters<PatchArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let provider = build_provider().map_err(map_error)?;
-        let metadata = resolve_sandbox_metadata(&args.sandbox).map_err(map_error)?;
-        patch_in_sandbox(&provider, &metadata, &args.path, &args.diff)
+        let project = self.project()?;
+        patch_in_sandbox(project, &args.sandbox, &args.path, &args.diff)
             .await
-            .map_err(|error| map_patch_error(&args.sandbox, error))?;
-        snapshot_after(
-            &provider,
-            &metadata,
-            &args.sandbox,
-            SnapshotTrigger::Patch { path: args.path },
-        )
-        .await
-        .map_err(map_error)?;
+            .map_err(ToolError::into_mcp)?;
+        if let Err(error) = project
+            .snapshot(
+                &args.sandbox,
+                &snapshot_message(&SnapshotTrigger::Patch { path: args.path }),
+            )
+            .await
+        {
+            tracing::warn!(sandbox = %args.sandbox, %error, "the patch landed but the snapshot failed");
+        }
         Ok(CallToolResult::success(Vec::new()))
     }
 
@@ -252,27 +219,22 @@ impl SandboxServer {
         &self,
         Parameters(args): Parameters<BashArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let provider = build_provider().map_err(map_error)?;
-        let metadata = resolve_sandbox_metadata(&args.sandbox).map_err(map_error)?;
+        let project = self.project()?;
         let result = bash_in_sandbox(
-            &provider,
-            &metadata,
+            project,
+            &args.sandbox,
             &args.command,
             args.workdir.as_deref(),
             args.timeout,
         )
         .await
-        .map_err(|error| map_bash_error(&args.sandbox, error))?;
-        snapshot_after(
-            &provider,
-            &metadata,
-            &args.sandbox,
-            SnapshotTrigger::Bash {
-                command: args.command.clone(),
-            },
-        )
-        .await
-        .map_err(map_error)?;
+        .map_err(ToolError::into_mcp)?;
+        if let Err(error) = project
+            .snapshot(&args.sandbox, &snapshot_message(&SnapshotTrigger::Bash))
+            .await
+        {
+            tracing::warn!(sandbox = %args.sandbox, %error, "the command ran but the snapshot failed");
+        }
         let content = ContentBlock::json(result)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
         Ok(CallToolResult::success(vec![content]))
@@ -281,11 +243,10 @@ impl SandboxServer {
     #[tool(name = "ls", description = "List directory entries")]
     async fn ls(&self, Parameters(args): Parameters<LsArgs>) -> Result<CallToolResult, McpError> {
         let recursive = args.recursive.unwrap_or(false);
-        let provider = build_provider().map_err(map_error)?;
-        let metadata = resolve_sandbox_metadata(&args.sandbox).map_err(map_error)?;
-        let entries = ls_in_sandbox(&provider, &metadata, &args.path, recursive)
+        let project = self.project()?;
+        let entries = ls_in_sandbox(project, &args.sandbox, &args.path, recursive)
             .await
-            .map_err(|error| map_ls_error(&args.sandbox, error))?;
+            .map_err(ToolError::into_mcp)?;
         let content = ContentBlock::json(entries)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
         Ok(CallToolResult::success(vec![content]))
@@ -296,11 +257,10 @@ impl SandboxServer {
         &self,
         Parameters(args): Parameters<GlobArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let provider = build_provider().map_err(map_error)?;
-        let metadata = resolve_sandbox_metadata(&args.sandbox).map_err(map_error)?;
-        let matches = glob_in_sandbox(&provider, &metadata, &args.pattern, args.path.as_deref())
+        let project = self.project()?;
+        let matches = glob_in_sandbox(project, &args.sandbox, &args.pattern, args.path.as_deref())
             .await
-            .map_err(|error| map_glob_tool_error(&args.sandbox, error))?;
+            .map_err(ToolError::into_mcp)?;
         let content = ContentBlock::json(matches)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
         Ok(CallToolResult::success(vec![content]))
@@ -311,17 +271,16 @@ impl SandboxServer {
         &self,
         Parameters(args): Parameters<GrepArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let provider = build_provider().map_err(map_error)?;
-        let metadata = resolve_sandbox_metadata(&args.sandbox).map_err(map_error)?;
+        let project = self.project()?;
         let matches = grep_in_sandbox(
-            &provider,
-            &metadata,
+            project,
+            &args.sandbox,
             &args.pattern,
             &args.path,
             args.include.as_deref(),
         )
         .await
-        .map_err(|error| map_grep_error(&args.sandbox, error))?;
+        .map_err(ToolError::into_mcp)?;
         let content = ContentBlock::json(matches)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
         Ok(CallToolResult::success(vec![content]))
@@ -543,7 +502,10 @@ pub fn generate_mcp_docs() -> String {
     output
 }
 
-pub async fn run_stdio() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn run_stdio(backend: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(backend) = backend {
+        let _ = BACKEND_OVERRIDE.set(backend);
+    }
     let service = SandboxServer::new().serve(stdio()).await.inspect_err(|e| {
         eprintln!("Error starting MCP server: {e}");
     })?;
@@ -551,104 +513,40 @@ pub async fn run_stdio() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn resolve_project_slug(config: &crate::config::Config) -> String {
-    config.project.slug.clone().unwrap_or_else(|| {
-        std::env::current_dir()
-            .ok()
-            .as_ref()
-            .and_then(|d| d.file_name())
-            .and_then(|n| n.to_str())
-            .map(crate::domain::slugify)
-            .unwrap_or_else(|| "unknown".to_string())
-    })
-}
-
-fn build_provider() -> Result<DockerSandboxProvider<ThreadSafeScm, DockerCompute>, SandboxError> {
-    let config = config_loader::load_final().map_err(|e| SandboxError::Config(e.to_string()))?;
-    build_provider_with_config(&config)
-}
-
-fn build_provider_with_config(
-    config: &crate::config::Config,
-) -> Result<DockerSandboxProvider<ThreadSafeScm, DockerCompute>, SandboxError> {
-    let mode = config.git.snapshot_mode.unwrap_or_default();
-    let host_path = std::path::Path::new(".");
-    let compute = DockerCompute::connect()?;
-
-    let scm = match mode {
-        ScmMode::Remote => {
-            let slug = resolve_project_slug(config);
-
-            let bare_path = VcsStore::clone_bare(host_path, &slug)?;
-            VcsStore::install_remote(host_path, &bare_path)?;
-            let host_abs = host_path
-                .canonicalize()
-                .unwrap_or_else(|_| host_path.to_path_buf());
-            ThreadSafeScm::open_with_mode_and_prefix(
-                &bare_path,
-                mode,
-                config.project.slug.clone(),
-                Some(host_abs),
-            )?
-        }
-        ScmMode::Direct => ThreadSafeScm::open_with_mode_and_prefix(
-            host_path,
-            mode,
-            config.project.slug.clone(),
+fn build_project() -> Result<Sandboxes, McpError> {
+    let mut config = config_loader::load_final().map_err(|error| {
+        McpError::internal_error(
+            Error::Misconfigured {
+                message: error.to_string(),
+            }
+            .to_string(),
             None,
-        )?,
-    };
-
-    Ok(DockerSandboxProvider::new(scm, compute))
-}
-
-fn map_error(error: SandboxError) -> McpError {
-    match error {
-        SandboxError::InvalidName { .. } => McpError::invalid_params(error.to_string(), None),
-        SandboxError::SandboxExists { .. } => McpError::invalid_params(error.to_string(), None),
-        SandboxError::SandboxNotFound { .. } => McpError::invalid_params(error.to_string(), None),
-        _ => McpError::internal_error(error.to_string(), None),
+        )
+    })?;
+    if let Some(backend) = backend_override() {
+        config.backend = Some(backend);
     }
-}
-
-fn map_sandbox_error(name: &str, error: SandboxError) -> McpError {
-    if is_container_missing(&error) {
-        return McpError::invalid_params(format!("Sandbox '{}' not found.", name), None);
+    for notice in &config.notices {
+        tracing::warn!("configuration: {notice}");
     }
-    map_error(error)
+    Sandboxes::open(config).map_err(|error| map_contract(error.into()))
 }
 
-fn resolve_sandbox_metadata(name: &str) -> Result<SandboxMetadata, SandboxError> {
-    let slug = slugify_name(name)?;
-    let config = config_loader::load_final().map_err(|e| SandboxError::Config(e.to_string()))?;
-    let project_slug = resolve_project_slug(&config);
+/// The per-invocation backend selection, set once when the server starts.
+static BACKEND_OVERRIDE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
-    // Load persisted metadata (mode-bound at creation time)
-    if let Some(meta) = metadata_store::load(&project_slug, &slug)? {
-        return Ok(meta);
-    }
-
-    // Legacy fallback: no metadata file = Direct mode
-    let scm = ThreadSafeScm::open_with_prefix(Path::new("."), config.project.slug)?;
-    let repo_prefix = scm.repo_prefix()?;
-    Ok(SandboxMetadata {
-        name: name.to_string(),
-        branch_name: branch_name_for_slug(&slug),
-        container_id: container_name_for_slug(&repo_prefix, &slug),
-        status: SandboxStatus::Active,
-        mode: ScmMode::Direct,
-        project_slug,
-        forwarded_ports: Vec::new(),
-    })
+fn backend_override() -> Option<String> {
+    BACKEND_OVERRIDE.get().cloned()
 }
 
-fn is_container_missing(error: &SandboxError) -> bool {
-    match error {
-        SandboxError::Compute(ComputeError::ContainerExec { source })
-        | SandboxError::Compute(ComputeError::ContainerInspect { source }) => {
-            source.kind().is_not_found()
-        }
-        _ => false,
+fn map_contract(error: Error) -> McpError {
+    // rmcp has three codes where the contract distinguishes seven failures, so
+    // the finer class travels in the data payload.
+    let data = serde_json::json!({ "class": error.class().as_str() });
+    match error.surface_class() {
+        SurfaceClass::InvalidParams => McpError::invalid_params(error.to_string(), Some(data)),
+        SurfaceClass::InvalidRequest => McpError::invalid_request(error.to_string(), Some(data)),
+        SurfaceClass::Internal => McpError::internal_error(error.to_string(), Some(data)),
     }
 }
 
@@ -660,138 +558,211 @@ struct SandboxPortsArgs {
 #[derive(Debug, Serialize)]
 struct SandboxPortsResponse {
     pub name: String,
-    pub forwarded_ports: Vec<ForwardedPortMapping>,
+    pub forwarded_ports: Vec<Forward>,
 }
 
-fn forwarded_ports_from_inspection(inspection: &ContainerInspection) -> Vec<ForwardedPortMapping> {
-    let mut env_map: HashMap<u16, String> = HashMap::new();
-    for entry in &inspection.env {
-        if let Some((key, value)) = entry.split_once('=')
-            && key.starts_with("LITTERBOX_FWD_PORT_")
-            && let Ok(port) = value.parse::<u16>()
-        {
-            env_map.insert(port, key.to_string());
-        }
-    }
-
-    let mut mappings = Vec::new();
-    for (container_port, bindings) in &inspection.port_bindings {
-        let target = container_port
-            .split('/')
-            .next()
-            .and_then(|value| value.parse::<u16>().ok());
-        let target = match target {
-            Some(target) => target,
-            None => continue,
-        };
-
-        for binding in bindings {
-            let host_port = binding
-                .host_port
-                .as_ref()
-                .and_then(|value| value.parse::<u16>().ok());
-            let host_port = match host_port {
-                Some(host_port) => host_port,
-                None => continue,
-            };
-
-            let env_var = match env_map.get(&host_port) {
-                Some(env) => env.clone(),
-                None => continue,
-            };
-            let name = env_var
-                .strip_prefix("LITTERBOX_FWD_PORT_")
-                .unwrap_or("")
-                .to_ascii_lowercase()
-                .replace('_', "-");
-
-            mappings.push(ForwardedPortMapping {
-                name,
-                target,
-                host_port,
-                env_var,
-            });
-        }
-    }
-
-    mappings
+/// The tool that produced a failure.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Tool {
+    Ls,
+    Read,
+    Write,
+    Patch,
+    Bash,
+    Glob,
+    Grep,
 }
 
+/// Why a tool failed, independent of which tool it was.
 #[derive(Debug)]
-enum LsError {
-    Sandbox(SandboxError),
+enum ToolFailure {
+    Sandbox(Error),
     NotFound { path: String },
     PermissionDenied { path: String },
     Failed { path: String, message: String },
+    InvalidPattern { pattern: String, message: String },
+    InvalidPatch { source: String },
+    PatchRead { path: String, source: String },
+    PatchWrite { path: String, source: String },
+    PatchApply { path: String, source: String },
 }
 
-fn map_ls_error(sandbox: &str, error: LsError) -> McpError {
-    match error {
-        LsError::Sandbox(error) => map_sandbox_error(sandbox, error),
-        LsError::NotFound { path } => {
-            McpError::invalid_params(format!("path not found: {}", path), None)
+/// One tool failure: the tool that raised it and what went wrong.
+#[derive(Debug)]
+struct ToolError {
+    tool: Tool,
+    failure: ToolFailure,
+}
+
+impl ToolError {
+    fn sandbox(tool: Tool, error: Error) -> Self {
+        Self {
+            tool,
+            failure: ToolFailure::Sandbox(error),
         }
-        LsError::PermissionDenied { path } => {
-            McpError::invalid_params(format!("permission denied: {}", path), None)
+    }
+
+    fn classify(tool: Tool, path: &str, result: &Execution) -> Self {
+        let stderr = result.stderr.trim();
+        let stdout = result.stdout.trim();
+        let message = if !stderr.is_empty() { stderr } else { stdout };
+        let failure = if message.contains("No such file or directory") {
+            ToolFailure::NotFound {
+                path: path.to_string(),
+            }
+        } else if message.contains("Permission denied") {
+            ToolFailure::PermissionDenied {
+                path: path.to_string(),
+            }
+        } else if message.is_empty() {
+            ToolFailure::Failed {
+                path: path.to_string(),
+                message: format!("exit code {}", result.exit_code),
+            }
+        } else {
+            ToolFailure::Failed {
+                path: path.to_string(),
+                message: message.to_string(),
+            }
+        };
+        Self { tool, failure }
+    }
+
+    fn invalid_pattern(tool: Tool, pattern: &str, message: impl Into<String>) -> Self {
+        Self {
+            tool,
+            failure: ToolFailure::InvalidPattern {
+                pattern: pattern.to_string(),
+                message: message.into(),
+            },
         }
-        LsError::Failed { path, message } => {
-            McpError::internal_error(format!("failed to list {}: {}", path, message), None)
+    }
+
+    fn invalid_patch(source: impl Into<String>) -> Self {
+        Self {
+            tool: Tool::Patch,
+            failure: ToolFailure::InvalidPatch {
+                source: source.into(),
+            },
+        }
+    }
+
+    fn patch_read(path: &str, source: impl std::fmt::Debug) -> Self {
+        Self {
+            tool: Tool::Patch,
+            failure: ToolFailure::PatchRead {
+                path: path.to_string(),
+                source: format!("{source:?}"),
+            },
+        }
+    }
+
+    fn patch_write(path: &str, source: impl std::fmt::Debug) -> Self {
+        Self {
+            tool: Tool::Patch,
+            failure: ToolFailure::PatchWrite {
+                path: path.to_string(),
+                source: format!("{source:?}"),
+            },
+        }
+    }
+
+    fn patch_apply(path: &str, source: impl Into<String>) -> Self {
+        Self {
+            tool: Tool::Patch,
+            failure: ToolFailure::PatchApply {
+                path: path.to_string(),
+                source: source.into(),
+            },
+        }
+    }
+
+    fn into_mcp(self) -> McpError {
+        match self.failure {
+            ToolFailure::Sandbox(error) => map_contract(error),
+            ToolFailure::NotFound { path } => {
+                let noun = if self.tool == Tool::Read {
+                    "file not found"
+                } else {
+                    "path not found"
+                };
+                McpError::invalid_params(format!("{noun}: {path}"), None)
+            }
+            ToolFailure::PermissionDenied { path } => {
+                McpError::invalid_params(format!("permission denied: {path}"), None)
+            }
+            ToolFailure::Failed { path, message } => {
+                let prefix = match self.tool {
+                    Tool::Ls => "failed to list",
+                    Tool::Read => "failed to read",
+                    Tool::Write => "failed to write",
+                    Tool::Glob => "glob failed for",
+                    Tool::Grep => "grep failed for",
+                    Tool::Patch | Tool::Bash => "failed",
+                };
+                McpError::internal_error(format!("{prefix} {path}: {message}"), None)
+            }
+            ToolFailure::InvalidPattern { pattern, message } => {
+                let kind = if self.tool == Tool::Glob {
+                    "glob"
+                } else {
+                    "grep"
+                };
+                McpError::invalid_params(
+                    format!("invalid {kind} pattern '{pattern}': {message}"),
+                    None,
+                )
+            }
+            ToolFailure::InvalidPatch { source } => {
+                McpError::invalid_params(format!("invalid patch: {source}"), None)
+            }
+            ToolFailure::PatchRead { path, source } => McpError::internal_error(
+                format!("failed to read file {path} for patching: {source}"),
+                None,
+            ),
+            ToolFailure::PatchWrite { path, source } => McpError::internal_error(
+                format!("failed to write patched file {path}: {source}"),
+                None,
+            ),
+            ToolFailure::PatchApply { path, source } => {
+                McpError::internal_error(format!("failed to apply patch to {path}: {source}"), None)
+            }
         }
     }
 }
 
-async fn ls_in_sandbox<P: SandboxProvider>(
-    provider: &P,
-    metadata: &SandboxMetadata,
+#[allow(clippy::result_large_err)]
+async fn ls_in_sandbox<P: SandboxIo + ?Sized>(
+    io: &P,
+    name: &str,
     path: &str,
     recursive: bool,
-) -> Result<Vec<String>, LsError> {
-    let container_path = resolve_container_path(path);
+) -> Result<Vec<String>, ToolError> {
+    let workspace = io
+        .workspace(name)
+        .await
+        .map_err(|error| ToolError::sandbox(Tool::Ls, error))?;
+    let sandbox_path = resolve_sandbox_path(&workspace, path);
     let command = if recursive {
         vec![
             "sh".to_string(),
             "-c".to_string(),
-            format!("find {} -mindepth 1 -print", shell_escape(&container_path)),
+            format!("find {} -mindepth 1 -print", shell_escape(&sandbox_path)),
         ]
     } else {
         vec![
             "sh".to_string(),
             "-c".to_string(),
-            format!("ls -1A {}", shell_escape(&container_path)),
+            format!("ls -1A {}", shell_escape(&sandbox_path)),
         ]
     };
-    let result = exec_in_sandbox(provider, metadata, command)
+    let result = exec_in_sandbox(io, name, &command)
         .await
-        .map_err(LsError::Sandbox)?;
+        .map_err(|error| ToolError::sandbox(Tool::Ls, error))?;
     if result.exit_code != 0 {
-        return Err(classify_ls_failure(&container_path, &result));
+        return Err(ToolError::classify(Tool::Ls, &sandbox_path, &result));
     }
-    Ok(parse_ls_output(&result.stdout, &container_path, recursive))
-}
-
-fn classify_ls_failure(path: &str, result: &ExecutionResult) -> LsError {
-    let stderr = result.stderr.trim();
-    let stdout = result.stdout.trim();
-    let message = if !stderr.is_empty() { stderr } else { stdout };
-    if message.contains("No such file or directory") {
-        LsError::NotFound {
-            path: path.to_string(),
-        }
-    } else if message.contains("Permission denied") {
-        LsError::PermissionDenied {
-            path: path.to_string(),
-        }
-    } else if message.is_empty() {
-        LsError::Failed {
-            path: path.to_string(),
-            message: format!("exit code {}", result.exit_code),
-        }
-    } else {
-        LsError::Failed {
-            path: path.to_string(),
-            message: message.to_string(),
-        }
-    }
+    Ok(parse_ls_output(&result.stdout, &sandbox_path, recursive))
 }
 
 fn parse_ls_output(output: &str, base: &str, recursive: bool) -> Vec<String> {
@@ -815,320 +786,139 @@ fn parse_ls_output(output: &str, base: &str, recursive: bool) -> Vec<String> {
     entries
 }
 
-#[derive(Debug)]
-enum ReadError {
-    Sandbox(SandboxError),
-    NotFound { path: String },
-    PermissionDenied { path: String },
-    Failed { path: String, message: String },
-}
-
-#[derive(Debug)]
-enum WriteError {
-    Sandbox(SandboxError),
-    NotFound { path: String },
-    PermissionDenied { path: String },
-    Failed { path: String, message: String },
-}
-
-#[derive(Debug)]
-enum PatchError {
-    InvalidPatch {
-        source: String,
-    },
-    ReadFile {
-        path: String,
-        source: Box<ReadError>,
-    },
-    WriteFile {
-        path: String,
-        source: Box<WriteError>,
-    },
-    ApplyFailed {
-        path: String,
-        source: String,
-    },
-}
-
-#[derive(Debug)]
-enum BashError {
-    Sandbox(SandboxError),
-}
-
 #[derive(Debug, Clone)]
 enum SnapshotTrigger {
     Write { path: String },
     Patch { path: String },
-    Bash { command: String },
-}
-
-fn map_read_error(sandbox: &str, error: ReadError) -> McpError {
-    match error {
-        ReadError::Sandbox(error) => map_sandbox_error(sandbox, error),
-        ReadError::NotFound { path } => {
-            McpError::invalid_params(format!("file not found: {}", path), None)
-        }
-        ReadError::PermissionDenied { path } => {
-            McpError::invalid_params(format!("permission denied: {}", path), None)
-        }
-        ReadError::Failed { path, message } => {
-            McpError::internal_error(format!("failed to read {}: {}", path, message), None)
-        }
-    }
-}
-
-fn map_write_error(sandbox: &str, error: WriteError) -> McpError {
-    match error {
-        WriteError::Sandbox(error) => map_sandbox_error(sandbox, error),
-        WriteError::NotFound { path } => {
-            McpError::invalid_params(format!("path not found: {}", path), None)
-        }
-        WriteError::PermissionDenied { path } => {
-            McpError::invalid_params(format!("permission denied: {}", path), None)
-        }
-        WriteError::Failed { path, message } => {
-            McpError::internal_error(format!("failed to write {}: {}", path, message), None)
-        }
-    }
-}
-
-fn map_patch_error(_sandbox: &str, error: PatchError) -> McpError {
-    match error {
-        PatchError::InvalidPatch { source } => {
-            McpError::invalid_params(format!("invalid patch: {}", source), None)
-        }
-        PatchError::ReadFile { path, source } => McpError::internal_error(
-            format!("failed to read file {} for patching: {:?}", path, source),
-            None,
-        ),
-        PatchError::WriteFile { path, source } => McpError::internal_error(
-            format!("failed to write patched file {}: {:?}", path, source),
-            None,
-        ),
-        PatchError::ApplyFailed { path, source } => McpError::internal_error(
-            format!("failed to apply patch to {}: {}", path, source),
-            None,
-        ),
-    }
-}
-
-fn map_bash_error(sandbox: &str, error: BashError) -> McpError {
-    match error {
-        BashError::Sandbox(error) => map_sandbox_error(sandbox, error),
-    }
-}
-
-async fn snapshot_after<P: SandboxProvider>(
-    provider: &P,
-    metadata: &SandboxMetadata,
-    sandbox: &str,
-    trigger: SnapshotTrigger,
-) -> Result<(), SandboxError> {
-    let scm = match metadata.mode {
-        ScmMode::Direct => {
-            let config =
-                config_loader::load_final().map_err(|e| SandboxError::Config(e.to_string()))?;
-            ThreadSafeScm::for_sandbox(Path::new("."), config.project.slug, sandbox)?
-        }
-        ScmMode::Remote => {
-            let host_path = Path::new(".");
-            let bare_path = VcsStore::clone_bare(host_path, &metadata.project_slug)?;
-            let host_abs = host_path
-                .canonicalize()
-                .unwrap_or_else(|_| host_path.to_path_buf());
-            let scm = ThreadSafeScm::open_with_mode_and_prefix(
-                &bare_path,
-                ScmMode::Remote,
-                None,
-                Some(host_abs),
-            )?;
-            scm.set_snapshot_branch(metadata.branch_name.clone())?;
-            scm
-        }
-    };
-
-    // Download container /src to temp staging directory
-    let staging_dir = tempfile::tempdir()
-        .map_err(|e| SandboxError::Config(format!("Failed to create temp dir: {}", e)))?;
-    provider
-        .download_path(metadata, "/src", staging_dir.path())
-        .await?;
-
-    // Commit from staging directory to snapshot branch
-    let _ = scm.commit_snapshot_from_staging(staging_dir.path(), &snapshot_message(&trigger))?;
-
-    Ok(())
+    Bash,
 }
 
 fn snapshot_message(trigger: &SnapshotTrigger) -> String {
+    // Raw tool input is never persisted: a command line can carry credentials,
+    // and a path can be arbitrarily long.
     match trigger {
-        SnapshotTrigger::Write { path } => format!("write: {}", path),
-        SnapshotTrigger::Patch { path } => format!("patch: {}", path),
-        SnapshotTrigger::Bash { command } => format!("bash: {}", command),
+        SnapshotTrigger::Write { path } => format!("write: {}", bounded(path)),
+        SnapshotTrigger::Patch { path } => format!("patch: {}", bounded(path)),
+        SnapshotTrigger::Bash => "bash".to_string(),
     }
 }
 
-#[allow(unused)]
-fn snapshot_after_with_scm<S: Scm>(scm: &S, trigger: SnapshotTrigger) -> Result<(), SandboxError> {
-    if !scm.has_changes()? {
-        return Ok(());
-    }
-    scm.stage_all()?;
-    scm.commit_snapshot(&snapshot_message(&trigger))?;
-    Ok(())
+fn bounded(text: &str) -> String {
+    text.chars().take(120).collect()
 }
 
-async fn read_in_sandbox<P: SandboxProvider>(
-    provider: &P,
-    metadata: &SandboxMetadata,
+#[allow(clippy::result_large_err)]
+async fn read_in_sandbox<P: SandboxIo + ?Sized>(
+    io: &P,
+    name: &str,
     path: &str,
     offset: Option<usize>,
     limit: Option<usize>,
-) -> Result<String, ReadError> {
-    let container_path = resolve_container_path(path);
+) -> Result<String, ToolError> {
+    let workspace = io
+        .workspace(name)
+        .await
+        .map_err(|error| ToolError::sandbox(Tool::Read, error))?;
+    let sandbox_path = resolve_sandbox_path(&workspace, path);
     let command = vec![
         "sh".to_string(),
         "-c".to_string(),
-        format!("cat -- {}", shell_escape(&container_path)),
+        format!("cat -- {}", shell_escape(&sandbox_path)),
     ];
-    let result = exec_in_sandbox(provider, metadata, command)
+    let result = exec_in_sandbox(io, name, &command)
         .await
-        .map_err(ReadError::Sandbox)?;
+        .map_err(|error| ToolError::sandbox(Tool::Read, error))?;
     if result.exit_code != 0 {
-        return Err(classify_read_failure(&container_path, &result));
+        return Err(ToolError::classify(Tool::Read, &sandbox_path, &result));
     }
     Ok(slice_content(&result.stdout, offset, limit))
 }
 
-async fn write_in_sandbox<P: SandboxProvider>(
-    provider: &P,
-    metadata: &SandboxMetadata,
+#[allow(clippy::result_large_err)]
+async fn write_in_sandbox<P: SandboxIo + ?Sized>(
+    io: &P,
+    name: &str,
     path: &str,
     content: &str,
-) -> Result<(), WriteError> {
-    let container_path = resolve_container_path(path);
+) -> Result<(), ToolError> {
+    let workspace = io
+        .workspace(name)
+        .await
+        .map_err(|error| ToolError::sandbox(Tool::Write, error))?;
+    let sandbox_path = resolve_sandbox_path(&workspace, path);
     let command = vec![
         "sh".to_string(),
         "-c".to_string(),
         format!(
             "printf %s {} > {}",
             shell_escape(content),
-            shell_escape(&container_path)
+            shell_escape(&sandbox_path)
         ),
     ];
-    let result = exec_in_sandbox(provider, metadata, command)
+    let result = exec_in_sandbox(io, name, &command)
         .await
-        .map_err(WriteError::Sandbox)?;
+        .map_err(|error| ToolError::sandbox(Tool::Write, error))?;
     if result.exit_code != 0 {
-        return Err(classify_write_failure(&container_path, &result));
+        return Err(ToolError::classify(Tool::Write, &sandbox_path, &result));
     }
     Ok(())
 }
 
-async fn patch_in_sandbox<P: SandboxProvider>(
-    provider: &P,
-    metadata: &SandboxMetadata,
+#[allow(clippy::result_large_err)]
+async fn patch_in_sandbox<P: SandboxIo + ?Sized>(
+    io: &P,
+    name: &str,
     path: &str,
     diff: &str,
-) -> Result<(), PatchError> {
+) -> Result<(), ToolError> {
     // Read current file content
-    let original_content = read_in_sandbox(provider, metadata, path, None, None)
+    let original_content = read_in_sandbox(io, name, path, None, None)
         .await
-        .map_err(|e| PatchError::ReadFile {
-            path: path.to_string(),
-            source: Box::new(e),
-        })?;
+        .map_err(|error| ToolError::patch_read(path, error))?;
 
     // Parse and apply patch using diffy
-    let patch = diffy::Patch::from_str(diff).map_err(|e| PatchError::InvalidPatch {
-        source: e.to_string(),
-    })?;
+    let patch = diffy::Patch::from_str(diff)
+        .map_err(|error| ToolError::invalid_patch(error.to_string()))?;
 
-    let patched_content =
-        diffy::apply(&original_content, &patch).map_err(|e| PatchError::ApplyFailed {
-            path: path.to_string(),
-            source: e.to_string(),
-        })?;
+    let patched_content = diffy::apply(&original_content, &patch)
+        .map_err(|error| ToolError::patch_apply(path, error.to_string()))?;
 
     // Write patched content back
-    write_in_sandbox(provider, metadata, path, &patched_content)
+    write_in_sandbox(io, name, path, &patched_content)
         .await
-        .map_err(|e| PatchError::WriteFile {
-            path: path.to_string(),
-            source: Box::new(e),
-        })?;
+        .map_err(|error| ToolError::patch_write(path, error))?;
 
     Ok(())
 }
 
-async fn bash_in_sandbox<P: SandboxProvider>(
-    provider: &P,
-    metadata: &SandboxMetadata,
+#[allow(clippy::result_large_err)]
+async fn bash_in_sandbox<P: SandboxIo + ?Sized>(
+    io: &P,
+    name: &str,
     command: &str,
     workdir: Option<&str>,
     timeout: Option<u64>,
-) -> Result<ExecutionResult, BashError> {
-    let command = build_bash_command(command, workdir, timeout);
-    let command = vec!["sh".to_string(), "-c".to_string(), command];
-    exec_in_sandbox(provider, metadata, command)
+) -> Result<Execution, ToolError> {
+    let workspace = io
+        .workspace(name)
         .await
-        .map_err(BashError::Sandbox)
+        .map_err(|error| ToolError::sandbox(Tool::Bash, error))?;
+    let command = build_bash_command(command, workdir, timeout, &workspace);
+    let command = vec!["sh".to_string(), "-c".to_string(), command];
+    exec_in_sandbox(io, name, &command)
+        .await
+        .map_err(|error| ToolError::sandbox(Tool::Bash, error))
 }
 
-fn classify_read_failure(path: &str, result: &ExecutionResult) -> ReadError {
-    let stderr = result.stderr.trim();
-    let stdout = result.stdout.trim();
-    let message = if !stderr.is_empty() { stderr } else { stdout };
-    if message.contains("No such file or directory") {
-        ReadError::NotFound {
-            path: path.to_string(),
-        }
-    } else if message.contains("Permission denied") {
-        ReadError::PermissionDenied {
-            path: path.to_string(),
-        }
-    } else if message.is_empty() {
-        ReadError::Failed {
-            path: path.to_string(),
-            message: format!("exit code {}", result.exit_code),
-        }
-    } else {
-        ReadError::Failed {
-            path: path.to_string(),
-            message: message.to_string(),
-        }
-    }
-}
-
-fn classify_write_failure(path: &str, result: &ExecutionResult) -> WriteError {
-    let stderr = result.stderr.trim();
-    let stdout = result.stdout.trim();
-    let message = if !stderr.is_empty() { stderr } else { stdout };
-    if message.contains("No such file or directory") {
-        WriteError::NotFound {
-            path: path.to_string(),
-        }
-    } else if message.contains("Permission denied") {
-        WriteError::PermissionDenied {
-            path: path.to_string(),
-        }
-    } else if message.is_empty() {
-        WriteError::Failed {
-            path: path.to_string(),
-            message: format!("exit code {}", result.exit_code),
-        }
-    } else {
-        WriteError::Failed {
-            path: path.to_string(),
-            message: message.to_string(),
-        }
-    }
-}
-
-fn build_bash_command(command: &str, workdir: Option<&str>, timeout: Option<u64>) -> String {
+fn build_bash_command(
+    command: &str,
+    workdir: Option<&str>,
+    timeout: Option<u64>,
+    workspace: &str,
+) -> String {
     let command = if let Some(workdir) = workdir {
-        let container_path = resolve_container_path(workdir);
-        format!("cd {} && {}", shell_escape(&container_path), command)
+        let sandbox_path = resolve_sandbox_path(workspace, workdir);
+        format!("cd {} && {}", shell_escape(&sandbox_path), command)
     } else {
         command.to_string()
     };
@@ -1140,19 +930,19 @@ fn build_bash_command(command: &str, workdir: Option<&str>, timeout: Option<u64>
     }
 }
 
-async fn exec_in_sandbox<P: SandboxProvider>(
-    provider: &P,
-    metadata: &SandboxMetadata,
-    command: Vec<String>,
-) -> Result<ExecutionResult, SandboxError> {
-    provider.shell(metadata, &command).await
+async fn exec_in_sandbox<P: SandboxIo + ?Sized>(
+    io: &P,
+    name: &str,
+    command: &[String],
+) -> Result<Execution, Error> {
+    io.exec(name, command).await
 }
 
-fn resolve_container_path(path: &str) -> String {
+fn resolve_sandbox_path(workspace: &str, path: &str) -> String {
     if path.starts_with('/') {
         path.to_string()
     } else {
-        format!("/src/{}", path)
+        format!("{workspace}/{path}")
     }
 }
 
@@ -1258,69 +1048,35 @@ fn slice_content(content: &str, offset: Option<usize>, limit: Option<usize>) -> 
     result
 }
 
-#[derive(Debug)]
-enum GlobError {
-    Sandbox(SandboxError),
-    InvalidPattern { pattern: String, message: String },
-    NotFound { path: String },
-    PermissionDenied { path: String },
-    Failed { path: String, message: String },
-}
-
-#[derive(Debug)]
-enum GrepError {
-    Sandbox(SandboxError),
-    InvalidPattern { pattern: String, message: String },
-    NotFound { path: String },
-    PermissionDenied { path: String },
-    Failed { path: String, message: String },
-}
-
-fn map_glob_tool_error(sandbox: &str, error: GlobError) -> McpError {
-    match error {
-        GlobError::Sandbox(error) => map_sandbox_error(sandbox, error),
-        GlobError::InvalidPattern { pattern, message } => McpError::invalid_params(
-            format!("invalid glob pattern '{}': {}", pattern, message),
-            None,
-        ),
-        GlobError::NotFound { path } => {
-            McpError::invalid_params(format!("path not found: {}", path), None)
-        }
-        GlobError::PermissionDenied { path } => {
-            McpError::invalid_params(format!("permission denied: {}", path), None)
-        }
-        GlobError::Failed { path, message } => {
-            McpError::internal_error(format!("glob failed for {}: {}", path, message), None)
-        }
-    }
-}
-
-async fn glob_in_sandbox<P: SandboxProvider>(
-    provider: &P,
-    metadata: &SandboxMetadata,
+#[allow(clippy::result_large_err)]
+async fn glob_in_sandbox<P: SandboxIo + ?Sized>(
+    io: &P,
+    name: &str,
     pattern: &str,
     base_path: Option<&str>,
-) -> Result<Vec<String>, GlobError> {
+) -> Result<Vec<String>, ToolError> {
+    let workspace = io
+        .workspace(name)
+        .await
+        .map_err(|error| ToolError::sandbox(Tool::Glob, error))?;
     let base = base_path
-        .map(resolve_container_path)
-        .unwrap_or_else(|| "/src".to_string());
+        .map(|path| resolve_sandbox_path(&workspace, path))
+        .unwrap_or_else(|| workspace.clone());
     let command = vec![
         "sh".to_string(),
         "-c".to_string(),
         format!("find {} -mindepth 1 -print", shell_escape(&base)),
     ];
-    let result = exec_in_sandbox(provider, metadata, command)
+    let result = exec_in_sandbox(io, name, &command)
         .await
-        .map_err(GlobError::Sandbox)?;
+        .map_err(|error| ToolError::sandbox(Tool::Glob, error))?;
     if result.exit_code != 0 {
-        return Err(classify_glob_failure(&base, &result));
+        return Err(ToolError::classify(Tool::Glob, &base, &result));
     }
 
     let pattern_is_absolute = Path::new(pattern).is_absolute();
-    let pattern = Pattern::new(pattern).map_err(|error| GlobError::InvalidPattern {
-        pattern: pattern.to_string(),
-        message: error.to_string(),
-    })?;
+    let pattern = Pattern::new(pattern)
+        .map_err(|error| ToolError::invalid_pattern(Tool::Glob, pattern, error.to_string()))?;
     let options = MatchOptions {
         case_sensitive: true,
         require_literal_separator: true,
@@ -1345,31 +1101,6 @@ async fn glob_in_sandbox<P: SandboxProvider>(
     Ok(entries)
 }
 
-fn classify_glob_failure(base: &str, result: &ExecutionResult) -> GlobError {
-    let stderr = result.stderr.trim();
-    let stdout = result.stdout.trim();
-    let message = if !stderr.is_empty() { stderr } else { stdout };
-    if message.contains("No such file or directory") {
-        GlobError::NotFound {
-            path: base.to_string(),
-        }
-    } else if message.contains("Permission denied") {
-        GlobError::PermissionDenied {
-            path: base.to_string(),
-        }
-    } else if message.is_empty() {
-        GlobError::Failed {
-            path: base.to_string(),
-            message: format!("exit code {}", result.exit_code),
-        }
-    } else {
-        GlobError::Failed {
-            path: base.to_string(),
-            message: message.to_string(),
-        }
-    }
-}
-
 fn parse_find_output(output: &str) -> Vec<String> {
     output
         .lines()
@@ -1387,48 +1118,34 @@ fn strip_base_prefix(path: &str, base: &str) -> String {
     }
 }
 
-fn map_grep_error(sandbox: &str, error: GrepError) -> McpError {
-    match error {
-        GrepError::Sandbox(error) => map_sandbox_error(sandbox, error),
-        GrepError::InvalidPattern { pattern, message } => McpError::invalid_params(
-            format!("invalid grep pattern '{}': {}", pattern, message),
-            None,
-        ),
-        GrepError::NotFound { path } => {
-            McpError::invalid_params(format!("path not found: {}", path), None)
-        }
-        GrepError::PermissionDenied { path } => {
-            McpError::invalid_params(format!("permission denied: {}", path), None)
-        }
-        GrepError::Failed { path, message } => {
-            McpError::internal_error(format!("grep failed for {}: {}", path, message), None)
-        }
-    }
-}
-
-async fn grep_in_sandbox<P: SandboxProvider>(
-    provider: &P,
-    metadata: &SandboxMetadata,
+#[allow(clippy::result_large_err)]
+async fn grep_in_sandbox<P: SandboxIo + ?Sized>(
+    io: &P,
+    name: &str,
     pattern: &str,
     path: &str,
     include: Option<&str>,
-) -> Result<Vec<String>, GrepError> {
-    let container_path = resolve_container_path(path);
+) -> Result<Vec<String>, ToolError> {
+    let workspace = io
+        .workspace(name)
+        .await
+        .map_err(|error| ToolError::sandbox(Tool::Grep, error))?;
+    let sandbox_path = resolve_sandbox_path(&workspace, path);
     let command = vec![
         "sh".to_string(),
         "-c".to_string(),
-        build_grep_command(pattern, &container_path, include),
+        build_grep_command(pattern, &sandbox_path, include),
     ];
-    let result = exec_in_sandbox(provider, metadata, command)
+    let result = exec_in_sandbox(io, name, &command)
         .await
-        .map_err(GrepError::Sandbox)?;
+        .map_err(|error| ToolError::sandbox(Tool::Grep, error))?;
     if result.exit_code == 0 {
         return Ok(parse_grep_output(&result.stdout));
     }
     if result.exit_code == 1 && result.stderr.trim().is_empty() {
         return Ok(Vec::new());
     }
-    Err(classify_grep_failure(&container_path, pattern, &result))
+    Err(classify_grep_failure(&sandbox_path, pattern, &result))
 }
 
 fn build_grep_command(pattern: &str, path: &str, include: Option<&str>) -> String {
@@ -1442,33 +1159,15 @@ fn build_grep_command(pattern: &str, path: &str, include: Option<&str>) -> Strin
     parts.join(" ")
 }
 
-fn classify_grep_failure(path: &str, pattern: &str, result: &ExecutionResult) -> GrepError {
+#[allow(clippy::result_large_err)]
+fn classify_grep_failure(path: &str, pattern: &str, result: &Execution) -> ToolError {
     let stderr = result.stderr.trim();
     let stdout = result.stdout.trim();
     let message = if !stderr.is_empty() { stderr } else { stdout };
-    if message.contains("No such file or directory") {
-        GrepError::NotFound {
-            path: path.to_string(),
-        }
-    } else if message.contains("Permission denied") {
-        GrepError::PermissionDenied {
-            path: path.to_string(),
-        }
-    } else if message.contains("Unmatched") || message.contains("Invalid") {
-        GrepError::InvalidPattern {
-            pattern: pattern.to_string(),
-            message: message.to_string(),
-        }
-    } else if message.is_empty() {
-        GrepError::Failed {
-            path: path.to_string(),
-            message: format!("exit code {}", result.exit_code),
-        }
+    if message.contains("Unmatched") || message.contains("Invalid") {
+        ToolError::invalid_pattern(Tool::Grep, pattern, message.to_string())
     } else {
-        GrepError::Failed {
-            path: path.to_string(),
-            message: message.to_string(),
-        }
+        ToolError::classify(Tool::Grep, path, result)
     }
 }
 
@@ -1484,122 +1183,49 @@ fn parse_grep_output(output: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backends::docker::compute::{ContainerInspection, PortBindingSpec};
     use futures_util::future::BoxFuture;
-    use git2::{ErrorCode, Oid, Repository, Signature};
     use std::fs;
     use std::io::Write;
-    use std::process::Command;
     use std::sync::{Arc, Mutex};
     use tempfile::NamedTempFile;
     use tempfile::TempDir;
 
-    struct TestScm {
-        has_changes: bool,
-        committed_messages: Mutex<Vec<String>>,
-    }
-
-    impl TestScm {
-        fn new(has_changes: bool) -> Self {
-            Self {
-                has_changes,
-                committed_messages: Mutex::new(Vec::new()),
-            }
-        }
-    }
-
     #[test]
-    fn forwarded_ports_from_inspection_builds_mapping() {
-        let inspection = ContainerInspection {
-            env: vec!["LITTERBOX_FWD_PORT_WEB=3001".to_string()],
-            port_bindings: HashMap::from([(
-                "8080/tcp".to_string(),
-                vec![PortBindingSpec {
-                    host_ip: Some("0.0.0.0".to_string()),
-                    host_port: Some("3001".to_string()),
-                }],
-            )]),
-        };
+    fn the_error_data_carries_the_class_the_code_cannot() {
+        let not_found = map_contract(Error::NotFound {
+            name: "demo".to_string(),
+        });
+        let conflict = map_contract(Error::Conflict {
+            name: "demo".to_string(),
+        });
+        assert_eq!(not_found.code, conflict.code, "rmcp collapses both");
+        assert_eq!(not_found.data.as_ref().unwrap()["class"], "not-found");
+        assert_eq!(conflict.data.as_ref().unwrap()["class"], "conflict");
 
-        let mappings = forwarded_ports_from_inspection(&inspection);
-
-        assert_eq!(mappings.len(), 1);
-        assert_eq!(mappings[0].name, "web");
-        assert_eq!(mappings[0].target, 8080);
-        assert_eq!(mappings[0].host_port, 3001);
-        assert_eq!(mappings[0].env_var, "LITTERBOX_FWD_PORT_WEB");
-    }
-
-    impl Scm for TestScm {
-        fn mode(&self) -> ScmMode {
-            ScmMode::Direct
-        }
-
-        fn create_branch(&self, _slug: &str) -> Result<String, SandboxError> {
-            Ok("branch".to_string())
-        }
-
-        fn delete_branch(&self, _slug: &str) -> Result<(), SandboxError> {
-            Ok(())
-        }
-
-        fn make_archive(&self, _reference: &str) -> Result<Vec<u8>, SandboxError> {
-            Ok(Vec::new())
-        }
-
-        fn list_sandboxes(&self) -> Result<Vec<String>, SandboxError> {
-            Ok(Vec::new())
-        }
-
-        fn repo_prefix(&self) -> Result<String, SandboxError> {
-            Ok("repo".to_string())
-        }
-
-        fn has_changes(&self) -> Result<bool, SandboxError> {
-            Ok(self.has_changes)
-        }
-
-        fn stage_all(&self) -> Result<(), SandboxError> {
-            Ok(())
-        }
-
-        fn commit_snapshot(&self, message: &str) -> Result<Option<Oid>, SandboxError> {
-            self.committed_messages
-                .lock()
-                .expect("commit lock")
-                .push(message.to_string());
-            Ok(Some(Oid::ZERO_SHA1))
-        }
-
-        fn apply_patch(&self, _diff: &str) -> Result<(), SandboxError> {
-            Ok(())
-        }
-    }
-
-    fn init_repo() -> (TempDir, Repository) {
-        let tempdir = TempDir::new().expect("tempdir");
-        let repo = Repository::init(tempdir.path()).expect("init repo");
-        fs::write(tempdir.path().join("README.md"), "initial").expect("write");
-        let mut index = repo.index().expect("index");
-        index.add_path(Path::new("README.md")).expect("add path");
-        let tree_id = index.write_tree().expect("write tree");
-        {
-            let tree = repo.find_tree(tree_id).expect("tree");
-            let signature = Signature::now("Test", "test@example.com").expect("signature");
-            repo.commit(Some("HEAD"), &signature, &signature, "init", &tree, &[])
-                .expect("commit");
-        }
-        (tempdir, repo)
+        let unsupported = map_contract(Error::Unsupported {
+            operation: "pause".to_string(),
+            backend: "docker".to_string(),
+            primitive: "a sandbox-level state".to_string(),
+            reason: "it has none".to_string(),
+            remedy: "stop the container".to_string(),
+        });
+        let denied = map_contract(Error::Denied {
+            operation: "read".to_string(),
+            reason: "outside the workspace".to_string(),
+        });
+        assert_eq!(unsupported.code, denied.code, "rmcp collapses both");
+        assert_eq!(unsupported.data.as_ref().unwrap()["class"], "unsupported");
+        assert_eq!(denied.data.as_ref().unwrap()["class"], "denied");
     }
 
     struct TestProvider {
-        shell_result: Mutex<Option<Result<ExecutionResult, SandboxError>>>,
+        shell_result: Mutex<Option<Result<Execution, Error>>>,
         last_command: Arc<Mutex<Option<Vec<String>>>>,
     }
 
     impl TestProvider {
         fn new(
-            result: Result<ExecutionResult, SandboxError>,
+            result: Result<Execution, Error>,
             last_command: Arc<Mutex<Option<Vec<String>>>>,
         ) -> Self {
             Self {
@@ -1610,76 +1236,42 @@ mod tests {
     }
 
     struct MultiResultProvider {
-        results: Arc<Mutex<Vec<Result<ExecutionResult, SandboxError>>>>,
+        results: Arc<Mutex<Vec<Result<Execution, Error>>>>,
+        commands: Arc<Mutex<Vec<Vec<String>>>>,
     }
 
     impl MultiResultProvider {
-        fn new(results: Arc<Mutex<Vec<Result<ExecutionResult, SandboxError>>>>) -> Self {
-            Self { results }
+        fn new(results: Arc<Mutex<Vec<Result<Execution, Error>>>>) -> Self {
+            Self {
+                results,
+                commands: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        fn commands(&self) -> Vec<Vec<String>> {
+            self.commands.lock().expect("commands lock").clone()
         }
     }
 
-    impl SandboxProvider for MultiResultProvider {
-        fn create<'a>(
+    impl SandboxIo for MultiResultProvider {
+        fn workspace<'a>(&'a self, _name: &'a str) -> BoxFuture<'a, Result<String, Error>> {
+            Box::pin(async { Ok("/src".to_string()) })
+        }
+
+        fn exec<'a>(
             &'a self,
             _name: &'a str,
-            _config: &'a SandboxConfig,
-        ) -> BoxFuture<'a, Result<SandboxMetadata, SandboxError>> {
-            Box::pin(async move {
-                Err(SandboxError::SandboxNotFound {
-                    name: "unused".to_string(),
-                })
-            })
-        }
-
-        fn pause<'a>(&'a self, _container_id: &'a str) -> BoxFuture<'a, Result<(), SandboxError>> {
-            Box::pin(async move {
-                Err(SandboxError::SandboxNotFound {
-                    name: "unused".to_string(),
-                })
-            })
-        }
-
-        fn inspect_container<'a>(
-            &'a self,
-            _container_id: &'a str,
-        ) -> BoxFuture<'a, Result<ContainerInspection, SandboxError>> {
-            Box::pin(async move {
-                Err(SandboxError::SandboxNotFound {
-                    name: "unused".to_string(),
-                })
-            })
-        }
-
-        fn resume<'a>(&'a self, _container_id: &'a str) -> BoxFuture<'a, Result<(), SandboxError>> {
-            Box::pin(async move {
-                Err(SandboxError::SandboxNotFound {
-                    name: "unused".to_string(),
-                })
-            })
-        }
-
-        fn delete<'a>(
-            &'a self,
-            _metadata: &'a SandboxMetadata,
-        ) -> BoxFuture<'a, Result<(), SandboxError>> {
-            Box::pin(async move {
-                Err(SandboxError::SandboxNotFound {
-                    name: "unused".to_string(),
-                })
-            })
-        }
-
-        fn shell<'a>(
-            &'a self,
-            _metadata: &'a SandboxMetadata,
-            _command: &'a [String],
-        ) -> BoxFuture<'a, Result<ExecutionResult, SandboxError>> {
+            command: &'a [String],
+        ) -> BoxFuture<'a, Result<Execution, Error>> {
+            self.commands
+                .lock()
+                .expect("commands lock")
+                .push(command.to_vec());
             let results = Arc::clone(&self.results);
             Box::pin(async move {
                 let mut results_lock = results.lock().expect("results lock");
                 if results_lock.is_empty() {
-                    return Err(SandboxError::SandboxNotFound {
+                    return Err(Error::NotFound {
                         name: "no more results".to_string(),
                     });
                 }
@@ -1687,96 +1279,42 @@ mod tests {
             })
         }
 
-        fn upload_path<'a>(
+        fn upload<'a>(
             &'a self,
-            _metadata: &'a SandboxMetadata,
-            _src_path: &'a Path,
-            _dest_path: &'a str,
-        ) -> BoxFuture<'a, Result<(), SandboxError>> {
-            Box::pin(async move {
-                Err(SandboxError::SandboxNotFound {
-                    name: "unused".to_string(),
-                })
-            })
+            _name: &'a str,
+            _source: &'a Path,
+            _destination: &'a str,
+        ) -> BoxFuture<'a, Result<(), Error>> {
+            Box::pin(async { Ok(()) })
         }
 
-        fn download_path<'a>(
+        fn download<'a>(
             &'a self,
-            _metadata: &'a SandboxMetadata,
-            _src_path: &'a str,
-            _dest_path: &'a Path,
-        ) -> BoxFuture<'a, Result<(), SandboxError>> {
-            Box::pin(async move {
-                Err(SandboxError::SandboxNotFound {
-                    name: "unused".to_string(),
-                })
-            })
+            _name: &'a str,
+            _source: &'a str,
+            _destination: &'a Path,
+        ) -> BoxFuture<'a, Result<(), Error>> {
+            Box::pin(async { Ok(()) })
         }
     }
 
-    impl SandboxProvider for TestProvider {
-        fn create<'a>(
+    impl SandboxIo for TestProvider {
+        fn workspace<'a>(&'a self, _name: &'a str) -> BoxFuture<'a, Result<String, Error>> {
+            Box::pin(async { Ok("/src".to_string()) })
+        }
+
+        fn exec<'a>(
             &'a self,
             _name: &'a str,
-            _config: &'a SandboxConfig,
-        ) -> BoxFuture<'a, Result<SandboxMetadata, SandboxError>> {
-            Box::pin(async move {
-                Err(SandboxError::SandboxNotFound {
-                    name: "unused".to_string(),
-                })
-            })
-        }
-
-        fn pause<'a>(&'a self, _container_id: &'a str) -> BoxFuture<'a, Result<(), SandboxError>> {
-            Box::pin(async move {
-                Err(SandboxError::SandboxNotFound {
-                    name: "unused".to_string(),
-                })
-            })
-        }
-
-        fn inspect_container<'a>(
-            &'a self,
-            _container_id: &'a str,
-        ) -> BoxFuture<'a, Result<ContainerInspection, SandboxError>> {
-            Box::pin(async move {
-                Err(SandboxError::SandboxNotFound {
-                    name: "unused".to_string(),
-                })
-            })
-        }
-
-        fn resume<'a>(&'a self, _container_id: &'a str) -> BoxFuture<'a, Result<(), SandboxError>> {
-            Box::pin(async move {
-                Err(SandboxError::SandboxNotFound {
-                    name: "unused".to_string(),
-                })
-            })
-        }
-
-        fn delete<'a>(
-            &'a self,
-            _metadata: &'a SandboxMetadata,
-        ) -> BoxFuture<'a, Result<(), SandboxError>> {
-            Box::pin(async move {
-                Err(SandboxError::SandboxNotFound {
-                    name: "unused".to_string(),
-                })
-            })
-        }
-
-        fn shell<'a>(
-            &'a self,
-            _metadata: &'a SandboxMetadata,
             command: &'a [String],
-        ) -> BoxFuture<'a, Result<ExecutionResult, SandboxError>> {
+        ) -> BoxFuture<'a, Result<Execution, Error>> {
             let result = self
                 .shell_result
                 .lock()
                 .expect("shell result lock")
                 .take()
                 .unwrap_or_else(|| {
-                    Err(SandboxError::SandboxNotFound {
+                    Err(Error::NotFound {
                         name: "unused".to_string(),
                     })
                 });
@@ -1788,42 +1326,133 @@ mod tests {
             })
         }
 
-        fn upload_path<'a>(
+        fn upload<'a>(
             &'a self,
-            _metadata: &'a SandboxMetadata,
-            _src_path: &'a Path,
-            _dest_path: &'a str,
-        ) -> BoxFuture<'a, Result<(), SandboxError>> {
-            Box::pin(async move {
-                Err(SandboxError::SandboxNotFound {
-                    name: "unused".to_string(),
-                })
-            })
+            _name: &'a str,
+            _source: &'a Path,
+            _destination: &'a str,
+        ) -> BoxFuture<'a, Result<(), Error>> {
+            Box::pin(async { Ok(()) })
         }
 
-        fn download_path<'a>(
+        fn download<'a>(
             &'a self,
-            _metadata: &'a SandboxMetadata,
-            _src_path: &'a str,
-            _dest_path: &'a Path,
-        ) -> BoxFuture<'a, Result<(), SandboxError>> {
-            Box::pin(async move {
-                Err(SandboxError::SandboxNotFound {
-                    name: "unused".to_string(),
-                })
-            })
+            _name: &'a str,
+            _source: &'a str,
+            _destination: &'a Path,
+        ) -> BoxFuture<'a, Result<(), Error>> {
+            Box::pin(async { Ok(()) })
         }
     }
 
-    fn stub_metadata() -> SandboxMetadata {
-        SandboxMetadata {
-            name: "sandbox".to_string(),
-            branch_name: "litterbox/sandbox".to_string(),
-            container_id: "container".to_string(),
-            status: SandboxStatus::Active,
-            mode: ScmMode::Direct,
-            project_slug: "project".to_string(),
-            forwarded_ports: Vec::new(),
+    #[test]
+    fn the_agent_facing_tool_names_are_unchanged() {
+        let server = SandboxServer::new();
+        let mut names: Vec<String> = server
+            .tool_router
+            .list_all()
+            .iter()
+            .map(|tool| tool.name.to_string())
+            .collect();
+        names.sort();
+
+        assert_eq!(
+            names,
+            vec![
+                "bash".to_string(),
+                "glob".to_string(),
+                "grep".to_string(),
+                "ls".to_string(),
+                "patch".to_string(),
+                "read".to_string(),
+                "sandbox-create".to_string(),
+                "sandbox-ports".to_string(),
+                "write".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_sandbox_ports_response_carries_the_neutral_forward_shape() {
+        let response = SandboxPortsResponse {
+            name: "demo".to_string(),
+            forwarded_ports: vec![Forward {
+                name: "web".to_string(),
+                target: 8080,
+                host_port: 49152,
+                bind: "127.0.0.1".to_string(),
+                env_var: "LITTERBOX_FWD_PORT_WEB".to_string(),
+            }],
+        };
+        let json = serde_json::to_value(&response).expect("serialises");
+        assert_eq!(json["name"], "demo");
+        assert_eq!(json["forwarded_ports"][0]["target"], 8080);
+        assert_eq!(json["forwarded_ports"][0]["bind"], "127.0.0.1");
+        assert!(
+            json["forwarded_ports"][0].get("container").is_none(),
+            "no mechanism vocabulary leaks: {json}"
+        );
+    }
+
+    #[test]
+    fn every_tool_exposes_the_documented_arguments_and_no_backend_setting() {
+        fn expected(tool: &str) -> Vec<&'static str> {
+            match tool {
+                "bash" => vec!["command", "sandbox", "timeout", "workdir"],
+                "glob" => vec!["path", "pattern", "sandbox"],
+                "grep" => vec!["include", "path", "pattern", "sandbox"],
+                "ls" => vec!["path", "recursive", "sandbox"],
+                "patch" => vec!["diff", "path", "sandbox"],
+                "read" => vec!["limit", "offset", "path", "sandbox"],
+                "sandbox-create" => vec!["name"],
+                "sandbox-ports" => vec!["sandbox"],
+                "write" => vec!["content", "path", "sandbox"],
+                other => panic!("unexpected tool {other}"),
+            }
+        }
+
+        let server = SandboxServer::new();
+        for tool in server.tool_router.list_all() {
+            let mut arguments: Vec<String> = tool
+                .input_schema
+                .get("properties")
+                .and_then(|properties| properties.as_object())
+                .map(|properties| properties.keys().cloned().collect())
+                .unwrap_or_default();
+            arguments.sort();
+
+            let expected: Vec<String> = expected(&tool.name)
+                .into_iter()
+                .map(str::to_string)
+                .collect();
+            assert_eq!(
+                arguments, expected,
+                "argument names for {} changed",
+                tool.name
+            );
+            assert!(
+                !arguments.iter().any(|argument| {
+                    matches!(argument.as_str(), "backend" | "image" | "docker")
+                }),
+                "{} accepts a backend setting",
+                tool.name
+            );
+
+            let doc = TOOL_DOCS
+                .iter()
+                .find(|doc| doc.name == tool.name)
+                .unwrap_or_else(|| panic!("no documentation for {}", tool.name));
+            let mut documented: Vec<String> = doc
+                .params
+                .iter()
+                .map(|param| param.name.to_string())
+                .collect();
+            documented.sort();
+            assert_eq!(
+                documented, arguments,
+                "the reference for {} drifted from its schema",
+                tool.name
+            );
         }
     }
 
@@ -1853,14 +1482,14 @@ mod tests {
 
     #[tokio::test]
     async fn read_in_sandbox_full_content() {
-        let result = ExecutionResult {
+        let result = Execution {
             exit_code: 0,
             stdout: "one\ntwo\n".to_string(),
             stderr: String::new(),
         };
         let last_command = Arc::new(Mutex::new(None));
         let provider = TestProvider::new(Ok(result), Arc::clone(&last_command));
-        let content = read_in_sandbox(&provider, &stub_metadata(), "README.md", None, None)
+        let content = read_in_sandbox(&provider, "sandbox", "README.md", None, None)
             .await
             .expect("read");
 
@@ -1875,14 +1504,14 @@ mod tests {
 
     #[tokio::test]
     async fn read_in_sandbox_slice_content() {
-        let result = ExecutionResult {
+        let result = Execution {
             exit_code: 0,
             stdout: "one\ntwo\nthree\n".to_string(),
             stderr: String::new(),
         };
         let last_command = Arc::new(Mutex::new(None));
         let provider = TestProvider::new(Ok(result), Arc::clone(&last_command));
-        let content = read_in_sandbox(&provider, &stub_metadata(), "README.md", Some(1), Some(1))
+        let content = read_in_sandbox(&provider, "sandbox", "README.md", Some(1), Some(1))
             .await
             .expect("read");
 
@@ -1891,31 +1520,31 @@ mod tests {
 
     #[tokio::test]
     async fn read_in_sandbox_missing_file_returns_not_found() {
-        let result = ExecutionResult {
+        let result = Execution {
             exit_code: 1,
             stdout: String::new(),
             stderr: "cat: /src/missing: No such file or directory".to_string(),
         };
         let provider = TestProvider::new(Ok(result), Arc::new(Mutex::new(None)));
-        let error = read_in_sandbox(&provider, &stub_metadata(), "missing", None, None)
+        let error = read_in_sandbox(&provider, "sandbox", "missing", None, None)
             .await
             .expect_err("missing file");
-        match error {
-            ReadError::NotFound { path } => assert_eq!(path, "/src/missing"),
+        match error.failure {
+            ToolFailure::NotFound { path } => assert_eq!(path, "/src/missing"),
             other => panic!("unexpected error: {other:?}"),
         }
     }
 
     #[tokio::test]
     async fn write_in_sandbox_success() {
-        let result = ExecutionResult {
+        let result = Execution {
             exit_code: 0,
             stdout: String::new(),
             stderr: String::new(),
         };
         let last_command = Arc::new(Mutex::new(None));
         let provider = TestProvider::new(Ok(result), Arc::clone(&last_command));
-        write_in_sandbox(&provider, &stub_metadata(), "file.txt", "hello")
+        write_in_sandbox(&provider, "sandbox", "file.txt", "hello")
             .await
             .expect("write");
 
@@ -1928,34 +1557,34 @@ mod tests {
 
     #[tokio::test]
     async fn write_in_sandbox_permission_denied() {
-        let result = ExecutionResult {
+        let result = Execution {
             exit_code: 1,
             stdout: String::new(),
             stderr: "/src/file.txt: Permission denied".to_string(),
         };
         let provider = TestProvider::new(Ok(result), Arc::new(Mutex::new(None)));
-        let error = write_in_sandbox(&provider, &stub_metadata(), "file.txt", "hello")
+        let error = write_in_sandbox(&provider, "sandbox", "file.txt", "hello")
             .await
             .expect_err("permission denied");
-        match error {
-            WriteError::PermissionDenied { path } => assert_eq!(path, "/src/file.txt"),
+        match error.failure {
+            ToolFailure::PermissionDenied { path } => assert_eq!(path, "/src/file.txt"),
             other => panic!("unexpected error: {other:?}"),
         }
     }
 
     #[tokio::test]
     async fn write_in_sandbox_missing_path() {
-        let result = ExecutionResult {
+        let result = Execution {
             exit_code: 1,
             stdout: String::new(),
             stderr: "sh: /src/missing/file.txt: No such file or directory".to_string(),
         };
         let provider = TestProvider::new(Ok(result), Arc::new(Mutex::new(None)));
-        let error = write_in_sandbox(&provider, &stub_metadata(), "missing/file.txt", "hello")
+        let error = write_in_sandbox(&provider, "sandbox", "missing/file.txt", "hello")
             .await
             .expect_err("missing path");
-        match error {
-            WriteError::NotFound { path } => assert_eq!(path, "/src/missing/file.txt"),
+        match error.failure {
+            ToolFailure::NotFound { path } => assert_eq!(path, "/src/missing/file.txt"),
             other => panic!("unexpected error: {other:?}"),
         }
     }
@@ -1963,13 +1592,13 @@ mod tests {
     #[tokio::test]
     async fn patch_in_sandbox_success() {
         // Mock read returning original content
-        let read_result = ExecutionResult {
+        let read_result = Execution {
             exit_code: 0,
             stdout: "original\n".to_string(),
             stderr: String::new(),
         };
         // Mock write succeeding
-        let write_result = ExecutionResult {
+        let write_result = Execution {
             exit_code: 0,
             stdout: String::new(),
             stderr: String::new(),
@@ -1978,15 +1607,24 @@ mod tests {
         let results = Arc::new(Mutex::new(vec![Ok(read_result), Ok(write_result)]));
         let provider = MultiResultProvider::new(results);
         let diff = "--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-original\n+patched\n";
-        patch_in_sandbox(&provider, &stub_metadata(), "file.txt", diff)
+        patch_in_sandbox(&provider, "sandbox", "file.txt", diff)
             .await
             .expect("patch");
+
+        let commands = provider.commands();
+        assert!(
+            commands
+                .last()
+                .map(|command| command.join(" ").contains("patched"))
+                .unwrap_or(false),
+            "the write carried the patched text: {commands:?}"
+        );
     }
 
     #[tokio::test]
     async fn patch_in_sandbox_invalid_diff() {
         // Mock read returning content
-        let read_result = ExecutionResult {
+        let read_result = Execution {
             exit_code: 0,
             stdout: "line1\nline2\n".to_string(),
             stderr: String::new(),
@@ -2000,11 +1638,11 @@ mod tests {
         // A diff that will parse but fail to apply
         let bad_diff =
             "--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-nonexistent line\n+replacement\n";
-        let error = patch_in_sandbox(&provider, &stub_metadata(), "file.txt", bad_diff)
+        let error = patch_in_sandbox(&provider, "sandbox", "file.txt", bad_diff)
             .await
             .expect_err("invalid diff");
-        match error {
-            PatchError::ApplyFailed { .. } => {}
+        match error.failure {
+            ToolFailure::PatchApply { .. } => {}
             other => panic!("unexpected error: {other:?}"),
         }
     }
@@ -2012,7 +1650,7 @@ mod tests {
     #[tokio::test]
     async fn patch_in_sandbox_missing_path() {
         // Mock read failing with not found
-        let read_result = ExecutionResult {
+        let read_result = Execution {
             exit_code: 1,
             stdout: String::new(),
             stderr: "cat: /src/missing.txt: No such file or directory".to_string(),
@@ -2020,16 +1658,14 @@ mod tests {
 
         let results = Arc::new(Mutex::new(vec![Ok(read_result)]));
         let provider = MultiResultProvider::new(results);
-        let error = patch_in_sandbox(&provider, &stub_metadata(), "missing.txt", "diff")
+        let error = patch_in_sandbox(&provider, "sandbox", "missing.txt", "diff")
             .await
             .expect_err("missing path");
-        match error {
-            PatchError::ReadFile { path, source } => {
+        match error.failure {
+            ToolFailure::PatchRead { path, source } => {
                 assert_eq!(path, "missing.txt");
-                match *source {
-                    ReadError::NotFound { path } => assert_eq!(path, "/src/missing.txt"),
-                    other => panic!("unexpected read error: {other:?}"),
-                }
+                assert!(source.contains("NotFound"), "{source}");
+                assert!(source.contains("/src/missing.txt"), "{source}");
             }
             other => panic!("unexpected error: {other:?}"),
         }
@@ -2037,14 +1673,14 @@ mod tests {
 
     #[tokio::test]
     async fn ls_in_sandbox_non_recursive() {
-        let result = ExecutionResult {
+        let result = Execution {
             exit_code: 0,
             stdout: "file.txt\nsubdir\n".to_string(),
             stderr: String::new(),
         };
         let last_command = Arc::new(Mutex::new(None));
         let provider = TestProvider::new(Ok(result), Arc::clone(&last_command));
-        let entries = ls_in_sandbox(&provider, &stub_metadata(), "dir", false)
+        let entries = ls_in_sandbox(&provider, "sandbox", "dir", false)
             .await
             .expect("list");
 
@@ -2057,14 +1693,14 @@ mod tests {
 
     #[tokio::test]
     async fn ls_in_sandbox_recursive() {
-        let result = ExecutionResult {
+        let result = Execution {
             exit_code: 0,
             stdout: "/src/dir/subdir\n/src/dir/subdir/child.txt\n/src/dir/file.txt\n".to_string(),
             stderr: String::new(),
         };
         let last_command = Arc::new(Mutex::new(None));
         let provider = TestProvider::new(Ok(result), Arc::clone(&last_command));
-        let entries = ls_in_sandbox(&provider, &stub_metadata(), "dir", true)
+        let entries = ls_in_sandbox(&provider, "sandbox", "dir", true)
             .await
             .expect("list");
 
@@ -2078,13 +1714,13 @@ mod tests {
 
     #[tokio::test]
     async fn ls_in_sandbox_empty_directory() {
-        let result = ExecutionResult {
+        let result = Execution {
             exit_code: 0,
             stdout: String::new(),
             stderr: String::new(),
         };
         let provider = TestProvider::new(Ok(result), Arc::new(Mutex::new(None)));
-        let entries = ls_in_sandbox(&provider, &stub_metadata(), "empty", false)
+        let entries = ls_in_sandbox(&provider, "sandbox", "empty", false)
             .await
             .expect("list");
 
@@ -2093,53 +1729,54 @@ mod tests {
 
     #[test]
     fn classify_ls_failure_permission_denied() {
-        let result = ExecutionResult {
+        let result = Execution {
             exit_code: 1,
             stdout: String::new(),
             stderr: "ls: /src/secret: Permission denied".to_string(),
         };
-        let error = classify_ls_failure("/src/secret", &result);
-        match error {
-            LsError::PermissionDenied { path } => assert_eq!(path, "/src/secret"),
+        let error = ToolError::classify(Tool::Ls, "/src/secret", &result);
+        match error.failure {
+            ToolFailure::PermissionDenied { path } => assert_eq!(path, "/src/secret"),
             other => panic!("unexpected error: {other:?}"),
         }
     }
 
     #[test]
     fn classify_ls_failure_not_found() {
-        let result = ExecutionResult {
+        let result = Execution {
             exit_code: 1,
             stdout: String::new(),
             stderr: "ls: /src/missing: No such file or directory".to_string(),
         };
-        let error = classify_ls_failure("/src/missing", &result);
-        match error {
-            LsError::NotFound { path } => assert_eq!(path, "/src/missing"),
+        let error = ToolError::classify(Tool::Ls, "/src/missing", &result);
+        match error.failure {
+            ToolFailure::NotFound { path } => assert_eq!(path, "/src/missing"),
             other => panic!("unexpected error: {other:?}"),
         }
     }
 
     #[test]
     fn map_ls_error_missing_sandbox() {
-        let error = map_ls_error(
-            "missing",
-            LsError::Sandbox(SandboxError::SandboxNotFound {
+        let error = ToolError::sandbox(
+            Tool::Ls,
+            Error::NotFound {
                 name: "missing".to_string(),
-            }),
-        );
-        assert!(error.to_string().contains("Sandbox 'missing' not found."));
+            },
+        )
+        .into_mcp();
+        assert!(error.to_string().contains("not found"));
     }
 
     #[tokio::test]
     async fn glob_in_sandbox_matches_with_base() {
-        let result = ExecutionResult {
+        let result = Execution {
             exit_code: 0,
             stdout: "/src/dir/subdir\n/src/dir/subdir/child.txt\n/src/dir/root.txt\n".to_string(),
             stderr: String::new(),
         };
         let last_command = Arc::new(Mutex::new(None));
         let provider = TestProvider::new(Ok(result), Arc::clone(&last_command));
-        let entries = glob_in_sandbox(&provider, &stub_metadata(), "**/*.txt", Some("dir"))
+        let entries = glob_in_sandbox(&provider, "sandbox", "**/*.txt", Some("dir"))
             .await
             .expect("glob");
 
@@ -2152,13 +1789,13 @@ mod tests {
 
     #[tokio::test]
     async fn glob_in_sandbox_no_matches() {
-        let result = ExecutionResult {
+        let result = Execution {
             exit_code: 0,
             stdout: "/src/root.txt\n".to_string(),
             stderr: String::new(),
         };
         let provider = TestProvider::new(Ok(result), Arc::new(Mutex::new(None)));
-        let entries = glob_in_sandbox(&provider, &stub_metadata(), "*.md", None)
+        let entries = glob_in_sandbox(&provider, "sandbox", "*.md", None)
             .await
             .expect("glob");
 
@@ -2167,31 +1804,31 @@ mod tests {
 
     #[tokio::test]
     async fn glob_in_sandbox_invalid_pattern() {
-        let result = ExecutionResult {
+        let result = Execution {
             exit_code: 0,
             stdout: String::new(),
             stderr: String::new(),
         };
         let provider = TestProvider::new(Ok(result), Arc::new(Mutex::new(None)));
-        let error = glob_in_sandbox(&provider, &stub_metadata(), "[[", None)
+        let error = glob_in_sandbox(&provider, "sandbox", "[[", None)
             .await
             .expect_err("invalid pattern");
-        match error {
-            GlobError::InvalidPattern { .. } => {}
+        match error.failure {
+            ToolFailure::InvalidPattern { .. } => {}
             other => panic!("unexpected error: {other:?}"),
         }
     }
 
     #[tokio::test]
     async fn grep_in_sandbox_matches() {
-        let result = ExecutionResult {
+        let result = Execution {
             exit_code: 0,
             stdout: "/src/dir/file.txt:1:hello\n/src/dir/sub/file.rs:2:hello\n".to_string(),
             stderr: String::new(),
         };
         let last_command = Arc::new(Mutex::new(None));
         let provider = TestProvider::new(Ok(result), Arc::clone(&last_command));
-        let entries = grep_in_sandbox(&provider, &stub_metadata(), "hello", "dir", None)
+        let entries = grep_in_sandbox(&provider, "sandbox", "hello", "dir", None)
             .await
             .expect("grep");
 
@@ -2209,14 +1846,14 @@ mod tests {
 
     #[tokio::test]
     async fn grep_in_sandbox_include_filter() {
-        let result = ExecutionResult {
+        let result = Execution {
             exit_code: 0,
             stdout: "/src/dir/main.rs:1:hello\n".to_string(),
             stderr: String::new(),
         };
         let last_command = Arc::new(Mutex::new(None));
         let provider = TestProvider::new(Ok(result), Arc::clone(&last_command));
-        let entries = grep_in_sandbox(&provider, &stub_metadata(), "hello", "dir", Some("*.rs"))
+        let entries = grep_in_sandbox(&provider, "sandbox", "hello", "dir", Some("*.rs"))
             .await
             .expect("grep");
 
@@ -2229,13 +1866,13 @@ mod tests {
 
     #[tokio::test]
     async fn grep_in_sandbox_no_matches() {
-        let result = ExecutionResult {
+        let result = Execution {
             exit_code: 1,
             stdout: String::new(),
             stderr: String::new(),
         };
         let provider = TestProvider::new(Ok(result), Arc::new(Mutex::new(None)));
-        let entries = grep_in_sandbox(&provider, &stub_metadata(), "hello", "dir", None)
+        let entries = grep_in_sandbox(&provider, "sandbox", "hello", "dir", None)
             .await
             .expect("grep");
 
@@ -2244,84 +1881,86 @@ mod tests {
 
     #[tokio::test]
     async fn grep_in_sandbox_invalid_pattern() {
-        let result = ExecutionResult {
+        let result = Execution {
             exit_code: 2,
             stdout: String::new(),
             stderr: "grep: Unmatched [".to_string(),
         };
         let provider = TestProvider::new(Ok(result), Arc::new(Mutex::new(None)));
-        let error = grep_in_sandbox(&provider, &stub_metadata(), "[", "dir", None)
+        let error = grep_in_sandbox(&provider, "sandbox", "[", "dir", None)
             .await
             .expect_err("invalid pattern");
-        match error {
-            GrepError::InvalidPattern { .. } => {}
+        match error.failure {
+            ToolFailure::InvalidPattern { .. } => {}
             other => panic!("unexpected error: {other:?}"),
         }
     }
 
     #[tokio::test]
     async fn grep_in_sandbox_missing_path() {
-        let result = ExecutionResult {
+        let result = Execution {
             exit_code: 2,
             stdout: String::new(),
             stderr: "grep: /src/dir: No such file or directory".to_string(),
         };
         let provider = TestProvider::new(Ok(result), Arc::new(Mutex::new(None)));
-        let error = grep_in_sandbox(&provider, &stub_metadata(), "hello", "dir", None)
+        let error = grep_in_sandbox(&provider, "sandbox", "hello", "dir", None)
             .await
             .expect_err("missing path");
-        match error {
-            GrepError::NotFound { path } => assert_eq!(path, "/src/dir"),
+        match error.failure {
+            ToolFailure::NotFound { path } => assert_eq!(path, "/src/dir"),
             other => panic!("unexpected error: {other:?}"),
         }
     }
 
     #[test]
     fn map_grep_error_missing_sandbox() {
-        let error = map_grep_error(
-            "missing",
-            GrepError::Sandbox(SandboxError::SandboxNotFound {
+        let error = ToolError::sandbox(
+            Tool::Grep,
+            Error::NotFound {
                 name: "missing".to_string(),
-            }),
-        );
-        assert!(error.to_string().contains("Sandbox 'missing' not found."));
+            },
+        )
+        .into_mcp();
+        assert!(error.to_string().contains("not found"));
     }
 
     #[test]
     fn map_glob_error_missing_sandbox() {
-        let error = map_glob_tool_error(
-            "missing",
-            GlobError::Sandbox(SandboxError::SandboxNotFound {
+        let error = ToolError::sandbox(
+            Tool::Glob,
+            Error::NotFound {
                 name: "missing".to_string(),
-            }),
-        );
-        assert!(error.to_string().contains("Sandbox 'missing' not found."));
+            },
+        )
+        .into_mcp();
+        assert!(error.to_string().contains("not found"));
     }
 
     #[test]
     fn classify_read_failure_permission_denied() {
-        let result = ExecutionResult {
+        let result = Execution {
             exit_code: 1,
             stdout: String::new(),
             stderr: "cat: /src/secret: Permission denied".to_string(),
         };
-        let error = classify_read_failure("/src/secret", &result);
-        match error {
-            ReadError::PermissionDenied { path } => assert_eq!(path, "/src/secret"),
+        let error = ToolError::classify(Tool::Read, "/src/secret", &result);
+        match error.failure {
+            ToolFailure::PermissionDenied { path } => assert_eq!(path, "/src/secret"),
             other => panic!("unexpected error: {other:?}"),
         }
     }
 
     #[test]
     fn classify_read_failure_invalid_path() {
-        let result = ExecutionResult {
+        let result = Execution {
             exit_code: 1,
             stdout: String::new(),
             stderr: "cat: /src/dir: Is a directory".to_string(),
         };
-        let error = classify_read_failure("/src/dir", &result);
-        match error {
-            ReadError::Failed { path, message } => {
+        let error = ToolError::classify(Tool::Read, "/src/dir", &result);
+        match error.failure {
+            ToolFailure::Failed { path, message } => {
                 assert_eq!(path, "/src/dir");
                 assert!(message.contains("Is a directory"));
             }
@@ -2331,48 +1970,44 @@ mod tests {
 
     #[test]
     fn map_read_error_missing_sandbox() {
-        let error = map_read_error(
-            "missing",
-            ReadError::Sandbox(SandboxError::SandboxNotFound {
+        let error = ToolError::sandbox(
+            Tool::Read,
+            Error::NotFound {
                 name: "missing".to_string(),
-            }),
-        );
-        assert!(error.to_string().contains("Sandbox 'missing' not found."));
+            },
+        )
+        .into_mcp();
+        assert!(error.to_string().contains("not found"));
     }
 
     #[test]
     fn map_write_error_missing_sandbox() {
-        let error = map_write_error(
-            "missing",
-            WriteError::Sandbox(SandboxError::SandboxNotFound {
+        let error = ToolError::sandbox(
+            Tool::Write,
+            Error::NotFound {
                 name: "missing".to_string(),
-            }),
-        );
-        assert!(error.to_string().contains("Sandbox 'missing' not found."));
+            },
+        )
+        .into_mcp();
+        assert!(error.to_string().contains("not found"));
     }
 
     #[test]
     fn map_grep_error_invalid_pattern_message() {
-        let error = map_grep_error(
-            "sandbox",
-            GrepError::InvalidPattern {
-                pattern: "[".to_string(),
-                message: "Unmatched [".to_string(),
-            },
-        );
+        let error = ToolError::invalid_pattern(Tool::Grep, "[", "Unmatched [").into_mcp();
         assert!(error.to_string().contains("invalid grep pattern"));
     }
 
     #[tokio::test]
     async fn bash_in_sandbox_success() {
-        let result = ExecutionResult {
+        let result = Execution {
             exit_code: 0,
             stdout: "ok".to_string(),
             stderr: String::new(),
         };
         let last_command = Arc::new(Mutex::new(None));
         let provider = TestProvider::new(Ok(result), Arc::clone(&last_command));
-        let output = bash_in_sandbox(&provider, &stub_metadata(), "echo ok", None, None)
+        let output = bash_in_sandbox(&provider, "sandbox", "echo ok", None, None)
             .await
             .expect("bash");
 
@@ -2386,13 +2021,13 @@ mod tests {
 
     #[tokio::test]
     async fn bash_in_sandbox_non_zero_exit() {
-        let result = ExecutionResult {
+        let result = Execution {
             exit_code: 2,
             stdout: String::new(),
             stderr: "fail".to_string(),
         };
         let provider = TestProvider::new(Ok(result), Arc::new(Mutex::new(None)));
-        let output = bash_in_sandbox(&provider, &stub_metadata(), "false", None, None)
+        let output = bash_in_sandbox(&provider, "sandbox", "false", None, None)
             .await
             .expect("bash");
 
@@ -2402,30 +2037,30 @@ mod tests {
 
     #[test]
     fn build_bash_command_with_workdir() {
-        let command = build_bash_command("ls", Some("dir"), None);
+        let command = build_bash_command("ls", Some("dir"), None, "/src");
         assert!(command.contains("cd '/src/dir'"));
         assert!(command.contains("&& ls"));
     }
 
     #[test]
     fn build_bash_command_with_timeout() {
-        let command = build_bash_command("sleep 5", None, Some(3));
+        let command = build_bash_command("sleep 5", None, Some(3), "/src");
         assert!(command.starts_with("timeout 3s sh -c"));
         assert!(command.contains("sleep 5"));
     }
 
     #[test]
     fn build_bash_command_with_workdir_and_timeout() {
-        let command = build_bash_command("ls -la", Some("dir"), Some(5));
+        let command = build_bash_command("ls -la", Some("dir"), Some(5), "/src");
         assert!(command.starts_with("timeout 5s sh -c"));
         assert!(command.contains("/src/dir"));
         assert!(command.contains("ls -la"));
     }
 
     #[test]
-    fn resolve_container_path_relative() {
-        assert_eq!(resolve_container_path("README.md"), "/src/README.md");
-        assert_eq!(resolve_container_path("/etc/hosts"), "/etc/hosts");
+    fn resolve_sandbox_path_relative() {
+        assert_eq!(resolve_sandbox_path("/src", "README.md"), "/src/README.md");
+        assert_eq!(resolve_sandbox_path("/src", "/etc/hosts"), "/etc/hosts");
     }
 
     #[test]
@@ -2435,13 +2070,14 @@ mod tests {
 
     #[test]
     fn map_bash_error_missing_sandbox() {
-        let error = map_bash_error(
-            "missing",
-            BashError::Sandbox(SandboxError::SandboxNotFound {
+        let error = ToolError::sandbox(
+            Tool::Bash,
+            Error::NotFound {
                 name: "missing".to_string(),
-            }),
-        );
-        assert!(error.to_string().contains("Sandbox 'missing' not found."));
+            },
+        )
+        .into_mcp();
+        assert!(error.to_string().contains("not found"));
     }
 
     #[test]
@@ -2459,140 +2095,11 @@ mod tests {
             "patch: src/lib.rs"
         );
         assert_eq!(
-            snapshot_message(&SnapshotTrigger::Bash {
-                command: "cargo test".to_string()
-            }),
-            "bash: cargo test"
+            snapshot_message(&SnapshotTrigger::Bash),
+            "bash",
+            "a command line never enters the branch history"
         );
     }
-
-    #[test]
-    fn snapshot_after_with_scm_skips_when_clean() {
-        let scm = TestScm::new(false);
-        snapshot_after_with_scm(
-            &scm,
-            SnapshotTrigger::Write {
-                path: "a".to_string(),
-            },
-        )
-        .expect("snapshot");
-        let committed = scm.committed_messages.lock().expect("commit lock");
-        assert!(committed.is_empty());
-    }
-
-    #[test]
-    fn snapshot_after_with_scm_commits_when_dirty() {
-        let scm = TestScm::new(true);
-        snapshot_after_with_scm(
-            &scm,
-            SnapshotTrigger::Patch {
-                path: "b".to_string(),
-            },
-        )
-        .expect("snapshot");
-        let committed = scm.committed_messages.lock().expect("commit lock");
-        assert_eq!(committed.as_slice(), &["patch: b".to_string()]);
-    }
-
-    #[test]
-    fn snapshot_after_with_scm_integration_commits() {
-        let (tempdir, repo) = init_repo();
-        fs::write(tempdir.path().join("README.md"), "updated").expect("write");
-        let scm = ThreadSafeScm::open(tempdir.path()).expect("open scm");
-        snapshot_after_with_scm(
-            &scm,
-            SnapshotTrigger::Write {
-                path: "README.md".to_string(),
-            },
-        )
-        .expect("snapshot");
-
-        let snapshot_ref = repo
-            .find_reference("refs/heads/litterbox-snapshots")
-            .expect("snapshot ref");
-        let snapshot_commit = snapshot_ref.peel_to_commit().expect("snapshot commit");
-        assert_eq!(
-            snapshot_commit.message().expect("message"),
-            "write: README.md"
-        );
-        let head_commit = repo
-            .head()
-            .expect("head")
-            .peel_to_commit()
-            .expect("head commit");
-        assert_ne!(snapshot_commit.id(), head_commit.id());
-    }
-
-    #[test]
-    fn snapshot_after_with_scm_integration_skips_clean_repo() {
-        let (tempdir, repo) = init_repo();
-        let scm = ThreadSafeScm::open(tempdir.path()).expect("open scm");
-        snapshot_after_with_scm(
-            &scm,
-            SnapshotTrigger::Write {
-                path: "README.md".to_string(),
-            },
-        )
-        .expect("snapshot");
-
-        match repo.find_reference("refs/heads/litterbox-snapshots") {
-            Ok(_) => panic!("unexpected snapshot ref"),
-            Err(error) => assert_eq!(error.code(), ErrorCode::NotFound),
-        }
-    }
-
-    #[test]
-    fn end_to_end_snapshot_workflow() {
-        let (tempdir, repo) = init_repo();
-        let scm = ThreadSafeScm::open(tempdir.path()).expect("open scm");
-
-        fs::write(tempdir.path().join("README.md"), "write").expect("write");
-        snapshot_after_with_scm(
-            &scm,
-            SnapshotTrigger::Write {
-                path: "README.md".to_string(),
-            },
-        )
-        .expect("snapshot write");
-
-        fs::write(tempdir.path().join("README.md"), "patch").expect("write patch");
-        snapshot_after_with_scm(
-            &scm,
-            SnapshotTrigger::Patch {
-                path: "README.md".to_string(),
-            },
-        )
-        .expect("snapshot patch");
-
-        let status = Command::new("sh")
-            .arg("-c")
-            .arg("printf %s bash >>README.md")
-            .current_dir(tempdir.path())
-            .status()
-            .expect("bash");
-        assert!(status.success());
-        snapshot_after_with_scm(
-            &scm,
-            SnapshotTrigger::Bash {
-                command: "printf %s bash >>README.md".to_string(),
-            },
-        )
-        .expect("snapshot bash");
-
-        let snapshot_ref = repo
-            .find_reference("refs/heads/litterbox-snapshots")
-            .expect("snapshot ref");
-        let head = snapshot_ref.peel_to_commit().expect("snapshot commit");
-        assert_eq!(
-            head.message().expect("message"),
-            "bash: printf %s bash >>README.md"
-        );
-        let parent = head.parent(0).expect("parent");
-        assert_eq!(parent.message().expect("message"), "patch: README.md");
-        let grandparent = parent.parent(0).expect("parent");
-        assert_eq!(grandparent.message().expect("message"), "write: README.md");
-    }
-
     #[test]
     fn read_file_missing_returns_error() {
         let path = PathBuf::from("/tmp/this-file-should-not-exist-12345");
