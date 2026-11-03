@@ -38,19 +38,6 @@ command = "rustfmt"
 options = ["--edition", "2024"]
 includes = ["*.rs"]
 
-[formatter.shellcheck]
-command = "shellcheck"
-includes = [
-  "*.bash",
-  "*.bats",
-  "*.sh"
-]
-
-[formatter.shellcheck-envrc]
-command = "shellcheck"
-options = ["--exclude=SC2148"]
-includes = ["*.envrc"]
-
 [formatter.toml-sort]
 command = "toml-sort"
 options = ["--in-place"]
