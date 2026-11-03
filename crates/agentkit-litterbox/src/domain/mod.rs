@@ -4,27 +4,6 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct SandboxConfig {
-    pub image: String,
-    pub setup_command: Option<String>,
-    pub forwarded_ports: Vec<ForwardedPort>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct ForwardedPort {
-    pub name: String,
-    pub target: u16,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ForwardedPortMapping {
-    pub name: String,
-    pub target: u16,
-    pub host_port: u16,
-    pub env_var: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ExecutionResult {
     pub exit_code: i32,
     pub stdout: String,
@@ -38,61 +17,12 @@ pub enum SandboxStatus {
     Error(String),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SandboxMetadata {
-    pub name: String,
-    pub branch_name: String,
-    pub container_id: String,
-    pub status: SandboxStatus,
-    pub mode: ScmMode,
-    pub project_slug: String,
-    pub forwarded_ports: Vec<ForwardedPortMapping>,
-}
-
-impl fmt::Display for SandboxConfig {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.setup_command {
-            Some(command) if command.is_empty() => write!(f, "setup_command=<empty>"),
-            Some(command) => write!(f, "setup_command={command}"),
-            None => write!(f, "setup_command=<none>"),
-        }?;
-
-        write!(f, ", forwarded_ports={}", self.forwarded_ports.len())
-    }
-}
-
 impl fmt::Display for ExecutionResult {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "exit_code={}, stdout=\"{}\", stderr=\"{}\"",
             self.exit_code, self.stdout, self.stderr
-        )
-    }
-}
-
-impl fmt::Display for SandboxStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SandboxStatus::Active => write!(f, "active"),
-            SandboxStatus::Paused => write!(f, "paused"),
-            SandboxStatus::Error(message) => write!(f, "error: {}", message),
-        }
-    }
-}
-
-impl fmt::Display for SandboxMetadata {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "name={}, branch={}, container={}, status={}, mode={:?}, project_slug={}, forwarded_ports={}",
-            self.name,
-            self.branch_name,
-            self.container_id,
-            self.status,
-            self.mode,
-            self.project_slug,
-            self.forwarded_ports.len()
         )
     }
 }
@@ -407,37 +337,5 @@ mod tests {
     #[test]
     fn scm_mode_default_is_remote() {
         assert_eq!(ScmMode::default(), ScmMode::Remote);
-    }
-
-    #[test]
-    fn sandbox_metadata_toml_includes_new_fields() {
-        let metadata = SandboxMetadata {
-            name: "test".to_string(),
-            branch_name: "litterbox/test".to_string(),
-            container_id: "abc123".to_string(),
-            status: SandboxStatus::Active,
-            mode: ScmMode::Remote,
-            project_slug: "myproject".to_string(),
-            forwarded_ports: Vec::new(),
-        };
-        let toml_str = toml::to_string(&metadata).expect("serialize");
-        assert!(toml_str.contains("mode = \"Remote\"") || toml_str.contains("mode = \"remote\""));
-        assert!(toml_str.contains("project_slug = \"myproject\""));
-    }
-
-    #[test]
-    fn sandbox_metadata_toml_always_has_project_slug() {
-        let metadata = SandboxMetadata {
-            name: "test".to_string(),
-            branch_name: "litterbox/test".to_string(),
-            container_id: "abc123".to_string(),
-            status: SandboxStatus::Active,
-            mode: ScmMode::Direct,
-            project_slug: "myproject".to_string(),
-            forwarded_ports: Vec::new(),
-        };
-        let toml_str = toml::to_string(&metadata).expect("serialize");
-        assert!(toml_str.contains("mode = \"Direct\"") || toml_str.contains("mode = \"direct\""));
-        assert!(toml_str.contains("project_slug = \"myproject\""));
     }
 }

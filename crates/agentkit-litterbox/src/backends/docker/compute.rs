@@ -1,10 +1,14 @@
+//! Docker's API client.
+//!
+//! Nothing outside `backends::docker` may use this module: it speaks the
+//! daemon's vocabulary, and the contract must not.
+
 use std::collections::HashMap;
 use std::fs;
-use std::io::Cursor;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
-use std::process::Command;
 
-use bollard::body_full;
+use bollard::body_try_stream;
 use bollard::container::LogOutput;
 use bollard::errors::Error as BollardError;
 use bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
@@ -16,163 +20,119 @@ use bollard::query_parameters::{
 use bollard::{API_DEFAULT_VERSION, Docker};
 use bytes::Bytes;
 use futures_util::StreamExt;
-use futures_util::future::BoxFuture;
 use tar::{Archive, Builder};
 
-use crate::domain::{BackendError, ComputeError, ExecutionResult, FailureKind, SandboxError};
+use super::error::{BackendError, ComputeError, FailureKind};
+use crate::sandbox::contract::Execution;
 
-pub trait Compute {
-    fn ensure_image<'a>(&'a self, image: &'a str) -> BoxFuture<'a, Result<(), SandboxError>>;
-    fn create_container<'a>(
-        &'a self,
-        spec: &'a ContainerSpec,
-    ) -> BoxFuture<'a, Result<String, SandboxError>>;
-    fn inspect_container<'a>(
-        &'a self,
-        container_id: &'a str,
-    ) -> BoxFuture<'a, Result<ContainerInspection, SandboxError>>;
-    fn state<'a>(
-        &'a self,
-        container_id: &'a str,
-    ) -> BoxFuture<'a, Result<SandboxState, SandboxError>>;
-    /// Sandboxes whose backend name starts with `name_prefix`.
-    fn list<'a>(
-        &'a self,
-        name_prefix: &'a str,
-    ) -> BoxFuture<'a, Result<Vec<SandboxSummary>, SandboxError>>;
-    fn pause_container<'a>(
-        &'a self,
-        container_id: &'a str,
-    ) -> BoxFuture<'a, Result<(), SandboxError>>;
-    fn resume_container<'a>(
-        &'a self,
-        container_id: &'a str,
-    ) -> BoxFuture<'a, Result<(), SandboxError>>;
-    fn delete_container<'a>(
-        &'a self,
-        container_id: &'a str,
-    ) -> BoxFuture<'a, Result<(), SandboxError>>;
-    fn exec<'a>(
-        &'a self,
-        container_id: &'a str,
-        command: &'a [String],
-        working_dir: Option<&'a str>,
-    ) -> BoxFuture<'a, Result<ExecutionResult, SandboxError>>;
-    /// Copy a host path into the container at `dest_path`.
-    fn upload_path<'a>(
-        &'a self,
-        container_id: &'a str,
-        src_path: &'a Path,
-        dest_path: &'a str,
-    ) -> BoxFuture<'a, Result<(), SandboxError>>;
-    /// Copy a container path into the host `dest_path` directory.
-    fn download_path<'a>(
-        &'a self,
-        container_id: &'a str,
-        src_path: &'a str,
-        dest_path: &'a Path,
-    ) -> BoxFuture<'a, Result<(), SandboxError>>;
-}
-
+/// Everything one container is created with.
 #[derive(Clone, Debug)]
 pub struct ContainerSpec {
+    /// The container's name.
     pub name: String,
+    /// The image it runs.
     pub image: String,
+    /// Its entry command.
     pub command: Vec<String>,
+    /// Where commands start.
     pub working_dir: Option<String>,
+    /// `KEY=VALUE` entries.
     pub env: Vec<String>,
+    /// Labels enumeration reads back.
+    pub labels: HashMap<String, String>,
+    /// Ports to publish, keyed by container port.
     pub port_bindings: HashMap<String, Vec<PortBindingSpec>>,
+    /// Memory ceiling for the container.
+    pub memory_bytes: Option<i64>,
+    /// CPU quota in nanoseconds per second.
+    pub nano_cpus: Option<i64>,
+    /// Maximum tasks or processes.
+    pub pids_limit: Option<i64>,
+    /// Extra capabilities to grant.
+    pub cap_add: Vec<String>,
 }
 
+/// One host binding for a container port.
 #[derive(Clone, Debug)]
 pub struct PortBindingSpec {
+    /// Host address the port is published on.
     pub host_ip: Option<String>,
+    /// Host port, when one was chosen.
     pub host_port: Option<String>,
 }
 
+/// What the daemon says a container is doing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SandboxState {
+    /// Running.
     Running,
+    /// Paused.
     Paused,
+    /// Created but not running.
     Stopped,
+    /// The daemon does not have it.
     Missing,
 }
 
-impl SandboxState {
-    pub fn is_active(self) -> bool {
-        self == Self::Running
-    }
-}
-
+/// One container as enumeration sees it.
 #[derive(Clone, Debug)]
 pub struct SandboxSummary {
+    /// The container id.
     pub id: String,
-    pub names: Vec<String>,
-    pub state: SandboxState,
+    /// The labels the backend wrote at create.
+    pub labels: HashMap<String, String>,
 }
 
-pub struct ContainerInspection {
-    pub env: Vec<String>,
-    pub port_bindings: HashMap<String, Vec<PortBindingSpec>>,
-}
-
+/// A connected Docker client, used only by this backend.
 pub struct DockerCompute {
     client: Docker,
 }
 
 impl DockerCompute {
-    pub fn new(client: Docker) -> Self {
-        Self { client }
-    }
-
-    pub fn client(&self) -> &Docker {
-        &self.client
-    }
-
-    pub fn connect() -> Result<Self, SandboxError> {
+    pub fn connect() -> Result<Self, ComputeError> {
         let client = connect_docker_client()?;
         Ok(Self { client })
     }
 
-    fn connect_with_defaults() -> Result<Docker, SandboxError> {
-        Docker::connect_with_local_defaults().map_err(|source| {
-            SandboxError::Compute(ComputeError::Connection {
-                source: backend_error(source),
-            })
+    fn connect_with_defaults() -> Result<Docker, ComputeError> {
+        Docker::connect_with_local_defaults().map_err(|source| ComputeError::Connection {
+            source: backend_error(source),
         })
     }
 
-    pub async fn ensure_image(&self, image: &str) -> Result<(), SandboxError> {
+    pub async fn ensure_image(&self, image: &str) -> Result<(), ComputeError> {
         match self.client.inspect_image(image).await {
             Ok(_) => Ok(()),
             Err(error) if is_not_found(&error) => self.pull_image(image).await,
-            Err(error) => Err(SandboxError::Compute(ComputeError::ImageInspect {
+            Err(error) => Err(ComputeError::ImageInspect {
                 source: backend_error(error),
-            })),
+            }),
         }
     }
 
     /// Whether the daemon answers.
-    pub async fn ping(&self) -> Result<(), SandboxError> {
-        self.client.ping().await.map(|_| ()).map_err(|source| {
-            SandboxError::Compute(ComputeError::Connection {
+    pub async fn ping(&self) -> Result<(), ComputeError> {
+        self.client
+            .ping()
+            .await
+            .map(|_| ())
+            .map_err(|source| ComputeError::Connection {
                 source: backend_error(source),
             })
-        })
     }
 
     /// Whether an image is present locally, without pulling it.
-    pub async fn image_present(&self, image: &str) -> Result<bool, SandboxError> {
+    pub async fn image_present(&self, image: &str) -> Result<bool, ComputeError> {
         match self.client.inspect_image(image).await {
             Ok(_) => Ok(true),
             Err(error) if is_not_found(&error) => Ok(false),
-            Err(error) => Err(SandboxError::Compute(ComputeError::ImageInspect {
+            Err(error) => Err(ComputeError::ImageInspect {
                 source: backend_error(error),
-            })),
+            }),
         }
     }
 
-    async fn pull_image(&self, image: &str) -> Result<(), SandboxError> {
+    async fn pull_image(&self, image: &str) -> Result<(), ComputeError> {
         let options = Some(CreateImageOptions {
             from_image: Some(image.to_string()),
             ..Default::default()
@@ -180,17 +140,15 @@ impl DockerCompute {
         let mut stream = self.client.create_image(options, None, None);
 
         while let Some(item) = stream.next().await {
-            item.map_err(|source| {
-                SandboxError::Compute(ComputeError::ImagePull {
-                    source: backend_error(source),
-                })
+            item.map_err(|source| ComputeError::ImagePull {
+                source: backend_error(source),
             })?;
         }
 
         Ok(())
     }
 
-    pub async fn create_container(&self, spec: &ContainerSpec) -> Result<String, SandboxError> {
+    pub async fn create_container(&self, spec: &ContainerSpec) -> Result<String, ComputeError> {
         let options = Some(
             CreateContainerOptionsBuilder::default()
                 .name(&spec.name)
@@ -229,8 +187,19 @@ impl DockerCompute {
             },
             working_dir: spec.working_dir.clone(),
             env,
+            labels: Some(spec.labels.clone()),
             host_config: Some(HostConfig {
                 port_bindings,
+                pids_limit: spec.pids_limit,
+                memory: spec.memory_bytes,
+                nano_cpus: spec.nano_cpus,
+                cap_add: if spec.cap_add.is_empty() {
+                    None
+                } else {
+                    Some(spec.cap_add.clone())
+                },
+                cap_drop: Some(vec!["ALL".to_string()]),
+                security_opt: Some(vec!["no-new-privileges".to_string()]),
                 ..Default::default()
             }),
             ..Default::default()
@@ -240,10 +209,8 @@ impl DockerCompute {
             .client
             .create_container(options, config)
             .await
-            .map_err(|source| {
-                SandboxError::Compute(ComputeError::ContainerProvision {
-                    source: backend_error(source),
-                })
+            .map_err(|source| ComputeError::ContainerProvision {
+                source: backend_error(source),
             })?;
 
         if let Err(source) = self.client.start_container(&response.id, None).await {
@@ -259,53 +226,15 @@ impl DockerCompute {
                     }),
                 )
                 .await;
-            return Err(SandboxError::Compute(ComputeError::ContainerProvision {
+            return Err(ComputeError::ContainerProvision {
                 source: backend_error(source),
-            }));
+            });
         }
 
         Ok(response.id)
     }
 
-    pub async fn inspect_container(
-        &self,
-        container_id: &str,
-    ) -> Result<ContainerInspection, SandboxError> {
-        let inspect = self
-            .client
-            .inspect_container(container_id, None)
-            .await
-            .map_err(|source| {
-                SandboxError::Compute(ComputeError::ContainerInspect {
-                    source: backend_error(source),
-                })
-            })?;
-        let env = inspect
-            .config
-            .and_then(|config| config.env)
-            .unwrap_or_default();
-        let port_bindings = inspect
-            .host_config
-            .and_then(|config| config.port_bindings)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|(key, bindings)| {
-                let bindings = bindings
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|binding| PortBindingSpec {
-                        host_ip: binding.host_ip,
-                        host_port: binding.host_port,
-                    })
-                    .collect();
-                (key, bindings)
-            })
-            .collect();
-
-        Ok(ContainerInspection { env, port_bindings })
-    }
-
-    pub async fn state(&self, container_id: &str) -> Result<SandboxState, SandboxError> {
+    pub async fn state(&self, container_id: &str) -> Result<SandboxState, ComputeError> {
         match self.client.inspect_container(container_id, None).await {
             Ok(info) => {
                 let state = info.state.as_ref();
@@ -318,22 +247,20 @@ impl DockerCompute {
                 }
             }
             Err(error) if is_not_found(&error) => Ok(SandboxState::Missing),
-            Err(source) => Err(SandboxError::Compute(ComputeError::ContainerInspect {
+            Err(source) => Err(ComputeError::ContainerInspect {
                 source: backend_error(source),
-            })),
+            }),
         }
     }
 
-    pub async fn list(&self, name_prefix: &str) -> Result<Vec<SandboxSummary>, SandboxError> {
+    pub async fn list(&self, name_prefix: &str) -> Result<Vec<SandboxSummary>, ComputeError> {
         let options = Some(ListContainersOptionsBuilder::default().all(true).build());
         let containers = self
             .client
             .list_containers(options)
             .await
-            .map_err(|source| {
-                SandboxError::Compute(ComputeError::ContainerList {
-                    source: backend_error(source),
-                })
+            .map_err(|source| ComputeError::ContainerList {
+                source: backend_error(source),
             })?;
 
         Ok(containers
@@ -350,52 +277,62 @@ impl DockerCompute {
                     .unwrap_or(false)
             })
             .filter_map(|container| {
-                let id = container.id?;
-                let names = container
-                    .names
-                    .unwrap_or_default()
-                    .iter()
-                    .map(|name| strip_leading_slash(name).to_string())
-                    .collect();
-                let state = match container.state {
-                    Some(bollard::models::ContainerSummaryStateEnum::RUNNING) => {
-                        SandboxState::Running
-                    }
-                    Some(bollard::models::ContainerSummaryStateEnum::PAUSED) => {
-                        SandboxState::Paused
-                    }
-                    _ => SandboxState::Stopped,
-                };
-                Some(SandboxSummary { id, names, state })
+                Some(SandboxSummary {
+                    id: container.id?,
+                    labels: container.labels.unwrap_or_default(),
+                })
             })
             .collect())
     }
 
-    pub async fn pause_container(&self, container_id: &str) -> Result<(), SandboxError> {
+    /// Replace the resource bounds of a running sandbox.
+    pub async fn update_limits(
+        &self,
+        container_id: &str,
+        memory_bytes: Option<u64>,
+        tasks: Option<u32>,
+        nano_cpus: Option<i64>,
+    ) -> Result<(), ComputeError> {
+        let body = bollard::models::ContainerUpdateBody {
+            memory: memory_bytes.map(|bytes| bytes as i64),
+            pids_limit: tasks.map(i64::from),
+            nano_cpus,
+            ..Default::default()
+        };
+        self.client
+            .update_container(container_id, body)
+            .await
+            .map(|_| ())
+            .map_err(|source| ComputeError::ContainerLimits {
+                source: backend_error(source),
+            })
+    }
+
+    pub async fn pause_container(&self, container_id: &str) -> Result<(), ComputeError> {
         match self.client.pause_container(container_id).await {
             Ok(()) => Ok(()),
             Err(bollard::errors::Error::DockerResponseServerError {
                 status_code: 409, ..
             }) => Ok(()),
-            Err(source) => Err(SandboxError::Compute(ComputeError::ContainerPause {
+            Err(source) => Err(ComputeError::ContainerPause {
                 source: backend_error(source),
-            })),
+            }),
         }
     }
 
-    pub async fn resume_container(&self, container_id: &str) -> Result<(), SandboxError> {
+    pub async fn resume_container(&self, container_id: &str) -> Result<(), ComputeError> {
         match self.client.unpause_container(container_id).await {
             Ok(()) => Ok(()),
             Err(bollard::errors::Error::DockerResponseServerError {
                 status_code: 409, ..
             }) => Ok(()),
-            Err(source) => Err(SandboxError::Compute(ComputeError::ContainerResume {
+            Err(source) => Err(ComputeError::ContainerResume {
                 source: backend_error(source),
-            })),
+            }),
         }
     }
 
-    pub async fn delete_container(&self, container_id: &str) -> Result<(), SandboxError> {
+    pub async fn delete_container(&self, container_id: &str) -> Result<(), ComputeError> {
         match self
             .client
             .remove_container(
@@ -411,9 +348,9 @@ impl DockerCompute {
             Err(bollard::errors::Error::DockerResponseServerError {
                 status_code: 404, ..
             }) => Ok(()),
-            Err(source) => Err(SandboxError::Compute(ComputeError::ContainerDelete {
+            Err(source) => Err(ComputeError::ContainerDelete {
                 source: backend_error(source),
-            })),
+            }),
         }
     }
 
@@ -422,7 +359,7 @@ impl DockerCompute {
         container_id: &str,
         command: &[String],
         working_dir: Option<&str>,
-    ) -> Result<ExecutionResult, SandboxError> {
+    ) -> Result<Execution, ComputeError> {
         let command_args: Vec<&str> = command.iter().map(String::as_str).collect();
         let exec_options = CreateExecOptions {
             attach_stdout: Some(true),
@@ -436,10 +373,8 @@ impl DockerCompute {
             .client
             .create_exec(container_id, exec_options)
             .await
-            .map_err(|source| {
-                SandboxError::Compute(ComputeError::ContainerExec {
-                    source: backend_error(source),
-                })
+            .map_err(|source| ComputeError::ContainerExec {
+                source: backend_error(source),
             })?;
 
         let mut stdout = Vec::new();
@@ -449,32 +384,40 @@ impl DockerCompute {
             .client
             .start_exec(&exec.id, None::<StartExecOptions>)
             .await
-            .map_err(|source| {
-                SandboxError::Compute(ComputeError::ContainerExec {
-                    source: backend_error(source),
-                })
+            .map_err(|source| ComputeError::ContainerExec {
+                source: backend_error(source),
             })?;
 
         if let StartExecResults::Attached { mut output, .. } = results {
-            while let Some(item) = output.next().await {
-                match item.map_err(|source| {
-                    SandboxError::Compute(ComputeError::ContainerExec {
+            let collect = async {
+                while let Some(item) = output.next().await {
+                    match item.map_err(|source| ComputeError::ContainerExec {
                         source: backend_error(source),
-                    })
-                })? {
-                    LogOutput::StdOut { message } | LogOutput::Console { message } => {
-                        stdout.extend_from_slice(&message)
+                    })? {
+                        LogOutput::StdOut { message } | LogOutput::Console { message } => {
+                            append_capped(&mut stdout, &message)
+                        }
+                        LogOutput::StdErr { message } => append_capped(&mut stderr, &message),
+                        LogOutput::StdIn { .. } => {}
                     }
-                    LogOutput::StdErr { message } => stderr.extend_from_slice(&message),
-                    LogOutput::StdIn { .. } => {}
                 }
+                Ok::<(), ComputeError>(())
+            };
+
+            // A command that never returns must not wedge the caller, and its
+            // output must not exhaust the host.
+            if tokio::time::timeout(EXEC_TIMEOUT, collect).await.is_err() {
+                self.kill_exec_process(container_id, &exec.id).await;
+                return Err(ComputeError::Timeout {
+                    seconds: EXEC_TIMEOUT.as_secs(),
+                });
             }
         }
 
         let inspect = self.client.inspect_exec(&exec.id).await.map_err(|source| {
-            SandboxError::Compute(ComputeError::ContainerExec {
+            ComputeError::ContainerExec {
                 source: backend_error(source),
-            })
+            }
         })?;
         let exit_code = inspect
             .exit_code
@@ -482,11 +425,48 @@ impl DockerCompute {
             .try_into()
             .unwrap_or(i32::MAX);
 
-        Ok(ExecutionResult {
+        Ok(Execution {
             exit_code,
             stdout: String::from_utf8_lossy(&stdout).to_string(),
             stderr: String::from_utf8_lossy(&stderr).to_string(),
         })
+    }
+
+    /// Best-effort kill of an exec that outlived its deadline.
+    async fn kill_exec_process(&self, container_id: &str, exec_id: &str) {
+        let Ok(inspect) = self.client.inspect_exec(exec_id).await else {
+            return;
+        };
+        let Some(pid) = inspect.pid else {
+            return;
+        };
+
+        let options = CreateExecOptions {
+            attach_stdout: Some(false),
+            attach_stderr: Some(false),
+            cmd: Some(vec![
+                "sh".to_string(),
+                "-c".to_string(),
+                format!("kill -KILL {pid}"),
+            ]),
+            ..Default::default()
+        };
+        let Ok(exec) = self.client.create_exec(container_id, options).await else {
+            return;
+        };
+        let started = self
+            .client
+            .start_exec(
+                &exec.id,
+                Some(StartExecOptions {
+                    detach: true,
+                    ..Default::default()
+                }),
+            )
+            .await;
+        if let Err(error) = started {
+            tracing::warn!(%error, container = %container_id, pid, "could not kill a timed-out command");
+        }
     }
 
     pub async fn upload_path(
@@ -494,9 +474,16 @@ impl DockerCompute {
         container_id: &str,
         src_path: &Path,
         dest_path: &str,
-    ) -> Result<(), SandboxError> {
-        let tar = build_tar(src_path)?;
-        self.upload_tar(container_id, dest_path, &tar).await
+    ) -> Result<(), ComputeError> {
+        // Build the archive into a temporary file and stream it to the daemon,
+        // so a large workspace is never held in memory.
+        let file = write_tar(
+            src_path,
+            CappedFile::new(tempfile::tempfile()?, EXTRACT_MAX_BYTES),
+        )?;
+        let mut file = file.into_inner();
+        file.seek(SeekFrom::Start(0))?;
+        self.upload_stream(container_id, dest_path, file).await
     }
 
     pub async fn download_path(
@@ -504,89 +491,88 @@ impl DockerCompute {
         container_id: &str,
         src_path: &str,
         dest_path: &Path,
-    ) -> Result<(), SandboxError> {
-        let tar = self.download_tar(container_id, src_path).await?;
-        extract_tar(dest_path, &tar)?;
+        workspace: &str,
+    ) -> Result<(), ComputeError> {
+        // Stream the archive to a temporary file so a large workspace never
+        // has to fit in memory before the cap or extraction can reject it.
+        let mut staged = tempfile::tempfile()?;
+        self.download_into(container_id, src_path, &mut staged)
+            .await?;
+        staged.seek(SeekFrom::Start(0))?;
+        extract_tar(dest_path, staged, workspace)?;
         Ok(())
     }
 
-    async fn upload_tar(
+    async fn upload_stream(
         &self,
         container_id: &str,
         dest_path: &str,
-        tar: &[u8],
-    ) -> Result<(), SandboxError> {
+        file: fs::File,
+    ) -> Result<(), ComputeError> {
         let options = Some(
             UploadToContainerOptionsBuilder::default()
                 .path(dest_path)
                 .build(),
         );
-        let body = body_full(Bytes::from(tar.to_vec()));
+        let body = body_try_stream(file_chunks(file));
         self.client
             .upload_to_container(container_id, options, body)
             .await
-            .map_err(|source| {
-                SandboxError::Compute(ComputeError::ContainerUpload {
-                    source: backend_error(source),
-                })
+            .map_err(|source| ComputeError::ContainerUpload {
+                source: backend_error(source),
             })
     }
 
-    async fn download_tar(
+    async fn download_into(
         &self,
         container_id: &str,
         src_path: &str,
-    ) -> Result<Vec<u8>, SandboxError> {
+        destination: &mut fs::File,
+    ) -> Result<(), ComputeError> {
         let options = Some(
             DownloadFromContainerOptionsBuilder::default()
                 .path(src_path)
                 .build(),
         );
         let mut stream = self.client.download_from_container(container_id, options);
-        let mut buffer = Vec::new();
+        let mut total = 0u64;
         while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|source| {
-                SandboxError::Compute(ComputeError::ContainerDownload {
-                    source: backend_error(source),
-                })
+            let chunk = chunk.map_err(|source| ComputeError::ContainerDownload {
+                source: backend_error(source),
             })?;
-            buffer.extend_from_slice(&chunk);
+            total = total.saturating_add(chunk.len() as u64);
+            if total > EXTRACT_MAX_BYTES {
+                return Err(ComputeError::TransferTooLarge {
+                    limit_bytes: EXTRACT_MAX_BYTES,
+                });
+            }
+            destination.write_all(&chunk)?;
         }
-        Ok(buffer)
+        destination.flush()?;
+        Ok(())
     }
 }
 
-fn connect_docker_client() -> Result<Docker, SandboxError> {
-    match select_endpoint_source(docker_context_from_env(), docker_host_from_env()) {
-        EndpointSource::ContextEnv { name } => {
-            let host = docker_host_for_context(Some(&name)).ok_or_else(|| {
-                SandboxError::Config(format!(
-                    "DOCKER_CONTEXT is set to '{name}' but the docker CLI could not resolve it"
-                ))
-            })?;
-            connect_with_host(&host)
-        }
-        EndpointSource::HostEnv { host } => connect_with_host(&host),
-        EndpointSource::CliContext => match docker_host_for_context(None) {
-            Some(host) => connect_with_host(&host),
-            None => DockerCompute::connect_with_defaults(),
-        },
+fn connect_docker_client() -> Result<Docker, ComputeError> {
+    // A TLS configuration this client cannot honour must not be silently
+    // downgraded to cleartext.
+    if std::env::var("DOCKER_TLS_VERIFY").is_ok() {
+        return Err(ComputeError::Config(
+            "DOCKER_TLS_VERIFY is set but TLS endpoints are not supported; \
+             connect over the local socket or unset it"
+                .to_string(),
+        ));
     }
-}
 
-/// Which endpoint to use, resolved in the same order as the Docker CLI:
-/// `DOCKER_CONTEXT` overrides `DOCKER_HOST`, which overrides the active context.
-enum EndpointSource {
-    ContextEnv { name: String },
-    HostEnv { host: String },
-    CliContext,
-}
+    if let Some(name) = docker_context_from_env() {
+        return Err(ComputeError::Config(format!(
+            "DOCKER_CONTEXT '{name}' is not supported; set DOCKER_HOST or unset it"
+        )));
+    }
 
-fn select_endpoint_source(context: Option<String>, host: Option<String>) -> EndpointSource {
-    match (context, host) {
-        (Some(name), _) => EndpointSource::ContextEnv { name },
-        (None, Some(host)) => EndpointSource::HostEnv { host },
-        (None, None) => EndpointSource::CliContext,
+    match docker_host_from_env() {
+        Some(host) => connect_with_host(&host),
+        None => DockerCompute::connect_with_defaults(),
     }
 }
 
@@ -605,25 +591,7 @@ fn non_empty_env(name: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-/// Asks the docker CLI for a context endpoint. `None` means the active context,
-/// which is already shaped by `DOCKER_CONTEXT` and `docker context use`.
-fn docker_host_for_context(context: Option<&str>) -> Option<String> {
-    let mut command = Command::new("docker");
-    command.args(["context", "inspect"]);
-    if let Some(context) = context {
-        command.arg(context);
-    }
-    command.args(["-f", "{{.Endpoints.docker.Host}}"]);
-
-    let output = command.output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let host = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if host.is_empty() { None } else { Some(host) }
-}
-
-fn connect_with_host(host: &str) -> Result<Docker, SandboxError> {
+fn connect_with_host(host: &str) -> Result<Docker, ComputeError> {
     let (scheme, rest) = match host.split_once("://") {
         Some((scheme, rest)) => (scheme, rest),
         None => ("unix", host),
@@ -634,121 +602,114 @@ fn connect_with_host(host: &str) -> Result<Docker, SandboxError> {
             #[cfg(unix)]
             {
                 Docker::connect_with_socket(rest, 120, API_DEFAULT_VERSION).map_err(|source| {
-                    SandboxError::Compute(ComputeError::Connection {
+                    ComputeError::Connection {
                         source: backend_error(source),
-                    })
+                    }
                 })
             }
             #[cfg(not(unix))]
             {
-                Err(SandboxError::Compute(ComputeError::Connection {
+                Err(ComputeError::Connection {
                     source: BackendError::other(std::io::Error::new(
                         std::io::ErrorKind::InvalidInput,
                         "unix backend host is not supported on this platform",
                     )),
-                }))
+                })
             }
         }
-        "tcp" => {
-            let endpoint = format!("http://{}", rest);
-            Docker::connect_with_http(&endpoint, 120, API_DEFAULT_VERSION).map_err(|source| {
-                SandboxError::Compute(ComputeError::Connection {
-                    source: backend_error(source),
-                })
-            })
+        // A cleartext TCP endpoint would send the workspace and every command
+        // in the open. TLS is not wired yet, so the only safe answer is no.
+        "tcp" => Err(ComputeError::Config(
+            "DOCKER_HOST uses tcp://, but remote daemons are not supported; \
+             connect over the local unix socket"
+                .to_string(),
+        )),
+        other => Err(ComputeError::Config(format!(
+            "DOCKER_HOST scheme '{other}' is not supported; use unix://"
+        ))),
+    }
+}
+
+/// A buffer that refuses to grow past the transfer ceiling.
+#[cfg(test)]
+struct CappedBuffer {
+    bytes: Vec<u8>,
+    limit: u64,
+}
+
+#[cfg(test)]
+impl CappedBuffer {
+    fn new(limit: u64) -> Self {
+        Self {
+            bytes: Vec::new(),
+            limit,
         }
-        _ => DockerCompute::connect_with_defaults(),
+    }
+
+    fn into_vec(self) -> Vec<u8> {
+        self.bytes
     }
 }
 
-impl Compute for DockerCompute {
-    fn ensure_image<'a>(&'a self, image: &'a str) -> BoxFuture<'a, Result<(), SandboxError>> {
-        Box::pin(async move { DockerCompute::ensure_image(self, image).await })
+#[cfg(test)]
+impl Write for CappedBuffer {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.bytes.len() as u64 + buf.len() as u64 > self.limit {
+            return Err(std::io::Error::other(format!(
+                "the archive exceeds the transfer limit of {} bytes",
+                self.limit
+            )));
+        }
+        self.bytes.extend_from_slice(buf);
+        Ok(buf.len())
     }
 
-    fn create_container<'a>(
-        &'a self,
-        spec: &'a ContainerSpec,
-    ) -> BoxFuture<'a, Result<String, SandboxError>> {
-        Box::pin(async move { DockerCompute::create_container(self, spec).await })
-    }
-
-    fn inspect_container<'a>(
-        &'a self,
-        container_id: &'a str,
-    ) -> BoxFuture<'a, Result<ContainerInspection, SandboxError>> {
-        Box::pin(async move { DockerCompute::inspect_container(self, container_id).await })
-    }
-
-    fn pause_container<'a>(
-        &'a self,
-        container_id: &'a str,
-    ) -> BoxFuture<'a, Result<(), SandboxError>> {
-        Box::pin(async move { DockerCompute::pause_container(self, container_id).await })
-    }
-
-    fn resume_container<'a>(
-        &'a self,
-        container_id: &'a str,
-    ) -> BoxFuture<'a, Result<(), SandboxError>> {
-        Box::pin(async move { DockerCompute::resume_container(self, container_id).await })
-    }
-
-    fn delete_container<'a>(
-        &'a self,
-        container_id: &'a str,
-    ) -> BoxFuture<'a, Result<(), SandboxError>> {
-        Box::pin(async move { DockerCompute::delete_container(self, container_id).await })
-    }
-
-    fn exec<'a>(
-        &'a self,
-        container_id: &'a str,
-        command: &'a [String],
-        working_dir: Option<&'a str>,
-    ) -> BoxFuture<'a, Result<ExecutionResult, SandboxError>> {
-        Box::pin(async move { DockerCompute::exec(self, container_id, command, working_dir).await })
-    }
-
-    fn state<'a>(
-        &'a self,
-        container_id: &'a str,
-    ) -> BoxFuture<'a, Result<SandboxState, SandboxError>> {
-        Box::pin(async move { DockerCompute::state(self, container_id).await })
-    }
-
-    fn list<'a>(
-        &'a self,
-        name_prefix: &'a str,
-    ) -> BoxFuture<'a, Result<Vec<SandboxSummary>, SandboxError>> {
-        Box::pin(async move { DockerCompute::list(self, name_prefix).await })
-    }
-
-    fn upload_path<'a>(
-        &'a self,
-        container_id: &'a str,
-        src_path: &'a Path,
-        dest_path: &'a str,
-    ) -> BoxFuture<'a, Result<(), SandboxError>> {
-        Box::pin(async move {
-            DockerCompute::upload_path(self, container_id, src_path, dest_path).await
-        })
-    }
-
-    fn download_path<'a>(
-        &'a self,
-        container_id: &'a str,
-        src_path: &'a str,
-        dest_path: &'a Path,
-    ) -> BoxFuture<'a, Result<(), SandboxError>> {
-        Box::pin(async move {
-            DockerCompute::download_path(self, container_id, src_path, dest_path).await
-        })
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
     }
 }
 
-fn build_tar(src_path: &Path) -> Result<Vec<u8>, SandboxError> {
-    let mut builder = Builder::new(Vec::new());
+/// A file writer that enforces the transfer ceiling as it writes.
+struct CappedFile {
+    inner: fs::File,
+    written: u64,
+    limit: u64,
+}
+
+impl CappedFile {
+    fn new(inner: fs::File, limit: u64) -> Self {
+        Self {
+            inner,
+            written: 0,
+            limit,
+        }
+    }
+
+    fn into_inner(self) -> fs::File {
+        self.inner
+    }
+}
+
+impl Write for CappedFile {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.written + buf.len() as u64 > self.limit {
+            return Err(std::io::Error::other(format!(
+                "the archive exceeds the transfer limit of {} bytes",
+                self.limit
+            )));
+        }
+        let written = self.inner.write(buf)?;
+        self.written += written as u64;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+fn write_tar<W: Write>(src_path: &Path, writer: W) -> Result<W, ComputeError> {
+    let mut builder = Builder::new(writer);
     let metadata = fs::symlink_metadata(src_path)?;
     if metadata.is_dir() {
         append_dir(&mut builder, src_path, src_path)?;
@@ -758,7 +719,7 @@ fn build_tar(src_path: &Path) -> Result<Vec<u8>, SandboxError> {
             .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid path"))?;
         builder.append_path_with_name(src_path, name)?;
     } else {
-        return Err(SandboxError::Config(format!(
+        return Err(ComputeError::Config(format!(
             "refusing to transfer a non-regular path: {}",
             src_path.display()
         )));
@@ -767,7 +728,33 @@ fn build_tar(src_path: &Path) -> Result<Vec<u8>, SandboxError> {
     Ok(builder.into_inner()?)
 }
 
-fn append_dir(builder: &mut Builder<Vec<u8>>, root: &Path, dir: &Path) -> Result<(), SandboxError> {
+#[cfg(test)]
+fn build_tar(src_path: &Path) -> Result<Vec<u8>, ComputeError> {
+    Ok(write_tar(src_path, CappedBuffer::new(EXTRACT_MAX_BYTES))?.into_vec())
+}
+
+/// Read a staged archive back in chunks for the daemon request body.
+fn file_chunks(
+    file: fs::File,
+) -> impl futures_util::Stream<Item = std::io::Result<Bytes>> + Send + 'static {
+    futures_util::stream::try_unfold(file, |mut file| async move {
+        let mut buffer = vec![0u8; 64 * 1024];
+        match file.read(&mut buffer) {
+            Ok(0) => Ok(None),
+            Ok(read) => {
+                buffer.truncate(read);
+                Ok(Some((Bytes::from(buffer), file)))
+            }
+            Err(error) => Err(error),
+        }
+    })
+}
+
+fn append_dir<W: Write>(
+    builder: &mut Builder<W>,
+    root: &Path,
+    dir: &Path,
+) -> Result<(), ComputeError> {
     let entries = fs::read_dir(dir)?;
     let mut has_entries = false;
 
@@ -802,63 +789,118 @@ fn append_dir(builder: &mut Builder<Vec<u8>>, root: &Path, dir: &Path) -> Result
     Ok(())
 }
 
-fn extract_tar(dest_path: &Path, tar: &[u8]) -> Result<(), SandboxError> {
-    fs::create_dir_all(dest_path)?;
-    let mut archive = Archive::new(Cursor::new(tar));
+/// The destination-relative path an archive entry lands at, or `None` for
+/// entries that are skipped.
+fn stripped_entry(path: &Path, workspace: &str) -> Option<std::path::PathBuf> {
+    let workspace_git = format!("{workspace}/.git");
+    if path.starts_with(".git") || path.starts_with(&workspace_git) {
+        return None;
+    }
 
+    let workspace_prefix = format!("{workspace}/");
+    let stripped = path
+        .strip_prefix(&workspace_prefix)
+        .or_else(|_| path.strip_prefix(format!("/{workspace_prefix}")))
+        .or_else(|_| path.strip_prefix(workspace))
+        .unwrap_or(path);
+
+    if stripped.as_os_str().is_empty() {
+        None
+    } else {
+        Some(stripped.to_path_buf())
+    }
+}
+
+fn extract_tar<R: Read + Seek>(
+    dest_path: &Path,
+    mut source: R,
+    workspace: &str,
+) -> Result<(), ComputeError> {
+    fs::create_dir_all(dest_path)?;
+    let workspace = workspace.trim_matches('/');
+
+    // Validate the whole archive before writing anything, so a refusal cannot
+    // leave a half-extracted tree behind.
+    let mut entries = 0usize;
+    let mut bytes = 0u64;
+    {
+        let mut archive = Archive::new(&mut source);
+        for entry in archive.entries()? {
+            let entry = entry?;
+            entries += 1;
+            bytes = bytes.saturating_add(entry.header().size().unwrap_or(0));
+            if entries > EXTRACT_MAX_ENTRIES || bytes > EXTRACT_MAX_BYTES {
+                return Err(ComputeError::Config(format!(
+                    "the archive exceeds the transfer limit of {EXTRACT_MAX_ENTRIES} entries \
+                     or {EXTRACT_MAX_BYTES} bytes"
+                )));
+            }
+
+            let path = entry.path()?;
+            let Some(stripped) = stripped_entry(&path, workspace) else {
+                continue;
+            };
+
+            // An archive is agent-controlled: only regular files and
+            // directories may land on the host, and nothing may resolve above
+            // the staging root.
+            let entry_type = entry.header().entry_type();
+            if !(entry_type.is_file() || entry_type.is_dir()) {
+                return Err(ComputeError::Config(format!(
+                    "archive contains a non-regular entry: {}",
+                    stripped.display()
+                )));
+            }
+            if stripped.is_absolute()
+                || stripped
+                    .components()
+                    .any(|component| matches!(component, std::path::Component::ParentDir))
+            {
+                return Err(ComputeError::Config(format!(
+                    "archive entry escapes the staging root: {}",
+                    stripped.display()
+                )));
+            }
+        }
+    }
+
+    source.seek(SeekFrom::Start(0))?;
+    let mut archive = Archive::new(source);
     for entry in archive.entries()? {
         let mut entry = entry?;
         let path = entry.path()?;
-
-        // Skip .git directory to prevent repository corruption
-        if path.starts_with(".git") || path.starts_with("src/.git") {
+        let Some(stripped) = stripped_entry(&path, workspace) else {
             continue;
-        }
-
-        // Strip leading "src/" or "/src/" from paths to avoid replicating the /src directory
-        let stripped_path = path
-            .strip_prefix("src/")
-            .or_else(|_| path.strip_prefix("/src/"))
-            .or_else(|_| path.strip_prefix("src"))
-            .unwrap_or(&path);
-
-        // Skip if stripping results in empty path (e.g., if path was exactly "src")
-        if stripped_path.as_os_str().is_empty() {
-            continue;
-        }
-
-        // An archive is agent-controlled: only regular files and directories
-        // may land on the host, and nothing may resolve above the staging root.
-        let entry_type = entry.header().entry_type();
-        if !(entry_type.is_file() || entry_type.is_dir()) {
-            return Err(SandboxError::Config(format!(
-                "archive contains a non-regular entry: {}",
-                stripped_path.display()
-            )));
-        }
-        if stripped_path.is_absolute()
-            || stripped_path
-                .components()
-                .any(|component| matches!(component, std::path::Component::ParentDir))
-        {
-            return Err(SandboxError::Config(format!(
-                "archive entry escapes the staging root: {}",
-                stripped_path.display()
-            )));
-        }
-
-        let dest = dest_path.join(stripped_path);
-
-        // Create parent directories if needed
+        };
+        let dest = dest_path.join(stripped);
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent)?;
         }
-
-        // Extract the entry to the stripped path
         entry.unpack(&dest)?;
     }
 
     Ok(())
+}
+
+/// How many entries and bytes a transfer may carry into the host.
+const EXTRACT_MAX_ENTRIES: usize = 200_000;
+const EXTRACT_MAX_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+
+/// How long a command may run before it is abandoned.
+const EXEC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
+/// How much of one stream is kept before it is truncated.
+const EXEC_OUTPUT_CAP: usize = 8 * 1024 * 1024;
+
+fn append_capped(buffer: &mut Vec<u8>, chunk: &[u8]) {
+    let truncated = buffer.len() >= EXEC_OUTPUT_CAP;
+    let remaining = EXEC_OUTPUT_CAP.saturating_sub(buffer.len());
+    if !truncated && remaining > 0 {
+        buffer.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+    }
+    if buffer.len() >= EXEC_OUTPUT_CAP && !buffer.ends_with(b"\n[truncated]\n") {
+        buffer.extend_from_slice(b"\n[truncated]\n");
+    }
 }
 
 /// Docker summary names carry a leading `/` that container names do not.
@@ -894,6 +936,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_remote_cleartext_endpoint_is_refused() {
+        let error = connect_with_host("tcp://127.0.0.1:2375").expect_err("tcp refused");
+        assert!(error.to_string().contains("tcp://"), "{error}");
+
+        let error = connect_with_host("ssh://host").expect_err("unknown scheme refused");
+        assert!(error.to_string().contains("ssh"), "{error}");
+    }
+
+    #[test]
     fn summary_names_drop_the_docker_leading_slash() {
         assert_eq!(
             strip_leading_slash("/litterbox-repo-slug"),
@@ -905,37 +956,14 @@ mod tests {
         );
     }
 
-    #[test]
-    fn docker_context_env_beats_docker_host_env() {
-        let source = select_endpoint_source(
-            Some("remote".to_string()),
-            Some("unix:///tmp/env.sock".to_string()),
-        );
-        assert!(matches!(source, EndpointSource::ContextEnv { name } if name == "remote"));
-    }
-
-    #[test]
-    fn docker_host_env_used_without_context_env() {
-        let source = select_endpoint_source(None, Some("unix:///tmp/env.sock".to_string()));
-        assert!(
-            matches!(source, EndpointSource::HostEnv { host } if host == "unix:///tmp/env.sock")
-        );
-    }
-
-    #[test]
-    fn active_context_used_when_neither_env_is_set() {
-        assert!(matches!(
-            select_endpoint_source(None, None),
-            EndpointSource::CliContext
-        ));
-    }
-
     #[tokio::test]
+    #[ignore = "requires a Docker daemon; run with --ignored and LITTERBOX_DOCKER_TESTS=1"]
     async fn docker_connects_and_ensures_image() -> Result<(), Box<dyn std::error::Error>> {
         // Requires a running Docker daemon; opt in with LITTERBOX_DOCKER_TESTS.
-        if std::env::var("LITTERBOX_DOCKER_TESTS").is_err() {
-            return Ok(());
-        }
+        assert!(
+            std::env::var("LITTERBOX_DOCKER_TESTS").is_ok(),
+            "set LITTERBOX_DOCKER_TESTS=1 and run with --ignored to exercise this test"
+        );
 
         let compute = DockerCompute::connect()?;
         compute.ensure_image("busybox:latest").await?;
@@ -946,8 +974,40 @@ mod tests {
 #[cfg(test)]
 mod transfer_tests {
     use std::fs;
+    use std::io::Cursor;
 
     use super::{build_tar, extract_tar};
+
+    #[test]
+    fn the_archive_buffer_refuses_to_grow_past_the_limit() {
+        use std::io::Write;
+
+        let mut buffer = super::CappedBuffer::new(4);
+        buffer.write_all(b"four").expect("within the limit");
+        let error = buffer.write_all(b"!").expect_err("past the limit");
+        assert!(error.to_string().contains("limit"), "{error}");
+    }
+
+    #[test]
+    fn the_staged_file_refuses_to_grow_past_the_limit() {
+        use std::io::Write;
+
+        let file = tempfile::tempfile().expect("temp file");
+        let mut capped = super::CappedFile::new(file, 4);
+        capped.write_all(b"four").expect("within the limit");
+        let error = capped.write_all(b"!").expect_err("past the limit");
+        assert!(error.to_string().contains("limit"), "{error}");
+    }
+
+    fn append_file(builder: &mut tar::Builder<Vec<u8>>, name: &str, contents: &[u8]) {
+        let mut header = tar::Header::new_gnu();
+        header.set_size(contents.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, name, contents)
+            .expect("append file");
+    }
 
     fn append_symlink(builder: &mut tar::Builder<Vec<u8>>, name: &str, target: &str) {
         let mut header = tar::Header::new_gnu();
@@ -963,16 +1023,41 @@ mod transfer_tests {
     #[test]
     fn extract_rejects_symlinks_and_writes_nothing() {
         let mut builder = tar::Builder::new(Vec::new());
+        append_file(&mut builder, "benign.txt", b"hello");
         append_symlink(&mut builder, "evil", "/etc/passwd");
         let archive = builder.into_inner().expect("finish tar");
 
         let dir = tempfile::tempdir().expect("tempdir");
-        let error = extract_tar(dir.path(), &archive).expect_err("symlink rejected");
+        let error =
+            extract_tar(dir.path(), Cursor::new(&archive), "/src").expect_err("symlink rejected");
         assert!(
             error.to_string().contains("non-regular"),
-            "unexpected error: {error}"
+            "the refusal names what it rejected: {error}"
         );
-        assert!(!dir.path().join("evil").exists());
+        assert!(
+            fs::read_dir(dir.path()).expect("read").next().is_none(),
+            "validation happens before anything is written"
+        );
+    }
+
+    #[test]
+    fn extraction_strips_the_workspace_the_caller_reports() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut builder = tar::Builder::new(Vec::new());
+        let mut header = tar::Header::new_gnu();
+        header.set_size(5);
+        header.set_mode(0o644);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, "sandbox/README.md", &b"hello"[..])
+            .expect("append");
+        let archive = builder.into_inner().expect("finish");
+
+        extract_tar(dir.path(), Cursor::new(&archive), "/sandbox").expect("extract");
+        assert_eq!(
+            fs::read_to_string(dir.path().join("README.md")).expect("read"),
+            "hello"
+        );
     }
 
     #[test]
@@ -991,7 +1076,8 @@ mod transfer_tests {
         let archive = builder.into_inner().expect("finish tar");
 
         let dir = tempfile::tempdir().expect("tempdir");
-        let error = extract_tar(dir.path(), &archive).expect_err("traversal rejected");
+        let error =
+            extract_tar(dir.path(), Cursor::new(&archive), "/src").expect_err("traversal rejected");
         assert!(
             error.to_string().contains("escapes"),
             "unexpected error: {error}"

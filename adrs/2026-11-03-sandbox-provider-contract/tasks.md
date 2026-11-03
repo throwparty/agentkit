@@ -249,7 +249,7 @@ Migrate this repository's .litterbox.toml to the new shape, update the configura
 | Depends On | T-009, T-015, T-016 |
 | References | documentation-parity,vocabulary-ownership,cli-surface,mcp-surface |
 
-### T-020: Parity sweep and dead code removal
+### T-020: [x] Parity sweep and dead code removal
 
 Remove what the contract supersedes: the old provider trait, SandboxMetadata, the compute accessor and the naming helpers on the public surface. Run the full suite, clippy and the lint, and confirm the generic surfaces carry no mechanism vocabulary.
 

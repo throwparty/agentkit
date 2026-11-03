@@ -1,11 +1,11 @@
 pub mod backends;
+pub mod cli;
 pub mod config;
 pub mod config_loader;
 pub mod domain;
-pub mod legacy_provider;
 pub mod mcp;
 pub mod metadata_store;
+pub mod orchestrator;
 pub mod sandbox;
-pub mod sandboxes;
 pub mod scm;
 pub mod vcs_store;
