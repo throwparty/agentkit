@@ -175,7 +175,7 @@ The Docker backend is re-expressed on the contract with its behaviour unchanged:
 
 ### FR-024: Arch: Module Boundaries
 
-The contract, each backend, the CLI, the MCP server and persistence are separate modules with declared dependencies: a backend may depend on the contract and on nothing else in Litterbox, and no backend may depend on another; the orchestration that pairs a branch with compute depends on the contract, the registry, SCM and persistence, and is the only module that performs that pairing; the CLI and the MCP server reach a backend through the orchestrator and the construction point rather than through its module; persistence depends on the contract's record types only. A rule broken fails the build.
+The contract, each backend, the CLI, the MCP server and persistence are separate modules with declared dependencies: a backend may depend on the contract and the shared error and slug kernel, and on nothing else in Litterbox, and no backend may depend on another; the orchestration that pairs a branch with compute depends on the contract, the registry, SCM and persistence, and is the only module that performs that pairing; the CLI and the MCP server reach a backend through the orchestrator and the construction point rather than through its module; persistence depends on the contract's record types only. A rule broken fails the build.
 
 **Slug:** `module-boundaries`
 

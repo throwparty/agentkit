@@ -6,7 +6,6 @@
 use agentkit_common::exit::ExitClass;
 
 use super::contract::Error;
-use crate::domain::{ComputeError, SandboxError};
 
 /// The class an agent-facing surface reports.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,34 +43,6 @@ impl Error {
     /// Whether the addressed sandbox does not exist.
     pub fn is_not_found(&self) -> bool {
         matches!(self, Self::NotFound { .. })
-    }
-}
-
-impl From<SandboxError> for Error {
-    fn from(error: SandboxError) -> Self {
-        match &error {
-            SandboxError::SandboxExists { name } => {
-                return Self::Conflict { name: name.clone() };
-            }
-            SandboxError::SandboxNotFound { name } => {
-                return Self::NotFound { name: name.clone() };
-            }
-            _ => {}
-        }
-
-        Self::Failed {
-            message: error.to_string(),
-            source: Some(Box::new(error)),
-        }
-    }
-}
-
-impl From<ComputeError> for Error {
-    fn from(error: ComputeError) -> Self {
-        Self::Failed {
-            message: error.to_string(),
-            source: Some(Box::new(error)),
-        }
     }
 }
 

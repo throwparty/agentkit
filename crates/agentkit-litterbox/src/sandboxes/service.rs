@@ -94,7 +94,7 @@ impl Sandboxes {
         if let Err(error) = metadata_store::store_sandbox(&self.project_slug, &stored) {
             let _ = selected.core.delete(&record).await;
             let _ = self.scm.delete_branch(&name);
-            return Err(error.into());
+            return Err(error);
         }
 
         Ok(record)
@@ -189,7 +189,7 @@ impl Sandboxes {
                 Ok(Some(LoadedSandbox::Current(stored))) => listing.sandboxes.push(stored.sandbox),
                 Ok(Some(LoadedSandbox::Legacy { .. })) => listing.legacy.push(name),
                 Ok(None) => {}
-                Err(error) => return Err(error.into()),
+                Err(error) => return Err(error),
             }
         }
         Ok(listing)
@@ -495,6 +495,38 @@ impl Sandboxes {
 
     fn valid_name(&self, name: &str) -> Result<String, Error> {
         crate::domain::slugify_name(name).map_err(|error| Error::failed(error.to_string()))
+    }
+}
+
+/// Conversions from the pre-contract error types.
+///
+/// They live with the orchestrator rather than in the contract, so the contract
+/// imports nothing internal.
+impl From<SandboxError> for Error {
+    fn from(error: SandboxError) -> Self {
+        match &error {
+            SandboxError::SandboxExists { name } => {
+                return Self::Conflict { name: name.clone() };
+            }
+            SandboxError::SandboxNotFound { name } => {
+                return Self::NotFound { name: name.clone() };
+            }
+            _ => {}
+        }
+
+        Self::Failed {
+            message: error.to_string(),
+            source: Some(Box::new(error)),
+        }
+    }
+}
+
+impl From<crate::domain::ComputeError> for Error {
+    fn from(error: crate::domain::ComputeError) -> Self {
+        Self::Failed {
+            message: error.to_string(),
+            source: Some(Box::new(error)),
+        }
     }
 }
 
