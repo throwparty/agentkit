@@ -1,249 +1,124 @@
 # Handover: `nix-devshell-sandbox`
 
-The map is complete. Twenty-two tickets, none open, every answer backed by
-`evidence/`. The destination is proven on both platforms: a Nix devShell's
-environment, captured on the host, builds inside a user-space sandbox with no
-container runtime and no virtualisation.
+Map complete: 22 tickets, none open. Detail in `evidence/`, decisions in `map.toon`.
 
-This file is the resumable summary. A session that starts cold should be able to
-read this and the map, and continue at "Next actions" without re-probing
-anything. Everything here is justified in `evidence/`; nothing is a guess that
-the map did not settle.
+**Next:** `adr.specify` `sandbox-provider-contract` with a brief only. Then capture,
+linux, darwin, proxy in parallel. Proxy is the longest pole for a usable sandbox:
+without it both native backends are offline-only.
 
-## Where this sits
+## ADRs
 
 ```mermaid
 flowchart LR
-    map["map: 22 tickets answered<br/>frontier empty"] --> contract["sandbox-provider-contract<br/>(gate)"]
-    contract --> capture["devenv-environment-capture"]
-    contract --> linux["linux-bwrap-provider"]
-    contract --> darwin["darwin-sandbox-provider"]
-    contract --> proxy["egress-proxy"]
+    contract["sandbox-provider-contract"] --> capture[devenv-environment-capture]
+    contract --> linux[linux-bwrap-provider]
+    contract --> darwin[darwin-sandbox-provider]
+    contract --> proxy[egress-proxy]
     capture --> linux
     capture --> darwin
-    proxy -.->|endpoint handed in| linux
-    proxy -.->|endpoint handed in| darwin
+    proxy -.->|endpoint| linux
+    proxy -.->|endpoint| darwin
 ```
 
-## The decision in one paragraph
+No "Nix provider" ADR: a devShell is an environment, not a backend.
 
-Bubblewrap on Linux, `sandbox_init` on macOS, no virtualisation. Linux runs a
-**holder** — the Kubernetes pause-container shape, as Flatpak's `enter` does it —
-and every command `setns`es into it, which restores shared pid and network
-context, gives `pause` a sandbox-level meaning through the holder's cgroup, and
-closes the `setsid` escape because killing pid 1 kills the namespace. macOS has
-nothing to hold open: the profile is a per-process property and commands already
-share the host's pids and network. In both cases the environment comes from a
-host-side capture of the devShell, and `nix` itself is deliberately unavailable
-inside the sandbox. Egress is a host-side proxy: a bind-mounted unix socket on
-Linux, a granted loopback port on macOS.
+## Decision
 
-## Linux: holder plus join
+bwrap on Linux, `sandbox_init` on macOS, no virtualisation. Linux runs a holder
+(`sleep infinity` in the namespaces) and every command `setns`es into it. macOS
+has no namespace, so the profile is applied per command. Environment is captured
+on the host; `nix` stays outside. Egress is a host-side proxy.
 
-```mermaid
-sequenceDiagram
-    participant C as litterbox
-    participant B as bwrap holder
-    participant S as sandbox pid namespace
-    C->>B: bwrap --unshare-{user,pid,ipc,uts,cgroup,net}<br/>--disable-userns -- sleep infinity
-    B-->>C: child-pid on --json-status-fd
-    C->>C: write child-pid into the systemd user scope
-    C->>S: setns(user, ipc, net, pid, mnt, uts), chroot, drop caps
-    S-->>C: command runs, sharing workspace and netns
-    C->>C: freeze scope / cgroup.kill on delete
-```
+## Linux
 
-| Finding | Consequence |
-|---|---|
-| The addressable pid is bwrap's `child-pid`, not the process you spawned | the holder must read `--json-status-fd`; targeting `$!` leaves you in the host's namespaces |
-| `setgroups` is denied in bwrap's user namespace | an `nsenter`-based join needs `--preserve-credentials`; a native join just drops caps like Flatpak |
-| `--wd` resolves in the outer namespace | use `--wdns`, or `chdir` after the join |
-| `--disable-userns` does not block joining | it stops creating a *further* userns, not `setns` from outside |
-| Killing pid 1 kills the whole pid namespace | the `setsid` escape that defeated process groups is closed |
-| Joined commands are children of the client, not the holder | `SIGSTOP` on the holder pauses nothing; only a cgroup freeze covers them |
+- Addressable pid is bwrap's `child-pid` on `--json-status-fd`, not `$!`.
+- `setgroups` is denied in the userns: `nsenter` needs `--preserve-credentials`.
+- `--wd` resolves outside; use `--wdns`.
+- `--disable-userns` does not block `setns`. It does prevent nested pid namespaces,
+  which pause enumeration depends on.
+- Killing pid 1 kills the pid namespace, including `setsid` escapees.
+- Joined commands are children of the client, so `SIGSTOP` on the holder pauses
+  nothing.
+- Assign each joined pid to the sandbox scope before `exec`; freeze and limits then
+  cover everything, and `cgroup.kill` tears it down atomically.
+- No cgroups: pause is stop-and-rescan to fixpoint, not a one-pass sweep (a forker
+  wrote 806 bytes while "paused"). A same-uid peer can livelock it.
+- Delegation is not a boundary; the sandbox owns its subtree.
 
-**Lifecycle.** Assign every joined pid to the sandbox scope before `exec`.
-Freeze and limits then cover every command, and `cgroup.kill` tears the scope
-down atomically. Without cgroups, pausing is a stop-and-rescan fixpoint over
-`/proc` by pid-namespace inode — a one-pass sweep is *not* a pause (a sustained
-forker wrote 806 bytes while "paused"), and the fixpoint can be livelocked by a
-same-uid peer signalling its stopped neighbours. Cgroups are the primitive;
-enumeration is the fallback. Delegation is not a security boundary: the sandbox
-owns its subtree and can move itself out.
+## Darwin
 
-## Darwin: a per-command helper
-
-`sandbox_init` with an SBPL profile, not the App Sandbox entitlement API, which
-needs a signed bundle. No namespaces are created at all, so every command shares
-the host's pid space and network stack, and the workspace is an ordinary host
-directory. There is no sandbox-level state: `pause` means signalling a command's
-process group, and there is no freeze or resource limit.
-
-Consequences that differ from Linux:
-
-- Cross-command client traffic works for free; sandboxed *listener* reachability
-  is untested because the profile emits neither `network-bind` nor
+- `sandbox_init`, not the entitlement API (needs a signed bundle). Deprecated:
+  longevity is a carried risk.
+- No namespaces: shared pids and network, cross-command client traffic works.
+- Listener reachability untested; profile emits neither `network-bind` nor
   `network-inbound`.
-- `sandbox_init` is deprecated and undocumented. That longevity risk is carried,
-  not resolved.
-- The `setsid` escape survives here too — there is no pid namespace to die.
+- No freeze, no limits, no sandbox-level state. `setsid` escape survives.
+- Builds a devShell with **zero** baseline additions; 524 denials, all tolerated.
 
-## Environment capture
+## Capture
 
-The single most subtle part, and the one most easily got wrong.
+`print-dev-env` exports, plus the `shellHook`'s additions **and overrides**,
+computed under a sanitized caller (`env -i HOME=… PATH=…`). 85 + 16 = 91.
 
-```mermaid
-flowchart TB
-    base["nix print-dev-env --json<br/>85 exported variables"] --> allow
-    hook["shellHook run under a sanitized caller<br/>(only HOME + minimal PATH)"] --> diff["diff vs base and sanitized caller<br/>additions AND overrides"]
-    diff --> allow["allowlist: 91 variables"]
-    allow --> rewrite["provider post-processing<br/>HOME, TMPDIR, TMP, TEMP, NIX_BUILD_TOP"]
-    rewrite --> exec["execve inside the sandbox"]
-```
+- Additions-only loses `PATH`'s `$CARGO_HOME/bin` prepend; a normal caller folds
+  its own `RUSTFLAGS` in.
+- Never copy `nix develop --command env`: carries `SSH_AUTH_SOCK`,
+  `BITWARDEN_SSH_AUTH_SOCK`, `DOCKER_HOST`, `DBUS_SESSION_BUS_ADDRESS`,
+  `WAYLAND_DISPLAY`, and is corrupted by hook stdout.
+- 109 bash functions lost.
+- Provider post-processes: `HOME`, `TMPDIR`, `TMP`, `TEMP` into the workspace;
+  `NIX_BUILD_TOP` must stay **set** (clang wrapper reads it unguarded).
 
-- **Take overrides, not just additions.** The hook prepends `$CARGO_HOME/bin` to
-  `PATH` and builds `RUSTFLAGS` from the caller's own `RUSTFLAGS`. An
-  additions-only diff loses the first and imports the second.
-- **Sanitise the caller first**, or caller state leaks in through string
-  interpolation.
-- **Never copy `nix develop --command env`.** It is the devShell *on top of your
-  whole session*: `SSH_AUTH_SOCK`, `BITWARDEN_SSH_AUTH_SOCK`, `GNUPGHOME`,
-  `DOCKER_HOST`, `DBUS_SESSION_BUS_ADDRESS`, `WAYLAND_DISPLAY`, `XDG_RUNTIME_DIR`.
-  Each is a path straight out of the confinement. It is also corrupted, because
-  the hook prints banners to stdout where `env -0` is writing.
-- **109 bash functions are lost.** Fine for compilers; fatal for `genericBuild`
-  and anything calling stdenv phases.
-- **The workload sees 93 against 91 captured**, the two being `LC_CTYPE` and
-  `PWD` that the shell sets. Nothing is dropped.
-- **Darwin needs the capture post-processed, not just applied.** Repointing
-  `HOME`, `TMPDIR`, `TMP`, `TEMP` and `NIX_BUILD_TOP` into the workspace is what
-  makes the linker work; `NIX_BUILD_TOP` must stay *set* because the clang
-  wrapper reads it unguarded.
+## Store
 
-## Store view
-
-The bind set is the devShell environment's Nix closure, one `--ro-bind` per path:
-**238 paths of the host's 57,534**, and the same `cargo test` passes. This
-replaces a hand-maintained, host-specific baseline discovered by failure, and it
-removes the class of bug the macOS spike hit when a read baseline missed a
-sibling store path. It is *derived*, not minimal — it carries Rust std libs for
-Windows and Apple targets — and it is O(n) mounts, comfortable at 238.
-
-Runtime `dlopen` of a dependency the derivation never declared still fails. That
-is the same contract `nix run` offers, and it fails legibly.
+Bind the devShell closure: 238 paths of 57,534, same test passes. Derived, not
+minimal (carries Windows/Apple std libs). O(n) mounts. Runtime `dlopen` of an
+undeclared dep still fails, as on the host.
 
 ## Network
 
 ```mermaid
 flowchart TB
-    subgraph L["Linux — no route to the host"]
-        LP["host proxy"] -->|"unix socket,<br/>bind-mounted into the netns"| LW["sandboxed command"]
-    end
-    subgraph D["macOS — no network namespace"]
-        DP["host proxy"] -->|"loopback TCP,<br/>localhost:port granted"| DW["sandboxed command"]
-    end
+    LP[host proxy] -->|unix socket, bind-mounted| LW[Linux sandbox]
+    DP[host proxy] -->|loopback TCP, port granted| DW[macOS sandbox]
 ```
 
-The two platforms do not share a transport, and the macOS result rules out the
-Linux one: a unix socket inside a *granted* workspace still fails with `EPERM`,
-because `connect(2)` on `AF_UNIX` is `network-outbound` with a `remote unix-socket`
-filter and needs `system-socket` as well. So the network facet is a
-**transport-typed endpoint** — a socket path or a port — not a boolean.
+The network facet is a transport-typed endpoint, not a boolean. `AF_UNIX` in a
+granted workspace still fails on macOS: `connect(2)` is `network-outbound` with a
+`remote unix-socket` filter, plus `system-socket`. Published ports are out of scope.
 
-Published ports are out of scope for the native backends; egress is the proxy's
-job and it is a separate ADR.
+## Excluded
 
-## Deliberately excluded
+`nix` inside the sandbox. With the daemon socket a sandboxed command grew the host
+store and the daemon accepted builds outside the sandbox; without it, nothing
+evaluates. Withhold it.
 
-`nix` inside the sandbox. It executes, but only usefully with the daemon socket
-and network, and with the socket a sandboxed command grew the host store with a
-root-owned, host-executable path and the daemon accepted build requests that run
-outside the sandbox. That is host-store growth and out-of-sandbox execution —
-not mutation of existing immutable paths, which content addressing makes hard —
-and `T-004` already names the daemon as a write channel. Withhold it. Projects
-that need `nix` at build time fail with their own error, which is legible.
+## Contract notes
 
-## The ADR structure
+- Facets are platform-specific (`posix`, `linux`, `darwin`, later `win32`). The
+  core trait holds only the invariants.
+- Readiness at provider and facet level, each returning reason and remedy.
+- Missing facet: compile error. Runtime-unavailable: startup error, never a
+  silent downgrade.
+- Environment is a provider-owned descriptor, because Darwin must rewrite it.
+- Never rewrite store paths; only workspace references move.
+- Leak to fix: `main.rs:427` and `mcp.rs:561` build `DockerSandboxProvider`;
+  `main.rs:252`/`276` bypass the provider for `pause --all-*`. Contract types
+  still say `container_id`, `inspect_container`, `ContainerInspection`.
 
-Five ADRs: one gate, four leaves.
+## Tests
 
-| ADR | Owns | Does not own | Depends on |
-|---|---|---|---|
-| `sandbox-provider-contract` | core trait, facet traits per platform family, provider- and facet-level readiness, neutral handle, one factory, `EnvironmentProvenance`, the network endpoint type, the CLI/MCP de-leaking | any mechanism, proxy behaviour, capture procedure | — |
-| `devenv-environment-capture` | sanitized-baseline differential, noise and scratch sanitisation, secret denylist, golden capture test | how a provider applies it, path rewriting | contract |
-| `linux-bwrap-provider` | holder, setns join, cgroup assignment, pid-namespace fallback, closure bind set, golden argv, userns readiness | environment capture, proxy | contract, capture |
-| `darwin-sandbox-provider` | per-command helper, SBPL renderer, closure → `file-read*`, environment post-processing, golden profiles, `sandbox_init` readiness | environment capture, proxy | contract, capture |
-| `egress-proxy` | transport per platform, destination policy, configuration surface, port/socket allocation, lifecycle | how a provider reveals the endpoint | contract (endpoint type only) |
+Modules, not crates. Select by `-p` and by test target:
+`cargo test -p agentkit-litterbox --lib sandbox::darwin`, `--test darwin`. Ubuntu
+keeps `cargo test --locked`. The macOS job runs only those selections, on `paths:`
+triggers. On the dedicated runner, unavailable is a failure, not a skip. The
+devShell works on `aarch64-darwin`, so it reuses `nix develop ./nix`.
 
-There is **no "Nix devShell provider" ADR**: the devShell is an environment, not
-a backend. That is a simplification the map earned.
+## Risks
 
-Interface first. The proxy's only dependency on the contract is one type — the
-endpoint the provider makes reachable — so it can be built in parallel with both
-providers once the contract exists. Writing it first would invent that seam
-inside the proxy and ask the contract to adopt it backwards.
-
-## Contract design notes
-
-Carried from the review of the current interface, and from the answers above:
-
-- **Facets are platform-specific.** `posix`, `linux`, `darwin` modules, `win32`
-  later, no neutralising. The core trait holds only the invariants: canonicalised
-  paths, fail-closed, workspace-only writes, descendants confined, no caller
-  flags.
-- **Two readiness levels.** Provider readiness ("is bwrap usable here at all",
-  "does `sandbox_init` resolve", "is there a Docker context") and facet readiness
-  ("is there cgroup delegation", "is a proxy endpoint present"). Both return a
-  reason and a remedy, because that is what turns a failure into an instruction.
-- **`Available` is not a capability enum.** A missing facet is a compile error at
-  the call site; a runtime-unavailable one is a startup error naming its remedy,
-  never a silent downgrade.
-- **Environment is a provider-owned descriptor**, not a bag of variables, because
-  Darwin must rewrite and sanitise what Linux applies with less work.
-- **Never rewrite store paths.** `/nix/store` is mounted at its own path; only
-  references to the *workspace* move if it is bound elsewhere.
-- **The leak to fix:** `main.rs:427` and `mcp.rs:561` each build
-  `DockerSandboxProvider` directly, and `main.rs:252`/`main.rs:276`
-  (`pause --all-envs`, `pause --all-repos`) bypass the provider entirely and call
-  `DockerCompute`. The contract also still speaks Docker: `container_id`,
-  `inspect_container`, `ContainerInspection`, `container_name_for_slug`.
-
-## Testing
-
-- **Modules, not crates.** The contract's only consumers live in
-  `agentkit-litterbox`; a crate would add an edge for nothing.
-  `arch-lint` scopes by path, not crate.
-- **Select by package or target, not by feature.**
-  `cargo test -p agentkit-litterbox --lib sandbox::darwin` for unit tests, and a
-  `--test darwin` target for anything that needs a real sandbox. The Ubuntu job
-  keeps `cargo test --locked`; the Darwin module compiles to nothing there.
-- **A macOS job runs only `-p`/`--test` selections**, modelled on
-  `tackle.conformance.yaml`, triggered on `paths:` for the Darwin and contract
-  modules rather than every PR.
-- **On the dedicated runner, unavailable is a failure, not a skip.** Locally it
-  skips; a green macOS job that skipped everything is worse than a red one.
-- **The devShell works on `aarch64-darwin`**, so the job reuses
-  `nix develop ./nix`. It proves the devShell, not the rest of the workspace's
-  crates.
-
-## Carried risks
-
-1. `sandbox_init` is deprecated, undocumented, and the named profiles are already
-   rejected when building against SDK 27 or later. Declare the symbol ourselves
-   and report unavailable rather than running unconfined.
-1. A devShell whose closure exceeds the toolchain closure is untested.
-1. The non-cgroup pause fixpoint can be livelocked by a same-uid peer.
-1. cgroup delegation is resource management, not a boundary.
-1. macOS sandboxed-listener reachability is untested.
-1. A process that reparents beyond the pid namespace would need privilege; barred
-   by `--disable-userns`, which is therefore load-bearing for pause enumeration.
-
-## Next actions
-
-1. `adr.specify` the gate: `sandbox-provider-contract`. Brief only — decision,
-   direction, established facts. No tickets, no evidence paths, no mention of a
-   map.
-1. Then, in parallel: `devenv-environment-capture`, `linux-bwrap-provider`,
-   `darwin-sandbox-provider`, `egress-proxy`.
-1. Longest pole for a *usable* sandbox is `egress-proxy`: without it both native
-   backends are offline-only.
+1. `sandbox_init` deprecation.
+1. A closure larger than the toolchain's is untested.
+1. Non-cgroup pause fixpoint is livelockable.
+1. Delegation is not a boundary.
+1. macOS listener reachability untested.
+1. `--disable-userns` is load-bearing for pause enumeration.
