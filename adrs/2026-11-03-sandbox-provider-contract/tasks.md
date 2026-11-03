@@ -98,7 +98,7 @@ Add backends/docker/config.rs with DockerConfig typed there and deny_unknown_fie
 | Depends On | T-006 |
 | References | per-backend-config,backend-readiness,primitive-missing-or-old |
 
-### T-009: Configuration scopes and merge
+### T-009: [x] Configuration scopes and merge
 
 Add src/config/ with the user file under agentkit-common's config directory, the project file and the local override, merged defaults then user then project then local. Backend selection and the forwarding bind are user-only; the backends map holds toml::Value per backend; setup-command moves under [project].
 

@@ -121,12 +121,17 @@ impl SandboxServer {
     ) -> Result<CallToolResult, McpError> {
         let config = config_loader::load_final()
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
-        let image =
-            config.docker.image.clone().ok_or_else(|| {
-                McpError::internal_error("missing docker.image".to_string(), None)
-            })?;
+        let docker_section = config
+            .backends
+            .get("docker")
+            .cloned()
+            .unwrap_or(toml::Value::Table(Default::default()));
+        let docker = crate::backends::docker::config::DockerConfig::from_section(&docker_section)
+            .map_err(|error| McpError::internal_error(error.to_string(), None))?;
+        let image = docker.image.clone().ok_or_else(|| {
+            McpError::internal_error("backends.docker.image is not set".to_string(), None)
+        })?;
         let forwarded_ports = config
-            .ports
             .ports
             .iter()
             .map(|port| ForwardedPort {
@@ -138,7 +143,7 @@ impl SandboxServer {
         let provider = build_provider_with_config(&config).map_err(map_error)?;
         let sandbox_config = SandboxConfig {
             image,
-            setup_command: config.docker.setup_command.clone(),
+            setup_command: config.project.setup_command.clone(),
             forwarded_ports,
         };
         let metadata = provider
