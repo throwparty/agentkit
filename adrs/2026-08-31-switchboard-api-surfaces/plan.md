@@ -44,14 +44,14 @@ flowchart LR
 
 ## Technologies
 
-| Technology   | Role                                  |
+| Technology | Role |
 | ------------ | ------------------------------------- |
-| axum 0.8     | HTTP framework and routing (existing) |
-| reqwest 0.12 | Upstream HTTP client (existing)       |
-| serde + toml | Config deserialization (existing)     |
-| clap         | CLI argument parsing (existing)       |
-| sqlx         | Session database (existing)           |
-| tracing      | Structured logging (existing)         |
+| axum 0.8 | HTTP framework and routing (existing) |
+| reqwest 0.12 | Upstream HTTP client (existing) |
+| serde + toml | Config deserialization (existing) |
+| clap | CLI argument parsing (existing) |
+| sqlx | Session database (existing) |
+| tracing | Structured logging (existing) |
 
 ## Components
 

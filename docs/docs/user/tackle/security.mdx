@@ -17,7 +17,7 @@ We believe the harness is responsible for two things a repository must not decid
 
 ## The sandbox is the consent boundary
 
-A cloned repository is untrusted input. But trust is not a property of the repository as a whole — it is a property of what a piece of configuration can *do*. Tackle admits configuration whose only power is to place text in the model's context, and denies configuration that can act on its own.
+A cloned repository is untrusted input. But trust is not a property of the repository as a whole — it is a property of what a piece of configuration can _do_. Tackle admits configuration whose only power is to place text in the model's context, and denies configuration that can act on its own.
 
 **Context is admitted.** The model already reads the repository with its own tools, so a definition's body or a package resource grants it nothing it could not read anyway. Definitions — personas, actors, and prompts — therefore load without a prompt, as do bounded Rhai scripts, whose engine limits are the consent (see [Scripts are bounded](#scripts-are-bounded)).
 

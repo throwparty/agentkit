@@ -45,16 +45,16 @@ Only document agents that actually exist. The set of supported agents is defined
 
 ## Emoji conventions
 
-| Location                              | Emoji                                |
+| Location | Emoji |
 | ------------------------------------- | ------------------------------------ |
-| Component intro heading (`index.mdx`) | `👋`                                 |
-| Category label for a component        | `🔀` (Switchboard), `💩` (Litterbox) |
-| Category label for agents             | `🛠️`                                 |
-| Category label for reference          | `📚`                                 |
-| Category label for utilities          | `🧰`                                 |
-| Setup/providers page heading          | `🔧`                                 |
-| Usage page heading                    | `🚀`                                 |
-| Roadmap page                          | `💭`                                 |
+| Component intro heading (`index.mdx`) | `👋` |
+| Category label for a component | `🔀` (Switchboard), `💩` (Litterbox) |
+| Category label for agents | `🛠️` |
+| Category label for reference | `📚` |
+| Category label for utilities | `🧰` |
+| Setup/providers page heading | `🔧` |
+| Usage page heading | `🚀` |
+| Roadmap page | `💭` |
 
 ## Terminology
 
@@ -67,14 +67,14 @@ Document the actual implementation, not the ADR spec. Check the source code — 
 
 ## Sidebar positions
 
-| Section                       | Position |
+| Section | Position |
 | ----------------------------- | -------- |
-| Component index               | 1        |
-| Setting up providers          | 2        |
-| Configuring agents (category) | 3        |
-| Reference (category)          | 50       |
-| Roadmap                       | 100      |
-| Utilities (category)          | 300      |
+| Component index | 1 |
+| Setting up providers | 2 |
+| Configuring agents (category) | 3 |
+| Reference (category) | 50 |
+| Roadmap | 100 |
+| Utilities (category) | 300 |
 
 Nested pages within a category don't need explicit `sidebar_position` unless ordering matters.
 

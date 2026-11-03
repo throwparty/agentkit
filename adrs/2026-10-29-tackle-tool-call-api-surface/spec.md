@@ -1,9 +1,8 @@
 # Tackle Tool Call API Surface
 
-**Status:** implemented  **Created:** 2026-10-29  **Author:** adrian
+**Status:** implemented **Created:** 2026-10-29 **Author:** adrian
 
 Tackle addresses tools by canonical invokable names: `mcp.<server>.<tool>`, `prompt.<name>`, `agent.<actor>`, and `client.<surface>.<method>`. The registry currently emits those names directly to model providers through `Registry::model_tools` and `Registry::manifest`, and the OpenAI chat-completions provider passes them to rig unchanged. Strict providers reject names containing dots: OpenAI and Anthropic require `^[a-zA-Z0-9_-]{1,64}$`, DeepSeek documents `^[a-zA-Z0-9_-]+$`, Gemini allows dots but requires a leading letter or underscore, Meta allows at most one dot, and Cohere disallows a leading digit. A dotted MCP name such as `mcp.github.search_issues` therefore fails before the model runs. A request-only Switchboard mutation cannot fix the response half because the model returns the rewritten name. This ADR refines FR-009 of `2026-09-17-tackle`, which assumed the model sees canonical namespaced names. Switchboard proxy changes are out of scope.
-
 
 ## Problem
 
@@ -26,7 +25,6 @@ Canonical invokable names are not valid tool names on several model surfaces, an
 - Persisting wire names in sessions or telemetry
 - Encoding `tool_choice` (not present in `ModelRequest` today)
 - Translating names for clients other than Tackle
-
 
 ## Functional Requirements
 
@@ -221,49 +219,57 @@ Routine namespace and character rewrites produce no warning; truncation and hash
 Canonical components may contain single or double underscores. The per-request map resolves the ambiguity; decoding never splits the wire name on `__` alone.
 
 **Slug:** `ambiguous-underscores`
+
 ### EC-002: Quoted Model Keys
 
 Model names containing slashes or dots are written as quoted TOML keys, for example `[endpoints.switchboard.models.'meta/llama-4']`.
 
 **Slug:** `quoted-model-keys`
+
 ### EC-003: Empty Name
 
 An empty canonical name fails the request with a precise error rather than producing an empty wire name.
 
 **Slug:** `empty-name`
+
 ### EC-004: Limit Too Small
 
 A configured `max_length` too small to fit a readable prefix and hash suffix fails the request with a precise error.
 
 **Slug:** `limit-too-small`
+
 ### EC-005: Historical Tool Not Current
 
 A historical tool call whose canonical name is not in the current tool set is still encoded for history, but a new model call to that wire name passes through and hits the unknown-invokable path.
 
 **Slug:** `historical-tool-not-current`
+
 ### EC-006: Model Returns Canonical Name
 
 A model call that already matches a canonical name but not a current wire name is treated as unknown and passes through unchanged.
 
 **Slug:** `model-returns-canonical-name`
+
 ### EC-007: Invalid Custom Pattern
 
 An invalid `pattern` is rejected at configuration load with the endpoint and model named.
 
 **Slug:** `invalid-custom-pattern`
+
 ### EC-008: Scheme And Pattern Conflict
 
 Setting `pattern` without `scheme = custom` is rejected at configuration load.
 
 **Slug:** `scheme-and-pattern-conflict`
+
 ### EC-009: Unimplemented Surface Scheme
 
 Selecting `gemini` before the Gemini provider exists is rejected at configuration load rather than failing at request time.
 
 **Slug:** `unimplemented-surface-scheme`
+
 ### EC-010: Non-ASCII Name
 
 A canonical name containing non-ASCII characters is sanitized into the scheme's allowed set, decoded through the map, and treated as lossy only if truncation or a hash suffix is required.
 
 **Slug:** `non-ascii-name`
-

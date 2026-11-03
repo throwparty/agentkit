@@ -27,7 +27,7 @@ pub trait SessionStore: Send + Sync {
     async fn close_session(&self, id: &str) -> Result<(), StoreError>;
     async fn set_session_mode(&self, id: &str, mode: String) -> Result<(), StoreError>;
     async fn set_session_head(&self, id: &str, head_prompt_turn_id: &str)
-    -> Result<(), StoreError>;
+        -> Result<(), StoreError>;
 
     /// Prompt Turn CRUD
     async fn append_prompt_turn(&self, turn: PromptTurn) -> Result<(), StoreError>;

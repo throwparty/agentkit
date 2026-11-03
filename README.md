@@ -5,7 +5,7 @@ A composable set of agentic software engineering tools.
 > [!WARNING]
 > AgentKit is under active development and is highly experimental; please use at your own risk and heed the warnings for each component.
 
----
+______________________________________________________________________
 
 ## Brief
 

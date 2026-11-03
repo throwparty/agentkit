@@ -6,19 +6,17 @@
 
 Add an optional package directory and a sorted resource listing to Definition. Enumerate resources as paths relative to the package directory, excluding the entry point, with a stable sort so the listing and the lock hash are deterministic.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | Unit tests: a directory definition reports its directory and sorted resources; a flat definition reports no directory and an empty listing; resource enumeration is order-stable. |
 | Complexity | 🟡 Medium |
 | Effort | 2-3h |
-| Depends On |  |
+| Depends On | |
 | References | definition-packages |
 
 ### T-002: [x] Directory definition discovery
 
 Extend the loader to scan .agentkit/tackle/<kind>/ for directory definitions at <name>/<ENTRY>.md, dispatching on the per-kind entry point name PROMPT.md, PERSONA.md, or ACTOR.md. A directory whose entry point is missing or misnamed is a load error naming the path. Size caps apply to the package total.
-
 
 | Field | Value |
 |-------|-------|
@@ -32,7 +30,6 @@ Extend the loader to scan .agentkit/tackle/<kind>/ for directory definitions at 
 
 Remove the user configuration layer for personas, actors, and prompts so definitions load only from the repository tree, and keep flat single-file definitions loading unchanged for definitions without resources. A flat and a directory definition of the same name in one kind directory is a load error naming both paths. Built-in defaults remain flat embedded assets at the lowest precedence.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | Unit tests: a definition directory under the user config dir is ignored; a flat definition still loads; a flat and directory collision errors naming both paths; a discovered definition replaces the built-in and is surfaced. |
@@ -44,7 +41,6 @@ Remove the user configuration layer for personas, actors, and prompts so definit
 ### T-004: [x] Context variable substitution
 
 Add the $ namespace to prompt expansion. $.name is the definition name and $.dir is the repository-relative package directory. Invokable::Prompt carries the definition directory and resource listing so expand_user and expand_model substitute and append without reaching back into the definitions map. Bare parameter names remain the parameter form.
-
 
 | Field | Value |
 |-------|-------|
@@ -58,7 +54,6 @@ Add the $ namespace to prompt expansion. $.name is the definition name and $.dir
 
 Append the resource listing to the expanded body of a prompt, after substitution, so the model knows which paths under $.dir it may read. A prompt with no resources gets no listing.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | Unit tests: an expanded prompt body ends with its sorted resource listing; a resource-less prompt is unchanged. |
@@ -71,7 +66,6 @@ Append the resource listing to the expanded body of a prompt, after substitution
 
 Substitute context variables into persona bodies and append the persona resource listing when the system prompt is assembled, sharing one implementation with prompt expansion so the two cannot diverge. Actors carry no body and are unaffected.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | Unit tests: a persona body substitutes $.dir and $.name and gains its listing before the invokable manifest; an actor produces no listing. |
@@ -82,21 +76,19 @@ Substitute context variables into persona bodies and append the persona resource
 
 ### T-007: [x] Manifest parsing
 
-Parse .agentkit/tackle/definitions.toml into sources and selections. Each [[source]] declares a required kind with no default and a kind-named spec table: git with url plus optional ref and path, or path with dir. Selections under [definitions.<source>] are keyed by kind with a list of names. The url field also accepts the PEP 508 git+ URL form, parsed into url, ref, and subdirectory.
-
+Parse .agentkit/tackle/definitions.toml into sources and selections. Each \[[source]\] declares a required kind with no default and a kind-named spec table: git with url plus optional ref and path, or path with dir. Selections under \[definitions.<source>\] are keyed by kind with a list of names. The url field also accepts the PEP 508 git+ URL form, parsed into url, ref, and subdirectory.
 
 | Field | Value |
 |-------|-------|
 | Success Criteria | Unit tests: both source kinds parse; the PEP 508 git+ form parses into url, ref, and subdirectory; a source without kind is a parse error naming the source. |
 | Complexity | 🟡 Medium |
 | Effort | 3-4h |
-| Depends On |  |
+| Depends On | |
 | References | definitions-manifest,source-specifications |
 
 ### T-008: [x] Manifest validation invariants
 
 Enforce the manifest invariants at parse time: unique local definition names across the resolved set, source and definition paths confined to their roots, and no override of a delegated or local name. Violations are parse errors naming the offending source and definition.
-
 
 | Field | Value |
 |-------|-------|
@@ -108,8 +100,7 @@ Enforce the manifest invariants at parse time: unique local definition names acr
 
 ### T-009: [x] Manifest delegation
 
-Resolve [[extends]] entries transitively: fetch each delegated definitions.toml at its pinned revision, union-merge its sources and selections with the local manifest, and treat duplicate names anywhere in the resolved set as a parse error. No override is permitted.
-
+Resolve \[[extends]\] entries transitively: fetch each delegated definitions.toml at its pinned revision, union-merge its sources and selections with the local manifest, and treat duplicate names anywhere in the resolved set as a parse error. No override is permitted.
 
 | Field | Value |
 |-------|-------|
@@ -123,7 +114,6 @@ Resolve [[extends]] entries transitively: fetch each delegated definitions.toml 
 
 Read and write .agentkit/tackle/definitions.lock: each source resolved to an immutable commit, each definition to a content hash over its sorted files (relative path plus length plus bytes). A flat definition hashes as bare file content so existing records stay stable. The lock carries integrity only and never gates loading.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | Unit tests: a lock round-trips; package hashing is stable across file order and changes when any file changes; a flat definition hashes as its file content. |
@@ -135,7 +125,6 @@ Read and write .agentkit/tackle/definitions.lock: each source resolved to an imm
 ### T-011: [x] Git source resolution
 
 Resolve git sources through git2: clone or fetch the url, check out the requested ref, and resolve it to a commit. Reuse the existing git2 dependency; add no new dependency. An unreachable or unresolvable source fails with the source name and URL.
-
 
 | Field | Value |
 |-------|-------|
@@ -149,7 +138,6 @@ Resolve git sources through git2: clone or fetch the url, check out the requeste
 
 Resolve kind = path sources from the local filesystem and vendor selected definitions from both source kinds into the repository tree at .agentkit/tackle/<kind>/<name>/. Vendoring writes the entry point and all resources and reports the definition paths it produced.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | Integration tests: a local path source vendors a definition with resources into the tree; a git source vendors the same; the tree matches the source files. |
@@ -161,7 +149,6 @@ Resolve kind = path sources from the local filesystem and vendor selected defini
 ### T-013: [x] Vendoring pipeline and fail-closed behaviour
 
 Wire get and update: get resolves the manifest against the lock and vendors the locked revisions, update re-resolves refs, re-vendors, and rewrites the lock. Both are the only network operations. A failure at any point leaves the tree and lock unchanged.
-
 
 | Field | Value |
 |-------|-------|
@@ -175,7 +162,6 @@ Wire get and update: get resolves the manifest against the lock and vendors the 
 
 Add the tackle definitions subcommand with the def alias: init scaffolds a manifest, add and remove edit selections, get and update drive the vendoring pipeline, and list reports declared and vendored definitions with status. The loader remains independent of the manifest and lock.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | CLI tests: definitions and def are equivalent; init writes a parseable manifest; add and remove update selections; list reports declared and vendored definitions. |
@@ -187,7 +173,6 @@ Add the tackle definitions subcommand with the def alias: init scaffolds a manif
 ### T-015: [x] Verify drift detection
 
 Implement verify: re-hash each vendored package and compare against the lock, reporting drift for any package whose files changed and exiting non-zero. A missing or stale lock is an error naming tackle definitions get.
-
 
 | Field | Value |
 |-------|-------|
@@ -201,7 +186,6 @@ Implement verify: re-hash each vendored package and compare against the lock, re
 
 Remove the per-path TOFU trust record for definitions now that they are repository-resident. Definition bodies and resources load without a prompt; bounded Rhai scripts also load because the engine limits are the consent.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | Tests: definitions and bounded scripts load in a repository with no consent prompt; the per-path trust entries for definitions are no longer written. |
@@ -213,7 +197,6 @@ Remove the per-path TOFU trust record for definitions now that they are reposito
 ### T-017: [x] Project-scope host execution denial
 
 Deny unbounded host execution at project scope: mcp_servers, client_tools, endpoints, and credential_helper declared in project configuration are ignored, and are honoured only from user configuration outside the repository. Preserve the existing hard denials.
-
 
 | Field | Value |
 |-------|-------|
@@ -227,7 +210,6 @@ Deny unbounded host execution at project scope: mcp_servers, client_tools, endpo
 
 Update security.mdx to state the sandbox-boundary posture and remove the per-entry consent description, and amend the tackle ADR FR-022 and AC-010 to record repository-only definitions and the retired trust gate.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | security.mdx describes the boundary posture with no per-entry consent; the tackle ADR records the amendments; no doc references the retired per-file definition trust. |
@@ -235,4 +217,3 @@ Update security.mdx to state the sandbox-boundary posture and remove the per-ent
 | Effort | 1-2h |
 | Depends On | T-017 |
 | References | trust-boundary |
-

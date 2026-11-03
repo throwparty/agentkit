@@ -1,6 +1,6 @@
 mod policy;
 
-use std::ffi::{CStr, CString, c_char};
+use std::ffi::{c_char, CStr, CString};
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -122,7 +122,15 @@ fn apply(profile: &str) -> Result<(), String> {
 /// them; TMPDIR is redirected into the workspace, which is the only scratch
 /// area the profile grants.
 fn child_environment(workspace: &Path) -> Vec<(String, String)> {
-    const FORWARD: &[&str] = &["PATH", "HOME", "LANG", "LC_ALL", "TERM", "USER", "LBX_RUN_LABEL"];
+    const FORWARD: &[&str] = &[
+        "PATH",
+        "HOME",
+        "LANG",
+        "LC_ALL",
+        "TERM",
+        "USER",
+        "LBX_RUN_LABEL",
+    ];
 
     let mut environment = Vec::new();
     for name in FORWARD {
@@ -274,9 +282,7 @@ fn main() {
             }
         };
         if resolved.starts_with(policy.workspace()) {
-            eprintln!(
-                "sandbox-custom: refusing to dump the profile inside the workspace"
-            );
+            eprintln!("sandbox-custom: refusing to dump the profile inside the workspace");
             std::process::exit(USAGE);
         }
         let written = std::fs::OpenOptions::new()
@@ -286,7 +292,10 @@ fn main() {
             .open(&resolved)
             .and_then(|mut file| std::io::Write::write_all(&mut file, profile.as_bytes()));
         if let Err(err) = written {
-            eprintln!("sandbox-custom: could not create {}: {err}", resolved.display());
+            eprintln!(
+                "sandbox-custom: could not create {}: {err}",
+                resolved.display()
+            );
             std::process::exit(USAGE);
         }
     }

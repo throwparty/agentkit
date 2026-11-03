@@ -11,12 +11,12 @@ All 41 ADR tasks are checked `[x]` and the test suite is green, but four
 integration seams are unwired — the headline acceptance criteria (AC-001
 agent loop, AC-005 permission pipeline over the wire) have never run:
 
-| #   | Seam                                                                                      | Evidence                                                                                                           |
+| # | Seam | Evidence |
 | --- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| 1   | `ModelRequest` has no `tools` field; tool-call stream content is discarded                | `src/agent/mod.rs:32-37`, `src/agent/provider.rs:260` (`Ok(_) => {} // tool calls land with the registry (T-021)`) |
-| 2   | `run_turn` never calls the registry/pipeline — no tool-call loop despite T-021            | `src/agent/turn.rs:59` loop runs once, returns at :214 (`// v1: the model made no tool requests`)                  |
-| 3   | `PermissionPipeline` has no production caller; `session/request_permission` is never sent | `src/permissions/mod.rs` referenced only by its own `mod tests`; `main.rs` still uses the `DenyPrompt` stub        |
-| 4   | System prompt = persona body only, no manifest injection (FR-012)                         | `src/acp/mod.rs:911` (`let system = persona.map(...)`)                                                             |
+| 1 | `ModelRequest` has no `tools` field; tool-call stream content is discarded | `src/agent/mod.rs:32-37`, `src/agent/provider.rs:260` (`Ok(_) => {} // tool calls land with the registry (T-021)`) |
+| 2 | `run_turn` never calls the registry/pipeline — no tool-call loop despite T-021 | `src/agent/turn.rs:59` loop runs once, returns at :214 (`// v1: the model made no tool requests`) |
+| 3 | `PermissionPipeline` has no production caller; `session/request_permission` is never sent | `src/permissions/mod.rs` referenced only by its own `mod tests`; `main.rs` still uses the `DenyPrompt` stub |
+| 4 | System prompt = persona body only, no manifest injection (FR-012) | `src/acp/mod.rs:911` (`let system = persona.map(...)`) |
 
 Why existing tests miss all of it: every `session/prompt` in the suite hits
 an intercepted path (`/fork`, direct invocation, `/mcp`, compaction) or a
@@ -50,21 +50,21 @@ lease error; endpoint-configuring tests point at dead addresses
 
 ## 3. Coverage map (AC → layer → verdict)
 
-| Behaviour                                                                                                                        | Layer                    | Existing coverage                                                                                                   | Verdict                                                                                                                |
+| Behaviour | Layer | Existing coverage | Verdict |
 | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| AC-001 agent loop: streamed chunks, tool calls, stopReason, tools offered, usage cadence, stable-only gating during a real turn  | E2E                      | **nothing**                                                                                                         | **NEW: `tests/tool_turn.rs`** (stdio + HTTP)                                                                           |
-| AC-005 permission _wiring_: unconfigured tool prompts, allow-once, allow-always honoured in-session, honest session-scope labels | E2E                      | unit only (§6)                                                                                                      | **Fold into the same scripted session** in `tool_turn.rs`                                                              |
-| AC-005 permission _matrices_: pipeline order, veto, fail-closed, scoping, expiry                                                 | unit                     | `src/permissions/mod.rs:306-617` — 11 tests, comprehensive                                                          | ✅ none needed                                                                                                         |
-| AC-002 persistence: load replays **full history**, stable ids, single usage snapshot                                             | integration (model-free) | `tests/initialize.rs:152` loads an **empty** session — asserts nothing about replay                                 | **NEW: `tests/restart_load.rs`** via direct invocation                                                                 |
-| AC-007 reusable prompts `/name`                                                                                                  | integration + unit       | implemented (T-023); unit tests **exist** (`invokables/mod.rs:833-927`, green) — the _wire_ path is what is unwired | fold one `/name` prompt into E2E (A10); arity/unknown-command errors → unit test on the expansion fn (already present) |
-| AC-003 fork fallback                                                                                                             | integration              | `tests/fork.rs`                                                                                                     | ✅                                                                                                                     |
-| AC-004 compaction + usage_update drop                                                                                            | integration              | `tests/compaction.rs`                                                                                               | ✅                                                                                                                     |
-| AC-006 direct invocation                                                                                                         | integration              | `tests/initialize.rs:292`, parse tests in `mcp_pool.rs`                                                             | ✅                                                                                                                     |
-| AC-008 first run                                                                                                                 | integration              | `tests/first_run.rs`                                                                                                | ✅                                                                                                                     |
-| AC-009 multi-instance lease                                                                                                      | integration              | `tests/two_process.rs`                                                                                              | ✅                                                                                                                     |
-| Command surface / capability advertisement                                                                                       | integration              | `tests/initialize.rs:32,210`                                                                                        | ✅                                                                                                                     |
-| HTTP wire basics                                                                                                                 | integration              | `tests/http.rs` (raw JSON-RPC)                                                                                      | ✅ — E2E adapter adds the typed layer                                                                                  |
-| HTTP response-only POST routing                                                                                                  | unit/regression          | **bug found, no test**                                                                                              | **NEW: fix + regression test (§4.4)**                                                                                  |
+| AC-001 agent loop: streamed chunks, tool calls, stopReason, tools offered, usage cadence, stable-only gating during a real turn | E2E | **nothing** | **NEW: `tests/tool_turn.rs`** (stdio + HTTP) |
+| AC-005 permission _wiring_: unconfigured tool prompts, allow-once, allow-always honoured in-session, honest session-scope labels | E2E | unit only (§6) | **Fold into the same scripted session** in `tool_turn.rs` |
+| AC-005 permission _matrices_: pipeline order, veto, fail-closed, scoping, expiry | unit | `src/permissions/mod.rs:306-617` — 11 tests, comprehensive | ✅ none needed |
+| AC-002 persistence: load replays **full history**, stable ids, single usage snapshot | integration (model-free) | `tests/initialize.rs:152` loads an **empty** session — asserts nothing about replay | **NEW: `tests/restart_load.rs`** via direct invocation |
+| AC-007 reusable prompts `/name` | integration + unit | implemented (T-023); unit tests **exist** (`invokables/mod.rs:833-927`, green) — the _wire_ path is what is unwired | fold one `/name` prompt into E2E (A10); arity/unknown-command errors → unit test on the expansion fn (already present) |
+| AC-003 fork fallback | integration | `tests/fork.rs` | ✅ |
+| AC-004 compaction + usage_update drop | integration | `tests/compaction.rs` | ✅ |
+| AC-006 direct invocation | integration | `tests/initialize.rs:292`, parse tests in `mcp_pool.rs` | ✅ |
+| AC-008 first run | integration | `tests/first_run.rs` | ✅ |
+| AC-009 multi-instance lease | integration | `tests/two_process.rs` | ✅ |
+| Command surface / capability advertisement | integration | `tests/initialize.rs:32,210` | ✅ |
+| HTTP wire basics | integration | `tests/http.rs` (raw JSON-RPC) | ✅ — E2E adapter adds the typed layer |
+| HTTP response-only POST routing | unit/regression | **bug found, no test** | **NEW: fix + regression test (§4.4)** |
 
 ## 4. Work items
 
@@ -161,17 +161,17 @@ test design.
 **Assertions** (all after the prompt response returns — no hangs even when
 seams are unwired, because a broken agent answers `end_turn` immediately):
 
-| #   | Assertion                                                                                                                                    | Source          | Status now                     |
+| # | Assertion | Source | Status now |
 | --- | -------------------------------------------------------------------------------------------------------------------------------------------- | --------------- | ------------------------------ |
-| A1  | `ToolCall` update with tool name `mcp.echo.echo`                                                                                             | AC-001          | 🔴 red (seam 2)                |
-| A2  | ≥1 `RequestPermissionRequest`; options contain both an allow-once and an allow-for-session label; `tool_call` names `mcp.echo.echo`          | AC-005          | 🔴 red (seam 3)                |
-| A3  | `ToolCallUpdate` reaches `Completed` with content containing `E2E-MARKER-9f3a` (echo output)                                                 | AC-001          | 🔴 red                         |
-| A4  | final `agent_message_chunk`s contain `done: E2E-MARKER-9f3a`; prompt returns `EndTurn`                                                       | AC-001          | 🔴 red (round 2 never happens) |
-| A5  | ≥2 `usage_update` **for our session id** (filter by id — titling's fork is a different session) with `used == 42` (scripted `prompt_tokens`) | usage cadence   | 🔴 red (only 1 request today)  |
-| A6  | mock received request with a `tools` array containing `mcp.echo.echo`                                                                        | seam 1 / FR-013 | 🔴 red (no tools field)        |
-| A7  | mock received `system` message containing `!mcp.echo.echo` **and** `Echoes the provided text`                                                | FR-012          | 🔴 red (seam 4, persona-only)  |
-| A8  | prompt 2 produces **no** new `RequestPermissionRequest` (allow-always honoured, session-scoped)                                              | AC-005          | 🔴 red (needs A2 first)        |
-| A9  | veto prompt: tool result / model context carries the deny reason; no execution side effect                                                   | AC-005          | 🔴 red                         |
+| A1 | `ToolCall` update with tool name `mcp.echo.echo` | AC-001 | 🔴 red (seam 2) |
+| A2 | ≥1 `RequestPermissionRequest`; options contain both an allow-once and an allow-for-session label; `tool_call` names `mcp.echo.echo` | AC-005 | 🔴 red (seam 3) |
+| A3 | `ToolCallUpdate` reaches `Completed` with content containing `E2E-MARKER-9f3a` (echo output) | AC-001 | 🔴 red |
+| A4 | final `agent_message_chunk`s contain `done: E2E-MARKER-9f3a`; prompt returns `EndTurn` | AC-001 | 🔴 red (round 2 never happens) |
+| A5 | ≥2 `usage_update` **for our session id** (filter by id — titling's fork is a different session) with `used == 42` (scripted `prompt_tokens`) | usage cadence | 🔴 red (only 1 request today) |
+| A6 | mock received request with a `tools` array containing `mcp.echo.echo` | seam 1 / FR-013 | 🔴 red (no tools field) |
+| A7 | mock received `system` message containing `!mcp.echo.echo` **and** `Echoes the provided text` | FR-012 | 🔴 red (seam 4, persona-only) |
+| A8 | prompt 2 produces **no** new `RequestPermissionRequest` (allow-always honoured, session-scoped) | AC-005 | 🔴 red (needs A2 first) |
+| A9 | veto prompt: tool result / model context carries the deny reason; no execution side effect | AC-005 | 🔴 red |
 
 Option ids: assert on **labels**, not ids — ids are product-chosen and not
 spec'd; `ask_options()` fixes only the label strings.
@@ -273,14 +273,14 @@ four product seams remain follow-up work driven by the red list.
 
 ### 5.3 HTTP transport: our shape vs stock `HttpClient`
 
-|                   | Stock `HttpClient` (agent-client-protocol-http 2.2.0)                | Our `http.rs`                                                                  |
+| | Stock `HttpClient` (agent-client-protocol-http 2.2.0) | Our `http.rs` |
 | ----------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Routes            | one URL for POST + SSE GET + DELETE                                  | `POST /rpc`, `GET /events?connection=`; no DELETE                              |
-| Connection id     | header `acp-connection-id` everywhere                                | `x-acp-connection` header on POST, **query param** for SSE                     |
-| Session id        | `acp-session-id` header                                              | not handled                                                                    |
+| Routes | one URL for POST + SSE GET + DELETE | `POST /rpc`, `GET /events?connection=`; no DELETE |
+| Connection id | header `acp-connection-id` everywhere | `x-acp-connection` header on POST, **query param** for SSE |
+| Session id | `acp-session-id` header | not handled |
 | Response delivery | POST bodies discarded (except initialize); responses arrive over SSE | blocking POST body; `outgoing_router:66-70` routes by-id lines _away_ from SSE |
-| SSE topology      | connection stream + per-session streams                              | single broadcast stream                                                        |
-| Close             | DELETE                                                               | 300 s idle reaper                                                              |
+| SSE topology | connection stream + per-session streams | single broadcast stream |
+| Close | DELETE | 300 s idle reaper |
 
 ⇒ stock client would hang on _every_ request (it ignores POST bodies while
 we only answer via bodies) — symmetric to the §4.4 bug. Hence the hand-rolled
@@ -375,12 +375,12 @@ fresh process, not a per-phase fresh session).
 
 ### 9.3 Findings beyond the planned seams
 
-| #   | Finding                                                                                                                                                                                                                                                                                                                                                                                                                                | Evidence                                                                                       |
+| # | Finding | Evidence |
 | --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| 6   | `/name` wire path unwired: `expand_user` has no production caller, so user prompts reach the model verbatim                                                                                                                                                                                                                                                                                                                            | A10 red; `src/invokables/mod.rs:211`                                                           |
-| 7   | `session/load` never emits the FR-005 usage snapshot                                                                                                                                                                                                                                                                                                                                                                                   | restart_load red 3; the only `UsageUpdate` send sites are `acp/mod.rs:855` and `:1011`         |
-| 8   | `replay_updates` parses message content as a block array **before** the role match — `Role::ToolCall` rows store raw arguments (`{"text":…}`), fail the parse, and are skipped, so direct-invocation tool calls are never replayed                                                                                                                                                                                                     | restart_load red 2; both rows confirmed present via `assemble_context`; `acp/mod.rs:1393-1396` |
-| 9   | Prompt turns are appended with `parent_id = NULL` (`acp/mod.rs:526`, whose comment claims "head-following turns chain via the store's head"; `store/mod.rs:541` inserts the parent verbatim, memory backend likewise) → `assemble_context`'s parent walk returns **only the head turn**. Earlier turns (seed, prior interactions) are neither assembled into model context nor replayed: multi-turn model context is current-turn-only | restart_load red 1; direct DB dump shows seed + tool rows present but excluded from the walk   |
+| 6 | `/name` wire path unwired: `expand_user` has no production caller, so user prompts reach the model verbatim | A10 red; `src/invokables/mod.rs:211` |
+| 7 | `session/load` never emits the FR-005 usage snapshot | restart_load red 3; the only `UsageUpdate` send sites are `acp/mod.rs:855` and `:1011` |
+| 8 | `replay_updates` parses message content as a block array **before** the role match — `Role::ToolCall` rows store raw arguments (`{"text":…}`), fail the parse, and are skipped, so direct-invocation tool calls are never replayed | restart_load red 2; both rows confirmed present via `assemble_context`; `acp/mod.rs:1393-1396` |
+| 9 | Prompt turns are appended with `parent_id = NULL` (`acp/mod.rs:526`, whose comment claims "head-following turns chain via the store's head"; `store/mod.rs:541` inserts the parent verbatim, memory backend likewise) → `assemble_context`'s parent walk returns **only the head turn**. Earlier turns (seed, prior interactions) are neither assembled into model context nor replayed: multi-turn model context is current-turn-only | restart_load red 1; direct DB dump shows seed + tool rows present but excluded from the walk |
 
 ### 9.4 Corrections and deviations vs the plan
 

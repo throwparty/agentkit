@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use rust_mcp_sdk::error::SdkResult;
-use rust_mcp_sdk::mcp_client::{ClientHandler, McpClientOptions, client_runtime};
+use rust_mcp_sdk::mcp_client::{client_runtime, ClientHandler, McpClientOptions};
 use rust_mcp_sdk::schema::{
     CallToolRequestParams, ClientCapabilities, ContentBlock, Implementation,
 };

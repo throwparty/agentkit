@@ -4,7 +4,7 @@ sidebar_position: 4
 
 # The prompt turn
 
-A *turn* is one `session/prompt` and everything it causes: the slash-command intercepts, the model requests, the tool calls, and the response that reports how it ended. This page is the account of the turn's control flow and of how a turn is cancelled. It describes the intended design; the cancellation mechanism is specified in `adrs/2026-10-24-tackle-turn-cancellation`.
+A _turn_ is one `session/prompt` and everything it causes: the slash-command intercepts, the model requests, the tool calls, and the response that reports how it ended. This page is the account of the turn's control flow and of how a turn is cancelled. It describes the intended design; the cancellation mechanism is specified in `adrs/2026-10-24-tackle-turn-cancellation`.
 
 ## Lifecycle
 
@@ -31,7 +31,7 @@ sequenceDiagram
     T-->>C: session/prompt response (stopReason)
 ```
 
-The response is sent by the *turn task*, not the dispatch loop, because the turn awaits client messages — a `session/request_permission` for a tool call has to be routed by the dispatch loop while the turn is still running. Running the turn inline on the dispatch task would deadlock on its own permission reply. This detach is the reason cancellation is not simply "the prompt handler returns early".
+The response is sent by the _turn task_, not the dispatch loop, because the turn awaits client messages — a `session/request_permission` for a tool call has to be routed by the dispatch loop while the turn is still running. Running the turn inline on the dispatch task would deadlock on its own permission reply. This detach is the reason cancellation is not simply "the prompt handler returns early".
 
 The turn's terminal state rides the `session/prompt` response as an ACP `stopReason`: `end_turn`, `max_turn_requests`, or `cancelled`.
 
@@ -63,10 +63,10 @@ Cancellation is **cooperative**. A turn is not killed; it is signalled, and it s
 
 ACP v1 defines three inbound signals that stop an in-flight prompt. All three converge on the same per-turn token, so a turn cannot be cancelled by one path and left running by another.
 
-| Trigger | Wire shape | How it reaches the turn |
-| --- | --- | --- |
-| `session/cancel` | notification (session id) | a notification handler looks up the session's token and cancels it |
-| `session/close` | request (session id) | the close handler cancels the token before running the existing close path |
+| Trigger            | Wire shape                         | How it reaches the turn                                                          |
+| ------------------ | ---------------------------------- | -------------------------------------------------------------------------------- |
+| `session/cancel`   | notification (session id)          | a notification handler looks up the session's token and cancels it               |
+| `session/close`    | request (session id)               | the close handler cancels the token before running the existing close path       |
 | `$/cancel_request` | protocol notification (request id) | the SDK marks the request's `Responder` cancellation; the turn races that marker |
 
 `session/cancel` and `session/close` carry a session id rather than a JSON-RPC request id, so tackle keeps a small **session → token** registry while a turn is in flight. `$/cancel_request` needs no registry: the SDK records it on the `Responder` before the handler runs, and the turn races `responder.cancellation()` directly.
@@ -96,14 +96,14 @@ sequenceDiagram
 
 ### Where it lands in code
 
-| Step | Location |
-| --- | --- |
-| Spawn the turn, register its token | `acp_v1/prompt.rs` (`run_model_turn_case`) |
-| Observe cancellation around the turn | `agent/prompt.rs` → `agent/turn.rs` (`stream_completion`) |
-| `session/cancel` handler | `acp_v1/server.rs` builder (new `on_receive_notification`) |
-| `session/close` signal | `acp_v1/sessions.rs` (`handle_close_session`) |
-| `$/cancel_request` bridge | `acp_v1/prompt.rs` (`responder.cancellation()`) |
-| Finalise (`cancelled` stop reason) | `acp_v1/prompt.rs` (response mapping) |
+| Step                                 | Location                                                   |
+| ------------------------------------ | ---------------------------------------------------------- |
+| Spawn the turn, register its token   | `acp_v1/prompt.rs` (`run_model_turn_case`)                 |
+| Observe cancellation around the turn | `agent/prompt.rs` → `agent/turn.rs` (`stream_completion`)  |
+| `session/cancel` handler             | `acp_v1/server.rs` builder (new `on_receive_notification`) |
+| `session/close` signal               | `acp_v1/sessions.rs` (`handle_close_session`)              |
+| `$/cancel_request` bridge            | `acp_v1/prompt.rs` (`responder.cancellation()`)            |
+| Finalise (`cancelled` stop reason)   | `acp_v1/prompt.rs` (response mapping)                      |
 
 ### Finalisation
 
@@ -115,7 +115,7 @@ The registry is a session → token map that exists only while a turn is in flig
 
 Over stdio the scope question does not arise: the client launches the agent as a subprocess, so there is exactly one connection per process and the registry is trivially the only one. Tackle's HTTP transport, by contrast, can serve several connections within one process, so connection scope is a deliberate policy there: a `session/cancel` reaches the turn only when it arrives on the connection that owns it, and a cancel on a different connection is not forwarded.
 
-Connection scope is chosen for both fit and policy. It is the natural home for per-connection facilities; the handlers that need it already hold the connection's negotiation state; and it is released with the connection rather than needing explicit deregistration. It also matches the rest of the transport model — the terminal map and MCP pool are likewise connection-local — and the assumption that the client that opened the session drives its own turn. The registry is keyed by session id, so one connection serving several sessions is still covered. Cancelling a turn from a *different* connection or process is out of scope; see `adrs/2026-10-24-tackle-turn-cancellation`.
+Connection scope is chosen for both fit and policy. It is the natural home for per-connection facilities; the handlers that need it already hold the connection's negotiation state; and it is released with the connection rather than needing explicit deregistration. It also matches the rest of the transport model — the terminal map and MCP pool are likewise connection-local — and the assumption that the client that opened the session drives its own turn. The registry is keyed by session id, so one connection serving several sessions is still covered. Cancelling a turn from a _different_ connection or process is out of scope; see `adrs/2026-10-24-tackle-turn-cancellation`.
 
 ## Conformance
 

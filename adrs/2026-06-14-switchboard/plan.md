@@ -10,26 +10,26 @@ decision: accepted
 
 ## 1. Requirements Traceability
 
-| Spec Requirement                            | Plan Section                                     | Verification                                                                                                                          |
+| Spec Requirement | Plan Section | Verification |
 | ------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
-| **FR1** — Route dispatch by API surface     | §4.1 Route registry, §4.2.1 Path prefix matching | Unit: `route_dispatch_by_path`. Integration: path 404 test.                                                                           |
-| **FR2** — Multi-provider routing            | §4.2.2 Candidate selection + scoring             | Unit: `routing_prefers_subscription`, `routing_ranks_by_cost`, `routing_model_not_available`. Integration: `proxy_completes_request`. |
-| **FR3** — Quota-preserving routing          | §4.2.3 Scoring algorithm, §5 Quota state         | Unit: `routing_prefers_subscription`, `routing_falls_through_on_quota_exhausted`. Integration: `proxy_429_retry`.                     |
-| **FR4** — Session affinity with persistence | §6 Session manager (in-memory + SQLite)          | Unit: `routing_session_affinity`, `routing_session_persisted_after_restart`. Integration: `proxy_session_persistence`.                |
-| **FR5** — Streaming passthrough             | §4.4 Forwarder (SSE byte copy)                   | Unit: `streaming_passthrough`. Integration: `proxy_streams_response`.                                                                 |
-| **FR6** — Model metadata resolution         | §3 Model DB (models.dev + TOML merge)            | Unit: `config_models_dev_merge`. Integration: `proxy_model_list`.                                                                     |
-| **FR7** — Credential pooling                | §4.2.2 Step 3 per-provider credential check      | Unit: `credential_env_var`, `credential_helper_not_found`.                                                                            |
-| **FR8** — Provider degradation and recovery | §5.3 Degradation state machine                   | Unit: `degradation_recovers_after_timeout`, `degradation_permanent_on_401`. Integration: `proxy_all_degraded_503`.                    |
-| **FR9** — Configuration and CLI             | §2 CLI + config loader                           | Unit: `config_parse_valid`, `config_parse_duplicate_identity`. BATS: flag parsing.                                                    |
-| **FR10** — Auth login subcommand            | §7 OAuth flow + credential helper                | Unit: `credential_helper_store`, `credential_helper_get`. Integration: mocked OAuth callback.                                         |
-| **FR11** — Session database persistence     | §6.3 SQLite schema + migrations                  | Unit: `session_db_create_and_query`, `session_db_corruption_handling`.                                                                |
-| **FR12** — Rate-limit header parsing        | §5.1 Header parser                               | Unit: `quota_headers_openai`, `quota_headers_anthropic`, `quota_headers_missing`.                                                     |
-| **NFR1** — Startup time < 2s                | §8.1 Lazy credential validation                  | Benchmark gate in CI (`cargo bench`).                                                                                                 |
-| **NFR2** — Proxy latency overhead           | §4.4 Streaming without body buffering            | Benchmark: P95 overhead measured against wiremock.                                                                                    |
-| **NFR3** — Memory footprint < 50MB idle     | §8.3 No in-memory session table                  | `memory-profiling` test gated.                                                                                                        |
-| **NFR4** — Credential security              | §7.3 Redaction in logs, helper-only access       | Audit: grep for credential values in logs.                                                                                            |
-| **NFR5** — Observability                    | §4.5 Structured logging + routing_events DB      | Unit: tracing-test assertion on routing decisions.                                                                                    |
-| **NFR6** — Async runtime                    | All I/O on tokio                                 | Compilation: tokio-annotated. Clippy: `disallowed_methods` for blocking calls.                                                        |
+| **FR1** — Route dispatch by API surface | §4.1 Route registry, §4.2.1 Path prefix matching | Unit: `route_dispatch_by_path`. Integration: path 404 test. |
+| **FR2** — Multi-provider routing | §4.2.2 Candidate selection + scoring | Unit: `routing_prefers_subscription`, `routing_ranks_by_cost`, `routing_model_not_available`. Integration: `proxy_completes_request`. |
+| **FR3** — Quota-preserving routing | §4.2.3 Scoring algorithm, §5 Quota state | Unit: `routing_prefers_subscription`, `routing_falls_through_on_quota_exhausted`. Integration: `proxy_429_retry`. |
+| **FR4** — Session affinity with persistence | §6 Session manager (in-memory + SQLite) | Unit: `routing_session_affinity`, `routing_session_persisted_after_restart`. Integration: `proxy_session_persistence`. |
+| **FR5** — Streaming passthrough | §4.4 Forwarder (SSE byte copy) | Unit: `streaming_passthrough`. Integration: `proxy_streams_response`. |
+| **FR6** — Model metadata resolution | §3 Model DB (models.dev + TOML merge) | Unit: `config_models_dev_merge`. Integration: `proxy_model_list`. |
+| **FR7** — Credential pooling | §4.2.2 Step 3 per-provider credential check | Unit: `credential_env_var`, `credential_helper_not_found`. |
+| **FR8** — Provider degradation and recovery | §5.3 Degradation state machine | Unit: `degradation_recovers_after_timeout`, `degradation_permanent_on_401`. Integration: `proxy_all_degraded_503`. |
+| **FR9** — Configuration and CLI | §2 CLI + config loader | Unit: `config_parse_valid`, `config_parse_duplicate_identity`. BATS: flag parsing. |
+| **FR10** — Auth login subcommand | §7 OAuth flow + credential helper | Unit: `credential_helper_store`, `credential_helper_get`. Integration: mocked OAuth callback. |
+| **FR11** — Session database persistence | §6.3 SQLite schema + migrations | Unit: `session_db_create_and_query`, `session_db_corruption_handling`. |
+| **FR12** — Rate-limit header parsing | §5.1 Header parser | Unit: `quota_headers_openai`, `quota_headers_anthropic`, `quota_headers_missing`. |
+| **NFR1** — Startup time < 2s | §8.1 Lazy credential validation | Benchmark gate in CI (`cargo bench`). |
+| **NFR2** — Proxy latency overhead | §4.4 Streaming without body buffering | Benchmark: P95 overhead measured against wiremock. |
+| **NFR3** — Memory footprint < 50MB idle | §8.3 No in-memory session table | `memory-profiling` test gated. |
+| **NFR4** — Credential security | §7.3 Redaction in logs, helper-only access | Audit: grep for credential values in logs. |
+| **NFR5** — Observability | §4.5 Structured logging + routing_events DB | Unit: tracing-test assertion on routing decisions. |
+| **NFR6** — Async runtime | All I/O on tokio | Compilation: tokio-annotated. Clippy: `disallowed_methods` for blocking calls. |
 
 ## 2. Architecture Overview
 
@@ -162,21 +162,21 @@ sequenceDiagram
 
 ## 3. Technology Choices
 
-| Choice                         | Selection                    | Rationale                                                                                      |
+| Choice | Selection | Rationale |
 | ------------------------------ | ---------------------------- | ---------------------------------------------------------------------------------------------- |
-| **HTTP framework**             | axum 0.8                     | Matches existing project patterns. Well-typed extractors for path/header/JSON. Native SSE.     |
-| **HTTP client**                | reqwest 0.12                 | Streaming support for SSE passthrough. Native TLS. tokio-compatible.                           |
-| **Config parsing**             | toml + serde                 | Follows litterbox pattern. Well-known, no alternatives considered.                             |
-| **CLI**                        | clap derive                  | Follows litterbox pattern. `ExitCode` return type.                                             |
-| **SQLite**                     | sqlx 0.9 (sqlite + migrate)  | Async via `spawn_blocking`. Migration support. No ORM overhead.                                |
-| **Logging**                    | tracing + tracing-subscriber | Structured JSON logs. Tokio-native. Env-filter for level control.                              |
-| **OAuth**                      | oauth2 5                     | Battle-tested. PKCE support. Minimal feature set (`basic`).                                    |
-| **Credential helper exec**     | `std::process::Command`      | No extra dependency. Each call is a subprocess. Tokio `spawn_blocking` for the exec call.      |
-| **Credential helper keychain** | keyring 3                    | Only in `agentkit-credential-keychain` binary, not in proxy. Cross-platform (macOS/Win/Linux). |
-| **Testing (mocked HTTP)**      | wiremock 0.6                 | Request matching, response templating. Used in model-provider-sdk samples.                     |
-| **Testing (async)**            | tokio::test                  | Standard for the project.                                                                      |
-| **Time types**                 | chrono 0.4                   | RFC 3339 parsing/serialization for token expiry. `serde` feature.                              |
-| **UUID**                       | uuid 1 (v4)                  | Request ID generation for routing_events.                                                      |
+| **HTTP framework** | axum 0.8 | Matches existing project patterns. Well-typed extractors for path/header/JSON. Native SSE. |
+| **HTTP client** | reqwest 0.12 | Streaming support for SSE passthrough. Native TLS. tokio-compatible. |
+| **Config parsing** | toml + serde | Follows litterbox pattern. Well-known, no alternatives considered. |
+| **CLI** | clap derive | Follows litterbox pattern. `ExitCode` return type. |
+| **SQLite** | sqlx 0.9 (sqlite + migrate) | Async via `spawn_blocking`. Migration support. No ORM overhead. |
+| **Logging** | tracing + tracing-subscriber | Structured JSON logs. Tokio-native. Env-filter for level control. |
+| **OAuth** | oauth2 5 | Battle-tested. PKCE support. Minimal feature set (`basic`). |
+| **Credential helper exec** | `std::process::Command` | No extra dependency. Each call is a subprocess. Tokio `spawn_blocking` for the exec call. |
+| **Credential helper keychain** | keyring 3 | Only in `agentkit-credential-keychain` binary, not in proxy. Cross-platform (macOS/Win/Linux). |
+| **Testing (mocked HTTP)** | wiremock 0.6 | Request matching, response templating. Used in model-provider-sdk samples. |
+| **Testing (async)** | tokio::test | Standard for the project. |
+| **Time types** | chrono 0.4 | RFC 3339 parsing/serialization for token expiry. `serde` feature. |
+| **UUID** | uuid 1 (v4) | Request ID generation for routing_events. |
 
 ## 4. Component Breakdown and Sequencing
 
@@ -524,12 +524,12 @@ sequenceDiagram
 
 ### 6.1 Test Layers
 
-| Layer                    | Harness                    | What It Covers                                                                                       | CI Gate                        |
+| Layer | Harness | What It Covers | CI Gate |
 | ------------------------ | -------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------ |
-| **Unit**                 | `cargo test --lib`         | Config, routing algorithm, quota math, session affinity, header parsing, credential protocol parsing | Yes — required                 |
-| **Integration (mocked)** | `cargo test` with wiremock | Full HTTP lifecycle, streaming, degradation, session persistence, model list                         | Yes — required                 |
-| **Integration (live)**   | `cargo test -- --ignored`  | Real OpenAI/Ollama round-trips                                                                       | Manual — uses real credentials |
-| **Benchmark**            | `cargo bench`              | Startup time, latency overhead, memory                                                               | Informational — no hard gate   |
+| **Unit** | `cargo test --lib` | Config, routing algorithm, quota math, session affinity, header parsing, credential protocol parsing | Yes — required |
+| **Integration (mocked)** | `cargo test` with wiremock | Full HTTP lifecycle, streaming, degradation, session persistence, model list | Yes — required |
+| **Integration (live)** | `cargo test -- --ignored` | Real OpenAI/Ollama round-trips | Manual — uses real credentials |
+| **Benchmark** | `cargo bench` | Startup time, latency overhead, memory | Informational — no hard gate |
 
 ### 6.2 Credential Helper Test Harness
 
@@ -586,16 +586,16 @@ This function can be tested without instantiating an HTTP server, without a data
 
 ## 7. Risks and Mitigations
 
-| Risk                                                                                           | Likelihood | Impact | Mitigation                                                                                                                               |
+| Risk | Likelihood | Impact | Mitigation |
 | ---------------------------------------------------------------------------------------------- | ---------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **Credential helper exec latency**: `std::process::Command` adds 1-5ms per request             | Medium     | Low    | Cache credential in-memory with TTL (deferred) — acceptable for MVP. Monitor via `routing_events.latency_ms`.                            |
-| **Keyring crate platform issues**: Linux libsecret/D-Bus not available                         | Medium     | Medium | Fallback to env var. User can set `credential_helper = "file"` for headless.                                                             |
-| **OAuth flow browser open fails**: Headless server without display                             | Low        | Low    | `switchboard auth token` fallback for CI. Error message tells user to set env var manually.                                              |
-| **SQLite write contention**: Multiple concurrent requests update the same session row          | Low        | Medium | Use `INSERT ... ON CONFLICT DO UPDATE` (upsert). sqlx handles serialization within SQLite. `spawn_blocking` ensures tokio doesn't stall. |
-| **Streaming response partially forwarded then upstream drops**: Client sees truncated response | Medium     | Low    | Acceptable per spec §12.3 — send error SSE chunk then `[DONE]`. No retry.                                                                |
-| **models.dev snapshot drift**: Prices/features change between releases                         | Low        | High   | Auto-generated snapshot in CI before each release. If no release in months, user can override via `[models.*]` TOML.                     |
-| **Multiple credentials for same base_url both degrade**: No provider available                 | Low        | Medium | Already handled — 503 with provider status. Alert in logs at error level.                                                                |
-| **Configuration hot reload needed**: User must restart to change providers                     | Medium     | Low    | Spec §12.5 explicitly defers this. Log warning on config file change detected.                                                           |
+| **Credential helper exec latency**: `std::process::Command` adds 1-5ms per request | Medium | Low | Cache credential in-memory with TTL (deferred) — acceptable for MVP. Monitor via `routing_events.latency_ms`. |
+| **Keyring crate platform issues**: Linux libsecret/D-Bus not available | Medium | Medium | Fallback to env var. User can set `credential_helper = "file"` for headless. |
+| **OAuth flow browser open fails**: Headless server without display | Low | Low | `switchboard auth token` fallback for CI. Error message tells user to set env var manually. |
+| **SQLite write contention**: Multiple concurrent requests update the same session row | Low | Medium | Use `INSERT ... ON CONFLICT DO UPDATE` (upsert). sqlx handles serialization within SQLite. `spawn_blocking` ensures tokio doesn't stall. |
+| **Streaming response partially forwarded then upstream drops**: Client sees truncated response | Medium | Low | Acceptable per spec §12.3 — send error SSE chunk then `[DONE]`. No retry. |
+| **models.dev snapshot drift**: Prices/features change between releases | Low | High | Auto-generated snapshot in CI before each release. If no release in months, user can override via `[models.*]` TOML. |
+| **Multiple credentials for same base_url both degrade**: No provider available | Low | Medium | Already handled — 503 with provider status. Alert in logs at error level. |
+| **Configuration hot reload needed**: User must restart to change providers | Medium | Low | Spec §12.5 explicitly defers this. Log warning on config file change detected. |
 
 ## 8. Operations
 
@@ -603,24 +603,24 @@ The switchboard is a local proxy — no deployment pipeline, no canary, no multi
 
 ### 8.1 What to Watch in Logs
 
-| Log Level | Signal                                 | What It Means                                                                    |
+| Log Level | Signal | What It Means |
 | --------- | -------------------------------------- | -------------------------------------------------------------------------------- |
-| `error`   | All providers degraded for model X     | Every candidate is down. Check credential validity and quota state.              |
-| `error`   | OAuth refresh failed for identity X    | Token can't be refreshed. Run `switchboard auth login` to re-auth.               |
-| `warn`    | Provider X degraded (reason)           | A provider hit a rate limit or error. Should auto-recover.                       |
-| `warn`    | Session X switched from A to B         | Cache penalty incurred. Expected when quota exhausts.                            |
-| `warn`    | Credential helper not found in PATH    | Falling back to env var. Install the helper or set `credential_helper = "file"`. |
-| `info`    | Routing decision: model X → provider Y | Every request's routing choice. Useful for debugging.                            |
+| `error` | All providers degraded for model X | Every candidate is down. Check credential validity and quota state. |
+| `error` | OAuth refresh failed for identity X | Token can't be refreshed. Run `switchboard auth login` to re-auth. |
+| `warn` | Provider X degraded (reason) | A provider hit a rate limit or error. Should auto-recover. |
+| `warn` | Session X switched from A to B | Cache penalty incurred. Expected when quota exhausts. |
+| `warn` | Credential helper not found in PATH | Falling back to env var. Install the helper or set `credential_helper = "file"`. |
+| `info` | Routing decision: model X → provider Y | Every request's routing choice. Useful for debugging. |
 
 ### 8.2 Undoing Things
 
-| What                             | How                                                                                                                                          |
+| What | How |
 | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Wrong config**                 | Edit `switchboard.toml`, restart the binary.                                                                                                 |
-| **Wrong binary version**         | Replace the binary, restart. Session DB is forward-compatible (additive migrations only).                                                    |
-| **Corrupt session DB**           | Delete `~/.switchboard/sessions.db`. Switchboard recreates it. Loss of session affinity is acceptable — next request incurs a cache penalty. |
-| **Stale OAuth tokens**           | Run `switchboard auth login <identity>` to re-auth. Or `switchboard auth logout <identity>` to clear them.                                   |
-| **Don't want the proxy anymore** | Kill the process. Point your client directly at the upstream provider. No state left behind beyond the session DB (safe to delete).          |
+| **Wrong config** | Edit `switchboard.toml`, restart the binary. |
+| **Wrong binary version** | Replace the binary, restart. Session DB is forward-compatible (additive migrations only). |
+| **Corrupt session DB** | Delete `~/.switchboard/sessions.db`. Switchboard recreates it. Loss of session affinity is acceptable — next request incurs a cache penalty. |
+| **Stale OAuth tokens** | Run `switchboard auth login <identity>` to re-auth. Or `switchboard auth logout <identity>` to clear them. |
+| **Don't want the proxy anymore** | Kill the process. Point your client directly at the upstream provider. No state left behind beyond the session DB (safe to delete). |
 
 ## 9. Alignment Check
 

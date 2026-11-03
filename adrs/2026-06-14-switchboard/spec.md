@@ -44,13 +44,13 @@ decision: accepted
 
 ### Quota Research Summary
 
-| Provider / Auth                      | Quota Data Source          | What It Reports                   | Window Types                   |
+| Provider / Auth | Quota Data Source | What It Reports | Window Types |
 | ------------------------------------ | -------------------------- | --------------------------------- | ------------------------------ |
-| OpenAI API key                       | Response headers           | `x-ratelimit-remaining-*`         | RPM, TPM (per-minute rolling)  |
-| OpenAI Codex subscription            | Internal `/usage` endpoint | Messages / 5h, weekly             | 5-hour rolling + weekly        |
-| Anthropic Platform API key           | Response headers           | `anthropic-ratelimit-*-remaining` | RPM, ITPM, OTPM (per-minute)   |
-| Anthropic subscription (Claude Code) | `GET ... /usage` endpoint  | 8 utilization floats (0.0–1.0)    | 5-hour rolling + 7-day rolling |
-| Ollama (local)                       | None                       | N/A                               | No limits                      |
+| OpenAI API key | Response headers | `x-ratelimit-remaining-*` | RPM, TPM (per-minute rolling) |
+| OpenAI Codex subscription | Internal `/usage` endpoint | Messages / 5h, weekly | 5-hour rolling + weekly |
+| Anthropic Platform API key | Response headers | `anthropic-ratelimit-*-remaining` | RPM, ITPM, OTPM (per-minute) |
+| Anthropic subscription (Claude Code) | `GET ... /usage` endpoint | 8 utilization floats (0.0–1.0) | 5-hour rolling + 7-day rolling |
+| Ollama (local) | None | N/A | No limits |
 
 ## 1. Problem
 
@@ -75,21 +75,21 @@ The switchboard solves this by acting as a **local HTTP proxy** that:
 
 ## 2. Terminology
 
-| Term                  | Definition                                                                                                                                                                                                                                                                                                    |
+| Term | Definition |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **API surface**       | The wire protocol format the proxy speaks and backends speak. Identified by URL path prefix (`/openai/v1/...`, `/anthropic/v1/...`, `/ollama/...`). Each surface has a dedicated inbound endpoint and bodies pass through unchanged — the proxy routes within a surface and never translates across surfaces. |
-| **Provider**          | A configurable combination of a base URL, API surface, authenticator implementation, billing model, pricing, and a set of models it can serve. Defined in TOML, stored in a map keyed by identity.                                                                                                            |
-| **Identity**          | The unique key for a provider within the TOML config. Used for lookup, credential reference, response header identification, and credential helper key.                                                                                                                                                       |
-| **Authenticator**     | A component that knows what credentials a provider expects, which env vars or credential helper keys to read, how to present the credential on the wire, and (for OAuth) how to refresh it.                                                                                                                   |
-| **Billing model**     | How the credential is charged: `subscription` (flat-rate, time-limited quota, no per-token cost within quota), `pay_as_you_go` (per-token cost, rate-limited), or `free` (local, no auth, no limits).                                                                                                         |
-| **Quota window**      | A time-bounded usage limit enforced by the provider. May be a rolling window (5-hour sliding window where the oldest prompt ages out) or a fixed window (monthly spend cap).                                                                                                                                  |
-| **Utilization float** | A 0.0–1.0 value representing how much of a quota window has been consumed. At 1.0, further requests return 429. Used by Claude Code's internal usage endpoint.                                                                                                                                                |
-| **Session**           | A grouping of requests identified by an `X-Session-Id` HTTP header. Sessions have provider affinity: once assigned, all requests in a session go to the same provider unless that provider becomes unavailable. Session state is persisted to SQLite.                                                         |
-| **Cache penalty**     | The additional cost incurred when a session switches providers, because the new provider has no cached prefix for the conversation context. Preserving session affinity avoids this.                                                                                                                          |
-| **Model metadata**    | Provider-agnostic facts about a model: context window size, max output tokens, supported capabilities (tool calling, structured output, reasoning, modalities). Sourced from a bundled snapshot of models.dev data, with TOML overrides.                                                                      |
-| **Model shape**       | A model as exposed by `GET /openai/v1/models`: its metadata (context window, max output, capabilities) plus the list of providers serving it and their per-model pricing. The unit returned by model shape discovery.                                                                                         |
-| **Provider pricing**  | Per-provider, per-model cost per million tokens for input, output, cached input, and reasoning tokens. Defined per provider (not per model), because the same model served by different providers has different prices.                                                                                       |
-| **Credential source** | Where a credential value comes from: an environment variable (for API keys and pre-acquired tokens) or a credential helper (for switchboard-managed OAuth tokens with refresh).                                                                                                                               |
+| **API surface** | The wire protocol format the proxy speaks and backends speak. Identified by URL path prefix (`/openai/v1/...`, `/anthropic/v1/...`, `/ollama/...`). Each surface has a dedicated inbound endpoint and bodies pass through unchanged — the proxy routes within a surface and never translates across surfaces. |
+| **Provider** | A configurable combination of a base URL, API surface, authenticator implementation, billing model, pricing, and a set of models it can serve. Defined in TOML, stored in a map keyed by identity. |
+| **Identity** | The unique key for a provider within the TOML config. Used for lookup, credential reference, response header identification, and credential helper key. |
+| **Authenticator** | A component that knows what credentials a provider expects, which env vars or credential helper keys to read, how to present the credential on the wire, and (for OAuth) how to refresh it. |
+| **Billing model** | How the credential is charged: `subscription` (flat-rate, time-limited quota, no per-token cost within quota), `pay_as_you_go` (per-token cost, rate-limited), or `free` (local, no auth, no limits). |
+| **Quota window** | A time-bounded usage limit enforced by the provider. May be a rolling window (5-hour sliding window where the oldest prompt ages out) or a fixed window (monthly spend cap). |
+| **Utilization float** | A 0.0–1.0 value representing how much of a quota window has been consumed. At 1.0, further requests return 429. Used by Claude Code's internal usage endpoint. |
+| **Session** | A grouping of requests identified by an `X-Session-Id` HTTP header. Sessions have provider affinity: once assigned, all requests in a session go to the same provider unless that provider becomes unavailable. Session state is persisted to SQLite. |
+| **Cache penalty** | The additional cost incurred when a session switches providers, because the new provider has no cached prefix for the conversation context. Preserving session affinity avoids this. |
+| **Model metadata** | Provider-agnostic facts about a model: context window size, max output tokens, supported capabilities (tool calling, structured output, reasoning, modalities). Sourced from a bundled snapshot of models.dev data, with TOML overrides. |
+| **Model shape** | A model as exposed by `GET /openai/v1/models`: its metadata (context window, max output, capabilities) plus the list of providers serving it and their per-model pricing. The unit returned by model shape discovery. |
+| **Provider pricing** | Per-provider, per-model cost per million tokens for input, output, cached input, and reasoning tokens. Defined per provider (not per model), because the same model served by different providers has different prices. |
+| **Credential source** | Where a credential value comes from: an environment variable (for API keys and pre-acquired tokens) or a credential helper (for switchboard-managed OAuth tokens with refresh). |
 
 ## 3. System Architecture
 
@@ -195,17 +195,17 @@ sequenceDiagram
 
 ### 3.3 Boundaries
 
-| Owns                                                          | Does Not Own                                             |
+| Owns | Does Not Own |
 | ------------------------------------------------------------- | -------------------------------------------------------- |
-| Provider selection and routing                                | Session conversation history (ACP server)                |
-| Credential resolution and rotation                            | Tool execution / MCP client (ACP server)                 |
-| Rate-limit and quota tracking per provider                    | User authentication / ACL for the proxy itself           |
-| Session-to-provider affinity mapping (persisted to SQLite)    | ACP session lifecycle (create/close/fork)                |
-| OAuth token acquisition, storage, and refresh                 | Multi-tenant quota enforcement                           |
-| Model metadata aggregation (models.dev + overrides)           | Cache penalty cost modeling (deferred)                   |
-| Request forwarding and SSE streaming passthrough              | Full protocol translation between arbitrary API surfaces |
-| Credential security (redaction in logs, helper-based storage) |                                                          |
-| Model shape enumeration (`GET /openai/v1/models`)             |                                                          |
+| Provider selection and routing | Session conversation history (ACP server) |
+| Credential resolution and rotation | Tool execution / MCP client (ACP server) |
+| Rate-limit and quota tracking per provider | User authentication / ACL for the proxy itself |
+| Session-to-provider affinity mapping (persisted to SQLite) | ACP session lifecycle (create/close/fork) |
+| OAuth token acquisition, storage, and refresh | Multi-tenant quota enforcement |
+| Model metadata aggregation (models.dev + overrides) | Cache penalty cost modeling (deferred) |
+| Request forwarding and SSE streaming passthrough | Full protocol translation between arbitrary API surfaces |
+| Credential security (redaction in logs, helper-based storage) | |
+| Model shape enumeration (`GET /openai/v1/models`) | |
 
 ### 3.4 Credential Storage Principles
 
@@ -213,14 +213,14 @@ The switchboard does **not** manage credential storage directly. Instead, it del
 
 The switchboard ships with two credential helpers:
 
-| Helper Binary                  | Backend                                                                                                                                                       | Use Case                                   |
+| Helper Binary | Backend | Use Case |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| `agentkit-credential-keychain` | System keychain (macOS Keychain, Windows Credential Manager, Linux libsecret)                                                                                 | Desktop workstation with a keychain daemon |
-| `agentkit-credential-file`     | JSON file at switchboard data dir (`~/.local/state/agentkit/switchboard/credentials.json` on Linux, `0600` perms). Override with `AGENTKIT_DATA_DIR` env var. | Headless server, CI, WSL without D-Bus     |
+| `agentkit-credential-keychain` | System keychain (macOS Keychain, Windows Credential Manager, Linux libsecret) | Desktop workstation with a keychain daemon |
+| `agentkit-credential-file` | JSON file at switchboard data dir (`~/.local/state/agentkit/switchboard/credentials.json` on Linux, `0600` perms). Override with `AGENTKIT_DATA_DIR` env var. | Headless server, CI, WSL without D-Bus |
 
 The helper binary is set once via the top-level `credential_helper` field in the TOML config (or `--credential-helper` CLI flag). All providers share the same credential helper. All credentials — API keys and OAuth tokens alike — are stored and read via the credential helper.
 
-| Storage                                     | Use Case                                                                                            | Supports Refresh?                                                    |
+| Storage | Use Case | Supports Refresh? |
 | ------------------------------------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
 | **Credential helper (default: `keychain`)** | All credentials. Managed via `switchboard auth login` (OAuth) or `switchboard auth add` (API keys). | Yes — OAuth tokens are refreshed automatically. API keys are static. |
 
@@ -533,10 +533,10 @@ struct PerModelPricing {
 
 All providers use `BearerToken` auth type, which reads credentials from the credential helper with env var fallback. OAuth-based refresh is driven by the presence of an `[auth.oauth]` config block — when present, the credential layer calls `auth::maybe_refresh_credential()` before forwarding, which delegates to the provider-specific refresh implementation (currently only OpenAI Codex). This dispatch is data-driven, not enum-variant-driven.
 
-| AuthType       | Uses credential helper?                                | Wire format                   | Supports refresh?                     |
+| AuthType | Uses credential helper? | Wire format | Supports refresh? |
 | -------------- | ------------------------------------------------------ | ----------------------------- | ------------------------------------- |
 | `bearer_token` | Yes — `auth add <identity>` or `auth login <identity>` | `Authorization: Bearer <val>` | Yes — if `[auth.oauth]` is configured |
-| `none`         | No                                                     | No header                     | N/A                                   |
+| `none` | No | No header | N/A |
 
 ### 6.4 Why HashMap Keyed by Identity
 
@@ -603,11 +603,11 @@ Credential helpers are plugin binaries found in `PATH`, named `agentkit-credenti
 
 #### 6.7.1 Commands
 
-| Command | Args         | stdin                | stdout               | Exit code                  |
+| Command | Args | stdin | stdout | Exit code |
 | ------- | ------------ | -------------------- | -------------------- | -------------------------- |
-| `get`   | `<identity>` | (none)               | JSON credential blob | 0 = success, 1 = not found |
-| `store` | `<identity>` | JSON credential blob | (none)               | 0 = success                |
-| `erase` | `<identity>` | (none)               | (none)               | 0 = success                |
+| `get` | `<identity>` | (none) | JSON credential blob | 0 = success, 1 = not found |
+| `store` | `<identity>` | JSON credential blob | (none) | 0 = success |
+| `erase` | `<identity>` | (none) | (none) | 0 = success |
 
 #### 6.7.2 Credential JSON Format
 
@@ -740,11 +740,11 @@ export AGENTKIT_SWITCHBOARD_OPENAI_CODEX_SUB=<access_token>
 
 The switchboard dispatches requests by URL path prefix:
 
-| Path                               | API Surface | Handler                  |
+| Path | API Surface | Handler |
 | ---------------------------------- | ----------- | ------------------------ |
-| `POST /openai/v1/chat/completions` | OpenAI      | Chat completions proxy   |
-| `GET /openai/v1/models`            | OpenAI      | Return merged model list |
-| `GET /health`                      | General     | Health check             |
+| `POST /openai/v1/chat/completions` | OpenAI | Chat completions proxy |
+| `GET /openai/v1/models` | OpenAI | Return merged model list |
+| `GET /health` | General | Health check |
 
 Future API surfaces would add their own path prefixes:
 
@@ -830,14 +830,14 @@ flowchart TD
 
 Derived from response headers on every request:
 
-| Header                                        | Provider  | Field                               |
+| Header | Provider | Field |
 | --------------------------------------------- | --------- | ----------------------------------- |
-| `x-ratelimit-remaining-requests`              | OpenAI    | Requests remaining this minute      |
-| `x-ratelimit-remaining-tokens`                | OpenAI    | Tokens remaining this minute        |
-| `anthropic-ratelimit-requests-remaining`      | Anthropic | Requests remaining this window      |
-| `anthropic-ratelimit-input-tokens-remaining`  | Anthropic | Input tokens remaining this window  |
+| `x-ratelimit-remaining-requests` | OpenAI | Requests remaining this minute |
+| `x-ratelimit-remaining-tokens` | OpenAI | Tokens remaining this minute |
+| `anthropic-ratelimit-requests-remaining` | Anthropic | Requests remaining this window |
+| `anthropic-ratelimit-input-tokens-remaining` | Anthropic | Input tokens remaining this window |
 | `anthropic-ratelimit-output-tokens-remaining` | Anthropic | Output tokens remaining this window |
-| `retry-after`                                 | Both      | Seconds to wait on 429              |
+| `retry-after` | Both | Seconds to wait on 429 |
 
 Missing headers → state remains `None` (unknown). Provider is never degraded by absence of headers.
 
@@ -882,10 +882,10 @@ struct ProviderQuotaState {
 
 Built-in implementations:
 
-| Provider  | Header Mapping            | Subscription Model                            |
+| Provider | Header Mapping | Subscription Model |
 | --------- | ------------------------- | --------------------------------------------- |
-| OpenAI    | `x-ratelimit-remaining-*` | Daily token bucket, 5h rolling message window |
-| Anthropic | `anthropic-ratelimit-*`   | Rolling windows (6h, daily, weekly)           |
+| OpenAI | `x-ratelimit-remaining-*` | Daily token bucket, 5h rolling message window |
+| Anthropic | `anthropic-ratelimit-*` | Rolling windows (6h, daily, weekly) |
 
 ### 8.5 Degradation and Recovery
 
@@ -906,14 +906,14 @@ struct DegradationState {
 }
 ```
 
-| Event                              | Action                                                         | Recovery                                    |
+| Event | Action | Recovery |
 | ---------------------------------- | -------------------------------------------------------------- | ------------------------------------------- |
-| 429 rate-limit (pay-as-you-go)     | Degrade for `retry-after` or `*-reset` time                    | Auto-recover when reset passes              |
-| 429 quota exhausted (subscription) | Degrade for `retry-after` or full window duration (default 5h) | Auto-recover after cooldown                 |
-| 429 spend cap (pay-as-you-go)      | Degrade permanently (end of billing period)                    | Manual re-enable or config reload           |
-| 5xx                                | Degrade for 30s, exponential backoff (max 5 min)               | Auto-recover after backoff                  |
-| 401/403                            | Degrade permanently                                            | Requires re-authentication or config reload |
-| Timeout                            | Degrade for 10s, exponential backoff (max 2 min)               | Auto-recover after backoff                  |
+| 429 rate-limit (pay-as-you-go) | Degrade for `retry-after` or `*-reset` time | Auto-recover when reset passes |
+| 429 quota exhausted (subscription) | Degrade for `retry-after` or full window duration (default 5h) | Auto-recover after cooldown |
+| 429 spend cap (pay-as-you-go) | Degrade permanently (end of billing period) | Manual re-enable or config reload |
+| 5xx | Degrade for 30s, exponential backoff (max 5 min) | Auto-recover after backoff |
+| 401/403 | Degrade permanently | Requires re-authentication or config reload |
+| Timeout | Degrade for 10s, exponential backoff (max 2 min) | Auto-recover after backoff |
 
 When degraded on 429, a session with that provider is **re-assigned** to the next-best provider. The re-assignment is persisted to the session database.
 
@@ -940,6 +940,7 @@ The mechanism works as follows:
 1. **Subsequent requests (affinity hit):** The router reads the existing `session_affinity` row. If the assigned provider is still healthy (passes candidate filtering — has a valid credential, is not degraded), the router skips ranking and uses it directly. This is the **affinity fast path**.
 
 1. **Provider degrades (affinity break):** When the assigned provider is filtered out (degraded or credential failure), the router:
+
    - Falls through to candidate ranking (step 5) to select a new provider.
    - Calls `increment_switch()` which updates `provider_identity` and increments `switch_count`.
    - The `switch_count` field tracks cumulative switches for observability (cache penalty detection).
@@ -1529,85 +1530,85 @@ If the session database is corrupted:
 
 ## 13. Out of Scope
 
-| Topic                                           | Rationale                                                                                                                                                |
+| Topic | Rationale |
 | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Anthropic / Ollama frontend API surfaces**    | MVP serves `/openai/v1/*` only. Additional surfaces are separate features.                                                                               |
-| **Cross-surface translation**                   | The proxy routes within a single API surface and never translates between surfaces. An early Chat Completions ↔ Responses translation layer was removed. |
-| **Third-party OAuth flows beyond OpenAI Codex** | The `switchboard auth login` subcommand is designed for extensibility, but only OpenAI Codex OAuth is implemented in the MVP.                            |
-| **Multi-tenant quota enforcement**              | Single-user workstation software.                                                                                                                        |
-| **Config hot reload**                           | Requires file watcher + graceful credential rotation. Deferred.                                                                                          |
-| **Prometheus metrics endpoint**                 | Observable via structured JSON logs and `routing_events` DB table.                                                                                       |
-| **Cache penalty cost modeling**                 | The switchboard tracks `switch_count` and cumulative tokens but does not automatically factor cache penalties into routing cost comparisons (deferred).  |
-| **Load balancing for throughput**               | Routing optimizes for cost, not throughput.                                                                                                              |
-| **Access control for the proxy itself**         | Binds to localhost by default. No auth middleware.                                                                                                       |
-| **Models.dev live refresh at runtime**          | Snapshot refreshed in CI per release. Periodic runtime refresh is a future improvement.                                                                  |
+| **Anthropic / Ollama frontend API surfaces** | MVP serves `/openai/v1/*` only. Additional surfaces are separate features. |
+| **Cross-surface translation** | The proxy routes within a single API surface and never translates between surfaces. An early Chat Completions ↔ Responses translation layer was removed. |
+| **Third-party OAuth flows beyond OpenAI Codex** | The `switchboard auth login` subcommand is designed for extensibility, but only OpenAI Codex OAuth is implemented in the MVP. |
+| **Multi-tenant quota enforcement** | Single-user workstation software. |
+| **Config hot reload** | Requires file watcher + graceful credential rotation. Deferred. |
+| **Prometheus metrics endpoint** | Observable via structured JSON logs and `routing_events` DB table. |
+| **Cache penalty cost modeling** | The switchboard tracks `switch_count` and cumulative tokens but does not automatically factor cache penalties into routing cost comparisons (deferred). |
+| **Load balancing for throughput** | Routing optimizes for cost, not throughput. |
+| **Access control for the proxy itself** | Binds to localhost by default. No auth middleware. |
+| **Models.dev live refresh at runtime** | Snapshot refreshed in CI per release. Periodic runtime refresh is a future improvement. |
 
 ## 14. Traceability to Prior ADRs
 
-| Prior ADR                                                                   | Relevance                                                                                                                                                                                                                    |
+| Prior ADR | Relevance |
 | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [ACP Server](../2026-04-28-acp-server/spec.md)                              | The ACP server becomes a consumer of the switchboard, sending its session IDs via `X-Session-Id`.                                                                                                                            |
-| [Session Storage](../2026-06-13-acp-server-session-storage/spec.md)         | The switchboard's session DB follows a similar SQLite pattern but uses its own schema (not `acp-storage`). The two are complementary: acp-storage persists conversation history; the switchboard persists provider affinity. |
-| [Model Provider SDK](../2026-06-14-model-provider-sdk/spec.md)              | rig-core's auth pattern analysis (Bearer token, x-api-key, OAuth) and usage detail granularity inform the authenticator and quota tracking design. The switchboard does NOT depend on rig-core.                              |
-| [Model Provider SDK Comparison](../2026-06-14-model-provider-sdk/README.md) | Auth pattern diversity and cache penalty observations are used directly. The comparison's coverage of provider auth flexibility (OAuth, API keys, no auth) drove the authenticator architecture.                             |
+| [ACP Server](../2026-04-28-acp-server/spec.md) | The ACP server becomes a consumer of the switchboard, sending its session IDs via `X-Session-Id`. |
+| [Session Storage](../2026-06-13-acp-server-session-storage/spec.md) | The switchboard's session DB follows a similar SQLite pattern but uses its own schema (not `acp-storage`). The two are complementary: acp-storage persists conversation history; the switchboard persists provider affinity. |
+| [Model Provider SDK](../2026-06-14-model-provider-sdk/spec.md) | rig-core's auth pattern analysis (Bearer token, x-api-key, OAuth) and usage detail granularity inform the authenticator and quota tracking design. The switchboard does NOT depend on rig-core. |
+| [Model Provider SDK Comparison](../2026-06-14-model-provider-sdk/README.md) | Auth pattern diversity and cache penalty observations are used directly. The comparison's coverage of provider auth flexibility (OAuth, API keys, no auth) drove the authenticator architecture. |
 
 ## 15. Testing Strategy
 
 ### 15.1 Test Layers
 
-| Layer                    | Scope                                                                                | Network | Command                   |
+| Layer | Scope | Network | Command |
 | ------------------------ | ------------------------------------------------------------------------------------ | ------- | ------------------------- |
-| **Unit**                 | Config, routing, quota math, session affinity, header parsing, credential resolution | No      | `cargo test --lib`        |
-| **Integration (mocked)** | Full lifecycle with mocked backends (wiremock) and in-memory SQLite                  | No      | `cargo test`              |
-| **Integration (live)**   | Real providers (OpenAI API key, Ollama)                                              | Yes     | `cargo test -- --ignored` |
+| **Unit** | Config, routing, quota math, session affinity, header parsing, credential resolution | No | `cargo test --lib` |
+| **Integration (mocked)** | Full lifecycle with mocked backends (wiremock) and in-memory SQLite | No | `cargo test` |
+| **Integration (live)** | Real providers (OpenAI API key, Ollama) | Yes | `cargo test -- --ignored` |
 
 ### 15.2 Unit Tests
 
-| Test                                       | Validates                                                                 |
+| Test | Validates |
 | ------------------------------------------ | ------------------------------------------------------------------------- |
-| `config_parse_valid`                       | TOML produces valid config with HashMap providers                         |
-| `config_parse_duplicate_identity`          | Duplicate identities fail deserialization                                 |
-| `config_auth_type_resolution`              | Each `auth.type` variant selects correct authenticator                    |
-| `config_models_dev_merge`                  | Model metadata merged correctly with TOML overrides                       |
-| `route_dispatch_by_path`                   | `/openai/v1/chat/completions` selects OpenAI providers; unknown paths 404 |
-| `routing_prefers_subscription`             | Subscription (not degraded) selected over pay-as-you-go                   |
-| `routing_falls_through_on_quota_exhausted` | Subscription degraded → pay-as-you-go selected                            |
-| `routing_ranks_by_cost`                    | Two pay-as-you-go: cheaper one selected                                   |
-| `routing_model_not_available`              | Unknown model → 503                                                       |
-| `routing_session_affinity`                 | Same X-Session-Id selects same provider                                   |
-| `routing_session_persisted_after_restart`  | In-memory store -> SQLite -> load -> same provider                        |
-| `routing_session_breaks_on_degradation`    | Degraded assigned provider → re-route, DB updated                         |
-| `quota_headers_openai`                     | OpenAI `x-ratelimit-remaining-*` headers parsed                           |
-| `quota_headers_anthropic`                  | Anthropic headers parsed                                                  |
-| `quota_headers_missing`                    | Missing headers leave state None                                          |
-| `quota_subscription_429`                   | 429 on subscription → degraded for window duration                        |
-| `quota_spend_cap_429`                      | 429 with insufficient_quota → permanently degraded                        |
-| `degradation_recovers_after_timeout`       | Timeout expires → provider re-enabled                                     |
-| `degradation_permanent_on_401`             | 401 → permanently degraded                                                |
-| `credential_env_var`                       | Env var read by authenticator; missing → unconfigured                     |
-| `credential_helper_get`                    | Credential helper `get` parsed from stdout                                |
-| `credential_helper_store`                  | Credential helper `store` invoked with correct stdin                      |
-| `credential_helper_refresh`                | Expired token read from helper → refresh → store new tokens               |
-| `credential_helper_not_found`              | Helper not in PATH → fallback to env var                                  |
-| `auth_login_dumps_env_var`                 | `switchboard auth token` prints correct env var                           |
-| `session_db_create_and_query`              | SQLite session table created, session affinity upserted and queried       |
-| `session_db_corruption_handling`           | Corrupt DB → fallback to in-memory, log error                             |
-| `streaming_passthrough`                    | SSE chunks forwarded byte-by-byte                                         |
+| `config_parse_valid` | TOML produces valid config with HashMap providers |
+| `config_parse_duplicate_identity` | Duplicate identities fail deserialization |
+| `config_auth_type_resolution` | Each `auth.type` variant selects correct authenticator |
+| `config_models_dev_merge` | Model metadata merged correctly with TOML overrides |
+| `route_dispatch_by_path` | `/openai/v1/chat/completions` selects OpenAI providers; unknown paths 404 |
+| `routing_prefers_subscription` | Subscription (not degraded) selected over pay-as-you-go |
+| `routing_falls_through_on_quota_exhausted` | Subscription degraded → pay-as-you-go selected |
+| `routing_ranks_by_cost` | Two pay-as-you-go: cheaper one selected |
+| `routing_model_not_available` | Unknown model → 503 |
+| `routing_session_affinity` | Same X-Session-Id selects same provider |
+| `routing_session_persisted_after_restart` | In-memory store -> SQLite -> load -> same provider |
+| `routing_session_breaks_on_degradation` | Degraded assigned provider → re-route, DB updated |
+| `quota_headers_openai` | OpenAI `x-ratelimit-remaining-*` headers parsed |
+| `quota_headers_anthropic` | Anthropic headers parsed |
+| `quota_headers_missing` | Missing headers leave state None |
+| `quota_subscription_429` | 429 on subscription → degraded for window duration |
+| `quota_spend_cap_429` | 429 with insufficient_quota → permanently degraded |
+| `degradation_recovers_after_timeout` | Timeout expires → provider re-enabled |
+| `degradation_permanent_on_401` | 401 → permanently degraded |
+| `credential_env_var` | Env var read by authenticator; missing → unconfigured |
+| `credential_helper_get` | Credential helper `get` parsed from stdout |
+| `credential_helper_store` | Credential helper `store` invoked with correct stdin |
+| `credential_helper_refresh` | Expired token read from helper → refresh → store new tokens |
+| `credential_helper_not_found` | Helper not in PATH → fallback to env var |
+| `auth_login_dumps_env_var` | `switchboard auth token` prints correct env var |
+| `session_db_create_and_query` | SQLite session table created, session affinity upserted and queried |
+| `session_db_corruption_handling` | Corrupt DB → fallback to in-memory, log error |
+| `streaming_passthrough` | SSE chunks forwarded byte-by-byte |
 
 ### 15.3 Integration Tests
 
-| Test                        | Validates                                         | Network |
+| Test | Validates | Network |
 | --------------------------- | ------------------------------------------------- | ------- |
-| `proxy_completes_request`   | Full round-trip via mock                          | No      |
-| `proxy_streams_response`    | SSE streaming forwarded                           | No      |
-| `proxy_429_retry`           | First provider 429 → retry with second            | No      |
-| `proxy_all_degraded_503`    | All 429 → 503                                     | No      |
-| `proxy_session_persistence` | Session assigned → restart SQLite → same provider | No      |
-| `proxy_model_list`          | `GET /openai/v1/models` returns merged list       | No      |
-| `proxy_health`              | `GET /health` returns provider states             | No      |
-| `live_openai_payg`          | Real request via switchboard                      | Yes     |
-| `live_ollama_local`         | Real request to local Ollama                      | Yes     |
-| `live_session_affinity`     | Session routed to same provider across requests   | Yes     |
+| `proxy_completes_request` | Full round-trip via mock | No |
+| `proxy_streams_response` | SSE streaming forwarded | No |
+| `proxy_429_retry` | First provider 429 → retry with second | No |
+| `proxy_all_degraded_503` | All 429 → 503 | No |
+| `proxy_session_persistence` | Session assigned → restart SQLite → same provider | No |
+| `proxy_model_list` | `GET /openai/v1/models` returns merged list | No |
+| `proxy_health` | `GET /health` returns provider states | No |
+| `live_openai_payg` | Real request via switchboard | Yes |
+| `live_ollama_local` | Real request to local Ollama | Yes |
+| `live_session_affinity` | Session routed to same provider across requests | Yes |
 
 ## 16. Project Structure
 

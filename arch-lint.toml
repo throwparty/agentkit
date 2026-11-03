@@ -7,22 +7,6 @@
 
 preset = "minimal"
 
-[[scopes]]
-name = "acp-common"
-paths = ["crates/agentkit-tackle/src/acp/common/**"]
-
-[[scopes]]
-name = "acp-v1"
-paths = ["crates/agentkit-tackle/src/acp/v1/**"]
-
-[[scopes]]
-name = "acp-v2"
-paths = ["crates/agentkit-tackle/src/acp/v2/**"]
-
-[[scopes]]
-name = "acp-transport"
-paths = ["crates/agentkit-tackle/src/acp/transport/**"]
-
 [[deny-scope-dep]]
 from = "acp-v1"
 to = ["acp-v2"]
@@ -42,3 +26,19 @@ message = "The transport must not depend on a protocol version; reach shared sta
 # not adopted here.
 [rules.no-unwrap-expect]
 enabled = false
+
+[[scopes]]
+name = "acp-common"
+paths = ["crates/agentkit-tackle/src/acp/common/**"]
+
+[[scopes]]
+name = "acp-v1"
+paths = ["crates/agentkit-tackle/src/acp/v1/**"]
+
+[[scopes]]
+name = "acp-v2"
+paths = ["crates/agentkit-tackle/src/acp/v2/**"]
+
+[[scopes]]
+name = "acp-transport"
+paths = ["crates/agentkit-tackle/src/acp/transport/**"]

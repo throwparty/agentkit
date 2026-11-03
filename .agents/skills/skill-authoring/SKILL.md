@@ -25,7 +25,7 @@ description: <one-line description of when to use>
 
 ---
 
-````
+```
 
 Required fields:
 
@@ -51,7 +51,7 @@ Write instructions, conventions, and examples. Use:
 - Code blocks with language annotations
 - Bullet lists for conventions
 - Prefer concrete examples over abstract rules
-````
+```
 
 ## Best practices
 

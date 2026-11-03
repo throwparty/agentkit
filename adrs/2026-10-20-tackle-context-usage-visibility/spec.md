@@ -1,13 +1,12 @@
 # Context Usage Visibility
 
-**Status:** implemented  **Created:** 2026-10-20  **Author:** adrian
+**Status:** implemented **Created:** 2026-10-20 **Author:** adrian
 
 The ACP session-usage RFD completed on 2026-06-05 and defines stable `UsageUpdate` notifications carrying `used`, `size`, and an optional cumulative session `cost`. Tackle already emits used/size after each model request, once after `session/load`, and after compaction, but never attaches cost, sends no snapshot on `session/new` or `session/resume`, and emits the load snapshot before the load response. Clients that render the update include Zed 1.7.2 (context ring, cost tracked) and acp.nvim (percentage counter); clients that ignore it remain unaffected. Tackle has no `/context` command.
 
 Prior art: Claude Code `/context` shows used/total, percentage, an estimated category breakdown (system prompt, tools, messages, compact buffer, free space), and a grid; Aider `/tokens` shows per-section tokens, cost, and remaining context; Codex exposes `/status` and a context-remaining status line; Gemini CLI exposes `/stats model` and `/stats session`; OpenCode context-indicator plugins show per-category breakdowns.
 
 Tackle assembles model context from a pinned system prompt (persona body plus invokable manifest), the model's tool catalogue, and the turn DAG walked from the head with compaction truncation. Token estimates use a single four-bytes-per-token conversion. The full specification is in adrs/2026-09-17-tackle/spec.toon (FR-007).
-
 
 ## Problem
 
@@ -26,7 +25,6 @@ Users cannot see how a Tackle session's context window is being consumed or what
 - Provider-specific cost fields beyond the bundled models.dev pricing snapshot
 - Client-side rendering changes or a new protocol extension
 - Persisting `/context` output, exposing it to the model, or replaying it on load
-
 
 ## Functional Requirements
 
@@ -143,39 +141,45 @@ For a model with no context-window metadata, no usage update is emitted and `/co
 A model without context-window metadata yields size zero: usage updates are skipped, and `/context` still reports the composition estimate with an unknown-window marker and no percentage or free space.
 
 **Slug:** `unknown-window-edge`
+
 ### EC-002: Unknown Pricing
 
 A configured endpoint such as a local gateway is not a models.dev provider key. Cost is omitted, while used/size reporting and `/context` continue normally.
 
 **Slug:** `unknown-pricing-edge`
+
 ### EC-003: Partial Pricing
 
 A provider prices input but not output, or vice versa. The known side is billed, the request has a known cost, and the cumulative total is reported.
 
 **Slug:** `partial-pricing`
+
 ### EC-004: Free Model
 
 A provider explicitly prices a model at zero. Cost is known and reported as zero rather than omitted.
 
 **Slug:** `free-model`
+
 ### EC-005: No Model Configured
 
 `/context` fails with a precise error when no model resolves. The turn is still deleted and the lease released; no model request is attempted.
 
 **Slug:** `no-model-configured`
+
 ### EC-006: Empty Session
 
 A freshly created session reports the seed turn, system prompt, and tool catalogue with an otherwise empty conversation.
 
 **Slug:** `empty-session`
+
 ### EC-007: Images
 
 Images are counted by payload bytes and shown as their own category. The report labels this estimate approximate because image tokenisation is model-specific.
 
 **Slug:** `images`
+
 ### EC-008: Concurrent Prompt
 
 `/context` follows the existing ownership lease rules: a prompt against a session owned by another connection returns the same precise ownership error as any other prompt.
 
 **Slug:** `concurrent-prompt-edge`
-

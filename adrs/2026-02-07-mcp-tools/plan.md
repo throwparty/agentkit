@@ -14,6 +14,7 @@ The key architectural principle is to keep the agent SCM-agnostic. The agent foc
 ## 2. Technology Stack Justification
 
 - **MCP Server:**
+
   - **Language:** Rust. Chosen for its performance, memory safety, and concurrency features, which are critical for a robust and efficient server handling multiple agent interactions and filesystem events.
 
   - **Container Orchestration:** `bollard` (Rust Docker client). Leveraged for managing Docker containers as sandbox environments, providing isolation and consistent execution.
@@ -21,9 +22,11 @@ The key architectural principle is to keep the agent SCM-agnostic. The agent foc
   - **SCM Interaction:** `git2` (Rust Git bindings). Provides direct, low-level access to Git functionalities for creating and managing snapshot commits.
 
 - **Sandbox Environment:**
+
   - **Technology:** Docker containers. Offers strong process and filesystem isolation, ensuring that agent actions do not affect the host system or other sandboxes. Provides a consistent and reproducible environment.
 
 - **SCM:**
+
   - **Technology:** Git. Widely adopted, robust, and provides the necessary primitives for efficient snapshotting and history management.
 
 ## 3. Component Breakdown
@@ -44,6 +47,7 @@ The key architectural principle is to keep the agent SCM-agnostic. The agent foc
 This is the core component responsible for exposing the MCP tools and managing the sandbox. It will be implemented using the `rmcp` library.
 
 - **MCP Tool Handlers:** Implements the logic for each exposed MCP tool. These handlers will parse agent requests, interact with the sandbox environment, and return results. Specific handlers will be developed for:
+
   - `read(sandbox: string, path: string, offset?: number, limit?: number)`: Returns the content of the file as a string from inside the sandbox. `offset` and `limit` are line-based (0-based offset, max lines = limit). Paths may be absolute within the container or relative to the sandbox workdir.
   - `write(sandbox: string, path: string, content: string)`: Creates or overwrites a file inside the sandbox. Paths may be absolute within the container or relative to the sandbox workdir.
   - `patch(sandbox: string, path: string, diff: string)`: Applies a unified diff (git-apply compatible) that may create, modify, or delete the file at `path` inside the sandbox. Paths may be absolute within the container or relative to the sandbox workdir.
@@ -55,11 +59,13 @@ This is the core component responsible for exposing the MCP tools and managing t
 - **Sandbox Resolution:** Each tool call must resolve the `sandbox` name using the same slugification rules as `sandbox-create`, derive the container name using the repo prefix, and execute operations inside the container (via `SandboxProvider::shell`, `upload_path`, `download_path`).
 
 - **Sandbox Manager:**
+
   - **Lifecycle Management:** Creates, starts, stops, and destroys sandbox containers.
   - **Resource Allocation:** Manages CPU, memory, and disk limits for each sandbox.
   - **File System Mounting:** Mounts the SCM repository into the sandbox environment.
 
 - **SCM Integration Module:**
+
   - **Snapshot Creation:** Stages all detected changes within the mounted SCM repository and creates an automatic Git commit (snapshot). This process is triggered directly by mutation-capable tools (e.g., `write`, `patch`, `bash`) after their execution, and only when `git status` reports changes (no empty commits).
   - **Commit Message Generation:** Generates a commit message that encodes the trigger (e.g., `bash: cargo test`, `write: path`, `patch: path`).
   - **Branch Management:** Manages a dedicated branch or strategy for agent-generated snapshots to avoid polluting the main development branch.

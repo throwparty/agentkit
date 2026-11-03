@@ -1,9 +1,9 @@
 use axum::{
-    Router as AxumRouter,
     body::Body,
     extract::{Request, State},
     http::StatusCode,
     routing::post,
+    Router as AxumRouter,
 };
 use serde_json::json;
 use std::sync::Arc;

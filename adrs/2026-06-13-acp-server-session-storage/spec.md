@@ -99,41 +99,41 @@ Three candidates were evaluated. All are embedded (no external service required)
 
 ### Option A: SQLite via `sqlx` (Recommended)
 
-| Property        | Detail                                                                                            |
+| Property | Detail |
 | --------------- | ------------------------------------------------------------------------------------------------- |
-| **Crate**       | [`sqlx`](https://crates.io/crates/sqlx) 0.9.0                                                     |
-| **Status**      | Very actively maintained (May 2026 release). 106M downloads, 2,800+ dependents, 16K GitHub stars. |
-| **Async**       | Native async with tokio runtime support (`runtime-tokio` feature).                                |
-| **SQLite**      | Bundled SQLite via `sqlite` feature. No system dependency.                                        |
-| **Migrations**  | Built-in migration runner using timestamped SQL files in `migrations/`.                           |
-| **DAG support** | Recursive CTEs for parent-chain traversal.                                                        |
-| **Type safety** | `FromRow` derive for row mapping; optional compile-time checked queries.                          |
-| **Testability** | In-memory SQLite (`:memory:`) for tests.                                                          |
+| **Crate** | [`sqlx`](https://crates.io/crates/sqlx) 0.9.0 |
+| **Status** | Very actively maintained (May 2026 release). 106M downloads, 2,800+ dependents, 16K GitHub stars. |
+| **Async** | Native async with tokio runtime support (`runtime-tokio` feature). |
+| **SQLite** | Bundled SQLite via `sqlite` feature. No system dependency. |
+| **Migrations** | Built-in migration runner using timestamped SQL files in `migrations/`. |
+| **DAG support** | Recursive CTEs for parent-chain traversal. |
+| **Type safety** | `FromRow` derive for row mapping; optional compile-time checked queries. |
+| **Testability** | In-memory SQLite (`:memory:`) for tests. |
 
 **Why it wins**: Async-native (matches the existing tokio codebase), built-in migration engine, recursive CTEs handle the DAG traversal in a single query, in-memory mode for tests, and it's the most widely used Rust SQL toolkit.
 
 ### Option B: SQLite via `rusqlite`
 
-| Property        | Detail                                                                             |
+| Property | Detail |
 | --------------- | ---------------------------------------------------------------------------------- |
-| **Crate**       | [`rusqlite`](https://crates.io/crates/rusqlite) 0.39.0                             |
-| **Status**      | Very actively maintained (March 2026 release). 54M downloads, 4K GitHub stars.     |
-| **Async**       | Sync-only. Requires `tokio::task::spawn_blocking` wrappers for async use.          |
-| **Migrations**  | No built-in migration engine. Would need `refinery` crate or manual version table. |
-| **DAG support** | Same as Option A (SQLite recursive CTEs).                                          |
+| **Crate** | [`rusqlite`](https://crates.io/crates/rusqlite) 0.39.0 |
+| **Status** | Very actively maintained (March 2026 release). 54M downloads, 4K GitHub stars. |
+| **Async** | Sync-only. Requires `tokio::task::spawn_blocking` wrappers for async use. |
+| **Migrations** | No built-in migration engine. Would need `refinery` crate or manual version table. |
+| **DAG support** | Same as Option A (SQLite recursive CTEs). |
 
 **Why it's second**: A solid choice, but the sync API adds friction in an async codebase. Every DB operation needs `spawn_blocking`, which complicates connection pooling and error handling. The lack of built-in migrations means another dependency (`refinery`) or custom tooling.
 
 ### Option C: `oxigraph` (SPARQL/ RDF Graph Database)
 
-| Property        | Detail                                                                                              |
+| Property | Detail |
 | --------------- | --------------------------------------------------------------------------------------------------- |
-| **Crate**       | [`oxigraph`](https://crates.io/crates/oxigraph) 0.5.8                                               |
-| **Status**      | Actively maintained (April 2026 release). 212K total downloads, 51K in 90 days, 1,700 GitHub stars. |
-| **Async**       | Sync-only.                                                                                          |
-| **Persistence** | RocksDB-backed (requires C++20 compiler, system `libclang` for bindgen).                            |
-| **Query**       | SPARQL 1.1 with property paths (supports transitive closure via `(^:hasParent)*`).                  |
-| **Model**       | RDF triples (subject-predicate-object). Data modeled as statements, not rows.                       |
+| **Crate** | [`oxigraph`](https://crates.io/crates/oxigraph) 0.5.8 |
+| **Status** | Actively maintained (April 2026 release). 212K total downloads, 51K in 90 days, 1,700 GitHub stars. |
+| **Async** | Sync-only. |
+| **Persistence** | RocksDB-backed (requires C++20 compiler, system `libclang` for bindgen). |
+| **Query** | SPARQL 1.1 with property paths (supports transitive closure via `(^:hasParent)*`). |
+| **Model** | RDF triples (subject-predicate-object). Data modeled as statements, not rows. |
 
 **Why it doesn't fit**, despite being well-maintained:
 
@@ -261,9 +261,9 @@ We use `sqlx`'s built-in migration system:
 
 The `SqliteSessionStore::connect(path)` method accepts any path string:
 
-| Path                | Behavior                               |
+| Path | Behavior |
 | ------------------- | -------------------------------------- |
-| `:memory:`          | In-memory SQLite database (no file)    |
+| `:memory:` | In-memory SQLite database (no file) |
 | `./acp-sessions.db` | File-based database, created if absent |
 
 Consumers decide the default path and CLI flag in their own configuration.

@@ -1,9 +1,8 @@
 # Linux Bubblewrap Lifecycle and Limits
 
-**Status:** implemented  **Created:** 2026-10-31  **Author:** adrian
+**Status:** implemented **Created:** 2026-10-31 **Author:** adrian
 
 The isolation spike proved the bwrap view but left two gaps: the sandbox shares the caller's session unless --new-session is set, and it has no resource controls. Evidence on NixOS, kernel 7.2.12, systemd user manager, cgroup v2: systemd-run --user --scope starts the harness; systemctl --user freeze and thaw stop and resume the workload; MemoryMax=64M and TasksMax=16 bound a 256 MiB allocation and a 64-thread hog. The copied lifecycle.sh is the isolation ADR's tested process-group path. A host without a usable user manager selects the fallback by checking systemctl --user show-environment; with XDG_RUNTIME_DIR=/nonexistent the launcher exits 69 and lifecycle.sh freezes, resumes and kills. Launcher cost: direct 23.8ms median, scope 47.5ms median. CPUQuota was not applied or tested.
-
 
 ## Problem
 
@@ -23,7 +22,6 @@ The isolation harness cannot create a separate session without losing group-base
 - Egress proxy or port forwarding
 - macOS confinement
 - A long-lived supervisor or daemon
-
 
 ## Functional Requirements
 
@@ -128,14 +126,15 @@ The launcher's startup cost is measured and recorded.
 The launcher detects the missing user manager and selects the fallback; exercised with XDG_RUNTIME_DIR=/nonexistent.
 
 **Slug:** `systemd-absent`
+
 ### EC-002: Delegation Absent
 
 A user manager without cgroup delegation is not detected up front: the scope start fails and the probe exits non-zero, leaving the tested process-group fallback to be selected by the caller. Accepted as an unverified host state.
 
 **Slug:** `delegation-absent`
+
 ### EC-003: Scope Name Collision
 
 Transient scope names include the pid and are collected on exit.
 
 **Slug:** `scope-name-collision`
-

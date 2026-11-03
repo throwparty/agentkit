@@ -18,11 +18,11 @@ Discovery reads `.agentkit/tackle/` in the repository, and ignores any defined i
 
 The kind directory and entry-point filename are fixed:
 
-| Kind | Directory | Entry point |
-| --- | --- | --- |
-| Prompt | `.agentkit/tackle/prompts/` | `PROMPT.md` |
+| Kind    | Directory                    | Entry point  |
+| ------- | ---------------------------- | ------------ |
+| Prompt  | `.agentkit/tackle/prompts/`  | `PROMPT.md`  |
 | Persona | `.agentkit/tackle/personas/` | `PERSONA.md` |
-| Actor | `.agentkit/tackle/actors/` | `ACTOR.md` |
+| Actor   | `.agentkit/tackle/actors/`   | `ACTOR.md`   |
 
 A flat definition is a single markdown file whose basename is its name:
 
@@ -49,10 +49,10 @@ A flat and a directory definition with the same name in one kind directory is a 
 
 Every definition body supports context variables in the `$` namespace:
 
-| Variable | Value |
-| --- | --- |
-| `{{ $.name }}` | The definition name |
-| `{{ $.dir }}` | The package directory, relative to the repository |
+| Variable       | Value                                             |
+| -------------- | ------------------------------------------------- |
+| `{{ $.name }}` | The definition name                               |
+| `{{ $.dir }}`  | The package directory, relative to the repository |
 
 ```markdown
 Read `{{ $.dir }}/checklist.md` before you review.

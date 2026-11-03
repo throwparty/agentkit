@@ -1,3 +1,11 @@
+[[bin]]
+name = "sandbox-nono"
+path = "src/main.rs"
+
+[dependencies]
+# Exactly pinned: this crate ships breaking releases at a high rate.
+nono = "=0.81.0"
+
 [package]
 name = "sandbox-nono"
 version = "0.0.0"
@@ -6,11 +14,3 @@ publish = false
 
 # Standalone: not a member of the agentkit workspace.
 [workspace]
-
-[[bin]]
-name = "sandbox-nono"
-path = "src/main.rs"
-
-[dependencies]
-# Exactly pinned: this crate ships breaking releases at a high rate.
-nono = "=0.81.0"

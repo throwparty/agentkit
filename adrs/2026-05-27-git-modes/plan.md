@@ -48,7 +48,7 @@ The implementation introduces a **remote mode** alongside the existing **direct 
 - **Location**: `~/.local/state/agentkit/litterbox/metadata/<project-slug>/<sandbox-slug>.toml`
 - **Backward compat**: Missing file → legacy Direct mode.
 
----
+______________________________________________________________________
 
 ## 2. Technology Choices
 
@@ -74,7 +74,7 @@ The implementation introduces a **remote mode** alongside the existing **direct 
 - On read, if no file exists, the sandbox is assumed to be legacy Direct mode — metadata reconstructed by convention.
 - Justification: No schema migrations (each file is self-describing); no coupling between compute and VCS layers; single-file-per-sandbox means no write contention across different sandboxes; `libc::flock` is used directly (libc is already a transitive dependency).
 
----
+______________________________________________________________________
 
 ## 3. Component Breakdown
 
@@ -177,7 +177,7 @@ impl MetadataStore {
 }
 ```
 
----
+______________________________________________________________________
 
 ## 4. Data Flow
 
@@ -232,7 +232,7 @@ impl MetadataStore {
 1. `clone_bare()` opens the bare repo and calls `Repository::open()`. If the repo is corrupt (`Err`), calls `VcsStore::self_heal(slug)` → re-clone.
 1. Retry failed operation.
 
----
+______________________________________________________________________
 
 ## 5. Testing Strategy
 
@@ -260,21 +260,21 @@ impl MetadataStore {
 - **Direct mode unchanged**: All existing tests pass (no regression).
 - **Remote mode**: All new tests pass.
 
----
+______________________________________________________________________
 
 ## 6. Risks & Mitigations
 
-| Risk                                          | Mitigation                                                                                                                                                                                                     |
+| Risk | Mitigation |
 | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Bare clone corrupt                            | Self-healing: destroy + re-clone on error                                                                                                                                                                      |
-| Concurrent clones race                        | Mutex in `ThreadSafeScm` serializes clone creation                                                                                                                                                             |
-| Host repo changes                             | Bare clone is independent; re-clone if stale                                                                                                                                                                   |
-| User rebases                                  | Bare clone is independent; fetch/merge works                                                                                                                                                                   |
-| `litterbox` remote conflicts                  | Check URL before adding; error if mismatch                                                                                                                                                                     |
-| Metadata file stale lock from crashed process | `flock` auto-releases when the holding process dies. No stale lock problem — advisory locks are kernel-managed.                                                                                                |
-| **Archive from bare clone**                   | `make_archive("HEAD")` on bare clone reads the initial shallow clone HEAD, not the user's working tree. Mitigation: GitScm stores `host_repo_path` and opens the host repo temporarily for archive operations. |
+| Bare clone corrupt | Self-healing: destroy + re-clone on error |
+| Concurrent clones race | Mutex in `ThreadSafeScm` serializes clone creation |
+| Host repo changes | Bare clone is independent; re-clone if stale |
+| User rebases | Bare clone is independent; fetch/merge works |
+| `litterbox` remote conflicts | Check URL before adding; error if mismatch |
+| Metadata file stale lock from crashed process | `flock` auto-releases when the holding process dies. No stale lock problem — advisory locks are kernel-managed. |
+| **Archive from bare clone** | `make_archive("HEAD")` on bare clone reads the initial shallow clone HEAD, not the user's working tree. Mitigation: GitScm stores `host_repo_path` and opens the host repo temporarily for archive operations. |
 
----
+______________________________________________________________________
 
 ## 7. Rollout Strategy
 
@@ -284,26 +284,26 @@ impl MetadataStore {
 1. **Phase 4**: Integration tests, self-healing, error recovery.
 1. **Final**: Verify all acceptance criteria, direct mode unchanged.
 
----
+______________________________________________________________________
 
 ## 8. Alignment with Spec
 
-| Spec Requirement             | Plan Component                                                                         |
+| Spec Requirement | Plan Component |
 | ---------------------------- | -------------------------------------------------------------------------------------- |
-| FR-1: Direct mode            | GitScm.mode = Direct, existing behavior                                                |
-| FR-2: Remote mode bare clone | VcsStore::clone_bare(), VcsStore::resolve_path()                                       |
-| FR-3: litterbox remote       | VcsStore::install_remote()                                                             |
-| FR-4: Create branch          | GitScm.create_branch() (same in both modes)                                            |
-| FR-5: commit_snapshot        | GitScm.commit_snapshot() operates on bare clone (remote)                               |
-| FR-6: delete                 | GitScm.delete_branch() + VcsStore::destroy_bare() (last sandbox only); remote persists |
-| FR-7: Self-healing           | VcsStore::self_heal()                                                                  |
-| FR-8: Direct mode unchanged  | GitScm.mode = Direct, existing behavior                                                |
-| FR-9: git2 library           | git2::Repository::open() for bare clone                                                |
-| FR-10: snapshot-mode default | Config snapshot_mode defaults to Remote                                                |
-| FR-11: Metadata persistence  | MetadataStore::store() in create flow                                                  |
-| NFR-1 to NFR-8               | All addressed in component design                                                      |
-| NFR-9: flock locking         | libc::flock-based exclusive lock on metadata file                                      |
-| NFR-10: Legacy fallback      | load_metadata returns None → Direct mode                                               |
-| AC-1 to AC-14                | All verified in testing strategy                                                       |
+| FR-1: Direct mode | GitScm.mode = Direct, existing behavior |
+| FR-2: Remote mode bare clone | VcsStore::clone_bare(), VcsStore::resolve_path() |
+| FR-3: litterbox remote | VcsStore::install_remote() |
+| FR-4: Create branch | GitScm.create_branch() (same in both modes) |
+| FR-5: commit_snapshot | GitScm.commit_snapshot() operates on bare clone (remote) |
+| FR-6: delete | GitScm.delete_branch() + VcsStore::destroy_bare() (last sandbox only); remote persists |
+| FR-7: Self-healing | VcsStore::self_heal() |
+| FR-8: Direct mode unchanged | GitScm.mode = Direct, existing behavior |
+| FR-9: git2 library | git2::Repository::open() for bare clone |
+| FR-10: snapshot-mode default | Config snapshot_mode defaults to Remote |
+| FR-11: Metadata persistence | MetadataStore::store() in create flow |
+| NFR-1 to NFR-8 | All addressed in component design |
+| NFR-9: flock locking | libc::flock-based exclusive lock on metadata file |
+| NFR-10: Legacy fallback | load_metadata returns None → Direct mode |
+| AC-1 to AC-14 | All verified in testing strategy |
 
 The plan is fully aligned with the spec. Every requirement maps to a component, every acceptance criterion has a verification path.

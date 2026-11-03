@@ -10,19 +10,12 @@ decision: pending
 
 ## Task List
 
-| #   | Task                                             | Est.  | Depends On     | Spec                      | Plan                         |
-  | --- | ------------------------------------------------ | ----- | -------------- | ------------------------- | ---------------------------- |
-  | 1   | Scaffold PoC crate and OTel SDK wiring           | 1 day | —              | §2.1, FR4, FR6, NFR1      | §3.1, §3.2, §5.2             |
-  | 2   | Build tracing-to-OTel log layer                  | 1 day | Task 1         | FR3, FR5                  | §3.3.3                       |
-  | 3   | Wire traces and metrics, compose subscriber      | 1 day | Task 1, Task 2 | FR1, FR2, FR5, NFR5, NFR1 | §3.3.1, §3.3.2, §3.3.4, §3.5 |
-  | 4   | Write offline in-memory unit tests               | 1 day | Task 3         | FR1–FR6, NFR4             | §4.1                         |
-  | 5   | Manual integration test with otel-desktop-viewer | 1 day | Task 4         | All FRs, NFR1–NFR5        | §4.2, §4.4, §4.5             |
----
+## | # | Task | Est. | Depends On | Spec | Plan | | --- | ------------------------------------------------ | ----- | -------------- | ------------------------- | ---------------------------- | | 1 | Scaffold PoC crate and OTel SDK wiring | 1 day | — | §2.1, FR4, FR6, NFR1 | §3.1, §3.2, §5.2 | | 2 | Build tracing-to-OTel log layer | 1 day | Task 1 | FR3, FR5 | §3.3.3 | | 3 | Wire traces and metrics, compose subscriber | 1 day | Task 1, Task 2 | FR1, FR2, FR5, NFR5, NFR1 | §3.3.1, §3.3.2, §3.3.4, §3.5 | | 4 | Write offline in-memory unit tests | 1 day | Task 3 | FR1–FR6, NFR4 | §4.1 | | 5 | Manual integration test with otel-desktop-viewer | 1 day | Task 4 | All FRs, NFR1–NFR5 | §4.2, §4.4, §4.5 |
 
 > **Note**: The original Task 6 ("Integrate OTel into agentkit-switchboard") was moved to
 > `adrs/2026-09-06-switchboard-otel`. This ADR covers the PoC only.
 
----
+______________________________________________________________________
 
 ### Task 1: Scaffold PoC crate and OTel SDK wiring
 
@@ -50,7 +43,7 @@ decision: pending
 
 **Rollout**: Throwaway crate under `adrs/`. No risk to workspace crates.
 
----
+______________________________________________________________________
 
 ### Task 2: Build tracing-to-OTel log layer
 
@@ -81,7 +74,7 @@ decision: pending
 
 **Rollout**: Same as Task 1 — throwaway crate.
 
----
+______________________________________________________________________
 
 ### Task 3: Wire traces and metrics, compose subscriber
 
@@ -122,7 +115,7 @@ decision: pending
 
 **Rollout**: Same as Tasks 1-2 — throwaway crate.
 
----
+______________________________________________________________________
 
 ### Task 4: Write offline in-memory unit tests
 
@@ -133,15 +126,15 @@ decision: pending
 **Acceptance Criteria**:
 All tests pass with `cargo test` (no network, no external processes):
 
-| Test                           | What it asserts                                                                                                          | Spec req      |
+| Test | What it asserts | Spec req |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------ | ------------- |
-| `test_trace_emission`          | Span names match, parent-child correct, attributes present, status set                                                   | FR1           |
-| `test_metric_emission`         | Counter=1, histogram count=1 with value 42, gauge=7                                                                      | FR2           |
-| `test_log_emission`            | Log severity, body, and attributes match expected values                                                                 | FR3           |
-| `test_trace_log_correlation`   | Log record's `trace_id` == active span's `trace_id`                                                                      | §5 edge cases |
-| `test_resource_attributes`     | All three signals carry same `service.name` from shared Resource                                                         | FR6           |
-| `test_dual_output`             | Stdout captured AND log record in exporter from single `tracing::info!()` call                                           | FR5, NFR5     |
-| `test_no_crash_on_no_receiver` | OTLP exporter pointed at unreachable port, all signal functions run, process exits 0, stderr contains `warn` not `panic` | NFR1          |
+| `test_trace_emission` | Span names match, parent-child correct, attributes present, status set | FR1 |
+| `test_metric_emission` | Counter=1, histogram count=1 with value 42, gauge=7 | FR2 |
+| `test_log_emission` | Log severity, body, and attributes match expected values | FR3 |
+| `test_trace_log_correlation` | Log record's `trace_id` == active span's `trace_id` | §5 edge cases |
+| `test_resource_attributes` | All three signals carry same `service.name` from shared Resource | FR6 |
+| `test_dual_output` | Stdout captured AND log record in exporter from single `tracing::info!()` call | FR5, NFR5 |
+| `test_no_crash_on_no_receiver` | OTLP exporter pointed at unreachable port, all signal functions run, process exits 0, stderr contains `warn` not `panic` | NFR1 |
 
 **Files to create**:
 
@@ -150,7 +143,7 @@ All tests pass with `cargo test` (no network, no external processes):
 
 **Rollout**: Same — throwaway crate. Tests run in CI without special setup.
 
----
+______________________________________________________________________
 
 ### Task 5: Manual integration test with otel-desktop-viewer
 
@@ -171,14 +164,14 @@ All tests pass with `cargo test` (no network, no external processes):
 
 **Rollout**: Nothing to roll back — this is a verification task.
 
----
+______________________________________________________________________
 
 ## Baseline Measurements (2026-07-16)
 
-| Binary                            | Profile | Size   | Build Time    |
+| Binary | Profile | Size | Build Time |
 | --------------------------------- | ------- | ------ | ------------- |
-| `agentkit-switchboard` (pre-OTel) | release | 13 MB  | 15.52s (warm) |
-| `poc-otel` (standalone OTel)      | release | 5.5 MB | 30.90s (warm) |
+| `agentkit-switchboard` (pre-OTel) | release | 13 MB | 15.52s (warm) |
+| `poc-otel` (standalone OTel) | release | 5.5 MB | 30.90s (warm) |
 
 **NFR2 target**: Delta < 2 MB, compile time increase < 30%.
 

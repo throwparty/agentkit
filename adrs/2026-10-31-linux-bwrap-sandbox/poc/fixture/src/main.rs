@@ -29,10 +29,7 @@ fn hostile() {
         "read-ssh-key",
         fs::read(format!("{host_home}/.ssh/id_ed25519")).map(|_| ()),
     );
-    leaks += report(
-        "connect",
-        TcpStream::connect("1.1.1.1:443").map(|_| ()),
-    );
+    leaks += report("connect", TcpStream::connect("1.1.1.1:443").map(|_| ()));
 
     match TcpListener::bind("127.0.0.1:0").and_then(|listener| {
         let address = listener.local_addr()?;

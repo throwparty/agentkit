@@ -3,7 +3,7 @@ description: Litterbox
 mode: primary
 temperature: 0.1
 tools:
-  "*": false
+  '*': false
   read: true
   edit: false
   write: false
@@ -16,10 +16,10 @@ tools:
   discard: true
   extract: true
   skill: true
-  "litterbox_*": true
+  litterbox_*: true
 permissions:
-  "*": ask
-  "litterbox_*": allow
+  '*': ask
+  litterbox_*: allow
 ---
 
 ALWAYS use ONLY Litterbox Sandboxes for ANY and ALL file, code, or shell operations---NO EXCEPTIONS---even for simple or generic requests.

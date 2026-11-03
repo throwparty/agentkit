@@ -35,7 +35,7 @@ flowchart LR
     end
 ```
 
----
+______________________________________________________________________
 
 ## Evaluation
 
@@ -53,19 +53,19 @@ A library evaluation was carried out on 2026-09-13 against the client interfaces
 
 ### Interface comparison matrix
 
-| Criterion                          | rmcp 3.3.0                      | rust-mcp-sdk 2.0.0                   | pmcp 2.20.0                               | smg-mcp 2.3.3             |
+| Criterion | rmcp 3.3.0 | rust-mcp-sdk 2.0.0 | pmcp 2.20.0 | smg-mcp 2.3.3 |
 | ---------------------------------- | ------------------------------- | ------------------------------------ | ----------------------------------------- | ------------------------- |
-| Client construction                | handler .serve(transport)       | create_client(opts) + start()        | Client::new(transport)                    | McpOrchestrator (gateway) |
-| Handshake                          | implicit in serve(); modes      | request_discover (stateless v2)      | explicit initialize() / server_discover() | internal                  |
-| Stdio child spawn                  | TokioChildProcess (argv)        | create_with_server_launch(cmd, argv) | own stdin/stdout only                     | via rmcp 1.7              |
-| Streamable HTTP client             | reqwest/rustls (+agnostic)      | streamable-http + SSE compat         | streamable-http, SSE, WS, WASM            | yes                       |
-| Tool list                          | list_all_tools() auto-paginated | request_tool_list()                  | list_all_tools() with cap                 | ToolInventory             |
-| Tool call                          | call_tool(params) + MRTR        | call_tool(struct) + MRTR             | call_tool + typed/task/meta               | orchestrator              |
-| Inbound handling                   | ClientHandler trait             | ClientHandler trait                  | builder host handlers                     | gateway                   |
-| Protocol eras                      | 2026-07-28 + 2025-11-25         | 2026-07-28 only (2.x)                | v1 default, v2 opt-in                     | n/a                       |
-| Conformance                        | official reference impl         | 440/440 client claimed               | TS-SDK compatible                         | n/a                       |
-| Shared types with our rmcp servers | same crate                      | separate                             | separate                                  | rmcp 1.x                  |
-| Shell-free spawn (EC-006)          | yes                             | yes                                  | absent                                    | via rmcp                  |
+| Client construction | handler .serve(transport) | create_client(opts) + start() | Client::new(transport) | McpOrchestrator (gateway) |
+| Handshake | implicit in serve(); modes | request_discover (stateless v2) | explicit initialize() / server_discover() | internal |
+| Stdio child spawn | TokioChildProcess (argv) | create_with_server_launch(cmd, argv) | own stdin/stdout only | via rmcp 1.7 |
+| Streamable HTTP client | reqwest/rustls (+agnostic) | streamable-http + SSE compat | streamable-http, SSE, WS, WASM | yes |
+| Tool list | list_all_tools() auto-paginated | request_tool_list() | list_all_tools() with cap | ToolInventory |
+| Tool call | call_tool(params) + MRTR | call_tool(struct) + MRTR | call_tool + typed/task/meta | orchestrator |
+| Inbound handling | ClientHandler trait | ClientHandler trait | builder host handlers | gateway |
+| Protocol eras | 2026-07-28 + 2025-11-25 | 2026-07-28 only (2.x) | v1 default, v2 opt-in | n/a |
+| Conformance | official reference impl | 440/440 client claimed | TS-SDK compatible | n/a |
+| Shared types with our rmcp servers | same crate | separate | separate | rmcp 1.x |
+| Shell-free spawn (EC-006) | yes | yes | absent | via rmcp |
 
 ### Selection
 

@@ -1,3 +1,9 @@
+[[bin]]
+name = "sandbox-custom"
+path = "src/main.rs"
+
+[dependencies]
+
 [package]
 name = "sandbox-custom"
 version = "0.0.0"
@@ -6,9 +12,3 @@ publish = false
 
 # Standalone: not a member of the agentkit workspace.
 [workspace]
-
-[[bin]]
-name = "sandbox-custom"
-path = "src/main.rs"
-
-[dependencies]

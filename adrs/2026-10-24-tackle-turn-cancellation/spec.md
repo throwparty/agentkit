@@ -1,13 +1,12 @@
 # Tackle Turn Cancellation
 
-**Status:** implemented  **Created:** 2026-10-24  **Author:** adrian
+**Status:** implemented **Created:** 2026-10-24 **Author:** adrian
 
 Tackle (adrs/2026-09-17-tackle) is an ACP v1 agent harness. ACP v1 defines three inbound signals that stop an in-flight session/prompt: the session/cancel notification, the session/close request, and the protocol-level $/cancel_request notification, which the SDK records on the request's Responder before handlers run. The umbrella tackle specification already requires the behaviour — FR-003 states that session/close cancels ongoing work and releases the ownership lease — and docs/docs/dev/tackle/acp.mdx names cancelled among the turn's terminal stop reasons, but no implementation mechanism is specified.
 
 The implementation today has none of it. There is no session/cancel handler; a prompt turn is spawned detached (so the dispatch loop stays free to route permission replies) and runs to completion; session/close closes the store row, drops grants and releases terminals without touching the running turn; and $/cancel_request is ignored. The pinned acp-tck suite records these gaps in crates/agentkit-tackle/tests/conformance/baseline.txt: ACP-CANCEL-001, ACP-CANCEL-002 and ACP-JSONRPC-007 (MANDATORY), with ACP-CLOSE-002 (CAPABILITY) failing too. A followed-on advisory gap, ACP-INIT-004 (agentInfo), was fixed separately and is not part of this ADR.
 
 The turn's one long await is a single streamed model request (crates/agentkit-tackle/src/agent/turn.rs), so a mechanism must drop that stream promptly and then finalise the turn: persist partial output, release the lease, and answer with stopReason cancelled. The ACP SDK (agent-client-protocol 3.5.0) models cancellation cooperatively, exposing RequestCancellation with cancelled(), is_cancelled() and run_until_cancelled(); session/cancel and session/close carry a session id rather than a request id, so tackle needs its own session-to-turn index alongside the SDK's per-request marker.
-
 
 ## Problem
 
@@ -27,7 +26,6 @@ An in-flight session/prompt cannot be cancelled. A client that sends session/can
 - A general job-control or pause/resume facility beyond stopping an in-flight turn
 - Client-side changes or a new protocol extension; this uses existing ACP v1 signals only
 - Fixing unrelated conformance gaps, including the advisory agentInfo requirement already addressed
-
 
 ## Functional Requirements
 
@@ -150,34 +148,39 @@ Closing or cancelling a session with no in-flight turn behaves exactly as today.
 A session/cancel that arrives after the prompt response has been sent is a no-op: no second response and no error.
 
 **Slug:** `cancel-after-completion`
+
 ### EC-002: Unknown Session
 
 session/cancel for an unknown or closed session is ignored; session/close for an unknown session keeps the existing response behaviour.
 
 **Slug:** `unknown-session`
+
 ### EC-003: Idle Close
 
 session/close with no in-flight turn performs the existing close path unchanged.
 
 **Slug:** `idle-close`
+
 ### EC-004: Cancel During Tool Call
 
 Cancellation while a tool call is in flight stops the turn; an open permission request resolves reject-once per the existing permission pipeline, and the session/request_permission outcome is unchanged.
 
 **Slug:** `cancel-during-tool-call`
+
 ### EC-005: Connection Drops
 
 A connection dropping mid-turn drops the spawned turn task with it; there is no orphaned task and no cancellation signal is required.
 
 **Slug:** `connection-drops`
+
 ### EC-006: Race With Completion
 
 A cancellation racing the model's natural completion yields exactly one response, cancelled or end_turn, never both.
 
 **Slug:** `race-with-completion`
+
 ### EC-007: Nested Agent Loop
 
 A cancelled turn also stops a nested agent.<actor> loop it spawned, because the nested loop runs inside the turn's own future and is dropped with it.
 
 **Slug:** `nested-agent-loop`
-

@@ -70,9 +70,7 @@ fn parse() -> Result<View, String> {
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--workspace" => {
-                workspace = Some(args.next().ok_or("--workspace requires a value")?)
-            }
+            "--workspace" => workspace = Some(args.next().ok_or("--workspace requires a value")?),
             "--read" => reads.push(args.next().ok_or("--read requires a value")?),
             "--env" => {
                 let pair = args.next().ok_or("--env requires KEY=VALUE")?;
@@ -109,7 +107,10 @@ fn parse() -> Result<View, String> {
 
     Ok(View {
         workspace: canonical(&workspace)?,
-        reads: reads.iter().map(|path| canonical(path)).collect::<Result<_, _>>()?,
+        reads: reads
+            .iter()
+            .map(|path| canonical(path))
+            .collect::<Result<_, _>>()?,
         env: envs,
         command,
         print_argv,
@@ -338,9 +339,8 @@ fn env_allowed(key: &str) -> bool {
 }
 
 fn allowed_host_env() -> Vec<(String, String)> {
-    let mut entries: Vec<(String, String)> = env::vars()
-        .filter(|(key, _)| env_allowed(key))
-        .collect();
+    let mut entries: Vec<(String, String)> =
+        env::vars().filter(|(key, _)| env_allowed(key)).collect();
     entries.sort_by(|left, right| left.0.cmp(&right.0));
     entries
 }
@@ -450,7 +450,14 @@ fn build_argv(view: &View, bwrap: &Path, grants: &[OwnedFd]) -> Result<Vec<OsStr
     if !omitted(view, "shell") {
         let nixos = Path::new("/nix/store").is_dir();
         if !nixos {
-            for path in ["/usr", "/lib", "/lib64", "/bin", "/sbin", "/etc/ld.so.cache"] {
+            for path in [
+                "/usr",
+                "/lib",
+                "/lib64",
+                "/bin",
+                "/sbin",
+                "/etc/ld.so.cache",
+            ] {
                 argv.push("--ro-bind-try".into());
                 argv.push(path.into());
                 argv.push(path.into());
@@ -551,7 +558,9 @@ fn run_bwrap(argv: &[OsString]) -> Result<i32, String> {
     match reader.read_line(&mut line) {
         Ok(0) => {
             let status = child.wait().map_err(|error| format!("wait: {error}"))?;
-            Err(format!("bwrap setup failed before the child started ({status})"))
+            Err(format!(
+                "bwrap setup failed before the child started ({status})"
+            ))
         }
         Ok(_) if line.contains("child-pid") => {
             let status = child.wait().map_err(|error| format!("wait: {error}"))?;
@@ -611,10 +620,7 @@ fn main() {
         }
     }
 
-    if grants
-        .iter()
-        .any(|fd| fd.as_raw_fd() >= STATUS_FD)
-    {
+    if grants.iter().any(|fd| fd.as_raw_fd() >= STATUS_FD) {
         eprintln!("lbx-bwrap: too many grants for the status descriptor");
         std::process::exit(EXIT_USAGE);
     }

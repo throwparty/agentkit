@@ -172,16 +172,16 @@ through which "/tmp" could be opened
 
 ## Comparison Points
 
-| Aspect           | hyper-mcp                  | rmcp (traditional SDK)     |
+| Aspect | hyper-mcp | rmcp (traditional SDK) |
 | ---------------- | -------------------------- | -------------------------- |
-| Binary Type      | WASM plugin                | Standalone executable      |
-| Deployment       | Requires hyper-mcp runtime | Self-contained             |
-| File I/O         | Blocked (sandboxed)        | Full access                |
-| Network          | Limited/blocked            | Full access                |
-| Security         | High (WASM sandbox)        | Standard process isolation |
-| Distribution     | OCI registries             | Direct binary              |
-| Build Complexity | Requires WASM target       | Standard Rust build        |
-| Runtime Deps     | hyper-mcp runtime required | None (standalone)          |
+| Binary Type | WASM plugin | Standalone executable |
+| Deployment | Requires hyper-mcp runtime | Self-contained |
+| File I/O | Blocked (sandboxed) | Full access |
+| Network | Limited/blocked | Full access |
+| Security | High (WASM sandbox) | Standard process isolation |
+| Distribution | OCI registries | Direct binary |
+| Build Complexity | Requires WASM target | Standard Rust build |
+| Runtime Deps | hyper-mcp runtime required | None (standalone) |
 
 ## Developer Experience
 

@@ -1,7 +1,7 @@
 use std::process::Stdio;
 
 use rmcp::model::{CallToolRequestParams, ContentBlock, ProtocolVersion};
-use rmcp::service::{ClientLifecycleMode, RoleClient, RunningService, serve_client_with_lifecycle};
+use rmcp::service::{serve_client_with_lifecycle, ClientLifecycleMode, RoleClient, RunningService};
 use rmcp::transport::{StreamableHttpClientTransport, TokioChildProcess};
 use serde_json::{Map, Value};
 use tokio::process::Command;

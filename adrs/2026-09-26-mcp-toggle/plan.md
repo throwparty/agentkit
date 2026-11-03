@@ -10,12 +10,12 @@ The solution extends the McpPool struct in src/mcp/mod.rs to include an enabled 
 
 ## Technologies
 
-| Technology               | Role                               |
+| Technology | Role |
 | ------------------------ | ---------------------------------- |
-| agentkit-tackle          | MCP server management              |
-| agentkit-tackle\_\_acp   | ACP command handling               |
-| agentkit-tackle\_\_mcp   | MCP pool and connection management |
-| agentkit-tackle\_\_store | Session state persistence          |
+| agentkit-tackle | MCP server management |
+| agentkit-tackle\_\_acp | ACP command handling |
+| agentkit-tackle\_\_mcp | MCP pool and connection management |
+| agentkit-tackle\_\_store | Session state persistence |
 
 ## Components
 

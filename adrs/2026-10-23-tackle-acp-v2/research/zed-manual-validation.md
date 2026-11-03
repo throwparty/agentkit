@@ -7,7 +7,7 @@ what the wire says.
 Record findings here, then copy any client-specific behaviour into
 [`docs/docs/dev/tackle/clients/zed.mdx`](../../../docs/docs/dev/tackle/clients/zed.mdx).
 
----
+______________________________________________________________________
 
 ## Environment
 
@@ -134,7 +134,7 @@ and point the Zed `command` at a wrapper script that does the same. The conforma
 in `target/conformance/report-{1,2}.json` remain the authoritative requirement-level record;
 this run is about rendering and UX.
 
----
+______________________________________________________________________
 
 ## ACP v1
 
@@ -160,7 +160,7 @@ v1 divergence notes:
 
 ```
 
----
+______________________________________________________________________
 
 ## ACP v2
 
@@ -194,7 +194,7 @@ v2 divergence notes:
 None
 ```
 
----
+______________________________________________________________________
 
 ## Cross-version checks
 

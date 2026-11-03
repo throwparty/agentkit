@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use bollard::Docker;
 use bollard::body_full;
 use bollard::container::LogOutput;
 use bollard::exec::{CreateExecOptions, StartExecResults};
@@ -9,6 +8,7 @@ use bollard::query_parameters::{
     ListContainersOptionsBuilder, RemoveContainerOptionsBuilder, StopContainerOptionsBuilder,
     UploadToContainerOptionsBuilder,
 };
+use bollard::Docker;
 use futures::StreamExt;
 use std::fs::File;
 use std::io;

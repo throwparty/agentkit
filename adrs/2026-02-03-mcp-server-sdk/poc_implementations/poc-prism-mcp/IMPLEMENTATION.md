@@ -100,23 +100,27 @@ server.add_tool(
 ### Critical Issues
 
 1. **Too New (5 months old)**
+
    - First release: August 2025
    - Latest release: December 27, 2025
    - Unknown stability track record
    - Breaking changes likely
 
 1. **Small Community**
+
    - Only 42 GitHub stars
    - Limited adoption
    - Fewer eyes on code quality
    - Less community support
 
 1. **Heavy Marketing**
+
    - README heavily emphasizes "enterprise-grade" and "production-ready"
    - Claims seem premature for such a young library
    - Many advanced features (plugins, circuit breakers, etc.) unproven
 
 1. **Dependency Weight**
+
    - 160 packages in dependency tree
    - More complex than rmcp (official SDK)
    - Larger attack surface
@@ -135,18 +139,18 @@ Most of these are **not needed** for a basic MCP server and add complexity.
 
 ## Comparison to rmcp (Official SDK)
 
-| Aspect                | prism-mcp-rs           | rmcp                         |
+| Aspect | prism-mcp-rs | rmcp |
 | --------------------- | ---------------------- | ---------------------------- |
-| **Maturity**          | 5 months               | Official, established        |
-| **Lines of Code**     | 90                     | 89                           |
-| **API Style**         | Builder pattern        | Macro-based                  |
-| **Schema Generation** | Manual JSON            | Automatic with schemars      |
-| **Argument Parsing**  | Manual from HashMap    | Type-safe with Parameters<T> |
-| **Error Types**       | Descriptive names      | Similar functionality        |
-| **Dependencies**      | 160 crates             | Fewer crates                 |
-| **Complexity**        | Many optional features | Focused core                 |
-| **Community**         | Small (42 stars)       | Official backing             |
-| **Production Ready**  | Unknown/Unproven       | Stable v0.14.0               |
+| **Maturity** | 5 months | Official, established |
+| **Lines of Code** | 90 | 89 |
+| **API Style** | Builder pattern | Macro-based |
+| **Schema Generation** | Manual JSON | Automatic with schemars |
+| **Argument Parsing** | Manual from HashMap | Type-safe with Parameters<T> |
+| **Error Types** | Descriptive names | Similar functionality |
+| **Dependencies** | 160 crates | Fewer crates |
+| **Complexity** | Many optional features | Focused core |
+| **Community** | Small (42 stars) | Official backing |
+| **Production Ready** | Unknown/Unproven | Stable v0.14.0 |
 
 ## Recommendation
 
