@@ -302,7 +302,7 @@ Map a vanished sandbox in pause or resume to not found, print the reason beside 
 | Depends On | T-013, T-014 |
 | References | neutral-errors,sandbox-status,legible-unavailability,bulk-pause-via-contract |
 
-### T-026: Decouple the contract and persistence from domain
+### T-026: [x] Decouple the contract and persistence from domain
 
 Move the domain-to-contract error conversions out of the contract into an adapter, return contract errors from the Docker client or convert at the backend boundary, stop persistence importing domain, and take directories from agentkit-common.
 

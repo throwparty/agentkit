@@ -1,33 +1,13 @@
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::thread::sleep;
-use std::time::Duration;
 
-use crate::domain::SandboxError;
+use crate::sandbox::contract::Error;
 
-const RETRY_MAX: u32 = 3;
-const RETRY_BASE_MS: u64 = 50;
-
-fn base_path(project_slug: &str, metadata_dir: Option<&Path>) -> PathBuf {
-    match metadata_dir {
-        Some(dir) => dir.join(project_slug),
-        None => crate::vcs_store::path::data_dir()
-            .join("metadata")
-            .join(project_slug),
-    }
-}
-
-fn load_metadata_dir() -> Option<PathBuf> {
-    std::env::var("LITTERBOX_METADATA_DIR")
-        .ok()
-        .map(PathBuf::from)
-}
-
-fn remove_in(dir: &Path, slug: &str) -> Result<(), SandboxError> {
+fn remove_in(dir: &Path, slug: &str) -> Result<(), Error> {
     let path = dir.join(format!("{}.toml", slug));
     if path.exists() {
-        fs::remove_file(&path).map_err(SandboxError::Io)?;
+        fs::remove_file(&path).map_err(io_error)?;
     }
     Ok(())
 }
@@ -53,6 +33,15 @@ pub enum LoadedSandbox {
     Legacy {
         /// The file holding it, so the user can remove it.
         path: PathBuf,
+        /// The identifier the old record used, when it named one.
+        container_id: Option<String>,
+    },
+    /// A record that cannot be read at all.
+    Corrupt {
+        /// The file holding it.
+        path: PathBuf,
+        /// What went wrong.
+        reason: String,
     },
 }
 
@@ -61,99 +50,156 @@ impl LoadedSandbox {
     pub fn record(&self) -> Option<&crate::sandbox::contract::SandboxRecord> {
         match self {
             Self::Current(stored) => Some(&stored.sandbox),
-            Self::Legacy { .. } => None,
+            Self::Legacy { .. } | Self::Corrupt { .. } => None,
         }
     }
 }
 
 /// The directory holding one project's records.
 pub fn directory(project_slug: &str) -> PathBuf {
-    base_path(project_slug, load_metadata_dir().as_deref())
+    agentkit_common::data_dir("litterbox")
+        .join("metadata")
+        .join(project_slug)
 }
 
-/// Persist a sandbox record.
-pub fn store_sandbox(project_slug: &str, stored: &StoredSandbox) -> Result<(), SandboxError> {
-    let dir = base_path(project_slug, load_metadata_dir().as_deref());
-    store_value_in(&dir, &stored.sandbox.name, stored)
+/// Persist a record into an explicit directory.
+pub fn store_sandbox_at(dir: &Path, name: &str, stored: &StoredSandbox) -> Result<(), Error> {
+    store_value_in(dir, name, stored)
 }
 
-/// Load a sandbox record, distinguishing a current record from a legacy one.
-pub fn load_sandbox(project_slug: &str, name: &str) -> Result<Option<LoadedSandbox>, SandboxError> {
-    let dir = base_path(project_slug, load_metadata_dir().as_deref());
-    load_sandbox_in(&dir, name)
+/// Load a record from an explicit directory.
+pub fn load_sandbox_at(dir: &Path, name: &str) -> Result<Option<LoadedSandbox>, Error> {
+    load_sandbox_in(dir, name)
 }
 
-/// Remove a sandbox record.
-pub fn remove_sandbox(project_slug: &str, name: &str) -> Result<(), SandboxError> {
-    let dir = base_path(project_slug, load_metadata_dir().as_deref());
-    remove_in(&dir, name)
+/// Every record name in a directory, with what the file turned out to be.
+pub fn names_in(dir: &Path) -> Vec<(String, LoadedSandbox)> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+
+    entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let name = name.strip_suffix(".toml")?.to_string();
+            load_sandbox_in(dir, &name)
+                .ok()
+                .flatten()
+                .map(|loaded| (name, loaded))
+        })
+        .collect()
 }
 
-fn store_value_in<T: serde::Serialize>(
-    dir: &Path,
-    slug: &str,
-    value: &T,
-) -> Result<(), SandboxError> {
-    fs::create_dir_all(dir).map_err(SandboxError::Io)?;
+/// Remove a record from an explicit directory.
+pub fn remove_sandbox_at(dir: &Path, name: &str) -> Result<(), Error> {
+    remove_in(dir, name)
+}
 
-    let path = dir.join(format!("{}.toml", slug));
-    let content = toml::to_string(value).map_err(|e| SandboxError::Config(e.to_string()))?;
-
-    let file = fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(&path)
-        .map_err(SandboxError::Io)?;
-
-    let mut attempt = 0u32;
-    loop {
-        match file.try_lock() {
-            Ok(()) => break,
-            Err(std::fs::TryLockError::WouldBlock) => {
-                attempt += 1;
-                if attempt > RETRY_MAX {
-                    return Err(SandboxError::Io(std::io::Error::new(
-                        std::io::ErrorKind::WouldBlock,
-                        "metadata lock held by another process",
-                    )));
-                }
-                sleep(Duration::from_millis(RETRY_BASE_MS * attempt as u64));
-            }
-            Err(e) => return Err(SandboxError::Io(e.into())),
+fn store_value_in<T: serde::Serialize>(dir: &Path, slug: &str, value: &T) -> Result<(), Error> {
+    fs::create_dir_all(dir).map_err(io_error)?;
+    #[cfg(unix)]
+    {
+        // Records name containers, ports and hosts; keep them, and the shared
+        // metadata root this module creates, to the user.
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).map_err(io_error)?;
+        if let Some(parent) = dir.parent().filter(|parent| {
+            parent
+                .file_name()
+                .is_some_and(|name| name == std::ffi::OsStr::new("metadata"))
+        }) {
+            fs::set_permissions(parent, fs::Permissions::from_mode(0o700)).map_err(io_error)?;
         }
     }
 
-    file.set_len(0).map_err(SandboxError::Io)?;
-    (&file)
-        .write_all(content.as_bytes())
-        .map_err(SandboxError::Io)?;
-    file.sync_all().map_err(SandboxError::Io)?;
+    let path = dir.join(format!("{}.toml", slug));
+    let content = toml::to_string(value).map_err(|error| Error::failed(error.to_string()))?;
+
+    // Write beside the target and rename, so a reader observes either the old
+    // record or the new one and never a truncated file.
+    let staging = dir.join(format!(".{}.toml.new", slug));
+    let staged = (|| -> std::io::Result<()> {
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&staging)?;
+        file.write_all(content.as_bytes())?;
+        file.sync_all()
+    })();
+    if let Err(error) = staged {
+        let _ = fs::remove_file(&staging);
+        return Err(io_error(error));
+    }
+    fs::rename(&staging, &path).map_err(io_error)?;
+
+    // The rename is only durable once the directory entry is synced.
+    #[cfg(unix)]
+    {
+        fs::File::open(dir)
+            .and_then(|handle| handle.sync_all())
+            .map_err(io_error)?;
+    }
 
     Ok(())
 }
 
-fn load_sandbox_in(dir: &Path, name: &str) -> Result<Option<LoadedSandbox>, SandboxError> {
+fn load_sandbox_in(dir: &Path, name: &str) -> Result<Option<LoadedSandbox>, Error> {
     let path = dir.join(format!("{}.toml", name));
     if !path.exists() {
         return Ok(None);
     }
 
-    let content = fs::read_to_string(&path).map_err(SandboxError::Io)?;
-    let value: toml::Value =
-        toml::from_str(&content).map_err(|e| SandboxError::Config(e.to_string()))?;
-
-    // A file with a nested sandbox record is ours. A file with a container id
-    // and no such record was written before the record changed, and is
-    // reported, not adopted.
-    if value.get("sandbox").is_none() {
-        return Ok(Some(LoadedSandbox::Legacy { path }));
+    let content = fs::read_to_string(&path).map_err(io_error)?;
+    if content.trim().is_empty() {
+        return Ok(Some(LoadedSandbox::Corrupt {
+            path,
+            reason: "the record is empty".to_string(),
+        }));
     }
 
-    let stored: StoredSandbox = value
-        .try_into()
-        .map_err(|e: toml::de::Error| SandboxError::Config(e.to_string()))?;
-    Ok(Some(LoadedSandbox::Current(stored)))
+    let value: toml::Value = match toml::from_str(&content) {
+        Ok(value) => value,
+        Err(error) => {
+            return Ok(Some(LoadedSandbox::Corrupt {
+                path,
+                reason: format!("the record is not valid TOML: {error}"),
+            }));
+        }
+    };
+
+    // A file with a nested sandbox record is ours. A file without one was
+    // written before the record changed, and is reported, not adopted.
+    if value.get("sandbox").is_none() {
+        let container_id = value
+            .get("container_id")
+            .and_then(toml::Value::as_str)
+            .map(str::to_string);
+        return Ok(Some(LoadedSandbox::Legacy { path, container_id }));
+    }
+
+    match value.try_into::<StoredSandbox>() {
+        Ok(stored) if stored.sandbox.name != name => Ok(Some(LoadedSandbox::Corrupt {
+            path,
+            reason: format!(
+                "the record names '{}' but is filed as '{name}'",
+                stored.sandbox.name
+            ),
+        })),
+        Ok(stored) => Ok(Some(LoadedSandbox::Current(stored))),
+        Err(error) => Ok(Some(LoadedSandbox::Corrupt {
+            path,
+            reason: format!("the record does not match the schema: {error}"),
+        })),
+    }
+}
+
+fn io_error(error: std::io::Error) -> Error {
+    Error::failed(error.to_string())
 }
 
 #[cfg(test)]
@@ -175,6 +221,53 @@ mod record_tests {
             },
             branch_name: "litterbox/demo".to_string(),
             remote: false,
+        }
+    }
+
+    #[test]
+    fn names_in_reports_current_and_legacy_records_only() {
+        let dir = TempDir::new().expect("tempdir");
+        store_value_in(dir.path(), "demo", &stored()).expect("store");
+        std::fs::write(
+            dir.path().join("old.toml"),
+            "container_id = 'abc'\nbranch = 'litterbox/old'\n",
+        )
+        .expect("legacy");
+        std::fs::write(dir.path().join("notes.txt"), "ignore me").expect("notes");
+
+        let mut names: Vec<(String, String)> = super::names_in(dir.path())
+            .into_iter()
+            .map(|(name, loaded)| {
+                let kind = match loaded {
+                    LoadedSandbox::Current(_) => "current",
+                    LoadedSandbox::Legacy { .. } => "legacy",
+                    LoadedSandbox::Corrupt { .. } => "corrupt",
+                };
+                (name, kind.to_string())
+            })
+            .collect();
+        names.sort();
+
+        assert_eq!(
+            names,
+            vec![
+                ("demo".to_string(), "current".to_string()),
+                ("old".to_string(), "legacy".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_record_whose_name_does_not_match_its_file_is_corrupt() {
+        let dir = TempDir::new().expect("tempdir");
+        store_value_in(dir.path(), "filed-as", &stored()).expect("store");
+
+        match load_sandbox_in(dir.path(), "filed-as").expect("load") {
+            Some(LoadedSandbox::Corrupt { reason, .. }) => {
+                assert!(reason.contains("demo"), "{reason}");
+                assert!(reason.contains("filed-as"), "{reason}");
+            }
+            other => panic!("expected a corrupt record, got {other:?}"),
         }
     }
 
@@ -206,12 +299,37 @@ mod record_tests {
             .expect("load")
             .expect("present");
         match &loaded {
-            LoadedSandbox::Legacy { path } => {
+            LoadedSandbox::Legacy { path, container_id } => {
                 assert_eq!(path.file_name().and_then(|n| n.to_str()), Some("demo.toml"));
+                assert_eq!(container_id.as_deref(), Some("abc123"));
             }
             other => panic!("expected a legacy record, got {other:?}"),
         }
         assert!(loaded.record().is_none());
+    }
+
+    #[test]
+    fn an_empty_record_is_corrupt_not_legacy() {
+        let dir = TempDir::new().expect("tempdir");
+        std::fs::write(dir.path().join("demo.toml"), "").expect("write");
+
+        match load_sandbox_in(dir.path(), "demo").expect("load") {
+            Some(LoadedSandbox::Corrupt { reason, .. }) => {
+                assert!(reason.contains("empty"), "{reason}");
+            }
+            other => panic!("expected a corrupt record, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unparsable_toml_is_corrupt_not_legacy() {
+        let dir = TempDir::new().expect("tempdir");
+        std::fs::write(dir.path().join("demo.toml"), "this is not toml").expect("write");
+
+        match load_sandbox_in(dir.path(), "demo").expect("load") {
+            Some(LoadedSandbox::Corrupt { .. }) => {}
+            other => panic!("expected a corrupt record, got {other:?}"),
+        }
     }
 
     #[test]
