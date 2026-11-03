@@ -15,7 +15,7 @@ Rename the crate directory, package and lib path, and add an exit module holding
 | Depends On |  |
 | References | neutral-errors,no-new-dependency |
 
-### T-002: Contract trait and neutral types
+### T-002: [x] Contract trait and neutral types
 
 Create src/sandbox/ with an object-safe Sandbox trait over BoxFuture, plus CreateRequest, Scope, Inspection, SandboxStatus and the neutral view of a sandbox. Leave the existing provider in place; the module compiles beside it.
 
