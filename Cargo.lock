@@ -67,10 +67,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "agentkit-common"
+version = "0.1.0"
+
+[[package]]
 name = "agentkit-credentials"
 version = "0.1.0"
 dependencies = [
- "agentkit-path",
+ "agentkit-common",
  "apple-native-keyring-store",
  "dbus-secret-service-keyring-store",
  "fs2",
@@ -144,10 +148,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "agentkit-path"
-version = "0.1.0"
-
-[[package]]
 name = "agentkit-script"
 version = "0.1.0"
 dependencies = [
@@ -161,10 +161,10 @@ dependencies = [
 name = "agentkit-switchboard"
 version = "0.1.0"
 dependencies = [
+ "agentkit-common",
  "agentkit-credentials",
  "agentkit-docgen",
  "agentkit-models",
- "agentkit-path",
  "agentkit-script",
  "axum",
  "base64 0.23.1",
@@ -202,10 +202,10 @@ name = "agentkit-tackle"
 version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
+ "agentkit-common",
  "agentkit-credentials",
  "agentkit-docgen",
  "agentkit-models",
- "agentkit-path",
  "agentkit-script",
  "axum",
  "clap",

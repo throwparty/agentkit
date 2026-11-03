@@ -2,7 +2,7 @@
 
 ## Tasks
 
-### T-001: Rename agentkit-path to agentkit-common
+### T-001: [x] Rename agentkit-path to agentkit-common
 
 Rename the crate directory, package and lib path, and add an exit module holding the shared taxonomy (0 ok, 1 failed, 2 usage, 3 not found, 4 conflict, 5 unsupported, 6 denied, 7 unavailable) with a class-to-exit-code helper. Update the four dependants: switchboard, tackle, credentials and litterbox. Change no dependant's exit behaviour.
 

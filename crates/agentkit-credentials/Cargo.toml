@@ -10,7 +10,7 @@ path = "src/bin/agentkit-credential-file.rs"
 serde_json = "1"
 sysinfo = "0.39"
 keyring-core = "1"
-agentkit-path = {path = "../agentkit-path"}
+agentkit-common = {path = "../agentkit-common"}
 fs2 = "0.4"
 
 [package]

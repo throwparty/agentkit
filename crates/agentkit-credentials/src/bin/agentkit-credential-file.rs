@@ -1,4 +1,4 @@
-use agentkit_path::data_dir;
+use agentkit_common::data_dir;
 use fs2::FileExt;
 use serde_json::Value;
 use std::collections::HashMap;

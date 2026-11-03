@@ -14,7 +14,7 @@ path = "src/bin/tackle-test-model.rs"
 agentkit-credentials = {path = "../agentkit-credentials"}
 agentkit-docgen = {path = "../agentkit-docgen"}
 agentkit-models = {path = "../agentkit-models"}
-agentkit-path = {path = "../agentkit-path"}
+agentkit-common = {path = "../agentkit-common"}
 agentkit-script = {path = "../agentkit-script"}
 agent-client-protocol = {version = "3.5.0", features = [
   "process",

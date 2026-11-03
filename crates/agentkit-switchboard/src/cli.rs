@@ -40,7 +40,7 @@ pub struct Cli {
 pub fn config_path(config: Option<&PathBuf>) -> PathBuf {
     config
         .cloned()
-        .unwrap_or_else(|| agentkit_path::config_dir("switchboard").join("config.toml"))
+        .unwrap_or_else(|| agentkit_common::config_dir("switchboard").join("config.toml"))
 }
 
 #[derive(Subcommand)]
