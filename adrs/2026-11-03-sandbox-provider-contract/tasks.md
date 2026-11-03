@@ -28,7 +28,7 @@ Create src/sandbox/ with an object-safe Sandbox trait over BoxFuture, plus Creat
 | Depends On |  |
 | References | backend-neutral-contract,sandbox-identity,sandbox-status,backends-are-mechanisms,primitive-gating |
 
-### T-003: Error taxonomy and surface mapping
+### T-003: [x] Error taxonomy and surface mapping
 
 Add src/sandbox/error.rs with NotFound, Conflict, Unsupported carrying operation, primitive, reason and remedy, Denied and Failed. Convert the existing SandboxError and ComputeError into it, and put the exit-code and MCP-class mapping in one place.
 
