@@ -1,6 +1,7 @@
 ---
-
-## name: switch-branch description: Switching branches or bookmarks before making changes
+name: switch-branch
+description: Switching branches or bookmarks before making changes
+---
 
 ## When to use me
 

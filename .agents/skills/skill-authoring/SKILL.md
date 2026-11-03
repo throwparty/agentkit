@@ -1,6 +1,7 @@
 ---
-
-## name: skill-authoring description: Authoring opencode skills for this project
+name: skill-authoring
+description: Authoring opencode skills for this project
+---
 
 ## When to use me
 
