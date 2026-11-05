@@ -15,7 +15,7 @@ Add ProvisionKind, ProvisionStep and ProvisionSupport to src/sandbox/contract.rs
 | Depends On |  |
 | References | provision-contract,step-kinds,no-new-dependency |
 
-### T-002: Config schema and extraction
+### T-002: [x] Config schema and extraction
 
 Add ProjectConfig.backends: Option<Vec<String>>, ProjectFile.provision: Vec<ProvisionDefinition>, and Config.backend_provision: BTreeMap<String, Vec<String>>. Deserialise [[provision]] with identity, kind and run, reusing ProvisionKind. In merge, replace the supported set, definitions and sequences from the local override, extract provision from each backend table (the project contributes only provision; the local contributes its settings and an optional replacement), and record the existing notice for other project backend keys.
 
