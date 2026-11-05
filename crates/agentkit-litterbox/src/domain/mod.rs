@@ -10,8 +10,6 @@ pub enum SandboxError {
     SandboxNotFound { name: String },
     #[error("SCM error: {0}")]
     Scm(#[from] ScmError),
-    #[error("Setup command failed with exit code {exit_code}: {stderr}")]
-    SetupCommandFailed { exit_code: i32, stderr: String },
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
     #[error("Configuration error: {0}")]
@@ -170,17 +168,6 @@ mod tests {
             err.to_string(),
             "Invalid sandbox name: '----'. Slugified names must be 1-63 characters and contain only [a-z0-9-]."
         );
-    }
-
-    #[test]
-    fn setup_command_failed_formats_error() {
-        let err = SandboxError::SetupCommandFailed {
-            exit_code: 1,
-            stderr: "boom".to_string(),
-        };
-        let message = err.to_string();
-        assert!(message.contains("exit code 1"));
-        assert!(message.contains("boom"));
     }
 
     #[test]
