@@ -8,9 +8,10 @@ use crate::backends;
 use crate::config::Config;
 use crate::domain::{SandboxError, ScmMode};
 use crate::metadata_store::{self, LoadedSandbox, StoredSandbox};
+use crate::provision::StepOutcome;
 use crate::sandbox::contract::{
-    CreateRequest, Error, Execution, Forward, Inspection, RequestedPort, SandboxRecord,
-    SandboxStatus, Workspace,
+    CreateRequest, Error, Execution, Forward, Inspection, ProvisionStep, ProvisionSupport,
+    ProvisioningFailure, RequestedPort, SandboxRecord, SandboxStatus, Workspace,
 };
 use crate::sandbox::selected::Selected;
 use crate::scm::{Scm, ThreadSafeScm};
@@ -117,21 +118,60 @@ impl Sandboxes {
     /// Create a sandbox: branch, workspace, compute and record, in that order.
     pub async fn create(&self, name: &str) -> Result<SandboxRecord, Error> {
         let name = self.valid_name(name)?;
-        let setup_allowed = self.config.allow_project_setup
-            || self
-                .config
-                .allowed_projects
-                .iter()
-                .any(|project| project == &self.project_slug);
-        if self.config.project.setup_command.is_some() && !setup_allowed {
-            return Err(Error::Misconfigured {
-                message: "this project defines a setup command; add its namespace to \
-                          allowed-projects, or set allow-project-setup = true, in the user \
-                          configuration to let it run"
-                    .to_string(),
-            });
-        }
         let selected = self.selected_for_operation("create a sandbox").await?;
+        let plan = preflight(
+            &self.config,
+            &self.project_slug,
+            selected.name(),
+            &selected.core().provision_support(),
+        );
+        if let Some(error) = plan.failure {
+            tracing::warn!(
+                sandbox = %name,
+                backend = %selected.name(),
+                %error,
+                "provisioning refused before create"
+            );
+            return Err(error);
+        }
+        let mut provision = Vec::with_capacity(plan.steps.len());
+        for planned in plan.steps {
+            match planned {
+                PlannedStep::Resolved { step, refusal, .. } => {
+                    if let Some(failure) = refusal {
+                        let error = Error::Provisioning {
+                            failure: Box::new(failure),
+                        };
+                        tracing::warn!(
+                            sandbox = %name,
+                            backend = %selected.name(),
+                            %error,
+                            "provisioning refused before create"
+                        );
+                        return Err(error);
+                    }
+                    provision.push(step);
+                }
+                PlannedStep::Failed { failure } => {
+                    let error = Error::Provisioning {
+                        failure: Box::new(failure),
+                    };
+                    tracing::warn!(
+                        sandbox = %name,
+                        backend = %selected.name(),
+                        %error,
+                        "provisioning refused before create"
+                    );
+                    return Err(error);
+                }
+            }
+        }
+        tracing::info!(
+            sandbox = %name,
+            backend = %selected.name(),
+            steps = ?provision.iter().map(ProvisionStep::identity).collect::<Vec<_>>(),
+            "resolved the provisioning sequence"
+        );
 
         tracing::info!(sandbox = %name, project = %self.project_slug, "creating the branch");
         let branch_name = self.scm.create_branch(&name)?;
@@ -151,7 +191,7 @@ impl Sandboxes {
             workspace: Workspace {
                 source: staged.path().to_path_buf(),
             },
-            provision: Vec::new(),
+            provision,
             forward_bind: self.config.forwarding.bind.clone(),
             ports: self.config.ports.iter().map(port).collect(),
         };
@@ -525,6 +565,98 @@ pub fn resolve_project_slug(config: &Config) -> Result<String, SandboxError> {
     Ok(format!("{}-{}", base_slug(config)?, namespace_suffix()))
 }
 
+/// One step in a preflight plan.
+#[derive(Clone, Debug)]
+pub enum PlannedStep {
+    /// The step resolved, with an optional consent refusal.
+    Resolved {
+        /// The typed step.
+        step: ProvisionStep,
+        /// The backend's support entry for its kind.
+        support: ProvisionSupport,
+        /// Consent refusal for a command step, when one applies.
+        refusal: Option<ProvisioningFailure>,
+    },
+    /// The step could not be resolved.
+    Failed {
+        /// The structured failure.
+        failure: ProvisioningFailure,
+    },
+}
+
+impl PlannedStep {
+    /// The step identity, when one is known.
+    pub fn identity(&self) -> &str {
+        match self {
+            Self::Resolved { step, .. } => step.identity(),
+            Self::Failed { failure } => failure.step.as_deref().unwrap_or("unknown"),
+        }
+    }
+
+    /// The step kind, when one is known.
+    pub fn kind(&self) -> &str {
+        match self {
+            Self::Resolved { step, .. } => step.kind().as_str(),
+            Self::Failed { failure } => failure.kind.as_deref().unwrap_or("unknown"),
+        }
+    }
+}
+
+/// A preflight plan: the steps in order plus a whole-call failure.
+#[derive(Debug)]
+pub struct Preflight {
+    /// Each step's outcome, in the selected backend's order.
+    pub steps: Vec<PlannedStep>,
+    /// A configuration or compatibility failure that prevented resolution.
+    pub failure: Option<Error>,
+}
+
+/// Build the shared create/doctor plan for the selected backend.
+pub fn preflight(
+    config: &Config,
+    project_slug: &str,
+    backend: &str,
+    support: &[ProvisionSupport],
+) -> Preflight {
+    match crate::provision::preflight_steps(config, backend, support) {
+        Ok(results) => {
+            let mut steps = Vec::with_capacity(results.len());
+            for result in results {
+                match result {
+                    StepOutcome::Resolved(resolved) => {
+                        let refusal =
+                            config.command_step_refusal(project_slug, backend, &resolved.step);
+                        steps.push(PlannedStep::Resolved {
+                            step: resolved.step,
+                            support: resolved.support,
+                            refusal,
+                        });
+                    }
+                    StepOutcome::Failed(Error::Provisioning { failure }) => {
+                        steps.push(PlannedStep::Failed { failure: *failure });
+                    }
+                    // A step-level error that is not a provisioning failure
+                    // must fail the whole plan rather than be dropped.
+                    StepOutcome::Failed(error) => {
+                        return Preflight {
+                            steps,
+                            failure: Some(error),
+                        };
+                    }
+                }
+            }
+            Preflight {
+                steps,
+                failure: None,
+            }
+        }
+        Err(error) => Preflight {
+            steps: Vec::new(),
+            failure: Some(error),
+        },
+    }
+}
+
 /// The slug without the namespace suffix: what pre-change records are keyed on.
 fn base_slug(config: &Config) -> Result<String, SandboxError> {
     let base = match &config.project.slug {
@@ -549,17 +681,30 @@ fn base_slug(config: &Config) -> Result<String, SandboxError> {
 
 /// A stable, short suffix for the current repository.
 fn namespace_suffix() -> String {
-    let path = std::env::current_dir()
-        .and_then(|dir| dir.canonicalize())
-        .map(|dir| dir.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| "unknown".to_string());
+    // Bind the namespace to the repository's remote when one exists, so the
+    // same checkout path used for different content does not inherit consent.
+    let identity = git2::Repository::discover(".")
+        .ok()
+        .and_then(|repository| {
+            repository
+                .find_remote("origin")
+                .ok()
+                .and_then(|remote| remote.url().ok().map(str::to_string))
+        })
+        .map(|url| url.trim_end_matches(".git").to_ascii_lowercase())
+        .unwrap_or_else(|| {
+            std::env::current_dir()
+                .and_then(|dir| dir.canonicalize())
+                .map(|dir| dir.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| "unknown".to_string())
+        });
 
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in path.as_bytes() {
+    for byte in identity.as_bytes() {
         hash ^= u64::from(*byte);
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
-    format!("{:08x}", hash as u32)
+    format!("{hash:016x}")
 }
 
 fn directory_slug() -> String {
@@ -798,7 +943,8 @@ mod seam_tests {
     use crate::config::Config;
     use crate::metadata_store::{self, StoredSandbox};
     use crate::sandbox::conformance::TestBackend;
-    use crate::sandbox::contract::{Error, SandboxRecord};
+    use crate::sandbox::contract::{Error, ProvisioningClass, SandboxRecord};
+    use crate::sandbox::report::State;
     use crate::sandbox::selected::Selected;
     use crate::scm::{Scm, ThreadSafeScm};
 
@@ -829,25 +975,41 @@ mod seam_tests {
         dir: &Path,
         records: PathBuf,
         backend: Arc<TestBackend>,
-        setup_command: Option<String>,
+        command: Option<String>,
     ) -> Sandboxes {
-        orchestrator_with(dir, records, backend, setup_command, true)
+        orchestrator_with(dir, records, backend, command, true)
     }
 
     fn orchestrator_with(
         dir: &Path,
         records: PathBuf,
         backend: Arc<TestBackend>,
-        setup_command: Option<String>,
+        command: Option<String>,
         allow_project_setup: bool,
     ) -> Sandboxes {
         let scm = ThreadSafeScm::open(dir).expect("scm");
+        let provision = command
+            .as_ref()
+            .map(|run| {
+                vec![crate::config::ProvisionDefinition::Command {
+                    identity: "setup".to_string(),
+                    run: run.clone(),
+                }]
+            })
+            .unwrap_or_default();
+        let backend_provision = command
+            .as_ref()
+            .map(|_| {
+                std::collections::BTreeMap::from([("test".to_string(), vec!["setup".to_string()])])
+            })
+            .unwrap_or_default();
         let config = Config {
             project: crate::config::ProjectConfig {
                 slug: Some("project".to_string()),
-                setup_command,
-                backends: None,
+                backends: Some(vec!["test".to_string()]),
             },
+            provision,
+            backend_provision,
             allow_project_setup,
             ..Config::default()
         };
@@ -887,6 +1049,52 @@ mod seam_tests {
         assert!(
             branches.is_empty(),
             "the branch should have been removed: {branches:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_command_step_removes_the_branch_and_names_the_step() {
+        let (dir, _repo) = repository();
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::failing_step("setup"));
+        let sandboxes = orchestrator_with(
+            dir.path(),
+            records.path().to_path_buf(),
+            backend,
+            Some("echo boom".to_string()),
+            true,
+        );
+
+        let error = sandboxes.create("demo").await.expect_err("create fails");
+        match &error {
+            Error::Provisioning { failure } => {
+                assert_eq!(failure.class, ProvisioningClass::Failed);
+                assert_eq!(failure.step.as_deref(), Some("setup"));
+                assert_eq!(failure.kind.as_deref(), Some("command"));
+                assert_eq!(failure.exit_code, Some(7));
+                assert!(
+                    failure
+                        .output
+                        .as_deref()
+                        .is_some_and(|output| output.contains("boom")),
+                    "{failure:?}"
+                );
+            }
+            other => panic!("expected a provisioning failure, got {other:?}"),
+        }
+        assert!(
+            sandboxes
+                .scm()
+                .list_sandboxes()
+                .expect("branches")
+                .is_empty(),
+            "the branch should have been removed"
+        );
+        assert!(
+            metadata_store::load_sandbox_at(records.path(), "demo")
+                .expect("readable")
+                .is_none(),
+            "no record remains"
         );
     }
 
@@ -1002,9 +1210,16 @@ mod seam_tests {
         let config = Config {
             project: crate::config::ProjectConfig {
                 slug: Some("project".to_string()),
-                setup_command: Some("echo permitted".to_string()),
-                backends: None,
+                backends: Some(vec!["test".to_string()]),
             },
+            provision: vec![crate::config::ProvisionDefinition::Command {
+                identity: "setup".to_string(),
+                run: "echo permitted".to_string(),
+            }],
+            backend_provision: std::collections::BTreeMap::from([(
+                "test".to_string(),
+                vec!["setup".to_string()],
+            )]),
             allow_project_setup: false,
             allowed_projects: vec!["project".to_string()],
             ..Config::default()
@@ -1014,13 +1229,20 @@ mod seam_tests {
             scm,
             "project".to_string(),
             records.path().to_path_buf(),
-            selected(backend),
+            selected(backend.clone()),
         );
 
         sandboxes
             .create("demo")
             .await
             .expect("the listed project is permitted");
+        let requests = backend.requests();
+        let identities: Vec<&str> = requests[0]
+            .provision
+            .iter()
+            .map(crate::sandbox::contract::ProvisionStep::identity)
+            .collect();
+        assert_eq!(identities, vec!["setup"]);
     }
 
     #[tokio::test]
@@ -1031,7 +1253,7 @@ mod seam_tests {
         let sandboxes = orchestrator_with(
             dir.path(),
             records.path().to_path_buf(),
-            backend,
+            backend.clone(),
             Some("echo permitted".to_string()),
             true,
         );
@@ -1040,6 +1262,179 @@ mod seam_tests {
             .create("demo")
             .await
             .expect("the machine-wide grant permits it");
+        let requests = backend.requests();
+        assert_eq!(requests[0].provision.len(), 1);
+        assert_eq!(requests[0].provision[0].identity(), "setup");
+    }
+
+    #[tokio::test]
+    async fn a_resolver_failure_leaves_no_branch() {
+        let (dir, _repo) = repository();
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let scm = ThreadSafeScm::open(dir.path()).expect("scm");
+        let config = Config {
+            project: crate::config::ProjectConfig {
+                slug: Some("project".to_string()),
+                backends: Some(vec!["other".to_string()]),
+            },
+            provision: vec![crate::config::ProvisionDefinition::Command {
+                identity: "setup".to_string(),
+                run: "echo refused".to_string(),
+            }],
+            backend_provision: std::collections::BTreeMap::from([(
+                "test".to_string(),
+                vec!["setup".to_string()],
+            )]),
+            ..Config::default()
+        };
+        let sandboxes = Sandboxes::for_test(
+            config,
+            scm,
+            "project".to_string(),
+            records.path().to_path_buf(),
+            selected(backend.clone()),
+        );
+
+        let error = sandboxes.create("demo").await.expect_err("refused");
+        assert!(
+            matches!(
+                error,
+                Error::Provisioning { ref failure }
+                    if failure.class
+                        == crate::sandbox::contract::ProvisioningClass::Misconfigured
+            ),
+            "{error}"
+        );
+        assert!(
+            sandboxes
+                .scm()
+                .list_sandboxes()
+                .expect("branches")
+                .is_empty(),
+            "the refusal happens before a branch exists"
+        );
+        assert!(backend.requests().is_empty(), "the backend was never asked");
+    }
+
+    #[tokio::test]
+    async fn an_unsupported_or_unaccepted_kind_never_reaches_the_backend() {
+        for (state, expected) in [
+            (State::Unavailable, ProvisioningClass::Unsupported),
+            (State::Degraded, ProvisioningClass::Unavailable),
+        ] {
+            let (dir, _repo) = repository();
+            let records = TempDir::new().expect("records");
+            let backend = Arc::new(TestBackend::new().with_provision_state(state));
+            let scm = ThreadSafeScm::open(dir.path()).expect("scm");
+            let config = Config {
+                project: crate::config::ProjectConfig {
+                    slug: Some("project".to_string()),
+                    backends: Some(vec!["test".to_string()]),
+                },
+                provision: vec![crate::config::ProvisionDefinition::Command {
+                    identity: "setup".to_string(),
+                    run: "echo refused".to_string(),
+                }],
+                backend_provision: std::collections::BTreeMap::from([(
+                    "test".to_string(),
+                    vec!["setup".to_string()],
+                )]),
+                allow_project_setup: true,
+                ..Config::default()
+            };
+            let sandboxes = Sandboxes::for_test(
+                config,
+                scm,
+                "project".to_string(),
+                records.path().to_path_buf(),
+                selected(backend.clone()),
+            );
+
+            let error = sandboxes.create("demo").await.expect_err("refused");
+            assert!(
+                matches!(error, Error::Provisioning { ref failure } if failure.class == expected),
+                "expected {expected:?}, got {error}"
+            );
+            assert!(
+                sandboxes
+                    .scm()
+                    .list_sandboxes()
+                    .expect("branches")
+                    .is_empty(),
+                "the refusal happens before a branch exists"
+            );
+            assert!(
+                backend.requests().is_empty(),
+                "the backend was never asked in state {state:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_request_carries_only_the_selected_backends_steps() {
+        let (dir, _repo) = repository();
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let scm = ThreadSafeScm::open(dir.path()).expect("scm");
+        let config = Config {
+            project: crate::config::ProjectConfig {
+                slug: Some("project".to_string()),
+                backends: Some(vec!["test".to_string(), "other".to_string()]),
+            },
+            provision: vec![
+                crate::config::ProvisionDefinition::Command {
+                    identity: "z-first".to_string(),
+                    run: "true".to_string(),
+                },
+                crate::config::ProvisionDefinition::Command {
+                    identity: "a-second".to_string(),
+                    run: "true".to_string(),
+                },
+                crate::config::ProvisionDefinition::Command {
+                    identity: "other-only".to_string(),
+                    run: "true".to_string(),
+                },
+            ],
+            backend_provision: std::collections::BTreeMap::from([
+                (
+                    "test".to_string(),
+                    vec!["z-first".to_string(), "a-second".to_string()],
+                ),
+                ("other".to_string(), vec!["other-only".to_string()]),
+            ]),
+            forwarding: crate::config::ForwardingConfig {
+                bind: "0.0.0.0".to_string(),
+            },
+            ports: vec![crate::config::PortRequest {
+                name: "web".to_string(),
+                target: 8080,
+            }],
+            allow_project_setup: true,
+            ..Config::default()
+        };
+        let sandboxes = Sandboxes::for_test(
+            config,
+            scm,
+            "project".to_string(),
+            records.path().to_path_buf(),
+            selected(backend.clone()),
+        );
+
+        sandboxes.create("demo").await.expect("create");
+        let requests = backend.requests();
+        let identities: Vec<&str> = requests[0]
+            .provision
+            .iter()
+            .map(crate::sandbox::contract::ProvisionStep::identity)
+            .collect();
+        assert_eq!(identities, vec!["z-first", "a-second"]);
+        assert_eq!(requests[0].forward_bind, "0.0.0.0");
+        assert_eq!(requests[0].ports.len(), 1);
+        assert_eq!(requests[0].ports[0].name, "web");
+        assert_eq!(requests[0].ports[0].target, 8080);
+        let rendered = serde_json::to_string(&requests[0]).expect("serialises");
+        assert!(!rendered.contains("other-only"), "{rendered}");
     }
 
     #[tokio::test]
@@ -1159,7 +1554,33 @@ mod seam_tests {
         );
 
         let error = sandboxes.create("demo").await.expect_err("refused");
-        assert!(error.to_string().contains("allow-project-setup"), "{error}");
+        match &error {
+            Error::Provisioning { failure } => {
+                assert_eq!(
+                    failure.class,
+                    crate::sandbox::contract::ProvisioningClass::Denied
+                );
+                assert_eq!(failure.backend.as_deref(), Some("test"));
+                assert_eq!(failure.step.as_deref(), Some("setup"));
+                assert_eq!(failure.kind.as_deref(), Some("command"));
+                assert!(failure.reason.contains("allowed-projects"), "{failure:?}");
+                assert!(
+                    failure.reason.contains("allow-project-setup"),
+                    "{failure:?}"
+                );
+                assert!(!failure.remedy.is_empty(), "{failure:?}");
+            }
+            other => panic!("expected a denial, got {other:?}"),
+        }
+        assert!(error.to_string().contains("setup"), "{error}");
+        assert!(
+            sandboxes
+                .scm()
+                .list_sandboxes()
+                .expect("branches")
+                .is_empty(),
+            "no branch is made for a refused step"
+        );
     }
 }
 
@@ -1173,7 +1594,6 @@ mod tests {
         let config = Config {
             project: ProjectConfig {
                 slug: Some("chosen".to_string()),
-                setup_command: None,
                 backends: None,
             },
             ..Config::default()
@@ -1195,7 +1615,6 @@ mod tests {
         let config = Config {
             project: ProjectConfig {
                 slug: Some("../../etc".to_string()),
-                setup_command: None,
                 backends: None,
             },
             ..Config::default()

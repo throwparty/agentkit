@@ -96,6 +96,33 @@ impl Selected {
         capabilities
     }
 
+    /// Merge a backend's own capability entries with the facet-derived ones.
+    ///
+    /// Provisioning kinds come from the contract's support report; a backend's
+    /// own entry replaces any standard entry for the same operation.
+    pub fn merge_capabilities(&self, extras: Vec<Capability>) -> Vec<Capability> {
+        let mut capabilities = self.standard_capabilities();
+        for support in self.core().provision_support() {
+            capabilities.push(Capability {
+                operation: format!("provision:{}", support.kind.as_str()),
+                state: support.state,
+                reason: support.reason,
+                remedy: support.remedy,
+            });
+        }
+        for extra in extras {
+            if let Some(existing) = capabilities
+                .iter_mut()
+                .find(|capability| capability.operation == extra.operation)
+            {
+                *existing = extra;
+            } else {
+                capabilities.push(extra);
+            }
+        }
+        capabilities
+    }
+
     /// The lifecycle facet, or a structured refusal naming what is missing.
     pub fn lifecycle_or_unsupported(&self, operation: &str) -> Result<&Arc<dyn Lifecycle>, Error> {
         self.lifecycle.as_ref().ok_or_else(|| Error::Unsupported {

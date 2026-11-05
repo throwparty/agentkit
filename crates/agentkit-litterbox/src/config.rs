@@ -11,7 +11,9 @@ use std::collections::{BTreeMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::domain::ScmMode;
-use crate::sandbox::contract::ProvisionKind;
+use crate::sandbox::contract::{
+    ProvisionKind, ProvisionStep, ProvisioningClass, ProvisioningFailure,
+};
 
 /// A port the project expects to be forwarded.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -74,12 +76,6 @@ impl ProvisionDefinition {
 pub struct ProjectConfig {
     /// Overrides the project slug derived from the directory name.
     pub slug: Option<String>,
-    /// A command run once, confined, after the workspace is materialised.
-    ///
-    /// Kept only until the orchestrator is wired to provisioning; the loader
-    /// rejects the key so no configuration can set it.
-    #[serde(rename = "setup-command")]
-    pub setup_command: Option<String>,
     /// The backends this project's provisioning supports.
     #[serde(default)]
     pub backends: Option<Vec<String>>,
@@ -124,7 +120,50 @@ pub struct Config {
     pub notices: Vec<String>,
 }
 
+/// Why a command step is refused when the project has no consent.
+pub const COMMAND_STEP_REASON: &str = "this project defines a command step; add its namespace to allowed-projects, or set \
+     allow-project-setup = true, in .agentkit/litterbox/config.local.toml to let it run";
+
+/// What the user can do about a refused command step.
+pub const COMMAND_STEP_REMEDY: &str =
+    "add the project to allowed-projects or set allow-project-setup";
+
 impl Config {
+    /// Whether this project's command steps may run.
+    pub fn command_steps_allowed(&self, project_slug: &str) -> bool {
+        self.allow_project_setup
+            || self
+                .allowed_projects
+                .iter()
+                .any(|project| project == project_slug)
+    }
+
+    /// The structured refusal for a command step this project may not run.
+    pub fn command_step_refusal(
+        &self,
+        project_slug: &str,
+        backend: &str,
+        step: &ProvisionStep,
+    ) -> Option<ProvisioningFailure> {
+        if self.command_steps_allowed(project_slug) {
+            return None;
+        }
+        match step {
+            ProvisionStep::Command { .. } => Some(ProvisioningFailure {
+                class: ProvisioningClass::Denied,
+                backend: Some(backend.to_string()),
+                step: Some(step.identity().to_string()),
+                kind: Some(step.kind().as_str().to_string()),
+                reason: COMMAND_STEP_REASON.to_string(),
+                remedy: format!(
+                    "{COMMAND_STEP_REMEDY}: add '{project_slug}' to allowed-projects"
+                ),
+                exit_code: None,
+                output: None,
+            }),
+        }
+    }
+
     /// Check the provisioning schema without changing the configuration.
     ///
     /// This is the one definition of the rules; the loader turns an issue into
@@ -482,10 +521,6 @@ pub fn merge(local: ProjectFile, project: ProjectFile) -> Result<Config, ConfigE
         backends,
         project: ProjectConfig {
             slug: local.project.slug.or(project.project.slug),
-            setup_command: local
-                .project
-                .setup_command
-                .or(project.project.setup_command),
             backends: local.project.backends.or(project.project.backends),
         },
         provision: local.provision.or(project.provision).unwrap_or_default(),
@@ -578,7 +613,6 @@ mod tests {
         ProjectFile {
             project: ProjectConfig {
                 slug: Some("project".to_string()),
-                setup_command: None,
                 backends: None,
             },
             ports: vec![PortRequest {
@@ -686,7 +720,6 @@ mod tests {
         let local = ProjectFile {
             project: ProjectConfig {
                 slug: Some("local".to_string()),
-                setup_command: None,
                 backends: None,
             },
             ..ProjectFile::default()
