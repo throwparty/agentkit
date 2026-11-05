@@ -119,7 +119,7 @@ Implement provision_support on DockerBackend with Command available and walk req
 | Depends On | T-007, T-008 |
 | References | provision-contract,command-consent,provision-atomic,explicit-order,step-provenance,test-selection |
 
-### T-010: Test backend and conformance
+### T-010: [x] Test backend and conformance
 
 Make TestBackend report Command and record the CreateRequest it receives. Add conformance assertions for list order, per-backend selection, an empty sequence, an unsupported kind, and that no other backend's name or the supported set crosses the boundary.
 

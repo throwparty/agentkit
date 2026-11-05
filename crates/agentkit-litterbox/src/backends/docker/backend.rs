@@ -1461,7 +1461,7 @@ mod tests {
         }
 
         let backend = backend();
-        crate::sandbox::conformance::exercise(&backend).await?;
+        crate::testing::exercise(&backend).await?;
         Ok(())
     }
 
@@ -1477,7 +1477,7 @@ mod tests {
         let workspace = tempfile::tempdir()?;
         std::fs::write(workspace.path().join("README.md"), "hello")?;
         let request = CreateRequest {
-            name: crate::sandbox::conformance::run_name("provision"),
+            name: crate::testing::run_name("provision"),
             provision: vec![
                 ProvisionStep::Command {
                     identity: "z-write".to_string(),
@@ -1566,7 +1566,7 @@ mod tests {
         let workspace = tempfile::tempdir()?;
         std::fs::write(workspace.path().join("README.md"), "hello")?;
         let request = CreateRequest {
-            name: crate::sandbox::conformance::run_name("provision-fail"),
+            name: crate::testing::run_name("provision-fail"),
             provision: vec![ProvisionStep::Command {
                 identity: "broken".to_string(),
                 run: "echo boom >&2; exit 7".to_string(),
@@ -1616,7 +1616,7 @@ mod tests {
         let workspace = tempfile::tempdir()?;
         std::fs::write(workspace.path().join("README.md"), "hello")?;
         let request = CreateRequest {
-            name: crate::sandbox::conformance::run_name("limits"),
+            name: crate::testing::run_name("limits"),
             provision: Vec::new(),
             forward_bind: "127.0.0.1".to_string(),
             project_slug: "contract-test".to_string(),
@@ -1650,7 +1650,7 @@ mod tests {
         }
 
         let backend = backend();
-        crate::sandbox::conformance::exercise_lifecycle(&backend).await?;
+        crate::testing::exercise_lifecycle(&backend).await?;
         Ok(())
     }
 
@@ -1663,8 +1663,8 @@ mod tests {
         }
 
         let backend = backend();
-        let name = crate::sandbox::conformance::run_name("docker-failure");
-        crate::sandbox::conformance::exercise_failed_create_with(
+        let name = crate::testing::run_name("docker-failure");
+        crate::testing::exercise_failed_create_with(
             &backend,
             &name,
             vec![ProvisionStep::Command {

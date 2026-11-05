@@ -355,7 +355,7 @@ mod tests {
 
     #[test]
     fn an_absent_limits_facet_is_reported_structurally() {
-        let backend = std::sync::Arc::new(crate::sandbox::conformance::TestBackend::new());
+        let backend = std::sync::Arc::new(crate::testing::TestBackend::new());
         let selected = crate::sandbox::selected::Selected::new("test", backend);
 
         match selected.limits_or_unsupported("set limits") {
@@ -379,7 +379,7 @@ mod tests {
 
     #[test]
     fn an_absent_facet_reports_its_operation_primitive_and_remedy() {
-        let backend = std::sync::Arc::new(crate::sandbox::conformance::TestBackend::new());
+        let backend = std::sync::Arc::new(crate::testing::TestBackend::new());
         let selected = crate::sandbox::selected::Selected::new("test", backend);
 
         let error = match selected.lifecycle_or_unsupported("pause") {
