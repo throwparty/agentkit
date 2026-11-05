@@ -6,6 +6,7 @@ pub mod domain;
 pub mod mcp;
 pub mod metadata_store;
 pub mod orchestrator;
+pub mod provision;
 pub mod sandbox;
 pub mod scm;
 pub mod vcs_store;
