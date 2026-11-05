@@ -72,12 +72,52 @@ plant "crates/agentkit-litterbox/src/cli.rs" \
   "cli-to-scm" \
   "litterbox-cli"
 
+plant "crates/agentkit-litterbox/src/cli.rs" \
+  "use crate::provision::resolve as _;" \
+  "cli-to-provision" \
+  "litterbox-cli"
+
+plant "crates/agentkit-litterbox/src/mcp.rs" \
+  "use crate::provision::resolve as _;" \
+  "mcp-to-provision" \
+  "litterbox-mcp"
+
 plant "crates/agentkit-litterbox/src/config.rs" \
   "use crate::backends::docker::BACKEND as _;" \
   "config-to-backend" \
   "litterbox-config"
 
+plant "crates/agentkit-litterbox/src/config.rs" \
+  "use crate::provision::resolve as _;" \
+  "config-to-provision" \
+  "litterbox-config"
+
+plant "crates/agentkit-litterbox/src/sandbox/mod.rs" \
+  "use crate::provision::resolve as _;" \
+  "contract-to-provision" \
+  "litterbox-contract"
+
 plant "crates/agentkit-litterbox/src/backends/registry.rs" \
   "use crate::orchestrator::Sandboxes as _;" \
   "registry-to-orchestrator" \
   "litterbox-registry"
+
+plant "crates/agentkit-litterbox/src/backends/registry.rs" \
+  "use crate::provision::resolve as _;" \
+  "registry-to-provision" \
+  "litterbox-registry"
+
+plant "crates/agentkit-litterbox/src/orchestrator/service.rs" \
+  "use crate::backends::docker::BACKEND as _;" \
+  "orchestrator-to-backend" \
+  "litterbox-orchestrator"
+
+plant "crates/agentkit-litterbox/src/backends/docker/backend.rs" \
+  "use crate::provision::resolve as _;" \
+  "backend-to-provision" \
+  "litterbox-backend-docker"
+
+plant "crates/agentkit-litterbox/src/provision/resolve.rs" \
+  "use crate::orchestrator::Sandboxes as _;" \
+  "provision-to-orchestrator" \
+  "litterbox-provision"

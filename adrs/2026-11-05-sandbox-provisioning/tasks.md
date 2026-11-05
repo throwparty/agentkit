@@ -67,7 +67,7 @@ Add src/provision with a pure resolve(config, selected, support, accept_degraded
 | Depends On | T-001, T-003 |
 | References | provision-resolution,kind-support,provision-failures,fail-closed,explicit-order,legible-unavailability,test-selection |
 
-### T-006: Resolver boundary
+### T-006: [x] Resolver boundary
 
 Add a litterbox-provision scope for src/provision/** to arch-lint.toml, deny backends, the CLI and the MCP server importing it, and allow the orchestrator. Add a negative fixture that imports it from a backend and proves the lint fails.
 

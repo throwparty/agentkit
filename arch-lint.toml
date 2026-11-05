@@ -1,8 +1,9 @@
 # Architecture rules for the ACP and Litterbox module boundaries.
 #
-# Two boundaries are declared: the ACP wire surfaces in agentkit-tackle
-# (adrs/2026-10-23-tackle-acp-v2) and the Litterbox provider contract
-# (adrs/2026-11-03-sandbox-provider-contract).
+# The ACP wire surfaces in agentkit-tackle (adrs/2026-10-23-tackle-acp-v2) and
+# the Litterbox contract, backends, orchestrator, registry and provisioning
+# resolver (adrs/2026-11-03-sandbox-provider-contract and
+# adrs/2026-11-05-sandbox-provisioning).
 
 preset = "minimal"
 
@@ -33,7 +34,8 @@ to = [
   "litterbox-config",
   "litterbox-scm",
   "litterbox-vcs-store",
-  "litterbox-shared"
+  "litterbox-shared",
+  "litterbox-provision"
 ]
 message = "the contract imports nothing internal; put conversions and adapters outside sandbox."
 
@@ -48,7 +50,8 @@ to = [
   "litterbox-config",
   "litterbox-scm",
   "litterbox-vcs-store",
-  "litterbox-shared"
+  "litterbox-shared",
+  "litterbox-provision"
 ]
 message = "a backend depends on the contract only; branches, records, commands and the shared kernel are not its business."
 
@@ -60,19 +63,20 @@ to = [
   "litterbox-cli",
   "litterbox-mcp",
   "litterbox-scm",
-  "litterbox-vcs-store"
+  "litterbox-vcs-store",
+  "litterbox-provision"
 ]
 message = "the registry constructs a backend; it does not pair branches, persist records or serve surfaces."
 
 [[deny-scope-dep]]
 from = "litterbox-cli"
-to = ["litterbox-backend-docker", "litterbox-scm", "litterbox-vcs-store"]
-message = "the CLI reaches a backend through the orchestrator and the registry, never its module; branches and bare clones are the orchestrator's business."
+to = ["litterbox-backend-docker", "litterbox-scm", "litterbox-vcs-store", "litterbox-provision"]
+message = "the CLI reaches a backend through the orchestrator and the registry, never its module; branches, bare clones and the provisioning resolver are the orchestrator's business."
 
 [[deny-scope-dep]]
 from = "litterbox-mcp"
-to = ["litterbox-backend-docker", "litterbox-scm", "litterbox-vcs-store"]
-message = "the MCP server reaches a backend through the orchestrator, never its module; branches and bare clones are the orchestrator's business."
+to = ["litterbox-backend-docker", "litterbox-scm", "litterbox-vcs-store", "litterbox-provision"]
+message = "the MCP server reaches a backend through the orchestrator and the registry, never its module; branches, bare clones and the provisioning resolver are the orchestrator's business."
 
 [[deny-scope-dep]]
 from = "litterbox-config"
@@ -84,9 +88,10 @@ to = [
   "litterbox-cli",
   "litterbox-mcp",
   "litterbox-scm",
-  "litterbox-vcs-store"
+  "litterbox-vcs-store",
+  "litterbox-provision"
 ]
-message = "configuration describes settings; it does not reach a mechanism, a record, a branch or a surface."
+message = "configuration describes settings; it does not reach a mechanism, a record, a branch, a surface or the resolver."
 
 [[deny-scope-dep]]
 from = "litterbox-persistence"
@@ -107,6 +112,21 @@ message = "persistence depends on the contract's record types only."
 from = "litterbox-orchestrator"
 to = ["litterbox-backend-docker"]
 message = "the orchestrator selects a backend through the registry; it does not name a mechanism."
+
+[[deny-scope-dep]]
+from = "litterbox-provision"
+to = [
+  "litterbox-backend-docker",
+  "litterbox-registry",
+  "litterbox-orchestrator",
+  "litterbox-persistence",
+  "litterbox-cli",
+  "litterbox-mcp",
+  "litterbox-scm",
+  "litterbox-vcs-store",
+  "litterbox-shared"
+]
+message = "the resolver depends on the contract and configuration only; it does not reach a mechanism, a record, a branch or a surface."
 
 [rules.no-unwrap-expect]
 enabled = false
@@ -147,6 +167,10 @@ name = "litterbox-orchestrator"
 paths = ["crates/agentkit-litterbox/src/orchestrator/**"]
 
 [[scopes]]
+name = "litterbox-provision"
+paths = ["crates/agentkit-litterbox/src/provision/**"]
+
+[[scopes]]
 name = "litterbox-persistence"
 paths = ["crates/agentkit-litterbox/src/metadata_store.rs"]
 
@@ -156,7 +180,10 @@ paths = ["crates/agentkit-litterbox/src/cli.rs"]
 
 [[scopes]]
 name = "litterbox-mcp"
-paths = ["crates/agentkit-litterbox/src/mcp.rs"]
+paths = [
+  "crates/agentkit-litterbox/src/mcp.rs",
+  "crates/agentkit-litterbox/src/mcp/**"
+]
 
 [[scopes]]
 name = "litterbox-config"
