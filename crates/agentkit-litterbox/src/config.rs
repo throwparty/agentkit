@@ -6,7 +6,7 @@
 //! the ports it expects. A mechanism's keys are never typed here; they stay
 //! untyped until the backend that owns them parses its own section.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -75,6 +75,9 @@ pub struct ProjectConfig {
     /// Overrides the project slug derived from the directory name.
     pub slug: Option<String>,
     /// A command run once, confined, after the workspace is materialised.
+    ///
+    /// Kept only until the orchestrator is wired to provisioning; the loader
+    /// rejects the key so no configuration can set it.
     #[serde(rename = "setup-command")]
     pub setup_command: Option<String>,
     /// The backends this project's provisioning supports.
@@ -100,9 +103,10 @@ pub struct Config {
     pub backends: BTreeMap<String, toml::Value>,
     /// What the project declares.
     pub project: ProjectConfig,
-    /// The provisioning steps the project declares, after the local override.
+    /// The step definitions, by identity. This is not a backend's sequence.
     pub provision: Vec<ProvisionDefinition>,
-    /// Each backend's ordered provisioning sequence, after the local override.
+    /// Each backend's ordered step identities. This is the sequence, not the
+    /// definitions.
     pub backend_provision: BTreeMap<String, Vec<String>>,
     /// Ports the project expects.
     pub ports: Vec<PortRequest>,
@@ -118,6 +122,245 @@ pub struct Config {
     pub git: GitConfig,
     /// Settings that were accepted but ignored, and why.
     pub notices: Vec<String>,
+}
+
+impl Config {
+    /// Check the provisioning schema without changing the configuration.
+    ///
+    /// This is the one definition of the rules; the loader turns an issue into
+    /// a configuration error and the resolver turns the same issue into a
+    /// structured provisioning failure.
+    pub fn check_provisioning(&self) -> Result<(), ProvisioningIssue> {
+        if self.provision.len() > MAX_PROVISION_STEPS {
+            return Err(ProvisioningIssue {
+                backend: None,
+                step: None,
+                reason: format!(
+                    "the project declares {} provisioning steps; the limit is \
+                     {MAX_PROVISION_STEPS}",
+                    self.provision.len()
+                ),
+                remedy: "remove steps the project does not need".to_string(),
+            });
+        }
+
+        let mut identities = HashSet::new();
+
+        for definition in &self.provision {
+            let identity = definition.identity();
+            if !valid_identity(identity) {
+                let identity = escaped(identity);
+                return Err(ProvisioningIssue {
+                    backend: None,
+                    step: Some(identity.clone()),
+                    reason: format!(
+                        "provisioning identity '{identity}' must start with a lowercase letter \
+                         and contain only lowercase letters, digits, hyphens and underscores"
+                    ),
+                    remedy: "rename the step to start with a lowercase letter and use only \
+                             lowercase letters, digits, hyphens and underscores"
+                        .to_string(),
+                });
+            }
+            if !identities.insert(identity.to_string()) {
+                return Err(ProvisioningIssue {
+                    backend: None,
+                    step: Some(identity.to_string()),
+                    reason: format!("duplicate provisioning identity '{identity}'"),
+                    remedy: "give each provisioning step a unique identity".to_string(),
+                });
+            }
+        }
+
+        for backend in self.project.backends.iter().flatten() {
+            if !valid_backend_name(backend) {
+                let backend = escaped(backend);
+                return Err(ProvisioningIssue {
+                    backend: Some(backend.clone()),
+                    step: None,
+                    reason: format!(
+                        "[project] backends names '{backend}', which is not a backend name"
+                    ),
+                    remedy: "name a backend using letters, digits, hyphens, underscores or dots"
+                        .to_string(),
+                });
+            }
+        }
+
+        for (backend, sequence) in &self.backend_provision {
+            if !valid_backend_name(backend) {
+                let backend = escaped(backend);
+                return Err(ProvisioningIssue {
+                    backend: Some(backend.clone()),
+                    step: None,
+                    reason: format!(
+                        "backends.{backend}.provision is keyed by a value that is not a backend \
+                         name"
+                    ),
+                    remedy: "name the backend using letters, digits, hyphens, underscores or dots"
+                        .to_string(),
+                });
+            }
+            if sequence.len() > MAX_SEQUENCE_STEPS {
+                let display = escaped(backend);
+                return Err(ProvisioningIssue {
+                    backend: Some(display.clone()),
+                    step: None,
+                    reason: format!(
+                        "backends.{display}.provision lists {} steps; the limit is \
+                         {MAX_SEQUENCE_STEPS}",
+                        sequence.len()
+                    ),
+                    remedy: "remove steps from the sequence".to_string(),
+                });
+            }
+            let mut seen = HashSet::new();
+            for identity in sequence {
+                if !seen.insert(identity) {
+                    let identity = escaped(identity);
+                    let backend = escaped(backend);
+                    return Err(ProvisioningIssue {
+                        backend: Some(backend.clone()),
+                        step: Some(identity.clone()),
+                        reason: format!("backends.{backend}.provision repeats '{identity}'"),
+                        remedy: "list each step identity once per backend".to_string(),
+                    });
+                }
+                if !identities.contains(identity) {
+                    let identity = escaped(identity);
+                    let backend = escaped(backend);
+                    return Err(ProvisioningIssue {
+                        backend: Some(backend.clone()),
+                        step: Some(identity.clone()),
+                        reason: format!(
+                            "backends.{backend}.provision names '{identity}', which \
+                             [[provision]] does not define"
+                        ),
+                        remedy: "define the step in [[provision]] or remove it from the \
+                                 sequence"
+                            .to_string(),
+                    });
+                }
+            }
+        }
+
+        if !self.provision.is_empty() {
+            match self.project.backends.as_deref() {
+                None => {
+                    return Err(ProvisioningIssue {
+                        backend: None,
+                        step: None,
+                        reason: "[[provision]] defines steps, so [project] backends must name \
+                                 the backends they support"
+                            .to_string(),
+                        remedy: "add [project] backends naming the supported backends".to_string(),
+                    });
+                }
+                Some([]) => {
+                    return Err(ProvisioningIssue {
+                        backend: None,
+                        step: None,
+                        reason: "[project] backends is empty; name at least one backend when \
+                                 [[provision]] defines steps"
+                            .to_string(),
+                        remedy: "name at least one backend in [project] backends".to_string(),
+                    });
+                }
+                Some(_) => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Check the schema and record what the project declared but no backend
+    /// uses.
+    pub fn validate_provisioning(&mut self) -> Result<(), ProvisioningIssue> {
+        self.check_provisioning()?;
+
+        let supported: HashSet<&str> = self
+            .project
+            .backends
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .map(String::as_str)
+            .collect();
+        let used: HashSet<&str> = self
+            .backend_provision
+            .values()
+            .flatten()
+            .map(String::as_str)
+            .collect();
+
+        let mut notices = Vec::new();
+        for definition in &self.provision {
+            if !used.contains(definition.identity()) {
+                notices.push(format!(
+                    "provisioning step '{}' is not used by any backend's sequence",
+                    definition.identity()
+                ));
+            }
+        }
+        for backend in self.backend_provision.keys() {
+            if !supported.contains(backend.as_str()) {
+                let display = escaped(backend);
+                notices.push(format!(
+                    "backends.{display}.provision is ignored because [project] backends does \
+                     not list '{display}'"
+                ));
+            }
+        }
+        self.notices.extend(notices);
+
+        Ok(())
+    }
+}
+
+/// The most step definitions a project may declare.
+const MAX_PROVISION_STEPS: usize = 32;
+
+/// The most steps one backend's sequence may list.
+const MAX_SEQUENCE_STEPS: usize = 32;
+
+/// A provisioning schema problem, independent of the surface reporting it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProvisioningIssue {
+    /// The backend the problem belongs to, when one is involved.
+    pub backend: Option<String>,
+    /// The step identity the problem names, when one is involved.
+    pub step: Option<String>,
+    /// What is wrong.
+    pub reason: String,
+    /// What the user can do about it.
+    pub remedy: String,
+}
+
+impl std::fmt::Display for ProvisioningIssue {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.reason)
+    }
+}
+
+/// A provisioning identity: lowercase, hyphenated or underscored, starting
+/// with a letter.
+fn valid_identity(identity: &str) -> bool {
+    let mut chars = identity.chars();
+    matches!(chars.next(), Some(first) if first.is_ascii_lowercase())
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+}
+
+/// Escape a configuration-supplied value for use in a human-readable message.
+pub(crate) fn escaped(value: &str) -> String {
+    value.chars().flat_map(char::escape_default).collect()
+}
+
+/// A backend name that cannot forge a log line or inject a control sequence.
+pub fn valid_backend_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    matches!(chars.next(), Some(first) if first.is_ascii_alphanumeric())
+        && name.len() <= 64
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '+'))
 }
 
 /// A configuration file. The committed project file and the untracked local
@@ -208,6 +451,7 @@ pub fn merge(local: ProjectFile, project: ProjectFile) -> Result<Config, ConfigE
         let mut table = table.clone();
         let sequence = take_provision(name, &mut table)?;
         if !table.is_empty() {
+            let name = escaped(name);
             notices.push(format!(
                 "project configuration configures a backend ('{name}'); backend settings \
                  belong to the machine, so they are ignored"
@@ -255,6 +499,7 @@ fn take_provision(
     let Some(value) = table.remove("provision") else {
         return Ok(None);
     };
+    let backend = escaped(backend);
     let toml::Value::Array(values) = value else {
         return Err(ConfigError::ParseError(format!(
             "backends.{backend}.provision must be an array of step identities"
@@ -280,6 +525,8 @@ pub enum ConfigError {
     FileNotFound(std::path::PathBuf),
     #[error("Parse error: {0}")]
     ParseError(String),
+    #[error("Provisioning configuration: {0}")]
+    Provisioning(ProvisioningIssue),
     #[error("Could not read {path}: {detail}")]
     Io {
         /// The file that could not be read.
@@ -316,7 +563,7 @@ mod tests {
         ProjectFile {
             project: ProjectConfig {
                 slug: Some("project".to_string()),
-                setup_command: Some("echo project".to_string()),
+                setup_command: None,
                 backends: None,
             },
             ports: vec![PortRequest {
@@ -332,10 +579,7 @@ mod tests {
         let config = merge(local(), project()).expect("merge");
         assert_eq!(config.backend.as_deref(), Some("docker"));
         assert!(config.backends.contains_key("docker"));
-        assert_eq!(
-            config.project.setup_command.as_deref(),
-            Some("echo project")
-        );
+        assert_eq!(config.project.slug.as_deref(), Some("project"));
         assert_eq!(config.ports.len(), 1);
         assert_eq!(config.forwarding.bind, "127.0.0.1");
         assert!(config.notices.is_empty());
@@ -426,15 +670,14 @@ mod tests {
     fn the_local_file_overrides_the_project_file() {
         let local = ProjectFile {
             project: ProjectConfig {
-                setup_command: Some("echo local".to_string()),
-                slug: None,
+                slug: Some("local".to_string()),
+                setup_command: None,
                 backends: None,
             },
             ..ProjectFile::default()
         };
         let config = merge(local, project()).expect("merge");
-        assert_eq!(config.project.setup_command.as_deref(), Some("echo local"));
-        assert_eq!(config.project.slug.as_deref(), Some("project"));
+        assert_eq!(config.project.slug.as_deref(), Some("local"));
     }
 
     #[test]

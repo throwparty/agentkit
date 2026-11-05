@@ -5,4 +5,4 @@
 # select or configure a backend.
 
 [project]
-setup-command = "sh -c 'echo we successfully initialised >/src/litterbox'"
+backends = ["docker"]

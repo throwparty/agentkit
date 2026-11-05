@@ -28,7 +28,7 @@ Add ProjectConfig.backends: Option<Vec<String>>, ProjectFile.provision: Vec<Prov
 | Depends On | T-001 |
 | References | project-compatibility,backend-sequence,config-ownership |
 
-### T-003: Config validation and setup-command rejection
+### T-003: [x] Config validation and setup-command rejection
 
 Validate identity shape and uniqueness, referenced identities, duplicate identities in a sequence, the supported set's presence when steps exist, a non-empty set with steps, and warn for a dead step or a sequence for an unsupported backend. Extend reject_moved_sections to detect [project] setup-command and reject it with the [[provision]] plus [backends.<name>].provision equivalent.
 
