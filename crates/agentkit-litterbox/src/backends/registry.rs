@@ -47,11 +47,12 @@ pub fn build(config: &Config) -> Result<Selected, Error> {
                 .unwrap_or_else(|| toml::Value::Table(Default::default()));
             constructor(&section)
         }
-        None => Err(Error::Unsupported {
-            operation: "select a backend".to_string(),
+        None => Err(Error::Unavailable {
             backend: name.to_string(),
-            primitive: "a backend by that name".to_string(),
-            reason: format!("this binary contains {}", available_names().join(", ")),
+            reason: format!(
+                "this binary does not build a backend named '{name}'; it contains {}",
+                available_names().join(", ")
+            ),
             remedy: "choose one of the backends listed by `litterbox backends`".to_string(),
         }),
     }
@@ -141,6 +142,11 @@ fn with_operation(operation: &str, error: Error) -> Error {
     }
 }
 
+/// Whether readiness permits an operation under the same policy `select` uses.
+pub fn readiness_is_usable(readiness: &Readiness, accept_degraded: bool) -> bool {
+    refusal(readiness, accept_degraded).is_none()
+}
+
 /// Construct the selected backend for one operation, if it can run here.
 pub async fn select_as(config: &Config, operation: &str) -> Result<Selected, Error> {
     let selected = build(config)?;
@@ -197,7 +203,8 @@ pub async fn introspect(config: &Config) -> Vec<BackendReport> {
                             Some(format!("capabilities could not be reported: {error}")),
                         ),
                     };
-                    let capabilities = backend.merge_capabilities(extras);
+                    let support = backend.core().provision_support();
+                    let capabilities = backend.merge_capabilities(extras, &support);
                     BackendReport {
                         name: (*name).to_string(),
                         selected: is_selected,
@@ -233,7 +240,26 @@ pub async fn introspect(config: &Config) -> Vec<BackendReport> {
 mod tests {
     use super::{DEFAULT, available_names, build, refusal, selected_name};
     use crate::config::Config;
+    use crate::sandbox::contract::Error;
     use crate::sandbox::report::{Check, Fallback, Readiness, State};
+
+    #[test]
+    fn an_unbuilt_backend_is_unavailable_not_unsupported() {
+        let config = Config {
+            backend: Some("bubblewrap".to_string()),
+            ..Config::default()
+        };
+        match build(&config) {
+            Err(Error::Unavailable {
+                backend, reason, ..
+            }) => {
+                assert_eq!(backend, "bubblewrap");
+                assert!(reason.contains("docker"), "{reason}");
+            }
+            Err(other) => panic!("expected Unavailable, got {other:?}"),
+            Ok(_) => panic!("expected the unbuilt backend to be refused"),
+        }
+    }
 
     fn check(primitive: &str, state: State, fallback: Option<Fallback>) -> Check {
         Check {

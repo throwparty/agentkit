@@ -696,6 +696,7 @@ impl Backend for DockerBackend {
                     "run a proxy inside the container or use a network-isolating backend"
                         .to_string(),
                 ),
+                fallback: None,
             }])
         })
     }
