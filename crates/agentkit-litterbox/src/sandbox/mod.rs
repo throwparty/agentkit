@@ -1,5 +1,3 @@
-#[cfg(test)]
-pub mod conformance;
 pub mod contract;
 pub mod environment;
 pub mod facets;

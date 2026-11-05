@@ -8,14 +8,14 @@ use std::sync::{Arc, Mutex};
 
 use futures_util::future::BoxFuture;
 
-use super::contract::{
+use crate::sandbox::contract::{
     Backend, CreateRequest, Error, Execution, Inspection, ProvisionKind, ProvisionStep,
     ProvisionSupport, ProvisioningClass, ProvisioningFailure, SandboxRecord, SandboxStatus, Scope,
     Workspace,
 };
-use super::environment::{Origin, Provenance};
-use super::facets::Lifecycle;
-use super::report::{EgressPosture, Readiness, State};
+use crate::sandbox::environment::{Origin, Provenance, StepProvenance};
+use crate::sandbox::facets::Lifecycle;
+use crate::sandbox::report::{EgressPosture, Fallback, Readiness, State};
 
 /// An in-memory backend that honours the contract without confining anything.
 pub struct TestBackend {
@@ -23,6 +23,7 @@ pub struct TestBackend {
     files: Mutex<std::collections::HashMap<String, Vec<u8>>>,
     paused: Mutex<std::collections::HashSet<String>>,
     requests: Mutex<Vec<CreateRequest>>,
+    environments: Mutex<std::collections::HashMap<String, Provenance>>,
     fail_create: bool,
     provision_failure: Option<String>,
     provision_state: State,
@@ -43,6 +44,7 @@ impl TestBackend {
             files: Mutex::new(std::collections::HashMap::new()),
             paused: Mutex::new(std::collections::HashSet::new()),
             requests: Mutex::new(Vec::new()),
+            environments: Mutex::new(std::collections::HashMap::new()),
             fail_create: false,
             provision_failure: None,
             provision_state: State::Available,
@@ -57,6 +59,7 @@ impl TestBackend {
             files: Mutex::new(std::collections::HashMap::new()),
             paused: Mutex::new(std::collections::HashSet::new()),
             requests: Mutex::new(Vec::new()),
+            environments: Mutex::new(std::collections::HashMap::new()),
             fail_create: true,
             provision_failure: None,
             provision_state: State::Available,
@@ -71,6 +74,7 @@ impl TestBackend {
             files: Mutex::new(std::collections::HashMap::new()),
             paused: Mutex::new(std::collections::HashSet::new()),
             requests: Mutex::new(Vec::new()),
+            environments: Mutex::new(std::collections::HashMap::new()),
             fail_create: false,
             provision_failure: Some(identity.to_string()),
             provision_state: State::Available,
@@ -96,13 +100,13 @@ impl Backend for TestBackend {
         request: &'a CreateRequest,
     ) -> BoxFuture<'a, Result<SandboxRecord, Error>> {
         Box::pin(async move {
-            if self.fail_create {
-                return Err(Error::failed("the mechanism refused to create the sandbox"));
-            }
             self.requests
                 .lock()
                 .map_err(|_| Error::failed("test backend lock poisoned"))?
                 .push(request.clone());
+            if self.fail_create {
+                return Err(Error::failed("the mechanism refused to create the sandbox"));
+            }
             if let Some(identity) = &self.provision_failure
                 && request
                     .provision
@@ -149,6 +153,27 @@ impl Backend for TestBackend {
                 .lock()
                 .map_err(|_| Error::failed("test backend lock poisoned"))?
                 .push(record.clone());
+            let steps = request
+                .provision
+                .iter()
+                .map(|step| StepProvenance {
+                    identity: step.identity().to_string(),
+                    kind: step.kind(),
+                    variables: Vec::new(),
+                })
+                .collect();
+            self.environments
+                .lock()
+                .map_err(|_| Error::failed("test backend lock poisoned"))?
+                .insert(
+                    request.name.clone(),
+                    Provenance {
+                        origin: Origin::Default,
+                        variables: Vec::new(),
+                        host_paths: Vec::new(),
+                        steps,
+                    },
+                );
             Ok(record)
         })
     }
@@ -288,12 +313,18 @@ impl Backend for TestBackend {
                 status,
                 egress: EgressPosture::Denied,
                 workspace: self.workspace.clone(),
-                environment: Provenance {
-                    origin: Origin::Default,
-                    variables: Vec::new(),
-                    host_paths: Vec::new(),
-                    steps: Vec::new(),
-                },
+                environment: self
+                    .environments
+                    .lock()
+                    .map_err(|_| Error::failed("test backend lock poisoned"))?
+                    .get(&sandbox.name)
+                    .cloned()
+                    .unwrap_or(Provenance {
+                        origin: Origin::Default,
+                        variables: Vec::new(),
+                        host_paths: Vec::new(),
+                        steps: Vec::new(),
+                    }),
                 forwards: Vec::new(),
             })
         })
@@ -322,7 +353,9 @@ impl Backend for TestBackend {
         })
     }
 
-    fn capabilities<'a>(&'a self) -> BoxFuture<'a, Result<Vec<super::report::Capability>, Error>> {
+    fn capabilities<'a>(
+        &'a self,
+    ) -> BoxFuture<'a, Result<Vec<crate::sandbox::report::Capability>, Error>> {
         Box::pin(async { Ok(Vec::new()) })
     }
 
@@ -332,7 +365,10 @@ impl Backend for TestBackend {
             state: self.provision_state,
             reason: Some("the test backend reports this state".to_string()),
             remedy: Some("accept it or choose another backend".to_string()),
-            fallback: None,
+            fallback: (self.provision_state == State::Degraded).then(|| Fallback {
+                name: "a weaker mechanism".to_string(),
+                does_not_bound: "some of the host".to_string(),
+            }),
         }]
     }
 }
@@ -539,6 +575,61 @@ pub async fn exercise<S: Backend + ?Sized>(backend: &S) -> Result<(), Error> {
     );
     backend.delete(&record).await?;
 
+    exercise_provisioning(backend).await?;
+
+    Ok(())
+}
+
+/// Drive provisioning: an ordered sequence must be applied and reported.
+pub async fn exercise_provisioning<S: Backend + ?Sized>(backend: &S) -> Result<(), Error> {
+    let workspace = tempfile::tempdir()
+        .map_err(|error| Error::failed(format!("could not stage a workspace: {error}")))?;
+    std::fs::write(workspace.path().join("README.md"), "hello\n")
+        .map_err(|error| Error::failed(format!("could not write the fixture: {error}")))?;
+
+    let request = CreateRequest {
+        name: run_name("provisioning"),
+        project_slug: "conformance".to_string(),
+        workspace: Workspace {
+            source: workspace.path().to_path_buf(),
+        },
+        provision: vec![
+            ProvisionStep::Command {
+                identity: "z-first".to_string(),
+                run: "true".to_string(),
+            },
+            ProvisionStep::Command {
+                identity: "a-second".to_string(),
+                run: "true".to_string(),
+            },
+        ],
+        forward_bind: "127.0.0.1".to_string(),
+        ports: Vec::new(),
+    };
+
+    let record = backend.create(&request).await?;
+    let inspection = backend.inspect(&record).await?;
+    let identities: Vec<&str> = inspection
+        .environment
+        .steps
+        .iter()
+        .map(|step| step.identity.as_str())
+        .collect();
+    assert_eq!(
+        identities,
+        vec!["z-first", "a-second"],
+        "the backend reports the resolved steps in list order"
+    );
+    assert!(
+        inspection
+            .environment
+            .steps
+            .iter()
+            .all(|step| step.kind == ProvisionKind::Command),
+        "the backend reports each step's kind"
+    );
+
+    backend.delete(&record).await?;
     Ok(())
 }
 
@@ -580,7 +671,7 @@ pub async fn exercise_lifecycle<S: Lifecycle + ?Sized>(backend: &S) -> Result<()
 /// An operation the mechanism does not provide is refused structurally.
 pub fn exercise_absent_facet() -> Result<(), Error> {
     let core: Arc<dyn Backend> = Arc::new(TestBackend::new());
-    let selected = super::selected::Selected::new("test", core);
+    let selected = crate::sandbox::selected::Selected::new("test", core);
 
     match selected.lifecycle_or_unsupported("pause") {
         Err(Error::Unsupported {
@@ -657,6 +748,10 @@ mod tests {
     use super::{
         TestBackend, exercise, exercise_absent_facet, exercise_failed_create, exercise_lifecycle,
     };
+    use crate::sandbox::contract::{
+        Backend, CreateRequest, ProvisionKind, ProvisionStep, Workspace,
+    };
+    use crate::sandbox::report::State;
 
     #[tokio::test]
     async fn the_test_backend_conforms() {
@@ -683,5 +778,73 @@ mod tests {
     #[test]
     fn an_absent_facet_is_reported_structurally() {
         exercise_absent_facet().expect("the refusal names its primitive, reason and remedy");
+    }
+
+    fn request(provision: Vec<ProvisionStep>) -> CreateRequest {
+        CreateRequest {
+            name: "recorded".to_string(),
+            project_slug: "conformance".to_string(),
+            workspace: Workspace {
+                source: std::path::PathBuf::from("/tmp/workspace"),
+            },
+            provision,
+            forward_bind: "127.0.0.1".to_string(),
+            ports: Vec::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn the_test_backend_records_the_request_verbatim() {
+        let backend = TestBackend::new();
+        let provision = vec![
+            ProvisionStep::Command {
+                identity: "first".to_string(),
+                run: "true".to_string(),
+            },
+            ProvisionStep::Command {
+                identity: "second".to_string(),
+                run: "true".to_string(),
+            },
+        ];
+        backend
+            .create(&request(provision.clone()))
+            .await
+            .expect("create");
+        let recorded = backend.requests();
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].provision, provision);
+    }
+
+    #[tokio::test]
+    async fn the_test_backend_records_an_empty_sequence() {
+        let backend = TestBackend::new();
+        backend.create(&request(Vec::new())).await.expect("create");
+        assert!(backend.requests()[0].provision.is_empty());
+    }
+
+    #[test]
+    fn the_test_backend_reports_only_command() {
+        let support = TestBackend::new().provision_support();
+        assert_eq!(support.len(), 1);
+        assert_eq!(support[0].kind, ProvisionKind::Command);
+        assert_eq!(support[0].state, State::Available);
+    }
+
+    #[tokio::test]
+    async fn a_recorded_request_carries_only_its_own_steps() {
+        let backend = TestBackend::new();
+        let provision = vec![ProvisionStep::Command {
+            identity: "fetch".to_string(),
+            run: "true".to_string(),
+        }];
+        backend
+            .create(&request(provision.clone()))
+            .await
+            .expect("create");
+        let recorded = &backend.requests()[0];
+        assert_eq!(
+            recorded.provision, provision,
+            "the request carries exactly the steps it was given"
+        );
     }
 }

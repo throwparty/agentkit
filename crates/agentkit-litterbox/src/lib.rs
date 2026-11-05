@@ -9,4 +9,6 @@ pub mod orchestrator;
 pub mod provision;
 pub mod sandbox;
 pub mod scm;
+#[cfg(test)]
+pub mod testing;
 pub mod vcs_store;

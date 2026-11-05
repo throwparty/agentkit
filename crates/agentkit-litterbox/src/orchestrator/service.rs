@@ -942,11 +942,11 @@ mod seam_tests {
     use super::Sandboxes;
     use crate::config::Config;
     use crate::metadata_store::{self, StoredSandbox};
-    use crate::sandbox::conformance::TestBackend;
     use crate::sandbox::contract::{Error, ProvisioningClass, SandboxRecord};
     use crate::sandbox::report::State;
     use crate::sandbox::selected::Selected;
     use crate::scm::{Scm, ThreadSafeScm};
+    use crate::testing::TestBackend;
 
     fn repository() -> (TempDir, Repository) {
         let dir = TempDir::new().expect("tempdir");
