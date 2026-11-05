@@ -197,17 +197,7 @@ pub async fn introspect(config: &Config) -> Vec<BackendReport> {
                             Some(format!("capabilities could not be reported: {error}")),
                         ),
                     };
-                    let mut capabilities = backend.standard_capabilities();
-                    for extra in extras {
-                        if let Some(existing) = capabilities
-                            .iter_mut()
-                            .find(|capability| capability.operation == extra.operation)
-                        {
-                            *existing = extra;
-                        } else {
-                            capabilities.push(extra);
-                        }
-                    }
+                    let capabilities = backend.merge_capabilities(extras);
                     BackendReport {
                         name: (*name).to_string(),
                         selected: is_selected,

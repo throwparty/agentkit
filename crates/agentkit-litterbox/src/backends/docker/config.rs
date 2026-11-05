@@ -33,8 +33,8 @@ impl DockerConfig {
     pub fn from_section(section: &toml::Value) -> Result<Self, Error> {
         if section.get("setup-command").is_some() {
             return Err(Error::Misconfigured {
-                message: "setup-command is not a backend setting; it belongs under [project] \
-                          in the project configuration"
+                message: "setup-command is not a backend setting; declare a [[provision]] \
+                          step with kind = 'command' and list it in [backends.<name>].provision"
                     .to_string(),
             });
         }
@@ -227,12 +227,12 @@ mod tests {
     }
 
     #[test]
-    fn a_backend_setup_command_points_at_the_project_section() {
+    fn a_backend_setup_command_points_at_the_provision_section() {
         let section: toml::Value =
             toml::from_str("image = 'busybox'\nsetup-command = 'echo ready'").expect("toml parses");
         let error = DockerConfig::from_section(&section).expect_err("setup command rejected");
         let message = error.to_string();
         assert!(message.contains("setup-command"), "{message}");
-        assert!(message.contains("[project]"), "{message}");
+        assert!(message.contains("[[provision]]"), "{message}");
     }
 }

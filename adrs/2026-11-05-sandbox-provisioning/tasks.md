@@ -80,7 +80,7 @@ Add a litterbox-provision scope for src/provision/** to arch-lint.toml, deny bac
 | Depends On | T-005 |
 | References | resolver-boundary,boundaries |
 
-### T-007: Orchestrator wiring and consent
+### T-007: [x] Orchestrator wiring and consent
 
 Select the backend, read provision_support, call the resolver before the branch is created, and pass the resolved steps in CreateRequest. Replace the setup_command consent check with a check over resolved command steps, returning Denied naming the identity and both settings. Keep the existing rollback.
 

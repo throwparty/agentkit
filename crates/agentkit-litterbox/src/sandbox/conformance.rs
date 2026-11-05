@@ -10,7 +10,8 @@ use futures_util::future::BoxFuture;
 
 use super::contract::{
     Backend, CreateRequest, Error, Execution, Inspection, ProvisionKind, ProvisionStep,
-    ProvisionSupport, SandboxRecord, SandboxStatus, Scope, Workspace,
+    ProvisionSupport, ProvisioningClass, ProvisioningFailure, SandboxRecord, SandboxStatus, Scope,
+    Workspace,
 };
 use super::environment::{Origin, Provenance};
 use super::facets::Lifecycle;
@@ -21,7 +22,10 @@ pub struct TestBackend {
     records: Mutex<Vec<SandboxRecord>>,
     files: Mutex<std::collections::HashMap<String, Vec<u8>>>,
     paused: Mutex<std::collections::HashSet<String>>,
+    requests: Mutex<Vec<CreateRequest>>,
     fail_create: bool,
+    provision_failure: Option<String>,
+    provision_state: State,
     workspace: String,
 }
 
@@ -38,7 +42,10 @@ impl TestBackend {
             records: Mutex::new(Vec::new()),
             files: Mutex::new(std::collections::HashMap::new()),
             paused: Mutex::new(std::collections::HashSet::new()),
+            requests: Mutex::new(Vec::new()),
             fail_create: false,
+            provision_failure: None,
+            provision_state: State::Available,
             workspace: "/sandbox".to_string(),
         }
     }
@@ -49,9 +56,37 @@ impl TestBackend {
             records: Mutex::new(Vec::new()),
             files: Mutex::new(std::collections::HashMap::new()),
             paused: Mutex::new(std::collections::HashSet::new()),
+            requests: Mutex::new(Vec::new()),
             fail_create: true,
+            provision_failure: None,
+            provision_state: State::Available,
             workspace: "/sandbox".to_string(),
         }
+    }
+
+    /// A backend whose create fails when it reaches the named step.
+    pub fn failing_step(identity: &str) -> Self {
+        Self {
+            records: Mutex::new(Vec::new()),
+            files: Mutex::new(std::collections::HashMap::new()),
+            paused: Mutex::new(std::collections::HashSet::new()),
+            requests: Mutex::new(Vec::new()),
+            fail_create: false,
+            provision_failure: Some(identity.to_string()),
+            provision_state: State::Available,
+            workspace: "/sandbox".to_string(),
+        }
+    }
+
+    /// A backend that reports the given provisioning support state.
+    pub fn with_provision_state(mut self, state: State) -> Self {
+        self.provision_state = state;
+        self
+    }
+
+    /// The create requests this backend has seen, in order.
+    pub fn requests(&self) -> Vec<CreateRequest> {
+        self.requests.lock().expect("test backend lock").clone()
     }
 }
 
@@ -63,6 +98,29 @@ impl Backend for TestBackend {
         Box::pin(async move {
             if self.fail_create {
                 return Err(Error::failed("the mechanism refused to create the sandbox"));
+            }
+            self.requests
+                .lock()
+                .map_err(|_| Error::failed("test backend lock poisoned"))?
+                .push(request.clone());
+            if let Some(identity) = &self.provision_failure
+                && request
+                    .provision
+                    .iter()
+                    .any(|step| step.identity() == identity)
+            {
+                return Err(Error::Provisioning {
+                    failure: Box::new(ProvisioningFailure {
+                        class: ProvisioningClass::Failed,
+                        backend: Some("test".to_string()),
+                        step: Some(identity.clone()),
+                        kind: Some("command".to_string()),
+                        reason: format!("provisioning step '{identity}' failed with exit code 7"),
+                        remedy: "fix the step and create again".to_string(),
+                        exit_code: Some(7),
+                        output: Some("boom".to_string()),
+                    }),
+                });
             }
             {
                 let records = self
@@ -270,9 +328,9 @@ impl Backend for TestBackend {
     fn provision_support(&self) -> Vec<ProvisionSupport> {
         vec![ProvisionSupport {
             kind: ProvisionKind::Command,
-            state: State::Available,
-            reason: None,
-            remedy: None,
+            state: self.provision_state,
+            reason: Some("the test backend reports this state".to_string()),
+            remedy: Some("accept it or choose another backend".to_string()),
             fallback: None,
         }]
     }

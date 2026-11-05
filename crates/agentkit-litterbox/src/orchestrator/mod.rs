@@ -9,4 +9,6 @@ pub mod machine;
 pub mod service;
 
 pub use bulk::PauseSummary;
-pub use service::{Listing, SandboxIo, Sandboxes, resolve_project_slug};
+pub use service::{
+    Listing, PlannedStep, Preflight, SandboxIo, Sandboxes, preflight, resolve_project_slug,
+};
