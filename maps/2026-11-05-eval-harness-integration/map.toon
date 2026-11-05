@@ -1,0 +1,24 @@
+destination: "Tackle is measurable with one adapter stack: SWE-bench measures Tackle; paired with/without runs measure whether a skill improves outcomes in Tackle; the same stack is general enough for other authors later"
+created: 2026-11-05
+status: probing
+research: research.md
+priorDecision: "The earlier research recommended Harbor for harness performance and BenchFlow for prompt efficacy. The one-stack constraint reopened the choice; T-004 records the resolution."
+tickets[17]{id,question,blockers,state,answer,evidence}:
+  T-001,"Can BenchFlow run a SWE-bench dataset through its Harbor inbound adapter and produce official-equivalent resolved rates for an ACP agent?",,answered,"No native SWE-bench adapter. Harbor-format tasks import; official-equivalent scoring is unproven and adoption is parity-gated.",evidence/T-001.md
+  T-002,"Can Harbor run a paired with/without-skill experiment and report lift without a bespoke harness?",,answered,"Yes with a small comparison script. `--skill` and `skills_dir` supply the arms; `metric.py` is per job; no native lift report.",evidence/T-002.md
+  T-003,"Can one ACP launcher and registry entry serve both Harbor and BenchFlow without changing Tackle?",,answered,"Yes. Wrapper-only launcher plus ACP registry entry; no Tackle change. Stage prompts in the project tree; auto-approve trust; isolate config and db.",evidence/T-003.md
+  T-004,"Which single runner covers both use cases with the least glue and the most trustworthy SWE-bench signal?",T-001 T-002 T-003,answered,"Harbor. Native SWE-bench and ACP; skill lift is a paired-job script. BenchFlow rejected for the single-stack role because its SWE-bench path is an adoption and parity project.","evidence/T-001.md;evidence/T-002.md;evidence/T-003.md"
+  T-005,"How does a Tackle prompt package map to a Harbor skill directory or to a staged project prompt?",T-004,open,,
+  T-006,"How do we observe prompt invocation; tool calls; tokens; and cost in Harbor's trajectory and results?",T-004,open,,
+  T-007,"What single result schema and report serves both the SWE-bench run and the skill-lift run?",T-004 T-006,open,,
+  T-008,"How do we isolate untrusted prompt packages and workspaces; and who approves project trust?",T-004,open,,
+  T-009,"How is the adapter packaged and versioned: ACP registry entry; binary targets; launcher?","T-003,T-004",answered,"Use the existing goreleaser matrix plus a `tackle-acp` launcher in the archive and an ACP registry entry. Add musl if containers need it.",evidence/T-009.md
+  T-010,"Which SWE-bench variant and subset give a meaningful first signal within the compute budget?","T-001,T-004",answered,"25-instance SWE-bench Verified subset at 3 trials; scale to 100 then 500 after the baseline is stable.",evidence/T-010.md
+  T-011,"What CI and baseline policy applies to both use cases?",T-007 T-010,open,,
+  T-012,"What authoring workflow lets another author write a skill eval without bespoke code?",T-005 T-007 T-008,open,,
+  T-013,"What is the MVP acceptance test that proves both use cases?",T-007 T-009 T-010,open,,
+  T-014,"Do the chosen runner's SWE-bench tasks preserve the official instance set; test patches; and pass rule?",T-004,answered,"Test patch is carried; the FAIL_TO_PASS/PASS_TO_PASS rule is unproven. A 5-instance overlap with the official harness is required.",evidence/T-014.md
+  T-015,"Does a 5-instance SWE-bench Verified overlap agree between Harbor and the official harness?",T-014,open,,
+  T-016,"Does the launcher work with Harbor's generic ACP agent; including skills_dir; trust approval; and model routing?",T-003 T-009,open,,
+  T-017,"Which SWE-bench Verified instance IDs; model snapshot; and provider define the first baseline?",T-010,open,,
+decision: "Harbor is the single runner. It has native SWE-bench tasks and ACP; skill lift is a paired-job script. BenchFlow's `bench skills eval` is better UX but its SWE-bench path is an adoption and parity project; it is rejected for the single-stack role. The adapter is a wrapper-only `tackle-acp` launcher plus an ACP registry entry. Carried risk: if T-016 shows Harbor's generic ACP agent cannot expose `skills_dir` to the launcher and task-variant staging is unacceptable, revisit BenchFlow."
