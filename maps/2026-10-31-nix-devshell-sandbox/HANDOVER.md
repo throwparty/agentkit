@@ -2,16 +2,16 @@
 
 Map complete: 26 tickets, none open. Detail in `evidence/`, decisions in `map.toon`.
 
-**Next:** define the provisioning abstraction (`sandbox-provisioning`) before the
-capture. It owns identity-named, typed steps, an ordered provision list on each
-backend, the FR-021 amendment that a project may name a backend to declare
-compatibility but not select one, machine overrides, the `setup-command`
-migration and the doctor/preflight report. Then `nix-devshell-env-capture` and
-`linux-bwrap-provider`. The capture does not realise derivations: readiness
-checks the devShell is already realised, and create refuses if it is not.
-Automatic mechanism selection is deferred to its own ADR
-(`automatic-backend-selection`). Proxy is the longest pole for a usable sandbox:
-without it both native backends are offline-only.
+**Next:** implement `sandbox-provisioning`, specified, planned and tasked at
+`adrs/2026-11-05-sandbox-provisioning`. It owns identity-named, typed steps, an
+ordered provision list on each backend, the FR-021 amendment that a project may
+name a backend to declare compatibility but not select one, machine overrides,
+the `setup-command` migration and the doctor/preflight report. Then
+`nix-devshell-env-capture` and `linux-bwrap-provider`. The capture does not
+realise derivations: readiness checks the devShell is already realised, and
+create refuses if it is not. Automatic mechanism selection is deferred to its own
+ADR (`automatic-backend-selection`). Proxy is the longest pole for a usable
+sandbox: without it both native backends are offline-only.
 
 ## ADRs
 
