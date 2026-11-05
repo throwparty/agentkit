@@ -56,7 +56,7 @@ Cover the local override end to end: replace [project] backends, [[provision]] a
 
 ### T-005: [x] Provision resolver
 
-Add src/provision with a pure resolve(config, selected, support, accept_degraded) -> Result<Vec<ProvisionStep>, Error>. Check the supported set, resolve identities in sequence order, reject duplicates and unknown identities, map an absent or unavailable kind to Unsupported and a degraded kind to Unavailable unless accepted, and return contract errors naming the backend, identity and kind.
+Add src/provision with a pure resolve(config, selected, support) -> Result<Vec<ProvisionStep>, Error> that reads accept-degraded from Config, plus resolve_each for a per-step preflight. Check the supported set, resolve identities in sequence order, reject duplicates and unknown identities, map an absent or unavailable kind to Unsupported and a degraded kind to Unavailable unless accepted, and return contract errors naming the backend, identity and kind.
 
 
 | Field | Value |
@@ -132,7 +132,7 @@ Make TestBackend report Command and record the CreateRequest it receives. Add co
 | Depends On | T-007, T-009 |
 | References | provision-resolution,step-kinds,provision-contract,explicit-order,test-selection |
 
-### T-011: Doctor command
+### T-011: [x] Doctor command
 
 Add litterbox doctor [--json]: load the merged config, build the selected backend with registry::build, report readiness and capabilities, resolve the steps, apply the consent check, and print the selected backend, the supported set and each step in order with state, reason and remedy. Exit non-zero when a required step is not ready. No create, record or command.
 
@@ -171,7 +171,7 @@ Document [project] backends, [[provision]], the command kind, per-backend sequen
 | Depends On | T-003, T-011, T-012 |
 | References | documentation,compatibility |
 
-### T-014: Acceptance verification
+### T-014: [x] Acceptance verification
 
 Run the acceptance criteria end to end on the provisioning flow: ordered sequence, per-backend selection, unlisted refusal, unknown identity, unsupported kind, setup-command replacement, consent, atomic failure, provenance, doctor, matrix isolation, local override, empty sequence, boundaries and unknown kind. Record the commands and results in the ADR directory.
 
