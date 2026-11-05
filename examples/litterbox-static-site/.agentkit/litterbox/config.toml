@@ -10,7 +10,7 @@ backends = ["docker"]
 [[provision]]
 identity = "serve"
 kind = "command"
-run = "busybox httpd -h /src/public -p 0.0.0.0:8080"
+run = "busybox httpd -h public -p 0.0.0.0:8080"
 
 [backends.docker]
 provision = ["serve"]

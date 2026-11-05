@@ -22,9 +22,11 @@ image = "ubuntu:latest"
 litterbox --backend docker list
 ```
 
-A project's `.agentkit/litterbox/config.toml` cannot select or configure a backend. If it tries,
-Litterbox reports the setting and ignores it: the sandbox runs on your machine,
-not the maintainer's.
+A project's `.agentkit/litterbox/config.toml` cannot select or configure a
+backend, with one exception: `[backends.<name>].provision` is the project-owned
+ordered list of provisioning steps for that backend. Every other backend key is
+machine-owned; if the project sets one, Litterbox reports it and ignores it, so
+the sandbox runs on your machine, not the maintainer's.
 
 ## Seeing what this machine can run
 

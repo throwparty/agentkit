@@ -5,8 +5,8 @@ Litterbox configuration is split by who owns the decision:
 - **The person running the code** owns the sandboxing mechanism: which backend, its
   settings, and where forwarded ports bind. That lives in the untracked local
   override and is never committed.
-- **The project** owns what it needs: its setup command, the ports it expects, and
-  how snapshots are stored. That lives in `.agentkit/litterbox/config.toml`.
+- **The project** owns what it needs: its provisioning steps, the ports it expects,
+  and how snapshots are stored. That lives in `.agentkit/litterbox/config.toml`.
 
 The committed project file may not select or configure a backend. If it tries,
 Litterbox says so and ignores the setting; the sandbox runs on your machine, so
@@ -27,8 +27,8 @@ Merge order is defaults, then project, then local override.
 # The sandboxing mechanism. Omit to use the default.
 backend = "docker"
 
-# Allow a repository's [project] setup-command to run. Off by default: cloning
-# a repository must not be enough to execute its shell command on your machine.
+# Allow a repository's command steps to run. Off by default: cloning a
+# repository must not be enough to execute its shell command on your machine.
 allow-project-setup = false
 
 # Or allow specific projects by their namespace: the project slug that
@@ -76,12 +76,12 @@ slug = "my-project"
 backends = ["docker"]
 
 [[provision]]
-identity = "fetch"
+identity = "setup"
 kind = "command"
-run = "cargo fetch"
+run = "echo 'Setup complete'"
 
 [backends.docker]
-provision = ["fetch"]
+provision = ["setup"]
 
 [[ports]]
 name = "web"
@@ -94,13 +94,21 @@ snapshot-mode = "direct"
 - `project.slug` identifies the project. It must already be a valid slug; a value
   the rules would change is refused rather than silently rewritten.
 - `project.backends` names the backends the project's provisioning supports. It is
-  required when `[[provision]]` defines a step; a selected backend absent from it
-  is refused.
+  required when `[[provision]]` defines a step. The local override may replace it;
+  selecting a backend it does not list is refused with both names.
 - `[[provision]]` defines a step once, by `identity`. `kind = "command"` runs `run`
   once, confined, with the workspace as its working directory, after the
-  workspace is materialised.
+  workspace is materialised, in the order the selected backend lists it. A
+  command step's environment changes do not persist to later steps.
 - `[backends.<name>].provision` is that backend's ordered sequence of step
-  identities. The list order is the execution order.
+  identities. The list order is the execution order. `provision` is the one
+  project-owned key in a backend section; every other key there remains
+  machine-owned and is ignored with a notice when the committed project file sets
+  it.
+- A project may define at most 32 provisioning steps and list at most 32
+  identities in one backend's sequence.
+- `setup-command` used to live under `[project]`. It is now a `command` step; the
+  old key is rejected with a message naming the replacement.
 - `ports` declares what the project expects forwarded. The project cannot decide
   where those ports bind or who may reach them.
 - `git.snapshot-mode` is `"remote"` (the default) to keep snapshots in an isolated
@@ -113,11 +121,25 @@ A command that exits non-zero fails create with its identity, exit code and up
 to 4096 characters of output. Host logs record the exit code and length only;
 the bounded output is returned to the caller so an agent can report it.
 
+`litterbox doctor` reports whether this project can create a sandbox here: the
+selected backend and its readiness, the supported backends, and each step in the
+selected backend's order with its state and remedy. It does not create anything.
+`--json` emits the same report for scripts and tests.
+
 ## Overriding project settings
 
-`.agentkit/litterbox/config.local.toml` takes the project file's shape, so a
-`[project]`, `[[ports]]` or `[git]` entry there overrides the committed value. It
-is also where the machine-owned settings above live. Keep it untracked: it
-describes this checkout and this machine, not the project. Litterbox refuses a
-local override that is tracked by Git or is a symlink; cloning a repository must
-not be able to grant itself setup consent or choose its own backend.
+`.agentkit/litterbox/config.local.toml` takes the project file's shape. A
+`[project]`, `[[ports]]` or `[git]` entry there overrides the committed value;
+`[project] backends`, `[[provision]]` and `[backends.<name>].provision` are
+replaced wholesale, and an empty list is a deliberate removal rather than a
+fallback to the project. It is also where the machine-owned settings above
+live. Keep it untracked: it describes this checkout and this machine, not the
+project. Litterbox refuses a local override that is tracked by Git, reached
+through a symlink, or larger than a small configuration file; cloning a
+repository must not be able to grant itself setup consent or choose its own
+backend. A committed project file that sets `allow-project-setup` or
+`allowed-projects` is rejected at load; those keys belong here.
+
+A provisioning identity starts with a lowercase letter and continues with
+lowercase letters, digits, hyphens or underscores. The same rule applies in the
+committed project file.

@@ -158,7 +158,7 @@ Carry provisioning failures through sandbox-create: the contract error's class a
 | Depends On | T-007 |
 | References | provision-failures,compatibility |
 
-### T-013: Documentation and samples
+### T-013: [x] Documentation and samples
 
 Document [project] backends, [[provision]], the command kind, per-backend sequences, the setup-command replacement and the doctor command; update the sample configuration; regenerate the CLI and MCP references.
 
