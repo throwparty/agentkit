@@ -20,11 +20,16 @@ use std::io;
 #[cfg(test)]
 use std::path::PathBuf;
 
+mod docs;
+mod error;
+
 use crate::config_loader;
 use crate::orchestrator::SandboxIo;
 use crate::orchestrator::Sandboxes;
 use crate::sandbox::contract::{Error, Execution, Forward};
-use crate::sandbox::mapping::SurfaceClass;
+
+use docs::TOOL_DOCS;
+use error::{map_config, map_contract};
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct SandboxCreateArgs {
@@ -110,6 +115,10 @@ impl SandboxServer {
         }
         let project = build_project()?;
         let _ = self.project.set(project);
+        tracing::info!(
+            "the MCP server reads project and local configuration and consent once at startup; \
+             restart it after changing either file"
+        );
         Ok(self.project.get().expect("just set"))
     }
 
@@ -295,179 +304,6 @@ impl ServerHandler for SandboxServer {
     }
 }
 
-#[derive(Clone, Copy)]
-struct ToolDoc {
-    name: &'static str,
-    description: &'static str,
-    params: &'static [ParamDoc],
-}
-
-#[derive(Clone, Copy)]
-struct ParamDoc {
-    name: &'static str,
-    type_name: &'static str,
-    required: bool,
-    description: &'static str,
-}
-
-const SANDBOX_NAME_PARAM: ParamDoc = ParamDoc {
-    name: "sandbox",
-    type_name: "string",
-    required: true,
-    description: "Sandbox name.",
-};
-
-const PATH_PARAM: ParamDoc = ParamDoc {
-    name: "path",
-    type_name: "string",
-    required: true,
-    description: "Path inside the sandbox.",
-};
-
-const TOOL_DOCS: &[ToolDoc] = &[
-    ToolDoc {
-        name: "sandbox-create",
-        description: "Create a new sandbox based on the current repository HEAD.",
-        params: &[ParamDoc {
-            name: "name",
-            type_name: "string",
-            required: true,
-            description: "Sandbox name.",
-        }],
-    },
-    ToolDoc {
-        name: "sandbox-ports",
-        description: "Get forwarded ports for a sandbox.",
-        params: &[SANDBOX_NAME_PARAM],
-    },
-    ToolDoc {
-        name: "read",
-        description: "Read a file from the sandbox.",
-        params: &[
-            SANDBOX_NAME_PARAM,
-            PATH_PARAM,
-            ParamDoc {
-                name: "offset",
-                type_name: "integer",
-                required: false,
-                description: "Line offset (0-based).",
-            },
-            ParamDoc {
-                name: "limit",
-                type_name: "integer",
-                required: false,
-                description: "Maximum number of lines to read.",
-            },
-        ],
-    },
-    ToolDoc {
-        name: "write",
-        description: "Write a file into the sandbox.",
-        params: &[
-            SANDBOX_NAME_PARAM,
-            PATH_PARAM,
-            ParamDoc {
-                name: "content",
-                type_name: "string",
-                required: true,
-                description: "Full file contents to write.",
-            },
-        ],
-    },
-    ToolDoc {
-        name: "patch",
-        description: "Apply a unified diff inside the sandbox.",
-        params: &[
-            SANDBOX_NAME_PARAM,
-            PATH_PARAM,
-            ParamDoc {
-                name: "diff",
-                type_name: "string",
-                required: true,
-                description: "Unified diff to apply.",
-            },
-        ],
-    },
-    ToolDoc {
-        name: "bash",
-        description: "Execute a shell command inside the sandbox.",
-        params: &[
-            SANDBOX_NAME_PARAM,
-            ParamDoc {
-                name: "command",
-                type_name: "string",
-                required: true,
-                description: "Shell command to execute.",
-            },
-            ParamDoc {
-                name: "workdir",
-                type_name: "string",
-                required: false,
-                description: "Working directory inside the sandbox.",
-            },
-            ParamDoc {
-                name: "timeout",
-                type_name: "integer",
-                required: false,
-                description: "Timeout in seconds.",
-            },
-        ],
-    },
-    ToolDoc {
-        name: "ls",
-        description: "List directory entries.",
-        params: &[
-            SANDBOX_NAME_PARAM,
-            PATH_PARAM,
-            ParamDoc {
-                name: "recursive",
-                type_name: "boolean",
-                required: false,
-                description: "Recursively list all descendants.",
-            },
-        ],
-    },
-    ToolDoc {
-        name: "glob",
-        description: "Find files matching a glob pattern.",
-        params: &[
-            SANDBOX_NAME_PARAM,
-            ParamDoc {
-                name: "pattern",
-                type_name: "string",
-                required: true,
-                description: "Glob pattern to match.",
-            },
-            ParamDoc {
-                name: "path",
-                type_name: "string",
-                required: false,
-                description: "Base path for matching.",
-            },
-        ],
-    },
-    ToolDoc {
-        name: "grep",
-        description: "Search file contents for a pattern.",
-        params: &[
-            SANDBOX_NAME_PARAM,
-            ParamDoc {
-                name: "pattern",
-                type_name: "string",
-                required: true,
-                description: "Pattern to search for.",
-            },
-            PATH_PARAM,
-            ParamDoc {
-                name: "include",
-                type_name: "string",
-                required: false,
-                description: "Glob include filter (e.g., *.rs).",
-            },
-        ],
-    },
-];
-
 pub fn generate_mcp_docs() -> String {
     let mut output = String::from("# 🤖 MCP tools\n\n");
 
@@ -514,15 +350,7 @@ pub async fn run_stdio(backend: Option<String>) -> Result<(), Box<dyn std::error
 }
 
 fn build_project() -> Result<Sandboxes, McpError> {
-    let mut config = config_loader::load_final().map_err(|error| {
-        McpError::internal_error(
-            Error::Misconfigured {
-                message: error.to_string(),
-            }
-            .to_string(),
-            None,
-        )
-    })?;
+    let mut config = config_loader::load_final().map_err(map_config)?;
     if let Some(backend) = backend_override() {
         config.backend = Some(backend);
     }
@@ -537,17 +365,6 @@ static BACKEND_OVERRIDE: std::sync::OnceLock<String> = std::sync::OnceLock::new(
 
 fn backend_override() -> Option<String> {
     BACKEND_OVERRIDE.get().cloned()
-}
-
-fn map_contract(error: Error) -> McpError {
-    // rmcp has three codes where the contract distinguishes seven failures, so
-    // the finer class travels in the data payload.
-    let data = serde_json::json!({ "class": error.class().as_str() });
-    match error.surface_class() {
-        SurfaceClass::InvalidParams => McpError::invalid_params(error.to_string(), Some(data)),
-        SurfaceClass::InvalidRequest => McpError::invalid_request(error.to_string(), Some(data)),
-        SurfaceClass::Internal => McpError::internal_error(error.to_string(), Some(data)),
-    }
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -1216,6 +1033,100 @@ mod tests {
         assert_eq!(unsupported.code, denied.code, "rmcp collapses both");
         assert_eq!(unsupported.data.as_ref().unwrap()["class"], "unsupported");
         assert_eq!(denied.data.as_ref().unwrap()["class"], "denied");
+    }
+
+    fn provisioning_error(
+        class: crate::sandbox::contract::ProvisioningClass,
+        backend: Option<String>,
+        remedy: &str,
+        exit_code: Option<i32>,
+        output: Option<&str>,
+    ) -> Error {
+        Error::Provisioning {
+            failure: Box::new(crate::sandbox::contract::ProvisioningFailure {
+                class,
+                backend,
+                step: Some("fetch".to_string()),
+                kind: Some("command".to_string()),
+                reason: "it cannot".to_string(),
+                remedy: remedy.to_string(),
+                exit_code,
+                output: output.map(str::to_string),
+            }),
+        }
+    }
+
+    #[test]
+    fn a_provisioning_failure_carries_the_step_and_kind() {
+        let unsupported = map_contract(provisioning_error(
+            crate::sandbox::contract::ProvisioningClass::Unsupported,
+            Some("docker".to_string()),
+            "choose another backend",
+            None,
+            None,
+        ));
+        let data = unsupported.data.as_ref().expect("data");
+        assert_eq!(data["class"], "unsupported");
+        assert_eq!(data["step"], "fetch");
+        assert_eq!(data["kind"], "command");
+        assert_eq!(data["backend"], "docker");
+        assert_eq!(data["reason"], "it cannot");
+        assert_eq!(data["remedy"], "choose another backend");
+    }
+
+    #[test]
+    fn a_misconfigured_failure_is_an_internal_error_with_no_backend() {
+        let error = map_contract(provisioning_error(
+            crate::sandbox::contract::ProvisioningClass::Misconfigured,
+            None,
+            "fix the sequence",
+            None,
+            None,
+        ));
+        let data = error.data.as_ref().expect("data");
+        assert_eq!(data["class"], "misconfigured");
+        assert!(data.get("backend").is_none(), "{data}");
+        assert_eq!(data["remedy"], "fix the sequence");
+        assert_eq!(error.code, McpError::internal_error("x", None).code);
+    }
+
+    #[test]
+    fn a_denied_failure_is_an_invalid_request_with_consent_fields() {
+        let error = map_contract(provisioning_error(
+            crate::sandbox::contract::ProvisioningClass::Denied,
+            Some("docker".to_string()),
+            "add the project to allowed-projects",
+            None,
+            None,
+        ));
+        let data = error.data.as_ref().expect("data");
+        assert_eq!(data["class"], "denied");
+        assert_eq!(data["backend"], "docker");
+        assert_eq!(data["remedy"], "add the project to allowed-projects");
+        assert_eq!(error.code, McpError::invalid_request("x", None).code);
+    }
+
+    #[test]
+    fn a_failed_command_carries_its_exit_code_and_output() {
+        let error = map_contract(provisioning_error(
+            crate::sandbox::contract::ProvisioningClass::Failed,
+            Some("docker".to_string()),
+            "inspect the output and fix the step",
+            Some(7),
+            Some("boom\n\u{1b}]0;pwned"),
+        ));
+        let data = error.data.as_ref().expect("data");
+        assert_eq!(data["class"], "failed");
+        assert_eq!(data["exit_code"], 7);
+        assert_eq!(data["remedy"], "inspect the output and fix the step");
+        assert_eq!(data["output_untrusted"], true);
+        let output = data["output"].as_str().expect("output");
+        assert!(output.contains("boom"), "{output}");
+        assert!(
+            !output.contains('\u{1b}'),
+            "control characters are escaped: {output}"
+        );
+        assert_eq!(error.code, McpError::internal_error("x", None).code);
     }
 
     struct TestProvider {

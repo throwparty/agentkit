@@ -145,7 +145,7 @@ Add litterbox doctor [--json]: load the merged config, build the selected backen
 | Depends On | T-005, T-007 |
 | References | doctor,legible-unavailability,command-consent,compatibility |
 
-### T-012: MCP error payload
+### T-012: [x] MCP error payload
 
 Carry provisioning failures through sandbox-create: the contract error's class and fields, including the step identity and kind, in the error data payload. Keep every tool name and argument unchanged.
 
