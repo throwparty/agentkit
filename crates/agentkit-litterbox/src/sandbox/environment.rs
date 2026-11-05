@@ -7,6 +7,8 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use super::contract::ProvisionKind;
+
 /// Where the environment as a whole came from.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Origin {
@@ -55,6 +57,17 @@ pub struct HostPath {
     pub path: PathBuf,
 }
 
+/// What one provisioning step changed.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct StepProvenance {
+    /// The step's identity.
+    pub identity: String,
+    /// The step's kind.
+    pub kind: ProvisionKind,
+    /// One entry per variable the step changed.
+    pub variables: Vec<Variable>,
+}
+
 /// Where the environment came from and what was changed about it.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Provenance {
@@ -64,6 +77,9 @@ pub struct Provenance {
     pub variables: Vec<Variable>,
     /// Host paths that were reported and not granted.
     pub host_paths: Vec<HostPath>,
+    /// One entry per provisioning step that ran.
+    #[serde(default)]
+    pub steps: Vec<StepProvenance>,
 }
 
 /// The environment a command receives, with its provenance.
@@ -94,6 +110,7 @@ impl Environment {
                 })
                 .collect(),
             host_paths: Vec::new(),
+            steps: Vec::new(),
         };
         Self {
             variables,
@@ -164,5 +181,60 @@ mod tests {
                 .iter()
                 .all(|variable| variable.change == Change::Unchanged)
         );
+    }
+
+    #[test]
+    fn a_step_reports_its_identity_kind_and_variable_names_without_values() {
+        let mut environment = Environment::unchanged(
+            Origin::Backend {
+                from: "the Docker image".to_string(),
+            },
+            BTreeMap::from([("TOKEN".to_string(), "SECRET-VALUE".to_string())]),
+            "/sandbox",
+        );
+        environment.provenance.steps.push(super::StepProvenance {
+            identity: "fetch".to_string(),
+            kind: crate::sandbox::contract::ProvisionKind::Command,
+            variables: vec![super::Variable {
+                name: "TOKEN".to_string(),
+                change: Change::Set,
+            }],
+        });
+
+        let rendered = serde_json::to_string(&environment.provenance).expect("serialises");
+        let parsed: super::Provenance =
+            serde_json::from_str(&rendered).expect("the provenance round-trips");
+        assert_eq!(parsed.steps[0].identity, "fetch");
+        assert_eq!(
+            parsed.steps[0].kind,
+            crate::sandbox::contract::ProvisionKind::Command
+        );
+        assert_eq!(parsed.steps[0].variables[0].name, "TOKEN");
+        assert_eq!(parsed.steps[0].variables[0].change, Change::Set);
+        assert!(!rendered.contains("SECRET-VALUE"), "{rendered}");
+
+        let whole = serde_json::to_string(&environment).expect("serialises");
+        assert!(
+            whole.contains("SECRET-VALUE"),
+            "the value is the environment's"
+        );
+        assert!(
+            !serde_json::to_string(&environment.provenance)
+                .expect("serialises")
+                .contains("SECRET-VALUE"),
+            "the provenance never carries a value"
+        );
+    }
+
+    #[test]
+    fn a_legacy_provenance_without_steps_deserialises() {
+        let legacy = r#"{
+            "origin": {"Backend": {"from": "the Docker image"}},
+            "variables": [],
+            "host_paths": []
+        }"#;
+        let provenance: super::Provenance =
+            serde_json::from_str(legacy).expect("a label written before this change parses");
+        assert!(provenance.steps.is_empty());
     }
 }

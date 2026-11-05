@@ -292,6 +292,7 @@ impl Backend for TestBackend {
                     origin: Origin::Default,
                     variables: Vec::new(),
                     host_paths: Vec::new(),
+                    steps: Vec::new(),
                 },
                 forwards: Vec::new(),
             })

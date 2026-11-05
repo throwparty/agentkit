@@ -573,6 +573,7 @@ mod tests {
                     change: crate::sandbox::environment::Change::Unchanged,
                 }],
                 host_paths: Vec::new(),
+                steps: Vec::new(),
             },
             forwards: Vec::new(),
         };
