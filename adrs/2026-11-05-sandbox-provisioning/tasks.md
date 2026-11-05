@@ -54,7 +54,7 @@ Cover the local override end to end: replace [project] backends, [[provision]] a
 | Depends On | T-003 |
 | References | config-ownership,project-compatibility,backend-sequence |
 
-### T-005: Provision resolver
+### T-005: [x] Provision resolver
 
 Add src/provision with a pure resolve(config, selected, support, accept_degraded) -> Result<Vec<ProvisionStep>, Error>. Check the supported set, resolve identities in sequence order, reject duplicates and unknown identities, map an absent or unavailable kind to Unsupported and a degraded kind to Unavailable unless accepted, and return contract errors naming the backend, identity and kind.
 
