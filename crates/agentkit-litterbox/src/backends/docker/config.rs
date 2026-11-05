@@ -65,7 +65,8 @@ impl DockerConfig {
             );
         }
 
-        let memory_mb = self.memory_mb.unwrap_or(4096);
+        let defaults = DockerSettings::default();
+        let memory_mb = self.memory_mb.unwrap_or(defaults.memory_mb);
         // Docker refuses anything below 6 MiB; zero means "no limit", which
         // would silently remove the bound the user asked for.
         if memory_mb < 6 {
@@ -76,14 +77,14 @@ impl DockerConfig {
             });
         }
 
-        let cpus = self.cpus.unwrap_or(2);
+        let cpus = self.cpus.unwrap_or(defaults.cpus);
         if cpus == 0 {
             return Err(Error::Misconfigured {
                 message: "backends.docker.cpus is 0; it must be at least 1".to_string(),
             });
         }
 
-        let pids_limit = self.pids_limit.unwrap_or(512);
+        let pids_limit = self.pids_limit.unwrap_or(defaults.pids_limit);
         if pids_limit == 0 {
             return Err(Error::Misconfigured {
                 message: "backends.docker.pids-limit is 0; it must be at least 1".to_string(),
@@ -101,6 +102,27 @@ impl DockerConfig {
                         "backends.docker.cap-add entry '{capability}' is not a capability name"
                     ),
                 });
+            }
+            if capability == "ALL" {
+                return Err(Error::Misconfigured {
+                    message: "backends.docker.cap-add cannot grant ALL; name the capabilities the \
+                              image genuinely needs"
+                        .to_string(),
+                });
+            }
+            if matches!(
+                capability.as_str(),
+                "SYS_ADMIN"
+                    | "SYS_PTRACE"
+                    | "SYS_MODULE"
+                    | "DAC_READ_SEARCH"
+                    | "DAC_OVERRIDE"
+                    | "NET_ADMIN"
+            ) {
+                tracing::warn!(
+                    capability = %capability,
+                    "backends.docker.cap-add grants a capability that widens the sandbox escape surface"
+                );
             }
         }
 
@@ -200,6 +222,21 @@ mod tests {
             .expect_err("lowercase is not a capability name")
             .to_string();
         assert!(message.contains("cap-add"), "{message}");
+    }
+
+    #[test]
+    fn granting_every_capability_is_refused() {
+        let config = DockerConfig {
+            image: Some("busybox:latest".to_string()),
+            cap_add: vec!["ALL".to_string()],
+            ..DockerConfig::default()
+        };
+        let message = config
+            .settings()
+            .expect_err("ALL is not a capability grant")
+            .to_string();
+        assert!(message.contains("cap-add"), "{message}");
+        assert!(message.contains("ALL"), "{message}");
     }
 
     #[test]
