@@ -433,6 +433,13 @@ pub fn merge(local: ProjectFile, project: ProjectFile) -> Result<Config, ConfigE
         ));
     }
 
+    // An explicitly empty local definitions list is a deliberate removal
+    // (EC-004) and drops the project's sequences with it. A non-empty local
+    // list still leaves each project sequence in place unless the local file
+    // supplied that backend's list; validation then rejects a dangling
+    // identity rather than silently disabling the sequence.
+    let local_definitions_empty = local.provision.as_ref().is_some_and(Vec::is_empty);
+    let inherit_project_sequences = !local_definitions_empty;
     let mut backends = local.backends;
     let mut backend_provision = BTreeMap::new();
 
@@ -458,7 +465,15 @@ pub fn merge(local: ProjectFile, project: ProjectFile) -> Result<Config, ConfigE
             ));
         }
         if let Some(sequence) = sequence {
-            backend_provision.entry(name.clone()).or_insert(sequence);
+            if inherit_project_sequences {
+                backend_provision.entry(name.clone()).or_insert(sequence);
+            } else {
+                let name = escaped(name);
+                notices.push(format!(
+                    "project configuration's backends.{name}.provision is ignored because the \
+                     local override removes the project's [[provision]] definitions"
+                ));
+            }
         }
     }
 
@@ -818,5 +833,79 @@ installable = "./nix"
         let sequence = take_provision("bubblewrap", &mut table).expect("no key");
         assert!(sequence.is_none());
         assert!(table.is_empty());
+    }
+
+    #[test]
+    fn the_local_supported_set_replaces_the_project_one() {
+        let project: ProjectFile =
+            toml::from_str("[project]\nbackends = ['bubblewrap']\n").expect("project");
+        let local: ProjectFile =
+            toml::from_str("[project]\nbackends = ['docker']\n").expect("local");
+        let config = merge(local, project).expect("merge");
+        assert_eq!(
+            config.project.backends.as_deref(),
+            Some(["docker".to_string()].as_slice())
+        );
+    }
+
+    #[test]
+    fn the_local_definitions_replace_the_project_definitions() {
+        let project: ProjectFile = toml::from_str(
+            "[[provision]]\nidentity = 'project-step'\nkind = 'command'\nrun = 'true'\n",
+        )
+        .expect("project");
+        let local: ProjectFile = toml::from_str(
+            "[[provision]]\nidentity = 'local-step'\nkind = 'command'\nrun = 'true'\n",
+        )
+        .expect("local");
+        let config = merge(local, project).expect("merge");
+        assert_eq!(config.provision.len(), 1);
+        assert_eq!(config.provision[0].identity(), "local-step");
+    }
+
+    #[test]
+    fn an_empty_local_definition_list_removes_the_project_steps() {
+        let project: ProjectFile = toml::from_str(
+            "[[provision]]\nidentity = 'fetch'\nkind = 'command'\nrun = 'true'\n\
+             [backends.bubblewrap]\nprovision = ['fetch']\n",
+        )
+        .expect("project");
+        let local: ProjectFile = toml::from_str("provision = []\n").expect("local");
+        let config = merge(local, project).expect("merge");
+        assert!(config.provision.is_empty());
+        assert!(
+            config.backend_provision.is_empty(),
+            "the removed definitions' sequences are dropped: {:?}",
+            config.backend_provision
+        );
+    }
+
+    #[test]
+    fn an_empty_local_sequence_removes_the_project_sequence() {
+        let project: ProjectFile =
+            toml::from_str("[backends.bubblewrap]\nprovision = ['fetch']\n").expect("project");
+        let local: ProjectFile =
+            toml::from_str("[backends.bubblewrap]\nprovision = []\n").expect("local");
+        let config = merge(local, project).expect("merge");
+        assert_eq!(config.backend_provision["bubblewrap"], Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_local_backend_table_keeps_machine_settings_and_extracts_provision() {
+        let local: ProjectFile =
+            toml::from_str("[backends.docker]\nimage = 'busybox'\nprovision = ['fetch']\n")
+                .expect("local");
+        let config = merge(local, project()).expect("merge");
+        assert_eq!(config.backend_provision["docker"], vec!["fetch"]);
+        let docker = config.backends["docker"].as_table().expect("docker table");
+        assert_eq!(
+            docker.get("image").and_then(toml::Value::as_str),
+            Some("busybox"),
+            "the machine setting stays for the backend"
+        );
+        assert!(
+            !docker.contains_key("provision"),
+            "provision is not left for deny_unknown_fields"
+        );
     }
 }
