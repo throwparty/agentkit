@@ -93,7 +93,7 @@ Select the backend, read provision_support, call the resolver before the branch 
 | Depends On | T-005, T-006 |
 | References | provision-resolution,command-consent,provision-atomic,provision-failures,fail-closed |
 
-### T-008: Per-step provenance types
+### T-008: [x] Per-step provenance types
 
 Extend the provenance types so inspection reports each step by identity and kind and the variables it changed by name and change kind, never by value. Keep the whole-environment origin for a sandbox with no steps.
 

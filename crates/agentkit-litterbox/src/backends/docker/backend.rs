@@ -546,6 +546,7 @@ fn environment(forwards: &[Forward]) -> Environment {
             },
             variables,
             host_paths: Vec::new(),
+            steps: Vec::new(),
         },
         workspace: WORKDIR.to_string(),
     }
@@ -715,6 +716,7 @@ mod tests {
             },
             variables: Vec::new(),
             host_paths: Vec::new(),
+            steps: Vec::new(),
         };
         let labels = labels_for(&request, &forwards, &provenance).expect("labels");
 
