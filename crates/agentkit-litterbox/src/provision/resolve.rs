@@ -633,8 +633,7 @@ mod tests {
             provision: vec![command("fetch")],
             ..Config::default()
         };
-        let error =
-            preflight_steps(&config, "bubblewrap", &[]).expect_err("missing supported set");
+        let error = preflight_steps(&config, "bubblewrap", &[]).expect_err("missing supported set");
         assert!(
             matches!(error, Error::Provisioning { ref failure } if failure.class == ProvisioningClass::Misconfigured),
             "{error}"

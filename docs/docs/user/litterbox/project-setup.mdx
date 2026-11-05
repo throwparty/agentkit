@@ -10,7 +10,15 @@ Create `.agentkit/litterbox/config.toml` in your repository:
 [project]
 # Optional: override the default project slug (derived from directory name)
 # slug = "my-project"
-setup-command = "busybox httpd -h /src -p 0.0.0.0:8080"
+backends = ["docker"]
+
+[[provision]]
+identity = "serve"
+kind = "command"
+run = "busybox httpd -h public -p 0.0.0.0:8080"
+
+[backends.docker]
+provision = ["serve"]
 
 [[ports]]
 name = "www"
@@ -28,7 +36,15 @@ backend = "docker"
 image = "busybox@sha256:..." # or a tag you are willing to have change
 ```
 
-The setup command only runs when the person running the code allows it. Cloning a
+Provisioning steps are one-shot. `busybox httpd` daemonises and returns; a
+command that stays in the foreground would hold the step open until the create
+deadline. Start a long-running service on demand from the sandbox instead.
+
+Command steps run with the workspace as their working directory, so write paths
+relative to it (`public`) rather than naming one backend's absolute workspace
+path (`/src`). The same step then works on every backend that supports commands.
+
+The command step only runs when the person running the code allows it. Cloning a
 repository is not consent to execute its shell command. Grant one repository by
 adding the namespace `litterbox list` prints to `allowed-projects` in the local
 override:
@@ -38,7 +54,7 @@ allowed-projects = ["my-project-1a2b3c4d"]
 ```
 
 `allow-project-setup = true` is the machine-wide alternative: it permits the
-setup command of every repository, including ones you have not seen yet. Use it
+command steps of every repository, including ones you have not seen yet. Use it
 deliberately, not to unblock a single project.
 
 For details on what configuration options are available, see the [configuration
@@ -48,6 +64,6 @@ When a new sandbox is created, Litterbox will:
 
 - Create a new branch named after the sandbox in your Git repository.
 - Materialise the source code at the sandbox's workspace path.
-- Run the setup command to start the HTTP server.
+- Run the command steps to start the HTTP server.
 - Assign it a random host port that forwards to the HTTP server running on port
   8080 in the sandbox.

@@ -11,12 +11,20 @@ Normative terminology for the Litterbox component. It covers the sandbox model t
 
 ## The contract
 
-- **Contract** — the `Backend` trait: create, enumerate, execute, upload, download, inspect, delete, and report readiness and capabilities. It names no container, image, namespace or transport.
+- **Contract** — the `Backend` trait: create, enumerate, execute, upload, download, inspect, delete, report readiness and capabilities, and report the provisioning step kinds it can apply. It names no container, image, namespace or transport.
 - **Facet** — a group of optional operations reached through a supertrait of the contract: lifecycle (pause and resume), limits, forwarding. A mechanism implements the facets it can, and code that requires one does not compile against a backend that lacks it.
 - **Capability** — a backend's report that an operation is available, degraded or unavailable, with a reason and a remedy.
 - **Readiness** — the same three states applied to the primitives a mechanism needs on this host, checked before a sandbox is created and before a capability is used.
-- **Failure class** — not found, conflict, unsupported, denied or failed. The CLI exit code and the MCP error class both derive from it, and the shared numbering lives in `agentkit-common`.
+- **Failure class** — not found, conflict, unsupported, denied, unavailable, misconfigured or failed. The CLI exit code and the MCP error class both derive from it, and the shared numbering lives in `agentkit-common`.
 - **Scope** — what an enumeration covers: one repository, or the whole machine.
+
+## Provisioning
+
+- **Provisioning step** — a project-declared unit of preparation with a stable identity, a typed kind and that kind's settings. Identities start with a lowercase letter and use lowercase letters, digits, hyphens and underscores; a step runs at most once in one sandbox.
+- **Step kind** — the typed behaviour a step selects. This release defines `command`, which runs a shell command once and confined, with the workspace as its working directory. Kinds are compiled in; an unknown kind fails configuration loading.
+- **Sequence** — the ordered list of step identities under `[backends.<name>].provision`. Order is execution order, with no implicit ordering by kind; a backend runs only its own sequence, and the project declares compatibility in `[project] backends` without selecting a backend.
+- **Provisioning failure** — a structured refusal or failure naming the class, backend, step identity, kind, reason and remedy. A refused command is denied; an unsupported kind is unsupported; a command that exits non-zero is failed with its exit code and bounded output.
+- **Step provenance** — the identity and kind of each step that ran, and the variables it changed by name and kind. It never carries a value.
 
 ## What a sandbox reports
 
@@ -31,7 +39,7 @@ Normative terminology for the Litterbox component. It covers the sandbox model t
 - **Record** — the persisted `StoredSandbox`: the contract record (name, backend, project, backend-owned payload) plus the branch and the SCM mode. Persistence keeps SCM vocabulary out of the contract.
 - **Legacy record** — a record written before this model. It is reported as unknown and never adopted; no record is synthesised from a name.
 - **Local override** — the person's choice of backend, that backend's settings, and where forwarded ports bind, in the untracked `.agentkit/litterbox/config.local.toml`. The only place a mechanism is chosen.
-- **Project configuration** — what the project needs: its setup command, expected ports, snapshot mode. It cannot select a backend or dictate confinement.
+- **Project configuration** — what the project needs: its provisioning definitions, the backends its provisioning supports, expected ports and snapshot mode. It cannot select a backend or dictate confinement.
 
 ## Language
 
