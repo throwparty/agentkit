@@ -2,12 +2,12 @@
 
 Map complete: 26 tickets, none open. Detail in `evidence/`, decisions in `map.toon`.
 
-**Next:** implement `sandbox-provisioning`, specified, planned and tasked at
+`sandbox-provisioning` is implemented at
 `adrs/2026-11-05-sandbox-provisioning`. It owns identity-named, typed steps, an
 ordered provision list on each backend, the FR-021 amendment that a project may
 name a backend to declare compatibility but not select one, machine overrides,
-the `setup-command` migration and the doctor/preflight report. Then
-`nix-devshell-env-capture` and `linux-bwrap-provider`. The capture does not
+the `setup-command` migration and the doctor/preflight report. Next is
+`nix-devshell-env-capture`, then `linux-bwrap-provider`. The capture does not
 realise derivations: readiness checks the devShell is already realised, and
 create refuses if it is not. Automatic mechanism selection is deferred to its own
 ADR (`automatic-backend-selection`). Proxy is the longest pole for a usable
@@ -124,11 +124,14 @@ evaluates. Withhold it.
 - Readiness at provider and facet level, each returning reason and remedy.
 - Missing facet: compile error. Runtime-unavailable: startup error, never a
   silent downgrade.
-- Environment is a provider-owned descriptor, because Darwin must rewrite it.
+- Environment provenance reports the origin, variable names and change kinds,
+  and the steps that ran; it never carries a value.
 - Never rewrite store paths; only workspace references move.
-- Leak to fix: `main.rs:427` and `mcp.rs:561` build `DockerSandboxProvider`;
-  `main.rs:252`/`276` bypass the provider for `pause --all-*`. Contract types
-  still say `container_id`, `inspect_container`, `ContainerInspection`.
+- The old provider leaks are closed: the registry is the only place a backend is
+  constructed, the CLI and MCP reach it through the orchestrator, and records
+  carry backend-owned data under the contract's `data` field.
+- Provisioning support is a static `Backend::provision_support` report; host
+  readiness stays in `Backend::readiness`.
 
 ## Tests
 
