@@ -7,5 +7,6 @@ pub(crate) mod docker;
 pub mod registry;
 
 pub use registry::{
-    BackendReport, DEFAULT, available_names, build, introspect, select, select_as, selected_name,
+    BackendReport, DEFAULT, available_names, build, introspect, readiness_is_usable, select,
+    select_as, selected_name,
 };

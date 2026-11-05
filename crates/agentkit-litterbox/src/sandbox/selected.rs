@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use super::contract::{Backend, Error};
+use super::contract::{Backend, Error, ProvisionSupport};
 use super::facets::{Forwarding, Lifecycle, Limits};
 use super::report::{Capability, State};
 
@@ -75,6 +75,7 @@ impl Selected {
                 state: State::Available,
                 reason: None,
                 remedy: None,
+                fallback: None,
             });
         }
         if self.limits.is_some() {
@@ -83,6 +84,7 @@ impl Selected {
                 state: State::Available,
                 reason: None,
                 remedy: None,
+                fallback: None,
             });
         }
         if self.forwarding.is_some() {
@@ -91,6 +93,7 @@ impl Selected {
                 state: State::Available,
                 reason: None,
                 remedy: None,
+                fallback: None,
             });
         }
         capabilities
@@ -100,14 +103,19 @@ impl Selected {
     ///
     /// Provisioning kinds come from the contract's support report; a backend's
     /// own entry replaces any standard entry for the same operation.
-    pub fn merge_capabilities(&self, extras: Vec<Capability>) -> Vec<Capability> {
+    pub fn merge_capabilities(
+        &self,
+        extras: Vec<Capability>,
+        support: &[ProvisionSupport],
+    ) -> Vec<Capability> {
         let mut capabilities = self.standard_capabilities();
-        for support in self.core().provision_support() {
+        for support in support {
             capabilities.push(Capability {
                 operation: format!("provision:{}", support.kind.as_str()),
                 state: support.state,
-                reason: support.reason,
-                remedy: support.remedy,
+                reason: support.reason.clone(),
+                remedy: support.remedy.clone(),
+                fallback: support.fallback.clone(),
             });
         }
         for extra in extras {

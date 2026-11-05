@@ -84,6 +84,8 @@ pub struct Capability {
     pub reason: Option<String>,
     /// What the user can do about it.
     pub remedy: Option<String>,
+    /// The weaker mechanism a degraded capability substitutes, when one does.
+    pub fallback: Option<Fallback>,
 }
 
 /// How a sandbox reaches the network.
@@ -176,6 +178,7 @@ mod tests {
             state: State::Unavailable,
             reason: Some("the sandbox has no sandbox-level state".to_string()),
             remedy: Some("stop the command instead".to_string()),
+            fallback: None,
         };
         assert_eq!(capability.state, State::Unavailable);
         assert!(capability.reason.is_some());
