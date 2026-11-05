@@ -14,3 +14,9 @@
 # Our rustup hook
 /.cargo/
 /.rustup/
+
+# Agent scratch and review artefacts
+.agents/
+
+# The machine-owned local override is never committed
+.agentkit/litterbox/config.local.toml

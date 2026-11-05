@@ -57,6 +57,7 @@ pub fn forwarded_port_env_var(name: &str) -> Result<String, String> {
             character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
         });
     if !valid {
+        let name: String = name.chars().flat_map(char::escape_default).collect();
         return Err(format!(
             "'{name}' is not a valid port name; use lowercase letters, digits and hyphens"
         ));
@@ -67,18 +68,67 @@ pub fn forwarded_port_env_var(name: &str) -> Result<String, String> {
     ))
 }
 
-/// Where a sandbox's environment comes from.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum EnvironmentSource {
-    /// The mechanism's own default, such as an image's environment.
-    Mechanism,
-    /// A captured host environment, described by where it came from.
-    Captured {
-        /// What was captured, in the caller's words.
-        from: String,
-        /// The variables, in order.
-        variables: Vec<(String, String)>,
+/// A kind of provisioning step a backend may apply.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProvisionKind {
+    /// A command run once, confined, in the sandbox.
+    Command,
+}
+
+impl ProvisionKind {
+    /// The stable name a surface reports.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Command => "command",
+        }
+    }
+}
+
+/// What a backend says about one provisioning kind.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct ProvisionSupport {
+    /// The kind.
+    pub kind: ProvisionKind,
+    /// Whether the backend can apply it.
+    pub state: crate::sandbox::report::State,
+    /// Why it is in this state.
+    pub reason: Option<String>,
+    /// What the user can do about it.
+    pub remedy: Option<String>,
+    /// The weaker mechanism the backend substitutes when degraded.
+    ///
+    /// A degraded kind with a fallback is refused unless the user accepts it;
+    /// a degraded kind without one is usable as reported.
+    pub fallback: Option<crate::sandbox::report::Fallback>,
+}
+
+/// A resolved provisioning step, ready for a backend to apply.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub enum ProvisionStep {
+    /// A command run once, confined, with the environment produced so far.
+    Command {
+        /// The step's stable identity.
+        identity: String,
+        /// The shell command to run.
+        run: String,
     },
+}
+
+impl ProvisionStep {
+    /// The step's identity.
+    pub fn identity(&self) -> &str {
+        match self {
+            Self::Command { identity, .. } => identity,
+        }
+    }
+
+    /// The step's kind.
+    pub fn kind(&self) -> ProvisionKind {
+        match self {
+            Self::Command { .. } => ProvisionKind::Command,
+        }
+    }
 }
 
 /// Everything a backend needs to create a sandbox.
@@ -90,12 +140,10 @@ pub struct CreateRequest {
     pub project_slug: String,
     /// The prepared workspace.
     pub workspace: Workspace,
-    /// Where the environment comes from.
-    pub environment: EnvironmentSource,
+    /// The ordered provisioning steps for this sandbox.
+    pub provision: Vec<ProvisionStep>,
     /// The host address forwarded ports bind to, from user configuration.
     pub forward_bind: String,
-    /// A command to run once, confined, before the sandbox is returned.
-    pub setup_command: Option<String>,
     /// Ports the project expects to be forwarded.
     pub ports: Vec<RequestedPort>,
 }
@@ -185,6 +233,110 @@ pub struct Inspection {
     pub forwards: Vec<Forward>,
 }
 
+/// The class of a provisioning failure, independent of the surface.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+pub enum ProvisioningClass {
+    /// The project's configuration is unusable.
+    Misconfigured,
+    /// The backend cannot apply this kind.
+    Unsupported,
+    /// Consent was refused.
+    Denied,
+    /// The host cannot apply this kind right now.
+    Unavailable,
+    /// The step ran and failed.
+    Failed,
+}
+
+impl ProvisioningClass {
+    /// The stable name a surface reports.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Misconfigured => "misconfigured",
+            Self::Unsupported => "unsupported",
+            Self::Denied => "denied",
+            Self::Unavailable => "unavailable",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+/// A failure that names the provisioning step responsible.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct ProvisioningFailure {
+    /// The failure's class.
+    pub class: ProvisioningClass,
+    /// The backend that was asked, when one was.
+    pub backend: Option<String>,
+    /// The step identity, when one is known.
+    pub step: Option<String>,
+    /// The step kind, when one is known.
+    pub kind: Option<String>,
+    /// Why the step could not run.
+    pub reason: String,
+    /// What the user can do about it.
+    pub remedy: String,
+    /// The exit status, when a command ran.
+    pub exit_code: Option<i32>,
+    /// A bounded excerpt of the command's output, when it ran.
+    pub output: Option<String>,
+}
+
+impl ProvisioningFailure {
+    /// A failure with no exit status or output.
+    pub fn new(
+        class: ProvisioningClass,
+        backend: Option<String>,
+        step: Option<String>,
+        kind: Option<String>,
+        reason: impl Into<String>,
+        remedy: impl Into<String>,
+    ) -> Self {
+        Self {
+            class,
+            backend,
+            step,
+            kind,
+            reason: reason.into(),
+            remedy: remedy.into(),
+            exit_code: None,
+            output: None,
+        }
+    }
+}
+
+/// Render a provisioning failure so a step, remedy and exit status are named
+/// even in a bare message.
+fn provisioning_message(failure: &ProvisioningFailure) -> String {
+    let mut message = String::new();
+    if let Some(backend) = &failure.backend {
+        message.push_str(&format!("{backend}: "));
+    }
+    match (&failure.step, &failure.kind) {
+        (Some(step), Some(kind)) => {
+            message.push_str(&format!(
+                "provisioning step '{step}' ({kind}): {}",
+                failure.reason
+            ));
+        }
+        (Some(step), None) => {
+            message.push_str(&format!("provisioning step '{step}': {}", failure.reason));
+        }
+        _ => message.push_str(&failure.reason),
+    }
+    if !failure.remedy.is_empty() {
+        message.push_str(&format!(" -- {}", failure.remedy));
+    }
+    if let Some(exit_code) = failure.exit_code {
+        message.push_str(&format!(" (exit code {exit_code})"));
+    }
+    if let Some(output) = &failure.output {
+        message.push('\n');
+        message.extend(output.chars().flat_map(char::escape_default));
+    }
+    message
+}
+
 /// A failure classified by meaning rather than by wire format.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -201,7 +353,7 @@ pub enum Error {
         name: String,
     },
     /// The backend does not provide this operation.
-    #[error("{backend} does not support {operation}: {reason}. {remedy}")]
+    #[error("{backend} does not support {operation} (needs {primitive}): {reason}. {remedy}")]
     Unsupported {
         /// The operation that was requested.
         operation: String,
@@ -246,6 +398,12 @@ pub enum Error {
         /// The underlying cause, when there is one.
         #[source]
         source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    },
+    /// A provisioning step failed, with the step named.
+    #[error("{}", provisioning_message(failure))]
+    Provisioning {
+        /// The structured failure.
+        failure: Box<ProvisioningFailure>,
     },
 }
 
@@ -306,6 +464,12 @@ pub trait Backend: Send + Sync {
     /// Report which optional operations this backend provides.
     fn capabilities(&self)
     -> BoxFuture<'_, Result<Vec<crate::sandbox::report::Capability>, Error>>;
+    /// Report which provisioning kinds this backend can apply, and why not.
+    ///
+    /// Support is a static statement about the kinds compiled into the
+    /// backend; host-dependent checks belong in [`Backend::readiness`], which
+    /// the orchestrator calls before create.
+    fn provision_support(&self) -> Vec<ProvisionSupport>;
 }
 
 #[cfg(test)]
@@ -385,6 +549,10 @@ mod tests {
             &self,
         ) -> BoxFuture<'_, Result<Vec<crate::sandbox::report::Capability>, Error>> {
             Box::pin(async { Ok(Vec::new()) })
+        }
+
+        fn provision_support(&self) -> Vec<super::ProvisionSupport> {
+            Vec::new()
         }
     }
 

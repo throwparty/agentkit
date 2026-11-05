@@ -151,9 +151,8 @@ impl Sandboxes {
             workspace: Workspace {
                 source: staged.path().to_path_buf(),
             },
-            environment: crate::sandbox::contract::EnvironmentSource::Mechanism,
+            provision: Vec::new(),
             forward_bind: self.config.forwarding.bind.clone(),
-            setup_command: self.config.project.setup_command.clone(),
             ports: self.config.ports.iter().map(port).collect(),
         };
 

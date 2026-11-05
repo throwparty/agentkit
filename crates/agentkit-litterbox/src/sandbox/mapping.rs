@@ -82,6 +82,19 @@ impl Error {
             Self::Unavailable { .. } => FailureClass::Unavailable,
             Self::Misconfigured { .. } => FailureClass::Misconfigured,
             Self::Failed { .. } => FailureClass::Failed,
+            Self::Provisioning { failure } => match failure.class {
+                crate::sandbox::contract::ProvisioningClass::Misconfigured => {
+                    FailureClass::Misconfigured
+                }
+                crate::sandbox::contract::ProvisioningClass::Unsupported => {
+                    FailureClass::Unsupported
+                }
+                crate::sandbox::contract::ProvisioningClass::Denied => FailureClass::Denied,
+                crate::sandbox::contract::ProvisioningClass::Unavailable => {
+                    FailureClass::Unavailable
+                }
+                crate::sandbox::contract::ProvisioningClass::Failed => FailureClass::Failed,
+            },
         }
     }
 
