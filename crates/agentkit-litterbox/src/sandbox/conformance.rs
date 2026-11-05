@@ -9,12 +9,12 @@ use std::sync::{Arc, Mutex};
 use futures_util::future::BoxFuture;
 
 use super::contract::{
-    Backend, CreateRequest, Error, Execution, Inspection, SandboxRecord, SandboxStatus, Scope,
-    Workspace,
+    Backend, CreateRequest, Error, Execution, Inspection, ProvisionKind, ProvisionStep,
+    ProvisionSupport, SandboxRecord, SandboxStatus, Scope, Workspace,
 };
 use super::environment::{Origin, Provenance};
 use super::facets::Lifecycle;
-use super::report::{EgressPosture, Readiness};
+use super::report::{EgressPosture, Readiness, State};
 
 /// An in-memory backend that honours the contract without confining anything.
 pub struct TestBackend {
@@ -266,6 +266,16 @@ impl Backend for TestBackend {
     fn capabilities<'a>(&'a self) -> BoxFuture<'a, Result<Vec<super::report::Capability>, Error>> {
         Box::pin(async { Ok(Vec::new()) })
     }
+
+    fn provision_support(&self) -> Vec<ProvisionSupport> {
+        vec![ProvisionSupport {
+            kind: ProvisionKind::Command,
+            state: State::Available,
+            reason: None,
+            remedy: None,
+            fallback: None,
+        }]
+    }
 }
 
 impl Lifecycle for TestBackend {
@@ -309,9 +319,8 @@ pub async fn exercise<S: Backend + ?Sized>(backend: &S) -> Result<(), Error> {
         workspace: Workspace {
             source: workspace.path().to_path_buf(),
         },
-        environment: super::contract::EnvironmentSource::Mechanism,
+        provision: Vec::new(),
         forward_bind: "127.0.0.1".to_string(),
-        setup_command: None,
         ports: Vec::new(),
     };
 
@@ -487,9 +496,8 @@ pub async fn exercise_lifecycle<S: Lifecycle + ?Sized>(backend: &S) -> Result<()
         workspace: Workspace {
             source: workspace.path().to_path_buf(),
         },
-        environment: super::contract::EnvironmentSource::Mechanism,
+        provision: Vec::new(),
         forward_bind: "127.0.0.1".to_string(),
-        setup_command: None,
         ports: Vec::new(),
     };
 
@@ -542,14 +550,14 @@ pub fn exercise_absent_facet() -> Result<(), Error> {
 /// Drive a backend whose create is expected to fail, and prove nothing
 /// survived it.
 pub async fn exercise_failed_create<S: Backend + ?Sized>(backend: &S) -> Result<(), Error> {
-    exercise_failed_create_with(backend, &run_name("conformance-failure"), None).await
+    exercise_failed_create_with(backend, &run_name("conformance-failure"), Vec::new()).await
 }
 
-/// Drive a failing create, optionally failing through the setup command.
+/// Drive a failing create, optionally failing through a provisioning step.
 pub async fn exercise_failed_create_with<S: Backend + ?Sized>(
     backend: &S,
     name: &str,
-    setup_command: Option<&str>,
+    provision: Vec<ProvisionStep>,
 ) -> Result<(), Error> {
     let workspace = tempfile::tempdir()
         .map_err(|error| Error::failed(format!("could not stage a workspace: {error}")))?;
@@ -562,9 +570,8 @@ pub async fn exercise_failed_create_with<S: Backend + ?Sized>(
         workspace: Workspace {
             source: workspace.path().to_path_buf(),
         },
-        environment: super::contract::EnvironmentSource::Mechanism,
+        provision,
         forward_bind: "127.0.0.1".to_string(),
-        setup_command: setup_command.map(str::to_string),
         ports: Vec::new(),
     };
 

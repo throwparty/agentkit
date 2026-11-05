@@ -141,6 +141,10 @@ mod tests {
         ) -> BoxFuture<'_, Result<Vec<crate::sandbox::report::Capability>, Error>> {
             Box::pin(async { Ok(Vec::new()) })
         }
+
+        fn provision_support(&self) -> Vec<crate::sandbox::contract::ProvisionSupport> {
+            Vec::new()
+        }
     }
 
     impl Lifecycle for Pausable {

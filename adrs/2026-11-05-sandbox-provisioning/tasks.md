@@ -2,7 +2,7 @@
 
 ## Tasks
 
-### T-001: Contract types
+### T-001: [x] Contract types
 
 Add ProvisionKind, ProvisionStep and ProvisionSupport to src/sandbox/contract.rs; replace CreateRequest.environment and setup_command with provision: Vec<ProvisionStep>; add Backend::provision_support; delete EnvironmentSource. Update Docker and TestBackend to implement the method and compile with an empty step list.
 

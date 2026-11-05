@@ -15,8 +15,8 @@ use super::compute::{ContainerSpec, SandboxState};
 use super::error::ComputeError;
 use super::naming::container_name_for_slug;
 use crate::sandbox::contract::{
-    Backend, CreateRequest, Error, Execution, Forward, Inspection, SandboxRecord, SandboxStatus,
-    Scope,
+    Backend, CreateRequest, Error, Execution, Forward, Inspection, ProvisionKind, ProvisionSupport,
+    SandboxRecord, SandboxStatus, Scope,
 };
 use crate::sandbox::environment::{Change, Environment, Origin, Provenance, Variable};
 use crate::sandbox::facets::{Forwarding, Lifecycle, Limits, ResourceLimits};
@@ -130,7 +130,7 @@ impl Backend for DockerBackend {
                 let (port_bindings, forwards) =
                     super::forwarding::forwarded_ports(&request.ports, &request.forward_bind)
                         .await?;
-                let environment = environment(request, &forwards)?;
+                let environment = environment(&forwards);
                 let env = environment
                     .variables
                     .iter()
@@ -191,35 +191,6 @@ impl Backend for DockerBackend {
             {
                 self.rollback(&id).await;
                 return Err(error.into());
-            }
-
-            if let Some(command) = &request.setup_command {
-                let argv = vec!["sh".to_string(), "-c".to_string(), command.clone()];
-                let result = match self.compute.exec(&id, &argv, Some(WORKDIR)).await {
-                    Ok(result) => result,
-                    Err(error) => {
-                        self.rollback(&id).await;
-                        return Err(error.into());
-                    }
-                };
-                if result.exit_code != 0 {
-                    self.rollback(&id).await;
-                    let stderr = if result.stderr.is_empty() {
-                        result.stdout
-                    } else {
-                        result.stderr
-                    };
-                    tracing::warn!(
-                        sandbox = %request.name,
-                        output = %stderr,
-                        "the setup command failed; the full output is in the log"
-                    );
-                    return Err(Error::failed(format!(
-                        "setup command failed with exit code {}: {}",
-                        result.exit_code,
-                        bounded_output(&stderr)
-                    )));
-                }
             }
 
             let data = DockerData {
@@ -459,6 +430,16 @@ impl Backend for DockerBackend {
             }])
         })
     }
+
+    fn provision_support(&self) -> Vec<ProvisionSupport> {
+        vec![ProvisionSupport {
+            kind: ProvisionKind::Command,
+            state: State::Available,
+            reason: None,
+            remedy: None,
+            fallback: None,
+        }]
+    }
 }
 
 impl Lifecycle for DockerBackend {
@@ -545,62 +526,10 @@ fn missing_image_check(image: &str) -> Option<Check> {
     })
 }
 
-/// Absolute paths a captured value names, unless they are already inside the
-/// workspace. They are reported, never granted.
-fn host_paths(variables: &[(String, String)]) -> Vec<crate::sandbox::environment::HostPath> {
-    let mut paths = Vec::new();
-    let workspace_prefix = format!("{WORKDIR}/");
-    for (name, value) in variables {
-        for part in value.split(':') {
-            let inside_workspace = part == WORKDIR || part.starts_with(&workspace_prefix);
-            if part.starts_with('/') && !inside_workspace {
-                paths.push(crate::sandbox::environment::HostPath {
-                    variable: name.clone(),
-                    path: std::path::PathBuf::from(part),
-                });
-            }
-        }
-    }
-    paths
-}
-
 /// The backend-owned environment: contents and provenance in one value.
-fn environment(request: &CreateRequest, forwards: &[Forward]) -> Result<Environment, Error> {
-    let (origin, mut values, mut variables, host_paths) = match &request.environment {
-        crate::sandbox::contract::EnvironmentSource::Captured { from, variables } => {
-            let mut values = BTreeMap::new();
-            for (name, value) in variables {
-                if !valid_env_name(name) {
-                    return Err(Error::failed(format!(
-                        "'{name}' is not a usable environment variable name"
-                    )));
-                }
-                values.insert(name.clone(), value.clone());
-            }
-            let provenance_variables = variables
-                .iter()
-                .map(|(name, _)| Variable {
-                    name: name.clone(),
-                    change: Change::Set,
-                })
-                .collect();
-            (
-                Origin::Captured { from: from.clone() },
-                values,
-                provenance_variables,
-                host_paths(variables),
-            )
-        }
-        crate::sandbox::contract::EnvironmentSource::Mechanism => (
-            Origin::Backend {
-                from: "the Docker image".to_string(),
-            },
-            BTreeMap::new(),
-            Vec::new(),
-            Vec::new(),
-        ),
-    };
-
+fn environment(forwards: &[Forward]) -> Environment {
+    let mut values = BTreeMap::new();
+    let mut variables = Vec::new();
     for forward in forwards {
         values.insert(forward.env_var.clone(), forward.host_port.to_string());
         variables.push(Variable {
@@ -609,27 +538,17 @@ fn environment(request: &CreateRequest, forwards: &[Forward]) -> Result<Environm
         });
     }
 
-    Ok(Environment {
+    Environment {
         variables: values,
         provenance: Provenance {
-            origin,
+            origin: Origin::Backend {
+                from: "the Docker image".to_string(),
+            },
             variables,
-            host_paths,
+            host_paths: Vec::new(),
         },
         workspace: WORKDIR.to_string(),
-    })
-}
-
-/// How much of a failing command's output travels in an error message.
-const ERROR_OUTPUT: usize = 4096;
-
-fn bounded_output(text: &str) -> String {
-    if text.chars().count() <= ERROR_OUTPUT {
-        return text.to_string();
     }
-    let mut bounded: String = text.chars().take(ERROR_OUTPUT).collect();
-    bounded.push_str("\n[truncated]");
-    bounded
 }
 
 /// The labels that let enumeration report identity without guessing.
@@ -694,16 +613,6 @@ fn record_from_labels(
     }))
 }
 
-/// A name the container runtime will accept as a variable.
-fn valid_env_name(name: &str) -> bool {
-    let mut chars = name.chars();
-    match chars.next() {
-        Some(first) if first.is_ascii_alphabetic() || first == '_' => {}
-        _ => return false,
-    }
-    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
-}
-
 /// How many times a conflicting create is retried with fresh ports.
 const PORT_RETRIES: usize = 2;
 
@@ -762,14 +671,14 @@ fn confined(path: &str, sandbox: &SandboxRecord) -> Result<String, Error> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BACKEND, Backend, DockerBackend, DockerSettings, PORT_RETRIES, confined, environment,
-        is_name_conflict, is_port_conflict, labels_for, missing_image_check, record_from_labels,
+        BACKEND, Backend, DockerBackend, DockerSettings, PORT_RETRIES, confined, is_name_conflict,
+        is_port_conflict, labels_for, missing_image_check, record_from_labels,
         retry_after_port_conflict,
     };
     use crate::backends::docker::compute;
     use crate::backends::docker::error::{BackendError, ComputeError, FailureKind};
     use crate::sandbox::contract::{
-        CreateRequest, EnvironmentSource, Error, Forward, RequestedPort, SandboxRecord, Scope,
+        CreateRequest, Error, Forward, ProvisionStep, RequestedPort, SandboxRecord, Scope,
         Workspace,
     };
     use crate::sandbox::environment::{Origin, Provenance};
@@ -784,79 +693,10 @@ mod tests {
             workspace: Workspace {
                 source: std::path::PathBuf::from("/tmp/workspace"),
             },
-            environment: EnvironmentSource::Mechanism,
+            provision: Vec::new(),
             forward_bind: "127.0.0.1".to_string(),
-            setup_command: None,
             ports: Vec::new(),
         }
-    }
-
-    #[test]
-    fn the_environment_carries_contents_and_provenance_without_leaking_values() {
-        let mut request = request();
-        request.environment = EnvironmentSource::Captured {
-            from: "the shell".to_string(),
-            variables: vec![("TOKEN".to_string(), "SECRET-VALUE".to_string())],
-        };
-
-        let environment = environment(&request, &[]).expect("environment");
-        assert_eq!(
-            environment.variables.get("TOKEN").map(String::as_str),
-            Some("SECRET-VALUE")
-        );
-        assert_eq!(environment.provenance.variables[0].name, "TOKEN");
-        assert_eq!(environment.workspace, "/src");
-
-        let reported = serde_json::to_string(&environment.provenance).expect("serialises");
-        assert!(!reported.contains("SECRET-VALUE"), "{reported}");
-    }
-
-    #[test]
-    fn captured_host_paths_are_reported_not_granted() {
-        let mut request = request();
-        request.environment = EnvironmentSource::Captured {
-            from: "the shell".to_string(),
-            variables: vec![
-                (
-                    "SSH_AUTH_SOCK".to_string(),
-                    "/run/user/1000/ssh-agent.sock".to_string(),
-                ),
-                ("PWD".to_string(), "/src/sub".to_string()),
-                (
-                    "PATH".to_string(),
-                    "/host/bin:/src/bin:/src-tools/bin".to_string(),
-                ),
-            ],
-        };
-
-        let environment = environment(&request, &[]).expect("environment");
-        let provenance = environment.provenance;
-        let named: Vec<&str> = provenance
-            .host_paths
-            .iter()
-            .map(|path| path.path.to_str().expect("utf-8 path"))
-            .collect();
-        assert!(
-            named.contains(&"/run/user/1000/ssh-agent.sock"),
-            "{named:?}"
-        );
-        assert!(named.contains(&"/host/bin"), "{named:?}");
-        assert!(
-            named.contains(&"/src-tools/bin"),
-            "a path that merely starts with /src is a host path: {named:?}"
-        );
-        assert!(
-            !named
-                .iter()
-                .any(|path| *path == "/src/sub" || *path == "/src/bin"),
-            "{named:?}"
-        );
-        assert!(
-            provenance
-                .variables
-                .iter()
-                .all(|variable| variable.change == crate::sandbox::environment::Change::Set)
-        );
     }
 
     #[test]
@@ -1042,14 +882,13 @@ mod tests {
         std::fs::write(workspace.path().join("README.md"), "hello")?;
 
         let request = CreateRequest {
-            environment: crate::sandbox::contract::EnvironmentSource::Mechanism,
+            provision: Vec::new(),
             forward_bind: "127.0.0.1".to_string(),
             name: format!("contract-{}", std::process::id()),
             project_slug: "contract-test".to_string(),
             workspace: Workspace {
                 source: workspace.path().to_path_buf(),
             },
-            setup_command: None,
             ports: vec![RequestedPort {
                 name: "web".to_string(),
                 target: 8080,
@@ -1098,51 +937,6 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "requires a Docker daemon; run with --ignored and LITTERBOX_DOCKER_TESTS=1"]
-    async fn a_setup_command_creates_a_file_visible_to_later_commands()
-    -> Result<(), Box<dyn std::error::Error>> {
-        assert!(
-            std::env::var("LITTERBOX_DOCKER_TESTS").is_ok(),
-            "set LITTERBOX_DOCKER_TESTS=1 and run with --ignored to exercise this test"
-        );
-
-        let backend = backend();
-        let workspace = tempfile::tempdir()?;
-        std::fs::write(workspace.path().join("README.md"), "hello")?;
-        let request = CreateRequest {
-            name: crate::sandbox::conformance::run_name("setup"),
-            environment: EnvironmentSource::Mechanism,
-            forward_bind: "127.0.0.1".to_string(),
-            project_slug: "contract-test".to_string(),
-            workspace: Workspace {
-                source: workspace.path().to_path_buf(),
-            },
-            setup_command: Some("printf setup > /setup-marker".to_string()),
-            ports: Vec::new(),
-        };
-
-        let record = backend.create(&request).await?;
-        let execution = backend
-            .exec(
-                &record,
-                &[
-                    "sh".to_string(),
-                    "-c".to_string(),
-                    "cat /setup-marker".to_string(),
-                ],
-            )
-            .await?;
-        assert_eq!(execution.exit_code, 0, "{}", execution.stderr);
-        assert_eq!(
-            execution.stdout, "setup",
-            "create ran the setup command in the workspace"
-        );
-
-        backend.delete(&record).await?;
-        Ok(())
-    }
-
-    #[tokio::test]
-    #[ignore = "requires a Docker daemon; run with --ignored and LITTERBOX_DOCKER_TESTS=1"]
     async fn the_docker_backend_applies_new_limits() -> Result<(), Box<dyn std::error::Error>> {
         assert!(
             std::env::var("LITTERBOX_DOCKER_TESTS").is_ok(),
@@ -1154,13 +948,12 @@ mod tests {
         std::fs::write(workspace.path().join("README.md"), "hello")?;
         let request = CreateRequest {
             name: crate::sandbox::conformance::run_name("limits"),
-            environment: EnvironmentSource::Mechanism,
+            provision: Vec::new(),
             forward_bind: "127.0.0.1".to_string(),
             project_slug: "contract-test".to_string(),
             workspace: Workspace {
                 source: workspace.path().to_path_buf(),
             },
-            setup_command: None,
             ports: Vec::new(),
         };
         let record = backend.create(&request).await?;
@@ -1204,8 +997,15 @@ mod tests {
 
         let backend = backend();
         let name = crate::sandbox::conformance::run_name("docker-failure");
-        crate::sandbox::conformance::exercise_failed_create_with(&backend, &name, Some("exit 7"))
-            .await?;
+        crate::sandbox::conformance::exercise_failed_create_with(
+            &backend,
+            &name,
+            vec![ProvisionStep::Command {
+                identity: "fail".to_string(),
+                run: "exit 7".to_string(),
+            }],
+        )
+        .await?;
         Ok(())
     }
 }
