@@ -84,6 +84,7 @@ pub struct SandboxSummary {
 }
 
 /// A connected Docker client, used only by this backend.
+#[derive(Clone)]
 pub struct DockerCompute {
     client: Docker,
 }
@@ -360,6 +361,42 @@ impl DockerCompute {
         command: &[String],
         working_dir: Option<&str>,
     ) -> Result<Execution, ComputeError> {
+        self.exec_with(
+            container_id,
+            command,
+            working_dir,
+            EXEC_OUTPUT_CAP,
+            EXEC_TIMEOUT,
+        )
+        .await
+    }
+
+    /// Run one provisioning step under its own, shorter deadline.
+    pub async fn exec_provisioning(
+        &self,
+        container_id: &str,
+        command: &[String],
+        working_dir: Option<&str>,
+        output_cap: usize,
+    ) -> Result<Execution, ComputeError> {
+        self.exec_with(
+            container_id,
+            command,
+            working_dir,
+            output_cap,
+            PROVISION_STEP_TIMEOUT,
+        )
+        .await
+    }
+
+    async fn exec_with(
+        &self,
+        container_id: &str,
+        command: &[String],
+        working_dir: Option<&str>,
+        output_cap: usize,
+        timeout: std::time::Duration,
+    ) -> Result<Execution, ComputeError> {
         let command_args: Vec<&str> = command.iter().map(String::as_str).collect();
         let exec_options = CreateExecOptions {
             attach_stdout: Some(true),
@@ -395,9 +432,11 @@ impl DockerCompute {
                         source: backend_error(source),
                     })? {
                         LogOutput::StdOut { message } | LogOutput::Console { message } => {
-                            append_capped(&mut stdout, &message)
+                            append_capped(&mut stdout, &message, output_cap)
                         }
-                        LogOutput::StdErr { message } => append_capped(&mut stderr, &message),
+                        LogOutput::StdErr { message } => {
+                            append_capped(&mut stderr, &message, output_cap)
+                        }
                         LogOutput::StdIn { .. } => {}
                     }
                 }
@@ -406,10 +445,10 @@ impl DockerCompute {
 
             // A command that never returns must not wedge the caller, and its
             // output must not exhaust the host.
-            if tokio::time::timeout(EXEC_TIMEOUT, collect).await.is_err() {
+            if tokio::time::timeout(timeout, collect).await.is_err() {
                 self.kill_exec_process(container_id, &exec.id).await;
                 return Err(ComputeError::Timeout {
-                    seconds: EXEC_TIMEOUT.as_secs(),
+                    seconds: timeout.as_secs(),
                 });
             }
         }
@@ -887,18 +926,23 @@ const EXTRACT_MAX_ENTRIES: usize = 200_000;
 const EXTRACT_MAX_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
 /// How long a command may run before it is abandoned.
-const EXEC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+pub(super) const EXEC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
+/// A provisioning step is setup work, not an interactive shell; it gets a
+/// shorter deadline than `EXEC_TIMEOUT`.
+pub(super) const PROVISION_STEP_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(10 * 60);
 
 /// How much of one stream is kept before it is truncated.
 const EXEC_OUTPUT_CAP: usize = 8 * 1024 * 1024;
 
-fn append_capped(buffer: &mut Vec<u8>, chunk: &[u8]) {
-    let truncated = buffer.len() >= EXEC_OUTPUT_CAP;
-    let remaining = EXEC_OUTPUT_CAP.saturating_sub(buffer.len());
+fn append_capped(buffer: &mut Vec<u8>, chunk: &[u8], cap: usize) {
+    let truncated = buffer.len() >= cap;
+    let remaining = cap.saturating_sub(buffer.len());
     if !truncated && remaining > 0 {
         buffer.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
     }
-    if buffer.len() >= EXEC_OUTPUT_CAP && !buffer.ends_with(b"\n[truncated]\n") {
+    if buffer.len() >= cap && !buffer.ends_with(b"\n[truncated]\n") {
         buffer.extend_from_slice(b"\n[truncated]\n");
     }
 }

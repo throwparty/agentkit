@@ -106,7 +106,7 @@ Extend the provenance types so inspection reports each step by identity and kind
 | Depends On | T-001 |
 | References | step-provenance |
 
-### T-009: Docker applies steps
+### T-009: [x] Docker applies steps
 
 Implement provision_support on DockerBackend with Command available and walk request.provision in create: run each command with sh -c in the workspace, stop on non-zero, roll back the container, and return Failed with the identity, exit code and output. Delete the old setup_command branch, populate per-step provenance and report provision:command in capabilities.
 

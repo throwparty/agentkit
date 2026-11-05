@@ -1,11 +1,14 @@
 //! Docker as a sandboxing mechanism.
 //!
 //! The backend knows about containers, images and bindings. It knows nothing
-//! about branches or the project a sandbox belongs to beyond the name it was
-//! handed: it is given a prepared tree and asked to confine commands against it.
+//! about branches or project configuration. The project slug and sandbox name
+//! are addressing: together they name the container, and the slug scopes an
+//! enumeration. Everything else is a prepared tree and commands to confine.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
@@ -15,10 +18,12 @@ use super::compute::{ContainerSpec, SandboxState};
 use super::error::ComputeError;
 use super::naming::container_name_for_slug;
 use crate::sandbox::contract::{
-    Backend, CreateRequest, Error, Execution, Forward, Inspection, ProvisionKind, ProvisionSupport,
-    SandboxRecord, SandboxStatus, Scope,
+    Backend, CreateRequest, Error, Execution, Forward, Inspection, ProvisionKind, ProvisionStep,
+    ProvisionSupport, ProvisioningClass, ProvisioningFailure, SandboxRecord, SandboxStatus, Scope,
 };
-use crate::sandbox::environment::{Change, Environment, Origin, Provenance, Variable};
+use crate::sandbox::environment::{
+    Change, Environment, Origin, Provenance, StepProvenance, Variable,
+};
 use crate::sandbox::facets::{Forwarding, Lifecycle, Limits, ResourceLimits};
 use crate::sandbox::report::{Capability, Check, EgressPosture, Readiness, State};
 
@@ -104,6 +109,276 @@ impl DockerBackend {
             tracing::warn!(container = %container, %error, "rollback could not remove the container");
         }
     }
+
+    /// Create the container, retrying with fresh host ports when one is taken.
+    async fn create_container(
+        &self,
+        request: &CreateRequest,
+        container: &str,
+    ) -> Result<(String, Vec<Forward>, Environment), Error> {
+        let mut attempt = 0;
+        loop {
+            let (port_bindings, forwards) =
+                super::forwarding::forwarded_ports(&request.ports, &request.forward_bind).await?;
+            let environment = environment(&forwards);
+            let spec =
+                self.container_spec(request, container, port_bindings, &environment, &forwards)?;
+
+            match self.compute.create_container(&spec).await {
+                Ok(id) => return Ok((id, forwards, environment)),
+                Err(error) if is_port_conflict(&error) => {
+                    match retry_after_port_conflict(&error, attempt) {
+                        Some(next) => {
+                            attempt = next;
+                            tracing::debug!(
+                                sandbox = %request.name,
+                                attempt,
+                                "host port was taken; retrying with fresh ports"
+                            );
+                        }
+                        None => {
+                            return Err(Error::failed(format!(
+                                "could not secure a host port for '{}' after {} attempts: {error}",
+                                request.name, PORT_RETRIES
+                            )));
+                        }
+                    }
+                }
+                Err(error) if is_name_conflict(&error) => {
+                    return Err(Error::Conflict {
+                        name: request.name.clone(),
+                    });
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+    }
+
+    /// The container definition for one attempt.
+    fn container_spec(
+        &self,
+        request: &CreateRequest,
+        container: &str,
+        port_bindings: HashMap<String, Vec<super::compute::PortBindingSpec>>,
+        environment: &Environment,
+        forwards: &[Forward],
+    ) -> Result<ContainerSpec, Error> {
+        let env = environment
+            .variables
+            .iter()
+            .map(|(name, value)| format!("{name}={value}"))
+            .collect();
+        Ok(ContainerSpec {
+            name: container.to_string(),
+            image: self.settings.image.clone(),
+            command: vec![
+                "sh".to_string(),
+                "-c".to_string(),
+                "tail -f /dev/null".to_string(),
+            ],
+            working_dir: Some(environment.workspace.clone()),
+            env,
+            // The labels are written before the steps run, so they carry the
+            // base environment only. The completed steps travel in the record
+            // create returns; a label must never claim a step that did not run.
+            labels: labels_for(request, forwards, &environment.provenance)?,
+            port_bindings,
+            memory_bytes: Some((self.settings.memory_mb * 1024 * 1024) as i64),
+            nano_cpus: Some(i64::from(self.settings.cpus) * 1_000_000_000),
+            pids_limit: Some(i64::from(self.settings.pids_limit)),
+            cap_add: self.settings.cap_add.clone(),
+        })
+    }
+}
+
+/// A step that could not be started at all.
+fn step_failure(step: &ProvisionStep, error: ComputeError) -> Error {
+    let identity = step.identity();
+    let kind = step.kind().as_str().to_string();
+    match error {
+        ComputeError::Timeout { seconds } => Error::Provisioning {
+            failure: Box::new(ProvisioningFailure {
+                class: ProvisioningClass::Failed,
+                backend: Some(BACKEND.to_string()),
+                step: Some(identity.to_string()),
+                kind: Some(kind),
+                reason: format!(
+                    "provisioning step '{identity}' exceeded its {seconds}s deadline and was \
+                     rolled back"
+                ),
+                remedy: "shorten the step or run long work inside the sandbox on demand"
+                    .to_string(),
+                exit_code: None,
+                output: None,
+            }),
+        },
+        // A daemon or transport fault is a host problem, not a broken step.
+        ComputeError::Connection { source } | ComputeError::ContainerExec { source } => {
+            Error::Unavailable {
+                backend: BACKEND.to_string(),
+                reason: format!("provisioning step '{identity}' lost the daemon: {source}"),
+                remedy: "start the Docker daemon and point DOCKER_HOST at it".to_string(),
+            }
+        }
+        other => Error::Provisioning {
+            failure: Box::new(ProvisioningFailure {
+                class: ProvisioningClass::Failed,
+                backend: Some(BACKEND.to_string()),
+                step: Some(identity.to_string()),
+                kind: Some(kind),
+                reason: format!("provisioning step '{identity}' could not run: {other}"),
+                remedy: "check the step's command".to_string(),
+                exit_code: None,
+                output: None,
+            }),
+        },
+    }
+}
+
+/// A step that ran and exited non-zero.
+fn command_failure(step: &ProvisionStep, exit_code: i32, output: &str) -> Error {
+    let identity = step.identity();
+    Error::Provisioning {
+        failure: Box::new(ProvisioningFailure {
+            class: ProvisioningClass::Failed,
+            backend: Some(BACKEND.to_string()),
+            step: Some(identity.to_string()),
+            kind: Some(step.kind().as_str().to_string()),
+            reason: format!("provisioning step '{identity}' failed with exit code {exit_code}"),
+            remedy: "inspect the step output, fix the command, and create again".to_string(),
+            exit_code: Some(exit_code),
+            output: Some(bounded_output(output)),
+        }),
+    }
+}
+
+/// A create that outlived its fixed budget.
+fn timeout_failure(step: &str, budget: Duration) -> Error {
+    let named = !step.is_empty();
+    let reason = if named {
+        format!("create exceeded the {budget:?} provisioning budget while running '{step}'")
+    } else {
+        format!(
+            "create exceeded the {budget:?} provisioning budget before running a provisioning \
+             step"
+        )
+    };
+    Error::Provisioning {
+        failure: Box::new(ProvisioningFailure {
+            class: ProvisioningClass::Failed,
+            backend: Some(BACKEND.to_string()),
+            step: named.then(|| step.to_string()),
+            kind: named.then(|| ProvisionKind::Command.as_str().to_string()),
+            reason,
+            remedy: "reduce the work the provisioning steps perform, or split the create"
+                .to_string(),
+            exit_code: None,
+            output: None,
+        }),
+    }
+}
+
+/// A workspace upload that outlived its transfer deadline.
+fn upload_failure(budget: Duration) -> Error {
+    Error::Unavailable {
+        backend: BACKEND.to_string(),
+        reason: format!("uploading the workspace exceeded the {budget:?} transfer deadline"),
+        remedy: "reduce the workspace or check the connection to the Docker daemon".to_string(),
+    }
+}
+
+/// The fixed ceiling for one create's provisioning, independent of step count.
+const CREATE_BUDGET: Duration = Duration::from_secs(2 * 60 * 60);
+
+/// Apply an ordered sequence, keeping only the steps that completed.
+fn run_steps<'a, F>(
+    sandbox: &'a str,
+    provision: &'a [ProvisionStep],
+    last_step: &'a Mutex<String>,
+    mut exec: F,
+) -> BoxFuture<'a, Result<Vec<StepProvenance>, Error>>
+where
+    F: FnMut(&'a str, &'a str) -> BoxFuture<'a, Result<Execution, ComputeError>> + Send + 'a,
+{
+    Box::pin(async move {
+        let mut steps = Vec::with_capacity(provision.len());
+        for step in provision {
+            let ProvisionStep::Command { identity, run } = step;
+            *last_step
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner()) = identity.clone();
+            let started = Instant::now();
+            tracing::info!(
+                sandbox = %sandbox,
+                step = %identity,
+                kind = step.kind().as_str(),
+                "starting provisioning step"
+            );
+            let result = exec(identity.as_str(), run.as_str())
+                .await
+                .map_err(|error| step_failure(step, error))?;
+            let elapsed_ms = started.elapsed().as_millis() as u64;
+            if result.exit_code != 0 {
+                let output = combined_output(&result.stdout, &result.stderr);
+                tracing::warn!(
+                    sandbox = %sandbox,
+                    step = %identity,
+                    kind = step.kind().as_str(),
+                    exit_code = result.exit_code,
+                    output_len = output.len(),
+                    "the provisioning step failed"
+                );
+                return Err(command_failure(step, result.exit_code, &output));
+            }
+            steps.push(StepProvenance {
+                identity: identity.clone(),
+                kind: step.kind(),
+                variables: Vec::new(),
+            });
+            tracing::info!(
+                sandbox = %sandbox,
+                step = %identity,
+                kind = step.kind().as_str(),
+                exit_code = result.exit_code,
+                elapsed_ms,
+                "provisioning step finished"
+            );
+        }
+        Ok(steps)
+    })
+}
+
+/// Rolls a container back if `create` is dropped before it finishes.
+struct RollbackGuard {
+    compute: compute::DockerCompute,
+    container: String,
+    armed: bool,
+}
+
+impl Drop for RollbackGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let compute = self.compute.clone();
+        let container = self.container.clone();
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            tracing::warn!(
+                container = %container,
+                "a cancelled create outside a runtime cannot be rolled back automatically"
+            );
+            return;
+        };
+        handle.spawn(async move {
+            if let Err(error) = compute.delete_container(&container).await {
+                tracing::warn!(
+                    container = %container,
+                    %error,
+                    "a cancelled create could not roll back"
+                );
+            }
+        });
+    }
 }
 
 impl Backend for DockerBackend {
@@ -121,90 +396,88 @@ impl Backend for DockerBackend {
             }
             self.compute.ensure_image(&self.settings.image).await?;
 
-            // A host port can be taken between the probe and the daemon's
-            // bind. Both failures surface as a conflict, so a conflict is
-            // retried with fresh ports before it is reported as a name clash.
             let container = self.container_name(request);
-            let mut attempt = 0;
-            let (id, forwards, environment) = loop {
-                let (port_bindings, forwards) =
-                    super::forwarding::forwarded_ports(&request.ports, &request.forward_bind)
-                        .await?;
-                let environment = environment(&forwards);
-                let env = environment
-                    .variables
-                    .iter()
-                    .map(|(name, value)| format!("{name}={value}"))
-                    .collect();
+            let (id, forwards, mut environment) =
+                self.create_container(request, &container).await?;
 
-                let spec = ContainerSpec {
-                    name: container.clone(),
-                    image: self.settings.image.clone(),
-                    command: vec![
-                        "sh".to_string(),
-                        "-c".to_string(),
-                        "tail -f /dev/null".to_string(),
-                    ],
-                    working_dir: Some(environment.workspace.clone()),
-                    env,
-                    labels: labels_for(request, &forwards, &environment.provenance)?,
-                    port_bindings,
-                    memory_bytes: Some((self.settings.memory_mb * 1024 * 1024) as i64),
-                    nano_cpus: Some(i64::from(self.settings.cpus) * 1_000_000_000),
-                    pids_limit: Some(i64::from(self.settings.pids_limit)),
-                    cap_add: self.settings.cap_add.clone(),
-                };
-
-                match self.compute.create_container(&spec).await {
-                    Ok(id) => break (id, forwards, environment),
-                    Err(error) if is_port_conflict(&error) => {
-                        match retry_after_port_conflict(&error, attempt) {
-                            Some(next) => {
-                                attempt = next;
-                                tracing::debug!(
-                                    sandbox = %request.name,
-                                    attempt,
-                                    "host port was taken; retrying with fresh ports"
-                                );
-                            }
-                            None => {
-                                return Err(Error::failed(format!(
-                                    "could not secure a host port for '{}' after {} attempts: {error}",
-                                    request.name, PORT_RETRIES
-                                )));
-                            }
-                        }
-                    }
-                    Err(error) if is_name_conflict(&error) => {
-                        return Err(Error::Conflict {
-                            name: request.name.clone(),
-                        });
-                    }
-                    Err(error) => return Err(error.into()),
-                }
+            let mut guard = RollbackGuard {
+                compute: self.compute.clone(),
+                container: id.clone(),
+                armed: true,
             };
 
-            if let Err(error) = self
-                .compute
-                .upload_path(&id, &request.workspace.source, WORKDIR)
-                .await
-            {
-                self.rollback(&id).await;
-                return Err(error.into());
+            let upload = tokio::time::timeout(
+                UPLOAD_TIMEOUT,
+                self.compute
+                    .upload_path(&id, &request.workspace.source, WORKDIR),
+            )
+            .await;
+            match upload {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    guard.armed = false;
+                    self.rollback(&id).await;
+                    return Err(error.into());
+                }
+                Err(_) => {
+                    guard.armed = false;
+                    self.rollback(&id).await;
+                    return Err(upload_failure(UPLOAD_TIMEOUT));
+                }
             }
+
+            let last_step = Mutex::new(String::new());
+            let budget = CREATE_BUDGET;
+            let provision = run_steps(
+                &request.name,
+                &request.provision,
+                &last_step,
+                |_identity, run| {
+                    let argv = vec!["sh".to_string(), "-c".to_string(), run.to_string()];
+                    let compute = &self.compute;
+                    let id = id.clone();
+                    Box::pin(async move {
+                        compute
+                            .exec_provisioning(&id, &argv, Some(WORKDIR), PROVISION_OUTPUT_CAP)
+                            .await
+                    })
+                },
+            );
+
+            let steps = match tokio::time::timeout(budget, provision).await {
+                Ok(Ok(steps)) => steps,
+                Ok(Err(error)) => {
+                    guard.armed = false;
+                    self.rollback(&id).await;
+                    return Err(error);
+                }
+                Err(_) => {
+                    guard.armed = false;
+                    self.rollback(&id).await;
+                    let step = last_step
+                        .lock()
+                        .map(|step| step.clone())
+                        .unwrap_or_else(|poison| poison.into_inner().clone());
+                    return Err(timeout_failure(&step, budget));
+                }
+            };
+            environment.provenance.steps = steps;
 
             let data = DockerData {
                 container: id,
                 environment: environment.provenance,
                 forwards,
             };
-
-            Ok(SandboxRecord {
+            let record = SandboxRecord {
                 name: request.name.clone(),
                 backend: BACKEND.to_string(),
                 project_slug: request.project_slug.clone(),
                 data: data.into_value()?,
-            })
+            };
+            // Disarm only once the record exists; a serialisation failure must
+            // leave the guard free to remove the container.
+            guard.armed = false;
+            Ok(record)
         })
     }
 
@@ -221,11 +494,6 @@ impl Backend for DockerBackend {
                 let Some(record) = record_from_labels(summary.id, &summary.labels)? else {
                     continue;
                 };
-                if let Scope::Repository { project_slug } = scope
-                    && &record.project_slug != project_slug
-                {
-                    continue;
-                }
                 records.push(record);
             }
             Ok(records)
@@ -416,7 +684,8 @@ impl Backend for DockerBackend {
 
     fn capabilities<'a>(&'a self) -> BoxFuture<'a, Result<Vec<Capability>, Error>> {
         Box::pin(async move {
-            // The standard facet capabilities are derived by `Selected`.
+            // The standard facet and provisioning capabilities are derived by
+            // `Selected`; this backend adds only its mechanism-specific entry.
             Ok(vec![Capability {
                 operation: "proxied egress".to_string(),
                 state: State::Unavailable,
@@ -552,6 +821,42 @@ fn environment(forwards: &[Forward]) -> Environment {
     }
 }
 
+/// How long a workspace upload may take before create is rolled back.
+const UPLOAD_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+
+/// How much output one provisioning step may buffer in the daemon client.
+const PROVISION_OUTPUT_CAP: usize = 16 * 1024;
+
+/// How much of a failing command's output travels in an error message.
+const ERROR_OUTPUT: usize = 4096;
+
+/// Both streams, labelled, so a diagnostic on stdout is not lost behind a
+/// warning on stderr.
+fn combined_output(stdout: &str, stderr: &str) -> String {
+    let mut output = String::new();
+    if !stdout.is_empty() {
+        output.push_str("stdout:\n");
+        output.push_str(stdout);
+    }
+    if !stderr.is_empty() {
+        if !output.is_empty() {
+            output.push('\n');
+        }
+        output.push_str("stderr:\n");
+        output.push_str(stderr);
+    }
+    output
+}
+
+fn bounded_output(text: &str) -> String {
+    if text.chars().count() <= ERROR_OUTPUT {
+        return text.to_string();
+    }
+    let mut bounded: String = text.chars().take(ERROR_OUTPUT).collect();
+    bounded.push_str("\n[truncated]");
+    bounded
+}
+
 /// The labels that let enumeration report identity without guessing.
 const LABEL_NAME: &str = "litterbox.name";
 const LABEL_PROJECT: &str = "litterbox.project";
@@ -672,20 +977,22 @@ fn confined(path: &str, sandbox: &SandboxRecord) -> Result<String, Error> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BACKEND, Backend, DockerBackend, DockerSettings, PORT_RETRIES, confined, is_name_conflict,
+        BACKEND, Backend, CREATE_BUDGET, DockerBackend, DockerSettings, PORT_RETRIES,
+        bounded_output, combined_output, command_failure, confined, is_name_conflict,
         is_port_conflict, labels_for, missing_image_check, record_from_labels,
-        retry_after_port_conflict,
+        retry_after_port_conflict, run_steps, step_failure, timeout_failure, upload_failure,
     };
     use crate::backends::docker::compute;
     use crate::backends::docker::error::{BackendError, ComputeError, FailureKind};
     use crate::sandbox::contract::{
-        CreateRequest, Error, Forward, ProvisionStep, RequestedPort, SandboxRecord, Scope,
-        Workspace,
+        CreateRequest, Error, Execution, Forward, ProvisionStep, ProvisioningClass, RequestedPort,
+        SandboxRecord, Scope, Workspace,
     };
     use crate::sandbox::environment::{Origin, Provenance};
     use crate::sandbox::facets::{Limits, ResourceLimits};
     use crate::sandbox::report::{EgressPosture, State};
     use std::collections::HashMap;
+    use std::time::Duration;
 
     fn request() -> CreateRequest {
         CreateRequest {
@@ -731,6 +1038,10 @@ mod tests {
         assert_eq!(data.container, "container-id");
         assert_eq!(data.forwards, forwards);
         assert_eq!(data.environment, provenance);
+        assert!(
+            data.environment.steps.is_empty(),
+            "a label carries the base environment, not completed steps"
+        );
 
         assert!(
             record_from_labels("old".to_string(), &HashMap::new())
@@ -849,7 +1160,8 @@ mod tests {
         assert_eq!(
             capabilities.len(),
             1,
-            "standard facet capabilities are derived by Selected: {capabilities:?}"
+            "the backend adds only its mechanism-specific entry; Selected derives the rest: \
+             {capabilities:?}"
         );
     }
 
@@ -871,13 +1183,230 @@ mod tests {
         );
     }
 
+    #[test]
+    fn output_is_bounded_at_the_boundary() {
+        let exact = "a".repeat(super::ERROR_OUTPUT);
+        assert_eq!(bounded_output(&exact), exact);
+        let over = "a".repeat(super::ERROR_OUTPUT + 1);
+        let bounded = bounded_output(&over);
+        assert!(bounded.ends_with("[truncated]"), "{bounded}");
+        let kept = bounded.trim_end_matches("\n[truncated]");
+        assert_eq!(kept.chars().count(), super::ERROR_OUTPUT);
+    }
+
+    fn step(identity: &str) -> ProvisionStep {
+        step_with(identity, "true")
+    }
+
+    fn step_with(identity: &str, run: &str) -> ProvisionStep {
+        ProvisionStep::Command {
+            identity: identity.to_string(),
+            run: run.to_string(),
+        }
+    }
+
+    #[test]
+    fn the_create_budget_is_fixed() {
+        assert_eq!(CREATE_BUDGET, Duration::from_secs(2 * 60 * 60));
+    }
+
+    #[test]
+    fn a_timeout_names_the_step_and_the_budget_without_a_phantom_step() {
+        match timeout_failure("fetch", Duration::from_secs(60)) {
+            Error::Provisioning { failure } => {
+                assert_eq!(failure.step.as_deref(), Some("fetch"));
+                assert_eq!(failure.kind.as_deref(), Some("command"));
+                assert!(failure.reason.contains("budget"), "{failure:?}");
+            }
+            other => panic!("expected Provisioning, got {other:?}"),
+        }
+
+        match timeout_failure("", Duration::from_secs(60)) {
+            Error::Provisioning { failure } => {
+                assert_eq!(failure.step, None);
+                assert_eq!(failure.kind, None);
+                assert!(!failure.reason.contains("a step"), "{failure:?}");
+            }
+            other => panic!("expected Provisioning, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_step_deadline_names_the_deadline_and_not_a_missing_binary() {
+        let step = step("fetch");
+        match step_failure(&step, ComputeError::Timeout { seconds: 30 }) {
+            Error::Provisioning { failure } => {
+                assert_eq!(failure.class, ProvisioningClass::Failed);
+                assert_eq!(failure.step.as_deref(), Some("fetch"));
+                assert!(failure.reason.contains("30s deadline"), "{failure:?}");
+                assert!(!failure.reason.contains("could not run"), "{failure:?}");
+                assert!(failure.exit_code.is_none());
+            }
+            other => panic!("expected Provisioning, got {other}"),
+        }
+    }
+
+    #[test]
+    fn a_daemon_fault_during_a_step_is_unavailable() {
+        let error = step_failure(
+            &step("fetch"),
+            ComputeError::Connection {
+                source: BackendError::other("connection refused"),
+            },
+        );
+        assert!(matches!(error, Error::Unavailable { .. }), "{error:?}");
+    }
+
+    #[test]
+    fn a_command_failure_carries_the_step_exit_and_bounded_output() {
+        let step = step("fetch");
+        let output = "x".repeat(super::ERROR_OUTPUT + 1);
+        match command_failure(&step, 7, &output) {
+            Error::Provisioning { failure } => {
+                assert_eq!(failure.step.as_deref(), Some("fetch"));
+                assert_eq!(failure.kind.as_deref(), Some("command"));
+                assert_eq!(failure.exit_code, Some(7));
+                assert!(!failure.remedy.is_empty());
+                let excerpt = failure.output.expect("output");
+                assert!(excerpt.ends_with("[truncated]"), "{excerpt}");
+            }
+            other => panic!("expected Provisioning, got {other}"),
+        }
+    }
+
+    #[test]
+    fn an_upload_deadline_is_an_unavailable_host_failure() {
+        let error = upload_failure(Duration::from_secs(60));
+        match error {
+            Error::Unavailable { reason, remedy, .. } => {
+                assert!(reason.contains("transfer deadline"), "{reason}");
+                assert!(!remedy.is_empty());
+            }
+            other => panic!("expected Unavailable, got {other}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn the_step_loop_returns_only_completed_steps_in_order() {
+        let steps = vec![
+            step_with("z-first", "touch first"),
+            step_with("a-second", "cat first"),
+        ];
+        let last = std::sync::Mutex::new(String::new());
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recorded = seen.clone();
+        let completed = run_steps("demo", &steps, &last, move |identity, run| {
+            recorded
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .push((identity.to_string(), run.to_string()));
+            Box::pin(async {
+                Ok(Execution {
+                    exit_code: 0,
+                    stdout: String::new(),
+                    stderr: String::new(),
+                })
+            })
+        })
+        .await
+        .expect("steps complete");
+        let identities: Vec<&str> = completed
+            .iter()
+            .map(|step| step.identity.as_str())
+            .collect();
+        assert_eq!(identities, vec!["z-first", "a-second"]);
+        assert_eq!(
+            *seen.lock().unwrap_or_else(|poison| poison.into_inner()),
+            vec![
+                ("z-first".to_string(), "touch first".to_string()),
+                ("a-second".to_string(), "cat first".to_string()),
+            ],
+            "each step runs with its own command, in list order"
+        );
+        assert_eq!(
+            *last.lock().unwrap_or_else(|poison| poison.into_inner()),
+            "a-second"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_step_loop_names_the_failing_step_and_keeps_completed_ones() {
+        let steps = vec![step("first"), step("second")];
+        let last = std::sync::Mutex::new(String::new());
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recorded = seen.clone();
+        let error = run_steps("demo", &steps, &last, move |identity, run| {
+            recorded
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .push((identity.to_string(), run.to_string()));
+            let failed = identity == "second";
+            Box::pin(async move {
+                Ok(Execution {
+                    exit_code: if failed { 7 } else { 0 },
+                    stdout: String::new(),
+                    stderr: if failed {
+                        "boom".to_string()
+                    } else {
+                        String::new()
+                    },
+                })
+            })
+        })
+        .await
+        .expect_err("second fails");
+        match error {
+            Error::Provisioning { failure } => {
+                assert_eq!(failure.step.as_deref(), Some("second"));
+                assert_eq!(failure.exit_code, Some(7));
+                assert!(
+                    failure
+                        .output
+                        .as_deref()
+                        .is_some_and(|o| o.contains("boom"))
+                );
+            }
+            other => panic!("expected Provisioning, got {other}"),
+        }
+        assert_eq!(
+            *seen.lock().unwrap_or_else(|poison| poison.into_inner()),
+            vec![
+                ("first".to_string(), "true".to_string()),
+                ("second".to_string(), "true".to_string()),
+            ],
+            "the failing step still ran with its own command"
+        );
+        assert_eq!(
+            *last.lock().unwrap_or_else(|poison| poison.into_inner()),
+            "second"
+        );
+    }
+
+    #[test]
+    fn a_failing_step_excerpt_keeps_both_streams() {
+        let output = combined_output("the diagnostic", "a warning");
+        assert!(output.contains("stdout:\nthe diagnostic"), "{output}");
+        assert!(output.contains("stderr:\na warning"), "{output}");
+    }
+
+    #[test]
+    fn a_label_carries_the_base_environment_without_steps() {
+        let environment = super::environment(&[]);
+        let labels = labels_for(&request(), &[], &environment.provenance).expect("labels");
+        let provenance: Provenance =
+            serde_json::from_str(&labels[super::LABEL_ENVIRONMENT]).expect("environment label");
+        assert!(
+            provenance.steps.is_empty(),
+            "a container label must not claim a step that has not run"
+        );
+    }
+
     #[tokio::test]
     #[ignore = "requires a Docker daemon; run with --ignored and LITTERBOX_DOCKER_TESTS=1"]
     async fn create_inspect_and_delete_are_idempotent() -> Result<(), Box<dyn std::error::Error>> {
-        assert!(
-            std::env::var("LITTERBOX_DOCKER_TESTS").is_ok(),
-            "set LITTERBOX_DOCKER_TESTS=1 and run with --ignored to exercise this test"
-        );
+        if std::env::var("LITTERBOX_DOCKER_TESTS").is_err() {
+            return Ok(());
+        }
 
         let backend = backend();
         let workspace = tempfile::tempdir()?;
@@ -927,10 +1456,9 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires a Docker daemon; run with --ignored and LITTERBOX_DOCKER_TESTS=1"]
     async fn the_docker_backend_conforms() -> Result<(), Box<dyn std::error::Error>> {
-        assert!(
-            std::env::var("LITTERBOX_DOCKER_TESTS").is_ok(),
-            "set LITTERBOX_DOCKER_TESTS=1 and run with --ignored to exercise this test"
-        );
+        if std::env::var("LITTERBOX_DOCKER_TESTS").is_err() {
+            return Ok(());
+        }
 
         let backend = backend();
         crate::sandbox::conformance::exercise(&backend).await?;
@@ -939,11 +1467,150 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "requires a Docker daemon; run with --ignored and LITTERBOX_DOCKER_TESTS=1"]
-    async fn the_docker_backend_applies_new_limits() -> Result<(), Box<dyn std::error::Error>> {
-        assert!(
-            std::env::var("LITTERBOX_DOCKER_TESTS").is_ok(),
-            "set LITTERBOX_DOCKER_TESTS=1 and run with --ignored to exercise this test"
+    async fn command_steps_run_in_order_in_the_workspace() -> Result<(), Box<dyn std::error::Error>>
+    {
+        if std::env::var("LITTERBOX_DOCKER_TESTS").is_err() {
+            return Ok(());
+        }
+
+        let backend = backend();
+        let workspace = tempfile::tempdir()?;
+        std::fs::write(workspace.path().join("README.md"), "hello")?;
+        let request = CreateRequest {
+            name: crate::sandbox::conformance::run_name("provision"),
+            provision: vec![
+                ProvisionStep::Command {
+                    identity: "z-write".to_string(),
+                    run: "printf setup > setup-marker".to_string(),
+                },
+                ProvisionStep::Command {
+                    identity: "a-env".to_string(),
+                    run: "printf '%s' \"$LITTERBOX_FWD_PORT_WEB\" > port-marker".to_string(),
+                },
+                ProvisionStep::Command {
+                    identity: "b-read".to_string(),
+                    run: "cat setup-marker > read-marker".to_string(),
+                },
+            ],
+            forward_bind: "127.0.0.1".to_string(),
+            project_slug: "contract-test".to_string(),
+            workspace: Workspace {
+                source: workspace.path().to_path_buf(),
+            },
+            ports: vec![RequestedPort {
+                name: "web".to_string(),
+                target: 8080,
+            }],
+        };
+
+        let record = backend.create(&request).await?;
+        let inspection = backend.inspect(&record).await?;
+        let identities: Vec<&str> = inspection
+            .environment
+            .steps
+            .iter()
+            .map(|step| step.identity.as_str())
+            .collect();
+        assert_eq!(
+            identities,
+            vec!["z-write", "a-env", "b-read"],
+            "steps run in list order"
         );
+
+        let execution = backend
+            .exec(
+                &record,
+                &[
+                    "sh".to_string(),
+                    "-c".to_string(),
+                    "cat read-marker".to_string(),
+                ],
+            )
+            .await?;
+        assert_eq!(execution.exit_code, 0, "{}", execution.stderr);
+        assert_eq!(
+            execution.stdout, "setup",
+            "a later step read, relative to the workspace, the file an earlier step wrote"
+        );
+
+        let execution = backend
+            .exec(
+                &record,
+                &[
+                    "sh".to_string(),
+                    "-c".to_string(),
+                    "cat port-marker".to_string(),
+                ],
+            )
+            .await?;
+        assert_eq!(execution.exit_code, 0, "{}", execution.stderr);
+        assert!(
+            execution.stdout.trim().parse::<u16>().is_ok(),
+            "the step saw the forwarded-port environment: {:?}",
+            execution.stdout
+        );
+
+        backend.delete(&record).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a Docker daemon; run with --ignored and LITTERBOX_DOCKER_TESTS=1"]
+    async fn a_failed_command_step_names_the_step_and_rolls_back()
+    -> Result<(), Box<dyn std::error::Error>> {
+        if std::env::var("LITTERBOX_DOCKER_TESTS").is_err() {
+            return Ok(());
+        }
+
+        let backend = backend();
+        let workspace = tempfile::tempdir()?;
+        std::fs::write(workspace.path().join("README.md"), "hello")?;
+        let request = CreateRequest {
+            name: crate::sandbox::conformance::run_name("provision-fail"),
+            provision: vec![ProvisionStep::Command {
+                identity: "broken".to_string(),
+                run: "echo boom >&2; exit 7".to_string(),
+            }],
+            forward_bind: "127.0.0.1".to_string(),
+            project_slug: "contract-test".to_string(),
+            workspace: Workspace {
+                source: workspace.path().to_path_buf(),
+            },
+            ports: Vec::new(),
+        };
+
+        let error = backend.create(&request).await.expect_err("create fails");
+        match &error {
+            Error::Provisioning { failure } => {
+                assert_eq!(failure.class, ProvisioningClass::Failed);
+                assert_eq!(failure.step.as_deref(), Some("broken"));
+                assert_eq!(failure.kind.as_deref(), Some("command"));
+                assert_eq!(failure.exit_code, Some(7));
+                assert!(
+                    failure
+                        .output
+                        .as_deref()
+                        .is_some_and(|output| output.contains("boom")),
+                    "{failure:?}"
+                );
+            }
+            other => panic!("expected Provisioning, got {other}"),
+        }
+
+        let listed = backend.list(&Scope::Machine).await?;
+        assert!(
+            !listed.iter().any(|record| record.name == request.name),
+            "a failed create leaves no container"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a Docker daemon; run with --ignored and LITTERBOX_DOCKER_TESTS=1"]
+    async fn the_docker_backend_applies_new_limits() -> Result<(), Box<dyn std::error::Error>> {
+        if std::env::var("LITTERBOX_DOCKER_TESTS").is_err() {
+            return Ok(());
+        }
 
         let backend = backend();
         let workspace = tempfile::tempdir()?;
@@ -978,10 +1645,9 @@ mod tests {
     #[ignore = "requires a Docker daemon; run with --ignored and LITTERBOX_DOCKER_TESTS=1"]
     async fn the_docker_backend_lifecycle_is_observable() -> Result<(), Box<dyn std::error::Error>>
     {
-        assert!(
-            std::env::var("LITTERBOX_DOCKER_TESTS").is_ok(),
-            "set LITTERBOX_DOCKER_TESTS=1 and run with --ignored to exercise this test"
-        );
+        if std::env::var("LITTERBOX_DOCKER_TESTS").is_err() {
+            return Ok(());
+        }
 
         let backend = backend();
         crate::sandbox::conformance::exercise_lifecycle(&backend).await?;
@@ -992,10 +1658,9 @@ mod tests {
     #[ignore = "requires a Docker daemon; run with --ignored and LITTERBOX_DOCKER_TESTS=1"]
     async fn the_docker_backend_rolls_back_a_failed_create()
     -> Result<(), Box<dyn std::error::Error>> {
-        assert!(
-            std::env::var("LITTERBOX_DOCKER_TESTS").is_ok(),
-            "set LITTERBOX_DOCKER_TESTS=1 and run with --ignored to exercise this test"
-        );
+        if std::env::var("LITTERBOX_DOCKER_TESTS").is_err() {
+            return Ok(());
+        }
 
         let backend = backend();
         let name = crate::sandbox::conformance::run_name("docker-failure");
