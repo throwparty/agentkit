@@ -113,12 +113,103 @@ impl Error {
     pub fn is_not_found(&self) -> bool {
         matches!(self, Self::NotFound { .. })
     }
+
+    /// The provisioning failure this error carries, if it is one.
+    pub fn provisioning_failure(&self) -> Option<&crate::sandbox::contract::ProvisioningFailure> {
+        match self {
+            Self::Provisioning { failure } => Some(failure),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{Error, FailureClass, SurfaceClass};
+    use crate::sandbox::contract::{ProvisioningClass, ProvisioningFailure};
     use agentkit_common::exit::ExitClass;
+
+    #[test]
+    fn a_provisioning_failure_names_its_step_and_kind() {
+        let failure = Error::Provisioning {
+            failure: Box::new(ProvisioningFailure {
+                class: ProvisioningClass::Unsupported,
+                backend: Some("docker".to_string()),
+                step: Some("fetch".to_string()),
+                kind: Some("command".to_string()),
+                reason: "no".to_string(),
+                remedy: "yes".to_string(),
+                exit_code: None,
+                output: None,
+            }),
+        };
+        let detail = failure.provisioning_failure().expect("provisioning");
+        assert_eq!(detail.step.as_deref(), Some("fetch"));
+        assert_eq!(detail.kind.as_deref(), Some("command"));
+        assert_eq!(failure.class(), FailureClass::Unsupported);
+
+        assert!(
+            Error::NotFound {
+                name: "demo".to_string()
+            }
+            .provisioning_failure()
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn every_provisioning_class_maps_to_the_contract_classes() {
+        let cases = [
+            (
+                ProvisioningClass::Misconfigured,
+                FailureClass::Misconfigured,
+                ExitClass::Usage,
+                SurfaceClass::Internal,
+            ),
+            (
+                ProvisioningClass::Unsupported,
+                FailureClass::Unsupported,
+                ExitClass::Unsupported,
+                SurfaceClass::InvalidRequest,
+            ),
+            (
+                ProvisioningClass::Denied,
+                FailureClass::Denied,
+                ExitClass::Denied,
+                SurfaceClass::InvalidRequest,
+            ),
+            (
+                ProvisioningClass::Unavailable,
+                FailureClass::Unavailable,
+                ExitClass::Unavailable,
+                SurfaceClass::InvalidRequest,
+            ),
+            (
+                ProvisioningClass::Failed,
+                FailureClass::Failed,
+                ExitClass::Failed,
+                SurfaceClass::Internal,
+            ),
+        ];
+
+        for (class, failure_class, exit_class, surface_class) in cases {
+            let error = Error::Provisioning {
+                failure: Box::new(ProvisioningFailure {
+                    class,
+                    backend: Some("docker".to_string()),
+                    step: Some("fetch".to_string()),
+                    kind: Some("command".to_string()),
+                    reason: "reason".to_string(),
+                    remedy: "remedy".to_string(),
+                    exit_code: None,
+                    output: None,
+                }),
+            };
+            assert_eq!(error.class(), failure_class, "{class:?}");
+            assert_eq!(error.exit_class(), exit_class, "{class:?}");
+            assert_eq!(error.surface_class(), surface_class, "{class:?}");
+        }
+    }
 
     #[test]
     fn not_found_is_a_usage_error_for_the_caller() {

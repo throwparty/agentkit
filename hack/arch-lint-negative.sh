@@ -82,6 +82,11 @@ plant "crates/agentkit-litterbox/src/mcp.rs" \
   "mcp-to-provision" \
   "litterbox-mcp"
 
+plant "crates/agentkit-litterbox/src/mcp/error.rs" \
+  "use crate::backends::docker::BACKEND as _;" \
+  "mcp-error-to-backend" \
+  "litterbox-mcp"
+
 plant "crates/agentkit-litterbox/src/config.rs" \
   "use crate::backends::docker::BACKEND as _;" \
   "config-to-backend" \

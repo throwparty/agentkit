@@ -73,7 +73,15 @@ backend, and explains anything that will not start.
 ```toml
 [project]
 slug = "my-project"
-setup-command = "echo 'Setup complete'"
+backends = ["docker"]
+
+[[provision]]
+identity = "fetch"
+kind = "command"
+run = "cargo fetch"
+
+[backends.docker]
+provision = ["fetch"]
 
 [[ports]]
 name = "web"
@@ -85,13 +93,25 @@ snapshot-mode = "direct"
 
 - `project.slug` identifies the project. It must already be a valid slug; a value
   the rules would change is refused rather than silently rewritten.
-- `project.setup-command` runs once, confined, after the workspace is materialised.
-  It used to live under `[docker]`; the old location is rejected with a message
-  pointing here.
+- `project.backends` names the backends the project's provisioning supports. It is
+  required when `[[provision]]` defines a step; a selected backend absent from it
+  is refused.
+- `[[provision]]` defines a step once, by `identity`. `kind = "command"` runs `run`
+  once, confined, with the workspace as its working directory, after the
+  workspace is materialised.
+- `[backends.<name>].provision` is that backend's ordered sequence of step
+  identities. The list order is the execution order.
 - `ports` declares what the project expects forwarded. The project cannot decide
   where those ports bind or who may reach them.
 - `git.snapshot-mode` is `"remote"` (the default) to keep snapshots in an isolated
   bare clone, or `"direct"` to keep them as branches in your working repository.
+
+`[project] setup-command` is removed. A configuration that still sets it fails
+to load with a message naming a `command` step and the per-backend list.
+
+A command that exits non-zero fails create with its identity, exit code and up
+to 4096 characters of output. Host logs record the exit code and length only;
+the bounded output is returned to the caller so an agent can report it.
 
 ## Overriding project settings
 
