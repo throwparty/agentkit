@@ -846,6 +846,7 @@ mod seam_tests {
             project: crate::config::ProjectConfig {
                 slug: Some("project".to_string()),
                 setup_command,
+                backends: None,
             },
             allow_project_setup,
             ..Config::default()
@@ -1002,6 +1003,7 @@ mod seam_tests {
             project: crate::config::ProjectConfig {
                 slug: Some("project".to_string()),
                 setup_command: Some("echo permitted".to_string()),
+                backends: None,
             },
             allow_project_setup: false,
             allowed_projects: vec!["project".to_string()],
@@ -1172,6 +1174,7 @@ mod tests {
             project: ProjectConfig {
                 slug: Some("chosen".to_string()),
                 setup_command: None,
+                backends: None,
             },
             ..Config::default()
         };
@@ -1193,6 +1196,7 @@ mod tests {
             project: ProjectConfig {
                 slug: Some("../../etc".to_string()),
                 setup_command: None,
+                backends: None,
             },
             ..Config::default()
         };

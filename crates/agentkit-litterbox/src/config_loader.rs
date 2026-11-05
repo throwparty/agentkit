@@ -30,7 +30,7 @@ pub fn load_final() -> Result<Config, ConfigError> {
         None => ProjectFile::default(),
     };
 
-    let config = merge(local, project);
+    let config = merge(local, project)?;
     validate_forwarding(&config)?;
     validate_ports(&config)?;
     Ok(config)
@@ -44,7 +44,7 @@ pub fn load_local_only() -> Result<Config, ConfigError> {
         Some(text) => parse_project(&text)?,
         None => ProjectFile::default(),
     };
-    let config = merge(local, ProjectFile::default());
+    let config = merge(local, ProjectFile::default())?;
     validate_forwarding(&config)?;
     Ok(config)
 }
@@ -130,6 +130,7 @@ fn reject_moved_sections(text: &str) -> Result<(), ConfigError> {
         !matches!(
             key.as_str(),
             "project"
+                | "provision"
                 | "ports"
                 | "git"
                 | "backend"
@@ -310,7 +311,7 @@ mod tests {
             .join("../../examples/litterbox-static-site/.agentkit/litterbox/config.toml");
         let text = std::fs::read_to_string(&path).expect("the example exists");
         let project = parse_project(&text).expect("the example parses");
-        let config = merge(ProjectFile::default(), project);
+        let config = merge(ProjectFile::default(), project).expect("merge");
         validate_ports(&config).expect("the example's ports validate");
         validate_forwarding(&config).expect("the example uses a valid bind");
     }
@@ -347,7 +348,7 @@ image = "busybox"
 bind = "0.0.0.0"
 "#;
         let project = parse_project(text).expect("the documented project keys parse");
-        let config = merge(ProjectFile::default(), project);
+        let config = merge(ProjectFile::default(), project).expect("merge");
         assert!(
             config
                 .notices
