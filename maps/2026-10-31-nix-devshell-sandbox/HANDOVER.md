@@ -1,19 +1,28 @@
 # Handover: `nix-devshell-sandbox`
 
-Map complete: 22 tickets, none open. Detail in `evidence/`, decisions in `map.toon`.
+Map complete: 26 tickets, none open. Detail in `evidence/`, decisions in `map.toon`.
 
-**Next:** `adr.plan` `sandbox-provider-contract`. Then nix-devshell-env-capture,
-the bubblewrap backend and the Seatbelt backend in parallel. Proxy is the longest
-pole for a usable sandbox: without it both native backends are offline-only.
+**Next:** define the provisioning abstraction (`sandbox-provisioning`) before the
+capture. It owns identity-named, typed steps, an ordered provision list on each
+backend, the FR-021 amendment that a project may name a backend to declare
+compatibility but not select one, machine overrides, the `setup-command`
+migration and the doctor/preflight report. Then `nix-devshell-env-capture` and
+`linux-bwrap-provider`. The capture does not realise derivations: readiness
+checks the devShell is already realised, and create refuses if it is not.
+Automatic mechanism selection is deferred to its own ADR
+(`automatic-backend-selection`). Proxy is the longest pole for a usable sandbox:
+without it both native backends are offline-only.
 
 ## ADRs
 
 ```mermaid
 flowchart LR
-    contract["sandbox-provider-contract"] --> capture[nix-devshell-env-capture]
-    contract --> linux[linux-bwrap-provider]
-    contract --> darwin[darwin-sandbox-provider]
+    contract["sandbox-provider-contract"] --> provision[sandbox-provisioning]
     contract --> proxy[egress-proxy]
+    contract --> auto[automatic-backend-selection]
+    provision --> capture[nix-devshell-env-capture]
+    provision --> linux[linux-bwrap-provider]
+    provision --> darwin[darwin-sandbox-provider]
     capture --> linux
     capture --> darwin
     proxy -.->|endpoint| linux
@@ -21,6 +30,21 @@ flowchart LR
 ```
 
 No "Nix provider" ADR: a devShell is an environment, not a backend.
+
+## Prototypes
+
+The three spikes remain in the tree; they are the worked evidence behind the
+decision, not throwaway scratch.
+
+| Prototype | Where | What it proves |
+|---|---|---|
+| bwrap isolation | `adrs/2026-10-31-linux-bwrap-sandbox/` | View built from unprivileged user namespaces; a Rust build runs with no network and a read-only store; the hostile half is denied (T-003, T-004, T-016) |
+| bwrap lifecycle and limits | `adrs/2026-10-31-linux-bwrap-lifecycle/` | systemd user scope freeze/thaw, `MemoryMax` and `TasksMax`; the no-systemd process-group fallback (T-009, T-010) |
+| Seatbelt | `adrs/2026-10-31-darwin-app-sandbox/` | `sandbox_init` applies an SBPL profile to an unsigned binary; a devShell build runs with no baseline addition (T-001, T-002, T-017) |
+
+Each keeps its `poc/` and its `findings.md`; reproduce commands are at the top of
+each findings file. T-024's holder-survival probe is beside the map at
+`evidence/T-024-holder-survival.sh`.
 
 ## Decision
 
