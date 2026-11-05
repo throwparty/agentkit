@@ -2,7 +2,7 @@ destination: Nix development shells run as first-class sandboxed environments on
 created: 2026-10-31
 status: complete
 handover: HANDOVER.md
-next: "sandbox-provisioning is specified, planned and tasked at adrs/2026-11-05-sandbox-provisioning; implement it next. Then nix-devshell-env-capture, then linux-bwrap-provider. Automatic mechanism selection (automatic-backend-selection) is deferred to its own ADR."
+next: "sandbox-provisioning is implemented at adrs/2026-11-05-sandbox-provisioning; specify nix-devshell-env-capture next. Then linux-bwrap-provider. Automatic mechanism selection (automatic-backend-selection) is deferred to its own ADR."
 tickets[26]{id,platform,question,blockers,state,answer,evidence}:
   T-001,darwin,"Can the App Sandbox entitlement API confine an unsigned devShell binary?",,answered,"No for the entitlement API: it requires a signed bundle. The spike exercised the sandbox_init entry point with a Seatbelt profile",evidence/T-001.md
   T-002,darwin,"Does the sandbox_init entry point confine an unsigned binary with a Seatbelt profile on a current macOS?",,answered,"Yes. sandbox_init applies a Seatbelt profile and confines the adhoc-signed binary; this is not entitlement-based App Sandbox support",evidence/T-002.md
@@ -43,7 +43,7 @@ prototypes[3]{name,dir,findings,proves}:
   seatbelt,adrs/2026-10-31-darwin-app-sandbox,adrs/2026-10-31-darwin-app-sandbox/findings.md,"sandbox_init applies an SBPL profile to an unsigned binary; a devShell build runs with no baseline addition (T-001, T-002, T-017)"
 plannedAdrs[7]{id,dir,dependsOn,owns,state}:
   A,sandbox-provider-contract,,"core trait, per-platform facet traits, two-level readiness, neutral handle, one factory, environment provenance, network endpoint type, CLI and MCP de-leaking",implemented
-  G,sandbox-provisioning,A,"identity-named, typed setup steps; ordered per-backend provision lists on [backends.<name>]; project-declared compatibility with machine-owned backend settings; machine overrides; setup-command migration; doctor/preflight; CreateRequest.provision; FR-021 amendment",tasked
+  G,sandbox-provisioning,A,"identity-named, typed setup steps; ordered per-backend provision lists on [backends.<name>]; project-declared compatibility with machine-owned backend settings; machine overrides; setup-command migration; doctor/preflight; CreateRequest.provision; FR-021 amendment",implemented
   B,nix-devshell-env-capture,"A, G","host Nix checks, no-realisation preflight, print-dev-env base, hook and bash functions in the sandbox, closure bind with a machine-owned whole-store option, environment persistence",planned
   C,linux-bwrap-provider,"A, B","holder, setns join, cgroup assignment, pid-namespace fallback, golden argv, userns readiness, holder detachment",planned
   D,darwin-sandbox-provider,"A, B","per-command helper, SBPL renderer, environment post-processing, golden profiles, sandbox_init readiness",planned
@@ -52,7 +52,7 @@ plannedAdrs[7]{id,dir,dependsOn,owns,state}:
 steps[14]{track,n,step,state}:
   shared,1,"Define the provisioning abstraction (sandbox-provisioning): identity-named, typed steps, an ordered provision list on each backend, machine overrides, and the doctor/preflight report",done
   shared,2,"Decide automatic mechanism selection (automatic-backend-selection) once more than one backend is valid for a platform",pending
-  shared,3,"Implement sandbox-provisioning: contract types, configuration and extraction, resolver, Docker command steps, doctor",next
+  shared,3,"Implement sandbox-provisioning: contract types, configuration and extraction, resolver, Docker command steps, doctor",done
   linux,1,"Capture the devShell environment on the host, with nix print-dev-env, and record which variables and which shell state do and do not survive (T-011)",done
   linux,2,"Build inside a holder with the captured environment and attribute every addition the build needs (T-016)",done
   linux,3,"Establish whether nix itself can run inside the sandbox, and what the daemon socket would grant if it did (T-018)",done
