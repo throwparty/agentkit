@@ -1,0 +1,186 @@
+# Sandbox Provisioning
+
+## Tasks
+
+### T-001: Contract types
+
+Add ProvisionKind, ProvisionStep and ProvisionSupport to src/sandbox/contract.rs; replace CreateRequest.environment and setup_command with provision: Vec<ProvisionStep>; add Backend::provision_support; delete EnvironmentSource. Update Docker and TestBackend to implement the method and compile with an empty step list.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | cargo check passes; CreateRequest has provision and no environment or setup_command; EnvironmentSource is gone; every Backend implements provision_support; Docker and TestBackend compile; no new crate appears in Cargo.toml. |
+| Complexity | 🟡 Medium |
+| Effort | 2-4h |
+| Depends On |  |
+| References | provision-contract,step-kinds,no-new-dependency |
+
+### T-002: Config schema and extraction
+
+Add ProjectConfig.backends: Option<Vec<String>>, ProjectFile.provision: Vec<ProvisionDefinition>, and Config.backend_provision: BTreeMap<String, Vec<String>>. Deserialise [[provision]] with identity, kind and run, reusing ProvisionKind. In merge, replace the supported set, definitions and sequences from the local override, extract provision from each backend table (the project contributes only provision; the local contributes its settings and an optional replacement), and record the existing notice for other project backend keys.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | A config with [project] backends, [[provision]] and [backends.bubblewrap].provision parses; DockerConfig still denies unknown keys and never sees provision; a local replacement wins; project machine-owned keys produce the existing notice. |
+| Complexity | 🔴 High |
+| Effort | 3-5h |
+| Depends On | T-001 |
+| References | project-compatibility,backend-sequence,config-ownership |
+
+### T-003: Config validation and setup-command rejection
+
+Validate identity shape and uniqueness, referenced identities, duplicate identities in a sequence, the supported set's presence when steps exist, a non-empty set with steps, and warn for a dead step or a sequence for an unsupported backend. Extend reject_moved_sections to detect [project] setup-command and reject it with the [[provision]] plus [backends.<name>].provision equivalent.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | Each invalid case fails with a message naming the identity, backend or kind; the setup-command message shows the replacement; dead steps and unsupported-backend sequences are warnings; tests cover every case. |
+| Complexity | 🟡 Medium |
+| Effort | 3-4h |
+| Depends On | T-002 |
+| References | provisioning-step,step-kinds,project-compatibility,config-ownership,setup-command-migrated,test-selection |
+
+### T-004: Local override semantics
+
+Cover the local override end to end: replace [project] backends, [[provision]] and a backend's sequence; an empty definition list or sequence is a deliberate removal; project machine-owned keys are ignored with the notice while provision is honoured.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | Tests assert the merged Config for each case; the doctor and create see the local result; no project definition is merged back after a local replacement. |
+| Complexity | 🟢 Low |
+| Effort | 2-3h |
+| Depends On | T-003 |
+| References | config-ownership,project-compatibility,backend-sequence |
+
+### T-005: Provision resolver
+
+Add src/provision with a pure resolve(config, selected, support, accept_degraded) -> Result<Vec<ProvisionStep>, Error>. Check the supported set, resolve identities in sequence order, reject duplicates and unknown identities, map an absent or unavailable kind to Unsupported and a degraded kind to Unavailable unless accepted, and return contract errors naming the backend, identity and kind.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | Unit tests cover order, duplicates, unknown identity, unlisted backend, unsupported kind, degraded kind with and without acceptance, and the empty sequence; the function is synchronous and performs no I/O. |
+| Complexity | 🟡 Medium |
+| Effort | 3-5h |
+| Depends On | T-001, T-003 |
+| References | provision-resolution,kind-support,provision-failures,fail-closed,explicit-order,legible-unavailability,test-selection |
+
+### T-006: Resolver boundary
+
+Add a litterbox-provision scope for src/provision/** to arch-lint.toml, deny backends, the CLI and the MCP server importing it, and allow the orchestrator. Add a negative fixture that imports it from a backend and proves the lint fails.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | arch-lint check passes on the tree; the negative fixture fails; the CI job runs both. |
+| Complexity | 🟢 Low |
+| Effort | 1-2h |
+| Depends On | T-005 |
+| References | resolver-boundary,boundaries |
+
+### T-007: Orchestrator wiring and consent
+
+Select the backend, read provision_support, call the resolver before the branch is created, and pass the resolved steps in CreateRequest. Replace the setup_command consent check with a check over resolved command steps, returning Denied naming the identity and both settings. Keep the existing rollback.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | Create resolves before creating a branch; a refused command returns Denied and leaves no branch or compute; a resolver failure leaves no branch; CreateRequest carries the ordered steps; no setup_command remains in the orchestrator. |
+| Complexity | 🟡 Medium |
+| Effort | 3-4h |
+| Depends On | T-005, T-006 |
+| References | provision-resolution,command-consent,provision-atomic,provision-failures,fail-closed |
+
+### T-008: Per-step provenance types
+
+Extend the provenance types so inspection reports each step by identity and kind and the variables it changed by name and change kind, never by value. Keep the whole-environment origin for a sandbox with no steps.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | Provenance carries per-step entries; serialization contains no variable value; a no-step sandbox still reports the whole-environment origin; tests cover both. |
+| Complexity | 🟡 Medium |
+| Effort | 2-3h |
+| Depends On | T-001 |
+| References | step-provenance |
+
+### T-009: Docker applies steps
+
+Implement provision_support on DockerBackend with Command available and walk request.provision in create: run each command with sh -c in the workspace, stop on non-zero, roll back the container, and return Failed with the identity, exit code and output. Delete the old setup_command branch, populate per-step provenance and report provision:command in capabilities.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | Two command steps run in list order and the second sees the first's file; a non-zero step leaves no container; the Docker suite passes with LITTERBOX_DOCKER_TESTS; capabilities include provision:command; no setup_command branch remains. |
+| Complexity | 🔴 High |
+| Effort | 4-6h |
+| Depends On | T-007, T-008 |
+| References | provision-contract,command-consent,provision-atomic,explicit-order,step-provenance,test-selection |
+
+### T-010: Test backend and conformance
+
+Make TestBackend report Command and record the CreateRequest it receives. Add conformance assertions for list order, per-backend selection, an empty sequence, an unsupported kind, and that no other backend's name or the supported set crosses the boundary.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | TestBackend's recorded request contains exactly the resolved steps; the conformance suite passes for TestBackend; the assertions fail if a step is reordered or another backend's step leaks. |
+| Complexity | 🟡 Medium |
+| Effort | 3-4h |
+| Depends On | T-007, T-009 |
+| References | provision-resolution,step-kinds,provision-contract,explicit-order,test-selection |
+
+### T-011: Doctor command
+
+Add litterbox doctor [--json]: load the merged config, build the selected backend with registry::build, report readiness and capabilities, resolve the steps, apply the consent check, and print the selected backend, the supported set and each step in order with state, reason and remedy. Exit non-zero when a required step is not ready. No create, record or command.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | The command prints the expected report for a ready, an unlisted and a refused-step project; --json is stable for tests; no branch, workspace, record or command is produced; exit codes match the report; no MCP tool exposes it. |
+| Complexity | 🟡 Medium |
+| Effort | 3-5h |
+| Depends On | T-005, T-007 |
+| References | doctor,legible-unavailability,command-consent,compatibility |
+
+### T-012: MCP error payload
+
+Carry provisioning failures through sandbox-create: the contract error's class and fields, including the step identity and kind, in the error data payload. Keep every tool name and argument unchanged.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | An unlisted backend, unsupported kind and refused command each return the expected MCP class and structured data; the MCP tool reference is unchanged; tests cover the three cases. |
+| Complexity | 🟢 Low |
+| Effort | 2-3h |
+| Depends On | T-007 |
+| References | provision-failures,compatibility |
+
+### T-013: Documentation and samples
+
+Document [project] backends, [[provision]], the command kind, per-backend sequences, the setup-command replacement and the doctor command; update the sample configuration; regenerate the CLI and MCP references.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | The configuration reference covers every field and the migration; the generated references build; the sample config parses; no stale setup-command example remains. |
+| Complexity | 🟢 Low |
+| Effort | 2-3h |
+| Depends On | T-003, T-011, T-012 |
+| References | documentation,compatibility |
+
+### T-014: Acceptance verification
+
+Run the acceptance criteria end to end on the provisioning flow: ordered sequence, per-backend selection, unlisted refusal, unknown identity, unsupported kind, setup-command replacement, consent, atomic failure, provenance, doctor, matrix isolation, local override, empty sequence, boundaries and unknown kind. Record the commands and results in the ADR directory.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | Every acceptance criterion in the spec has a passing test or a recorded command; the Docker suite and arch-lint pass; the results are recorded. |
+| Complexity | 🟡 Medium |
+| Effort | 3-4h |
+| Depends On | T-009, T-010, T-011, T-012, T-013 |
+| References | provision-resolution,project-compatibility,command-consent,provision-atomic,step-provenance,doctor,provision-failures,compatibility,resolver-boundary |
+

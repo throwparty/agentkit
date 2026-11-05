@@ -1,0 +1,26 @@
+flowchart TD
+    subgraph project["Committed project file"]
+        supported["[project] backends"]
+        defs["[[provision]]<br/>identity + kind + settings"]
+        sequences["[backends.BACKEND].provision<br/>ordered identities"]
+    end
+
+    subgraph machine["Untracked local override"]
+        selected["backend selection"]
+        overrides["replaces supported set,<br/>definitions and sequences"]
+    end
+
+    supported --> loader
+    defs --> loader
+    sequences --> loader
+    selected --> loader
+    overrides --> loader
+
+    loader["load, merge, validate"] --> resolver["provision::resolve"]
+    resolver --> request["CreateRequest.provision<br/>ordered typed steps"]
+    request --> backend["selected backend"]
+    backend --> apply["materialise workspace,<br/>apply steps in order"]
+    apply --> record["record + per-step provenance"]
+
+    loader --> doctor["litterbox doctor"]
+    resolver --> doctor
