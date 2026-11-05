@@ -41,7 +41,7 @@ Validate identity shape and uniqueness, referenced identities, duplicate identit
 | Depends On | T-002 |
 | References | provisioning-step,step-kinds,project-compatibility,config-ownership,setup-command-migrated,test-selection |
 
-### T-004: Local override semantics
+### T-004: [x] Local override semantics
 
 Cover the local override end to end: replace [project] backends, [[provision]] and a backend's sequence; an empty definition list or sequence is a deliberate removal; project machine-owned keys are ignored with the notice while provision is honoured.
 
