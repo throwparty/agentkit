@@ -413,8 +413,10 @@ pub fn merge(local: ProjectFile, project: ProjectFile) -> Result<Config, ConfigE
 
     // A local definitions list replaces the project's definitions but leaves
     // each backend sequence in place unless the local file supplied that
-    // backend's list. Validation then rejects a dangling identity rather than
-    // silently disabling the sequence.
+    // backend's list. An explicitly empty list removes the project's steps, so
+    // its sequences go with them; a non-empty list that drops an identity still
+    // fails validation by naming the dangling identity.
+    let remove_inherited_sequences = local.provision.as_ref().is_some_and(Vec::is_empty);
     let mut backends = local.backends;
     let mut backend_sequences = BTreeMap::new();
 
@@ -439,7 +441,9 @@ pub fn merge(local: ProjectFile, project: ProjectFile) -> Result<Config, ConfigE
                  belong to the machine, so they are ignored"
             ));
         }
-        if let Some(sequence) = sequence {
+        if let Some(sequence) = sequence
+            && !remove_inherited_sequences
+        {
             backend_sequences.entry(name.clone()).or_insert(sequence);
         }
     }
@@ -825,7 +829,7 @@ installable = "./nix"
     }
 
     #[test]
-    fn an_empty_local_definition_list_is_rejected_by_dangling_sequences() {
+    fn an_empty_local_definition_list_removes_inherited_sequences() {
         let project: ProjectFile = toml::from_str(
             "[[provision]]\nidentity = 'fetch'\nkind = 'command'\nrun = 'true'\n\
              [backends.bubblewrap]\nprovision = ['fetch']\n",
@@ -834,11 +838,14 @@ installable = "./nix"
         let local: ProjectFile = toml::from_str("provision = []\n").expect("local");
         let mut config = merge(local, project).expect("merge");
         assert!(config.provision_definitions.is_empty());
-        assert_eq!(config.backend_sequences["bubblewrap"], vec!["fetch"]);
-        let error = config
+        assert!(
+            config.backend_sequences.is_empty(),
+            "the empty list removes the inherited sequence: {:?}",
+            config.backend_sequences
+        );
+        config
             .validate_provisioning()
-            .expect_err("the dangling sequence is refused");
-        assert!(error.reason.contains("does not define"), "{error}");
+            .expect("an empty local definition list is loadable");
     }
 
     #[test]
