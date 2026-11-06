@@ -1541,6 +1541,44 @@ mod seam_tests {
     }
 
     #[tokio::test]
+    async fn consent_matches_the_hashed_project_namespace() {
+        let (dir, _repo) = repository();
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let scm = ThreadSafeScm::open(dir.path()).expect("scm");
+        let mut config = Config {
+            project: crate::config::ProjectConfig {
+                slug: Some("project".to_string()),
+                backends: Some(vec!["test".to_string()]),
+            },
+            provision_definitions: vec![crate::config::ProvisionDefinition::Command {
+                identity: "setup".to_string(),
+                run: "echo permitted".to_string(),
+            }],
+            backend_sequences: std::collections::BTreeMap::from([(
+                "test".to_string(),
+                vec!["setup".to_string()],
+            )]),
+            allow_project_setup: false,
+            ..Config::default()
+        };
+        let slug = crate::orchestrator::resolve_project_slug(&config).expect("slug");
+        assert!(slug.starts_with("project-"), "{slug}");
+        config.allowed_projects = vec![slug.clone()];
+        let sandboxes = Sandboxes::for_test(
+            config,
+            scm,
+            slug,
+            records.path().to_path_buf(),
+            selected(backend),
+        );
+        sandboxes
+            .create("demo")
+            .await
+            .expect("the hashed namespace is permitted");
+    }
+
+    #[tokio::test]
     async fn a_project_setup_command_needs_permission() {
         let (dir, _repo) = repository();
         let records = TempDir::new().expect("records");
