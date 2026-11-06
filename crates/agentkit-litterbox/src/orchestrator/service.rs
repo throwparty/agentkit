@@ -25,9 +25,6 @@ pub struct Sandboxes {
     records_dir: std::path::PathBuf,
     legacy_records_dir: Option<std::path::PathBuf>,
     fixed: Option<Selected>,
-    /// The constructed backend, cleared when a daemon disappears so the next
-    /// operation re-checks readiness instead of reusing a stale answer.
-    selected: std::sync::Mutex<Option<Selected>>,
 }
 
 /// What a project's sandboxes currently look like.
@@ -73,7 +70,6 @@ impl Sandboxes {
             records_dir,
             legacy_records_dir,
             fixed: None,
-            selected: std::sync::Mutex::new(None),
         })
     }
 
@@ -95,7 +91,6 @@ impl Sandboxes {
             records_dir,
             legacy_records_dir: None,
             fixed: Some(fixed),
-            selected: std::sync::Mutex::new(None),
         }
     }
 
@@ -272,9 +267,6 @@ impl Sandboxes {
             }
             Err(error) => {
                 tracing::error!(sandbox = %name, %error, "command failed");
-                if matches!(error, Error::Unavailable { .. }) {
-                    self.forget_selected();
-                }
             }
         }
         result
@@ -496,22 +488,14 @@ impl Sandboxes {
         self.selected_for_operation(operation).await
     }
 
-    /// The selected backend, constructed once and reused until it disappears.
+    /// The selected backend, revalidated for every operation.
     async fn selected_for_operation(&self, operation: &str) -> Result<Selected, Error> {
         if let Some(fixed) = &self.fixed {
             return Ok(fixed.clone());
         }
-        if let Some(selected) = self.selected.lock().expect("selected backend lock").clone() {
-            return Ok(selected);
-        }
-        let selected = backends::select_as(&self.config, operation).await?;
-        *self.selected.lock().expect("selected backend lock") = Some(selected.clone());
-        Ok(selected)
-    }
-
-    /// Drop the cached backend so the next operation re-checks readiness.
-    fn forget_selected(&self) {
-        *self.selected.lock().expect("selected backend lock") = None;
+        // Readiness is checked before every operation so a backend that
+        // disappeared since the last call is not reused from the cache.
+        backends::select_as(&self.config, operation).await
     }
 
     fn stage(&self) -> Result<TempDir, Error> {
