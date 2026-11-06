@@ -29,7 +29,7 @@ pub enum StepOutcome {
     /// The step resolved and its kind is usable.
     Resolved(ResolvedStep),
     /// The step could not be resolved; the other steps still report.
-    Failed(Error),
+    Failed(Box<ProvisioningFailure>),
 }
 
 /// Build a structured provisioning failure.
@@ -147,29 +147,6 @@ fn undefined_identity(selected: &str, identity: &str) -> Error {
     )
 }
 
-/// Resolve the selected backend's sequence, keeping each step's support entry.
-#[cfg(test)]
-pub fn resolve_steps(
-    config: &Config,
-    selected: &str,
-    support: &[ProvisionSupport],
-) -> Result<Vec<ResolvedStep>, Error> {
-    validate(config)?;
-    check_selected(config, selected)?;
-    let definitions = sequence_definitions(config, selected)?;
-    let mut steps = Vec::with_capacity(definitions.len());
-
-    for definition in definitions {
-        let support = check_support(definition, selected, support, config.accept_degraded)?;
-        steps.push(ResolvedStep {
-            step: step(definition),
-            support,
-        });
-    }
-
-    Ok(steps)
-}
-
 /// Resolve each identity independently, keeping a failure beside its step.
 ///
 /// Configuration and compatibility failures still fail the whole call; a
@@ -184,31 +161,20 @@ pub fn preflight_steps(
     check_selected(config, selected)?;
     let definitions = sequence_definitions(config, selected)?;
 
-    Ok(definitions
-        .into_iter()
-        .map(|definition| {
-            match check_support(definition, selected, support, config.accept_degraded) {
-                Ok(support) => StepOutcome::Resolved(ResolvedStep {
-                    step: step(definition),
-                    support,
-                }),
-                Err(error) => StepOutcome::Failed(error),
+    let mut outcomes = Vec::with_capacity(definitions.len());
+    for definition in definitions {
+        match check_support(definition, selected, support, config.accept_degraded) {
+            Ok(support) => outcomes.push(StepOutcome::Resolved(ResolvedStep {
+                step: step(definition),
+                support,
+            })),
+            Err(Error::Provisioning { failure }) => {
+                outcomes.push(StepOutcome::Failed(failure));
             }
-        })
-        .collect())
-}
-
-/// Resolve the selected backend's provisioning sequence.
-#[cfg(test)]
-pub fn resolve(
-    config: &Config,
-    selected: &str,
-    support: &[ProvisionSupport],
-) -> Result<Vec<ProvisionStep>, Error> {
-    Ok(resolve_steps(config, selected, support)?
-        .into_iter()
-        .map(|resolved| resolved.step)
-        .collect())
+            Err(other) => return Err(other),
+        }
+    }
+    Ok(outcomes)
 }
 
 /// Refuse a step whose kind the backend cannot apply, or whose degradation the
@@ -295,12 +261,39 @@ fn list(backends: &[String]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{StepOutcome, preflight_steps, resolve, resolve_steps, validate};
+    use super::{ResolvedStep, StepOutcome, preflight_steps, validate};
     use crate::config::{Config, ProjectConfig};
     use crate::sandbox::contract::{
         Error, ProvisionKind, ProvisionStep, ProvisionSupport, ProvisioningClass,
     };
     use crate::sandbox::report::{Fallback, State};
+
+    /// Test-only convenience: fail on the first step failure.
+    fn resolve_steps(
+        config: &Config,
+        selected: &str,
+        support: &[ProvisionSupport],
+    ) -> Result<Vec<ResolvedStep>, Error> {
+        preflight_steps(config, selected, support)?
+            .into_iter()
+            .map(|outcome| match outcome {
+                StepOutcome::Resolved(resolved) => Ok(resolved),
+                StepOutcome::Failed(failure) => Err(Error::Provisioning { failure }),
+            })
+            .collect()
+    }
+
+    /// Test-only convenience: the ordered typed steps.
+    fn resolve(
+        config: &Config,
+        selected: &str,
+        support: &[ProvisionSupport],
+    ) -> Result<Vec<ProvisionStep>, Error> {
+        Ok(resolve_steps(config, selected, support)?
+            .into_iter()
+            .map(|resolved| resolved.step)
+            .collect())
+    }
 
     fn command(identity: &str) -> ProvisionStep {
         ProvisionStep::Command {
@@ -615,9 +608,7 @@ mod tests {
         let identities: Vec<&str> = results
             .iter()
             .map(|outcome| match outcome {
-                StepOutcome::Failed(Error::Provisioning { failure }) => {
-                    failure.step.as_deref().unwrap_or("")
-                }
+                StepOutcome::Failed(failure) => failure.step.as_deref().unwrap_or(""),
                 _ => "",
             })
             .collect();
