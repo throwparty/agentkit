@@ -69,10 +69,9 @@ fn issue(issue: ProvisioningIssue) -> Error {
 ///
 /// The rules live in configuration; this wrapper gives the resolver the
 /// contract's structured error.
-pub fn validate(config: &Config) -> Result<(), Error> {
+fn validate(config: &Config) -> Result<(), Error> {
     config.check_provisioning().map_err(issue)
 }
-
 /// Check that the selected backend is well named and the project lists it.
 fn check_selected(config: &Config, selected: &str) -> Result<(), Error> {
     if !valid_backend_name(selected) {
@@ -177,6 +176,24 @@ pub fn preflight_steps(
     Ok(outcomes)
 }
 
+/// Resolve the selected backend's sequence, failing on the first step.
+///
+/// This is the production entry point create uses; `preflight_steps` keeps the
+/// per-step outcomes the doctor needs.
+pub fn resolve(
+    config: &Config,
+    selected: &str,
+    support: &[ProvisionSupport],
+) -> Result<Vec<ProvisionStep>, Error> {
+    preflight_steps(config, selected, support)?
+        .into_iter()
+        .map(|outcome| match outcome {
+            StepOutcome::Resolved(resolved) => Ok(resolved.step),
+            StepOutcome::Failed(failure) => Err(Error::Provisioning { failure }),
+        })
+        .collect()
+}
+
 /// Refuse a step whose kind the backend cannot apply, or whose degradation the
 /// user has not accepted.
 fn check_support(
@@ -261,7 +278,9 @@ fn list(backends: &[String]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{ResolvedStep, StepOutcome, preflight_steps, undefined_identity, validate};
+    use super::{
+        ResolvedStep, StepOutcome, preflight_steps, resolve, undefined_identity, validate,
+    };
     use crate::config::{Config, ProjectConfig};
     use crate::sandbox::contract::{
         Error, ProvisionKind, ProvisionStep, ProvisionSupport, ProvisioningClass,
@@ -281,18 +300,6 @@ mod tests {
                 StepOutcome::Failed(failure) => Err(Error::Provisioning { failure }),
             })
             .collect()
-    }
-
-    /// Test-only convenience: the ordered typed steps.
-    fn resolve(
-        config: &Config,
-        selected: &str,
-        support: &[ProvisionSupport],
-    ) -> Result<Vec<ProvisionStep>, Error> {
-        Ok(resolve_steps(config, selected, support)?
-            .into_iter()
-            .map(|resolved| resolved.step)
-            .collect())
     }
 
     fn command(identity: &str) -> ProvisionStep {

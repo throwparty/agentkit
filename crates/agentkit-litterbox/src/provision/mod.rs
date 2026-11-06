@@ -2,4 +2,4 @@
 
 mod resolve;
 
-pub use resolve::{StepOutcome, preflight_steps};
+pub use resolve::{ResolvedStep, StepOutcome, preflight_steps, resolve};
