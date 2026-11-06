@@ -358,8 +358,8 @@ fn validate_provisioning(config: &mut Config) -> Result<(), ConfigError> {
 mod tests {
 
     use super::{
-        parse_project, reject_moved_sections, validate_forwarding, validate_local_file,
-        validate_ports, validate_provisioning,
+        MAX_CONFIG_BYTES, parse_project, read_config_file, reject_moved_sections,
+        validate_forwarding, validate_local_file, validate_ports, validate_provisioning,
     };
     use crate::config::{Config, PortRequest, ProjectFile, ProvisionDefinition, merge};
 
@@ -819,5 +819,56 @@ bind = "0.0.0.0"
             .expect_err("setup-command rejected");
         assert!(error.to_string().contains("[[provision]]"), "{error}");
         assert!(error.to_string().contains("backends"), "{error}");
+    }
+
+    #[test]
+    fn a_missing_configuration_file_is_none_and_a_directory_is_refused() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert!(
+            read_config_file(&dir.path().join("absent.toml"))
+                .expect("absent is not an error")
+                .is_none()
+        );
+
+        let error = read_config_file(dir.path()).expect_err("a directory is refused");
+        assert!(
+            error.to_string().contains("must be a regular file"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn an_oversized_configuration_file_is_refused() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, vec![b'a'; MAX_CONFIG_BYTES as usize + 1]).expect("write");
+        let error = read_config_file(&path).expect_err("oversized refused");
+        assert!(error.to_string().contains("larger than"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_ancestor_of_the_project_config_is_refused() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let real = dir.path().join("real-agentkit");
+        std::fs::create_dir_all(real.join("litterbox")).expect("real dirs");
+        std::fs::write(real.join("litterbox/config.toml"), "[project]\n").expect("write");
+        std::os::unix::fs::symlink(&real, dir.path().join(".agentkit")).expect("symlink");
+        let path = dir.path().join(".agentkit/litterbox/config.toml");
+        let error = read_config_file(&path).expect_err("symlinked ancestor refused");
+        assert!(
+            error.to_string().contains("symlinked path component"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_local_override_in_a_bare_repository_is_refused() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        git2::Repository::init_bare(dir.path()).expect("bare repo");
+        let path = dir.path().join("config.local.toml");
+        std::fs::write(&path, "backend = \"docker\"\n").expect("write");
+        let error = validate_local_file(&path).expect_err("bare repository refused");
+        assert!(error.to_string().contains("bare Git repository"), "{error}");
     }
 }

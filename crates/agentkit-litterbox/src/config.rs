@@ -922,6 +922,87 @@ installable = "./nix"
     }
 
     #[test]
+    fn local_machine_flags_reach_the_merged_configuration() {
+        let local = ProjectFile {
+            accept_degraded: true,
+            allow_project_setup: true,
+            allowed_projects: vec!["project".to_string()],
+            ..ProjectFile::default()
+        };
+        let config = merge(local, ProjectFile::default()).expect("merge");
+        assert!(config.accept_degraded);
+        assert!(config.allow_project_setup);
+        assert_eq!(config.allowed_projects, vec!["project"]);
+    }
+
+    #[test]
+    fn a_project_setting_allowed_projects_is_refused() {
+        let project: ProjectFile =
+            toml::from_str("allowed-projects = ['project']\n").expect("project");
+        let error = merge(ProjectFile::default(), project).expect_err("consent refused");
+        assert!(
+            error.to_string().contains("must not set setup consent"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_project_accepting_degraded_mechanisms_is_noticed_and_ignored() {
+        let project: ProjectFile = toml::from_str("accept-degraded = true\n").expect("project");
+        let config = merge(ProjectFile::default(), project).expect("merge");
+        assert!(!config.accept_degraded);
+        assert!(
+            config
+                .notices
+                .iter()
+                .any(|notice| notice.contains("accepts degraded")),
+            "{:?}",
+            config.notices
+        );
+    }
+
+    #[test]
+    fn a_non_empty_local_definition_list_keeps_project_sequences() {
+        let project: ProjectFile = toml::from_str(
+            "[[provision]]\nidentity = 'fetch'\nkind = 'command'\nrun = 'true'\n\
+             [backends.bubblewrap]\nprovision = ['fetch']\n",
+        )
+        .expect("project");
+        let local: ProjectFile =
+            toml::from_str("[[provision]]\nidentity = 'fetch'\nkind = 'command'\nrun = 'false'\n")
+                .expect("local");
+        let config = merge(local, project).expect("merge");
+        assert_eq!(config.backend_sequences["bubblewrap"], vec!["fetch"]);
+    }
+
+    #[test]
+    fn snapshot_mode_prefers_the_local_file_then_the_project() {
+        let project: ProjectFile =
+            toml::from_str("[git]\nsnapshot-mode = 'direct'\n").expect("project");
+        let config = merge(ProjectFile::default(), project.clone()).expect("merge");
+        assert_eq!(
+            config.git.snapshot_mode,
+            Some(crate::domain::ScmMode::Direct)
+        );
+
+        let local: ProjectFile =
+            toml::from_str("[git]\nsnapshot-mode = 'remote'\n").expect("local");
+        let config = merge(local, project).expect("merge");
+        assert_eq!(
+            config.git.snapshot_mode,
+            Some(crate::domain::ScmMode::Remote)
+        );
+    }
+
+    #[test]
+    fn backend_name_boundaries_are_enforced() {
+        assert!(super::valid_backend_name(&"a".repeat(64)));
+        assert!(!super::valid_backend_name(&"a".repeat(65)));
+        assert!(!super::valid_backend_name("\nbad"));
+        assert!(super::valid_backend_name("a.b-c_d+e"));
+    }
+
+    #[test]
     fn a_local_backend_table_keeps_machine_settings_and_extracts_provision() {
         let local: ProjectFile =
             toml::from_str("[backends.docker]\nimage = 'busybox'\nprovision = ['fetch']\n")
