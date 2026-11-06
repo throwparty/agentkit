@@ -7,11 +7,11 @@ machine.
 
 ## Choosing one
 
-The backend is chosen by the person running the code, in the untracked local
-override, or for a single command:
+The backend is chosen by the person running the code, in the user configuration
+outside the checkout, or for a single command:
 
 ```toml
-# .agentkit/litterbox/config.local.toml
+# ~/.config/agentkit/litterbox/config.toml
 backend = "docker"
 
 [backends.docker]
