@@ -316,7 +316,9 @@ pub struct ProvisioningIssue {
 
 impl std::fmt::Display for ProvisioningIssue {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(&self.reason)
+        // Every surface reports the remedy too: the CLI and doctor flatten
+        // this into a plain message, so dropping it here loses it for them.
+        write!(formatter, "{}; {}", self.reason, self.remedy)
     }
 }
 
@@ -523,8 +525,8 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::{
-        ConfigError, ForwardingConfig, PortRequest, ProjectConfig, ProjectFile, merge,
-        take_provision,
+        Config, ConfigError, ForwardingConfig, PortRequest, ProjectConfig, ProjectFile,
+        ProvisioningIssue, merge, take_provision,
     };
 
     fn local() -> ProjectFile {
@@ -964,5 +966,35 @@ installable = "./nix"
             !docker.contains_key("provision"),
             "provision is not left for deny_unknown_fields"
         );
+    }
+
+    #[test]
+    fn a_provisioning_issue_display_carries_the_remedy() {
+        let issue = ProvisioningIssue {
+            backend: None,
+            step: None,
+            reason: "the project declares too many steps".to_string(),
+            remedy: "remove steps the project does not need".to_string(),
+        };
+        assert_eq!(
+            issue.to_string(),
+            "the project declares too many steps; remove steps the project does not need"
+        );
+    }
+
+    #[test]
+    fn an_invalid_sequence_key_is_refused_and_escaped() {
+        let config = Config {
+            backend_sequences: BTreeMap::from([(
+                "bad\nname".to_string(),
+                vec!["fetch".to_string()],
+            )]),
+            ..Config::default()
+        };
+        let error = config
+            .check_provisioning()
+            .expect_err("the invalid key is refused");
+        assert!(error.reason.contains("bad\\nname"), "{error}");
+        assert!(!error.reason.contains('\n'), "{error}");
     }
 }
