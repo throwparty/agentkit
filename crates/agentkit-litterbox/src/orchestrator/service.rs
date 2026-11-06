@@ -129,6 +129,7 @@ impl Sandboxes {
             tracing::warn!(
                 sandbox = %name,
                 backend = %selected.name(),
+                class = %error.class().as_str(),
                 %error,
                 "provisioning refused before create"
             );
@@ -139,30 +140,18 @@ impl Sandboxes {
             match planned {
                 PlannedStep::Resolved { step, refusal, .. } => {
                     if let Some(failure) = refusal {
-                        let error = Error::Provisioning {
+                        log_refusal(&name, selected.name(), &failure);
+                        return Err(Error::Provisioning {
                             failure: Box::new(failure),
-                        };
-                        tracing::warn!(
-                            sandbox = %name,
-                            backend = %selected.name(),
-                            %error,
-                            "provisioning refused before create"
-                        );
-                        return Err(error);
+                        });
                     }
                     provision.push(step);
                 }
                 PlannedStep::Failed { failure } => {
-                    let error = Error::Provisioning {
+                    log_refusal(&name, selected.name(), &failure);
+                    return Err(Error::Provisioning {
                         failure: Box::new(failure),
-                    };
-                    tracing::warn!(
-                        sandbox = %name,
-                        backend = %selected.name(),
-                        %error,
-                        "provisioning refused before create"
-                    );
-                    return Err(error);
+                    });
                 }
             }
         }
@@ -562,7 +551,25 @@ fn port(port: &crate::config::PortRequest) -> RequestedPort {
 /// A configured slug becomes a path component, so it is validated rather than
 /// trusted: a value the slug rules would change is refused, naming the setting.
 pub fn resolve_project_slug(config: &Config) -> Result<String, SandboxError> {
-    Ok(format!("{}-{}", base_slug(config)?, namespace_suffix()))
+    let definitions = toml::to_string(&config.provision_definitions).unwrap_or_default();
+    Ok(format!(
+        "{}-{}",
+        base_slug(config)?,
+        namespace_suffix(&definitions)
+    ))
+}
+
+/// Log a structured provisioning refusal with its class and step fields.
+fn log_refusal(sandbox: &str, backend: &str, failure: &ProvisioningFailure) {
+    tracing::warn!(
+        sandbox = %sandbox,
+        backend = %backend,
+        class = failure.class.as_str(),
+        step = failure.step.as_deref().unwrap_or(""),
+        kind = failure.kind.as_deref().unwrap_or(""),
+        reason = %failure.reason,
+        "provisioning refused before create"
+    );
 }
 
 /// One step in a preflight plan.
@@ -680,9 +687,10 @@ fn base_slug(config: &Config) -> Result<String, SandboxError> {
 }
 
 /// A stable, short suffix for the current repository.
-fn namespace_suffix() -> String {
-    // Bind the namespace to the repository's remote when one exists, so the
-    // same checkout path used for different content does not inherit consent.
+fn namespace_suffix(definitions: &str) -> String {
+    // Bind the namespace to the repository's remote and to the provisioning
+    // definitions the user approved, so different content in the same checkout
+    // does not inherit consent.
     let identity = git2::Repository::discover(".")
         .ok()
         .and_then(|repository| {
@@ -700,7 +708,12 @@ fn namespace_suffix() -> String {
         });
 
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in identity.as_bytes() {
+    for byte in identity
+        .as_bytes()
+        .iter()
+        .chain(std::iter::once(&0u8))
+        .chain(definitions.as_bytes())
+    {
         hash ^= u64::from(*byte);
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }

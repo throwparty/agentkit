@@ -95,8 +95,8 @@ pub struct GitConfig {
 pub struct Config {
     /// The backend the user selected.
     pub backend: Option<String>,
-    /// One untyped section per backend, keyed by backend name.
-    pub backends: BTreeMap<String, toml::Value>,
+    /// Machine-owned backend settings, keyed by backend name.
+    pub backend_settings: BTreeMap<String, toml::Value>,
     /// What the project declares.
     pub project: ProjectConfig,
     /// The step definitions, by identity. This is not a backend's sequence.
@@ -516,7 +516,7 @@ pub fn merge(local: ProjectFile, project: ProjectFile) -> Result<Config, ConfigE
 
     Ok(Config {
         backend: local.backend,
-        backends,
+        backend_settings: backends,
         project: ProjectConfig {
             slug: local.project.slug.or(project.project.slug),
             backends: local.project.backends.or(project.project.backends),
@@ -625,7 +625,7 @@ mod tests {
     fn the_local_file_chooses_the_mechanism_and_the_project_supplies_its_needs() {
         let config = merge(local(), project()).expect("merge");
         assert_eq!(config.backend.as_deref(), Some("docker"));
-        assert!(config.backends.contains_key("docker"));
+        assert!(config.backend_settings.contains_key("docker"));
         assert_eq!(config.project.slug.as_deref(), Some("project"));
         assert_eq!(config.ports.len(), 1);
         assert_eq!(config.forwarding.bind, "127.0.0.1");
@@ -660,7 +660,7 @@ mod tests {
             .backends
             .insert("docker".to_string(), toml::Value::Table(table));
         let config = merge(local(), project).expect("merge");
-        assert_eq!(config.backends.len(), 1);
+        assert_eq!(config.backend_settings.len(), 1);
         assert!(
             config
                 .notices
@@ -768,7 +768,7 @@ provision = ["fetch"]
         let config = merge(ProjectFile::default(), file).expect("merge");
         assert_eq!(config.backend_sequences["bubblewrap"], vec!["fetch"]);
         assert!(
-            config.backends.is_empty(),
+            config.backend_settings.is_empty(),
             "a project table contributes no machine settings"
         );
         assert_eq!(
@@ -810,7 +810,7 @@ image = "nope"
         let config = merge(ProjectFile::default(), project).expect("merge");
         assert_eq!(config.backend_sequences["bubblewrap"], vec!["fetch"]);
         assert!(
-            config.backends.is_empty(),
+            config.backend_settings.is_empty(),
             "project machine settings are not carried"
         );
         assert!(
@@ -1009,7 +1009,9 @@ installable = "./nix"
                 .expect("local");
         let config = merge(local, project()).expect("merge");
         assert_eq!(config.backend_sequences["docker"], vec!["fetch"]);
-        let docker = config.backends["docker"].as_table().expect("docker table");
+        let docker = config.backend_settings["docker"]
+            .as_table()
+            .expect("docker table");
         assert_eq!(
             docker.get("image").and_then(toml::Value::as_str),
             Some("busybox"),

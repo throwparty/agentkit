@@ -41,7 +41,7 @@ pub fn build(config: &Config) -> Result<Selected, Error> {
     match BACKENDS.iter().find(|(candidate, _)| *candidate == name) {
         Some((_, constructor)) => {
             let section = config
-                .backends
+                .backend_settings
                 .get(name)
                 .cloned()
                 .unwrap_or_else(|| toml::Value::Table(Default::default()));
