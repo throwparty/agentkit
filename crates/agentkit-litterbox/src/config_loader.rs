@@ -155,10 +155,77 @@ fn read_user_config() -> Result<ProjectFile, ConfigError> {
     let Some(path) = user_config_path() else {
         return Ok(ProjectFile::default());
     };
+    validate_user_config_path(&path)?;
     match read_config_file(&path)? {
-        Some(text) => parse_project(&text),
+        Some(text) => {
+            let user = parse_project(&text)?;
+            reject_project_keys_in_user(&user)?;
+            Ok(user)
+        }
         None => Ok(ProjectFile::default()),
     }
+}
+
+/// The user configuration must sit outside the checkout.
+///
+/// Consent and backend selection are machine-owned; a committed wrapper that
+/// points `LITTERBOX_USER_CONFIG` or `XDG_CONFIG_HOME` at a file in the
+/// repository must not be able to supply them.
+fn validate_user_config_path(path: &Path) -> Result<(), ConfigError> {
+    if !path.is_absolute() {
+        return Err(ConfigError::ParseError(format!(
+            "{} must be an absolute path",
+            path.display()
+        )));
+    }
+    if path
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err(ConfigError::ParseError(format!(
+            "{} must not contain '..'",
+            path.display()
+        )));
+    }
+    let Some(workdir) = Repository::discover(".")
+        .ok()
+        .and_then(|repository| repository.workdir().map(Path::to_path_buf))
+    else {
+        return Ok(());
+    };
+    let workdir = workdir.canonicalize().unwrap_or(workdir);
+    let resolved = path
+        .parent()
+        .and_then(|parent| parent.canonicalize().ok())
+        .map(|parent| parent.join(path.file_name().unwrap_or_default()));
+    if let Some(resolved) = resolved
+        && resolved.starts_with(&workdir)
+    {
+        return Err(ConfigError::ParseError(format!(
+            "{} is inside the checkout; keep the user configuration outside the repository",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+/// Steps are project-owned; the user configuration carries machine settings
+/// and consent only.
+fn reject_project_keys_in_user(user: &ProjectFile) -> Result<(), ConfigError> {
+    let backend_provision = user.backends.iter().find_map(|(name, value)| match value {
+        toml::Value::Table(table) if table.contains_key("provision") => {
+            Some(format!("backends.{name}.provision"))
+        }
+        _ => None,
+    });
+    if user.provision.is_some() || backend_provision.is_some() {
+        let key = backend_provision.unwrap_or_else(|| "provision".to_string());
+        return Err(ConfigError::ParseError(format!(
+            "{key} is project-owned; declare it in the project configuration or the local \
+             override, not the user configuration"
+        )));
+    }
+    Ok(())
 }
 
 /// The maximum size of a configuration file. Configuration is small; a committed
@@ -1017,6 +1084,35 @@ bind = "0.0.0.0"
                 .len(),
             0
         );
+    }
+
+    #[test]
+    fn a_user_configuration_cannot_declare_project_steps() {
+        for text in [
+            "provision = []\n",
+            "[[provision]]\nidentity = 'fetch'\nkind = 'command'\nrun = 'true'\n",
+            "[backends.docker]\nprovision = []\n",
+        ] {
+            let user: ProjectFile = toml::from_str(text).expect("user parses");
+            let error = super::reject_project_keys_in_user(&user)
+                .expect_err("project-owned keys are refused");
+            assert!(error.to_string().contains("project-owned"), "{error}");
+        }
+    }
+
+    #[test]
+    fn the_user_config_path_must_be_absolute_and_outside_the_checkout() {
+        let error = super::validate_user_config_path(std::path::Path::new("config.toml"))
+            .expect_err("relative path refused");
+        assert!(error.to_string().contains("absolute"), "{error}");
+
+        let inside = std::env::current_dir().expect("cwd").join("config.toml");
+        let error = super::validate_user_config_path(&inside).expect_err("inside refused");
+        assert!(error.to_string().contains("inside the checkout"), "{error}");
+
+        let outside = tempfile::tempdir().expect("tempdir");
+        super::validate_user_config_path(&outside.path().join("config.toml"))
+            .expect("an absolute path outside the checkout is accepted");
     }
 
     #[test]
