@@ -702,12 +702,13 @@ fn render_doctor(report: &DoctorReport, json: bool) -> Result<String, Error> {
         lines.push(format!("provisioning ({}): {}", error.class, error.message));
     }
     for step in &report.steps {
-        let mut line = format!(
-            "step {} ({}): {}",
-            step.identity.as_deref().unwrap_or("<unnamed>"),
-            step.kind.map(ProvisionKind::as_str).unwrap_or("unknown"),
-            doctor_state_label(step.state)
-        );
+        let subject = match (&step.identity, step.kind) {
+            (Some(identity), Some(kind)) => format!("step {identity} ({})", kind.as_str()),
+            (Some(identity), None) => format!("step {identity}"),
+            (None, Some(kind)) => format!("step ({})", kind.as_str()),
+            (None, None) => "step".to_string(),
+        };
+        let mut line = format!("{subject}: {}", doctor_state_label(step.state));
         if let Some(class) = &step.class {
             line.push_str(&format!(" [{}]", class.as_str()));
         }
@@ -1078,10 +1079,7 @@ mod tests {
         };
 
         let text = render_doctor(&report, false).expect("renders");
-        assert!(
-            text.contains("step <unnamed> (unknown): unavailable"),
-            "{text}"
-        );
+        assert!(text.contains("step: unavailable"), "{text}");
     }
 
     #[test]
