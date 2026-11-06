@@ -277,8 +277,6 @@ fn reject_moved_sections(text: &str) -> Result<(), ConfigError> {
     Ok(())
 }
 
-
-
 /// The most ports a project may ask the host to publish.
 const MAX_PORTS: usize = 32;
 
@@ -666,8 +664,8 @@ bind = "0.0.0.0"
                 backends,
                 ..Default::default()
             },
-            provision: definitions,
-            backend_provision: sequences
+            provision_definitions: definitions,
+            backend_sequences: sequences
                 .iter()
                 .map(|(name, identities)| {
                     (

@@ -997,7 +997,7 @@ mod seam_tests {
                 }]
             })
             .unwrap_or_default();
-        let backend_provision = command
+        let backend_sequences = command
             .as_ref()
             .map(|_| {
                 std::collections::BTreeMap::from([("test".to_string(), vec!["setup".to_string()])])
@@ -1008,8 +1008,8 @@ mod seam_tests {
                 slug: Some("project".to_string()),
                 backends: Some(vec!["test".to_string()]),
             },
-            provision,
-            backend_provision,
+            provision_definitions: provision,
+            backend_sequences,
             allow_project_setup,
             ..Config::default()
         };
@@ -1212,11 +1212,11 @@ mod seam_tests {
                 slug: Some("project".to_string()),
                 backends: Some(vec!["test".to_string()]),
             },
-            provision: vec![crate::config::ProvisionDefinition::Command {
+            provision_definitions: vec![crate::config::ProvisionDefinition::Command {
                 identity: "setup".to_string(),
                 run: "echo permitted".to_string(),
             }],
-            backend_provision: std::collections::BTreeMap::from([(
+            backend_sequences: std::collections::BTreeMap::from([(
                 "test".to_string(),
                 vec!["setup".to_string()],
             )]),
@@ -1278,11 +1278,11 @@ mod seam_tests {
                 slug: Some("project".to_string()),
                 backends: Some(vec!["other".to_string()]),
             },
-            provision: vec![crate::config::ProvisionDefinition::Command {
+            provision_definitions: vec![crate::config::ProvisionDefinition::Command {
                 identity: "setup".to_string(),
                 run: "echo refused".to_string(),
             }],
-            backend_provision: std::collections::BTreeMap::from([(
+            backend_sequences: std::collections::BTreeMap::from([(
                 "test".to_string(),
                 vec!["setup".to_string()],
             )]),
@@ -1332,11 +1332,11 @@ mod seam_tests {
                     slug: Some("project".to_string()),
                     backends: Some(vec!["test".to_string()]),
                 },
-                provision: vec![crate::config::ProvisionDefinition::Command {
+                provision_definitions: vec![crate::config::ProvisionDefinition::Command {
                     identity: "setup".to_string(),
                     run: "echo refused".to_string(),
                 }],
-                backend_provision: std::collections::BTreeMap::from([(
+                backend_sequences: std::collections::BTreeMap::from([(
                     "test".to_string(),
                     vec!["setup".to_string()],
                 )]),
@@ -1382,7 +1382,7 @@ mod seam_tests {
                 slug: Some("project".to_string()),
                 backends: Some(vec!["test".to_string(), "other".to_string()]),
             },
-            provision: vec![
+            provision_definitions: vec![
                 crate::config::ProvisionDefinition::Command {
                     identity: "z-first".to_string(),
                     run: "true".to_string(),
@@ -1396,7 +1396,7 @@ mod seam_tests {
                     run: "true".to_string(),
                 },
             ],
-            backend_provision: std::collections::BTreeMap::from([
+            backend_sequences: std::collections::BTreeMap::from([
                 (
                     "test".to_string(),
                     vec!["z-first".to_string(), "a-second".to_string()],
