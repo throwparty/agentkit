@@ -850,7 +850,7 @@ bind = "0.0.0.0"
 
     #[test]
     fn setup_command_is_rejected_with_the_replacement() {
-        let error = reject_moved_sections("[project]\nsetup-command = 'echo hi'\n")
+        let error = parse_project("[project]\nsetup-command = 'echo hi'\n")
             .expect_err("setup-command rejected");
         assert!(error.to_string().contains("[[provision]]"), "{error}");
         assert!(error.to_string().contains("backends"), "{error}");
