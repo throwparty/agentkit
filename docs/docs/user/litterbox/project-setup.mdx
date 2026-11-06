@@ -26,7 +26,7 @@ target = 8080
 ```
 
 The sandbox's image is not a project setting: it belongs to the person running
-the code, in the untracked `.agentkit/litterbox/config.local.toml`:
+the code, in `~/.config/agentkit/litterbox/config.toml`:
 
 ```toml
 backend = "docker"
@@ -46,8 +46,8 @@ path (`/src`). The same step then works on every backend that supports commands.
 
 The command step only runs when the person running the code allows it. Cloning a
 repository is not consent to execute its shell command. Grant one repository by
-adding the namespace `litterbox list` prints to `allowed-projects` in the local
-override:
+adding the namespace `litterbox list` prints to `allowed-projects` in the user
+configuration:
 
 ```toml
 allowed-projects = ["my-project-1a2b3c4d"]

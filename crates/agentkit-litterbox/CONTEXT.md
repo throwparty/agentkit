@@ -38,7 +38,8 @@ Normative terminology for the Litterbox component. It covers the sandbox model t
 
 - **Record** — the persisted `StoredSandbox`: the contract record (name, backend, project, backend-owned payload) plus the branch and the SCM mode. Persistence keeps SCM vocabulary out of the contract.
 - **Legacy record** — a record written before this model. It is reported as unknown and never adopted; no record is synthesised from a name.
-- **Local override** — the person's choice of backend, that backend's settings, and where forwarded ports bind, in the untracked `.agentkit/litterbox/config.local.toml`. The only place a mechanism is chosen.
+- **User configuration** — the person's choice of backend, that backend's settings, setup consent and where forwarded ports bind, in `~/.config/agentkit/litterbox/config.toml`. The only place a mechanism is chosen.
+- **Local override** — the untracked `.agentkit/litterbox/config.local.toml`, carrying project-owned replacements only; machine settings and consent are rejected there.
 - **Project configuration** — what the project needs: its provisioning definitions, the backends its provisioning supports, expected ports and snapshot mode. It cannot select a backend or dictate confinement.
 
 ## Language

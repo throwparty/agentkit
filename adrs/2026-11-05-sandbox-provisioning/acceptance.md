@@ -10,7 +10,7 @@ nix develop ./nix --command cargo test -p agentkit-litterbox --lib
 nix develop ./nix --command cargo test -p agentkit-litterbox --doc
 ```
 
-313 passed, 0 failed, 8 ignored in the library target. The ignored tests are the
+316 passed, 0 failed, 8 ignored in the library target. The ignored tests are the
 Docker suite. The doc target runs the compile_fail facet doctest: 1 passed.
 The doctor integration test target has 2 passed, including a misconfigured run.
 
