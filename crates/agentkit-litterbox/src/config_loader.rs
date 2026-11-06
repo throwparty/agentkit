@@ -44,10 +44,12 @@ const CONFIG_KEYS: &[&str] = &[
 
 /// Load the merged configuration.
 pub fn load_final() -> Result<Config, ConfigError> {
+    let project_root = std::env::current_dir().ok();
     load_final_from(
         Path::new(PROJECT_FILE),
         Path::new(LOCAL_FILE),
         user_config_path().as_deref(),
+        project_root.as_deref(),
     )
 }
 
@@ -56,6 +58,7 @@ fn load_final_from(
     project_path: &Path,
     local_path: &Path,
     user_path: Option<&Path>,
+    project_root: Option<&Path>,
 ) -> Result<Config, ConfigError> {
     let project = match read_config_file(project_path)? {
         Some(text) => parse_project(&text)?,
@@ -68,7 +71,7 @@ fn load_final_from(
         None => ProjectFile::default(),
     };
     reject_machine_keys_in_local(&local)?;
-    let user = read_user_config_at(user_path)?;
+    let user = read_user_config_at(user_path, project_root)?;
     let mut config = merge_layers(project, local, user)?;
     validate_forwarding(&config)?;
     validate_ports(&config)?;
@@ -113,7 +116,7 @@ pub fn load_local_only() -> Result<Config, ConfigError> {
         None => ProjectFile::default(),
     };
     reject_machine_keys_in_local(&local)?;
-    let user = read_user_config_at(user_config_path().as_deref())?;
+    let user = read_user_config_at(user_config_path().as_deref(), None)?;
     let mut config = merge(user, ProjectFile::default())?;
     validate_forwarding(&config)?;
     warn_public_ports(&mut config);
@@ -172,11 +175,14 @@ fn combine_backends(
 }
 
 /// Read the user-scoped configuration, if present.
-fn read_user_config_at(path: Option<&Path>) -> Result<ProjectFile, ConfigError> {
+fn read_user_config_at(
+    path: Option<&Path>,
+    project_root: Option<&Path>,
+) -> Result<ProjectFile, ConfigError> {
     let Some(path) = path else {
         return Ok(ProjectFile::default());
     };
-    validate_user_config_path(path)?;
+    validate_user_config_path(path, project_root)?;
     match read_config_file(path)? {
         Some(text) => {
             let user = parse_project(&text)?;
@@ -192,7 +198,7 @@ fn read_user_config_at(path: Option<&Path>) -> Result<ProjectFile, ConfigError> 
 /// Consent and backend selection are machine-owned; a committed wrapper that
 /// points `LITTERBOX_USER_CONFIG` or `XDG_CONFIG_HOME` at a file in the
 /// repository must not be able to supply them.
-fn validate_user_config_path(path: &Path) -> Result<(), ConfigError> {
+fn validate_user_config_path(path: &Path, project_root: Option<&Path>) -> Result<(), ConfigError> {
     if !path.is_absolute() {
         return Err(ConfigError::ParseError(format!(
             "{} must be an absolute path",
@@ -209,7 +215,6 @@ fn validate_user_config_path(path: &Path) -> Result<(), ConfigError> {
         )));
     }
 
-    let inside = |root: &Path| path.starts_with(root);
     let inside_error = || {
         ConfigError::ParseError(format!(
             "{} is inside the checkout; keep the user configuration outside the repository",
@@ -217,54 +222,70 @@ fn validate_user_config_path(path: &Path) -> Result<(), ConfigError> {
         ))
     };
 
-    // Fail closed without needing a repository: a path under the directory
-    // being operated on is never a machine-owned user configuration.
-    let cwd = std::env::current_dir()
-        .ok()
-        .and_then(|dir| dir.canonicalize().ok());
-    if let Some(cwd) = &cwd
-        && inside(cwd)
-    {
-        return Err(inside_error());
-    }
-
     let resolved = path
         .parent()
         .and_then(|parent| parent.canonicalize().ok())
         .map(|parent| parent.join(path.file_name().unwrap_or_default()));
-    if let (Some(resolved), Some(cwd)) = (&resolved, &cwd)
-        && resolved.starts_with(cwd)
-    {
-        return Err(inside_error());
+
+    // `load_final` knows the project it is operating on even when git metadata
+    // is unavailable or broken, so this check does not depend on discovery.
+    if let Some(root) = project_root {
+        let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        if path.starts_with(&root)
+            || resolved
+                .as_ref()
+                .is_some_and(|resolved| resolved.starts_with(&root))
+        {
+            return Err(inside_error());
+        }
     }
 
     let Ok(project) = Repository::discover(".") else {
+        // Host-scoped commands may run outside a repository; without a
+        // checkout there is no project to contain the path against.
         return Ok(());
     };
+    let project_common = project
+        .commondir()
+        .canonicalize()
+        .map_err(|_| inside_error())?;
+
     if let Some(resolved) = &resolved {
-        if let Some(workdir) = project.workdir() {
-            let workdir = workdir
-                .canonicalize()
-                .unwrap_or_else(|_| workdir.to_path_buf());
-            if resolved.starts_with(&workdir) {
-                return Err(inside_error());
+        match project.workdir() {
+            Some(workdir) => {
+                let workdir = workdir
+                    .canonicalize()
+                    .unwrap_or_else(|_| workdir.to_path_buf());
+                if resolved.starts_with(&workdir) {
+                    return Err(inside_error());
+                }
+            }
+            None => {
+                let gitdir = project
+                    .path()
+                    .canonicalize()
+                    .unwrap_or_else(|_| project.path().to_path_buf());
+                if resolved.starts_with(&gitdir) {
+                    return Err(inside_error());
+                }
             }
         }
         // A linked worktree is outside the main workdir but still this
         // project: compare the shared git directory.
         if let Some(parent) = path.parent()
             && let Ok(candidate) = Repository::discover(parent)
-            && let (Ok(candidate_common), Ok(project_common)) = (
-                candidate.commondir().canonicalize(),
-                project.commondir().canonicalize(),
-            )
-            && candidate_common == project_common
         {
-            return Err(ConfigError::ParseError(format!(
-                "{} is inside a worktree of this repository; keep the user configuration \
-                 outside it",
-                path.display()
-            )));
+            let candidate_common = candidate
+                .commondir()
+                .canonicalize()
+                .map_err(|_| inside_error())?;
+            if candidate_common == project_common {
+                return Err(ConfigError::ParseError(format!(
+                    "{} is inside a worktree of this repository; keep the user \
+                     configuration outside it",
+                    path.display()
+                )));
+            }
         }
     }
     Ok(())
@@ -1171,9 +1192,10 @@ bind = "0.0.0.0"
     fn load_final_applies_the_user_and_local_layers() {
         let dir = tempfile::tempdir().expect("tempdir");
         git2::Repository::init(dir.path()).expect("repo");
+        let user_dir = tempfile::tempdir().expect("user dir");
         let project = dir.path().join("config.toml");
         let local = dir.path().join("config.local.toml");
-        let user = dir.path().join("user.toml");
+        let user = user_dir.path().join("user.toml");
         std::fs::write(
             &project,
             "[project]\nbackends = ['docker']\n\
@@ -1193,7 +1215,8 @@ bind = "0.0.0.0"
         )
         .expect("user");
 
-        let config = super::load_final_from(&project, &local, Some(&user)).expect("load");
+        let config =
+            super::load_final_from(&project, &local, Some(&user), Some(dir.path())).expect("load");
         assert_eq!(config.backend.as_deref(), Some("docker"));
         assert_eq!(config.provision_definitions[0].identity(), "local-step");
         assert_eq!(config.backend_sequences["docker"], vec!["local-step"]);
@@ -1207,15 +1230,31 @@ bind = "0.0.0.0"
     fn load_final_rejects_a_project_key_in_the_user_configuration() {
         let dir = tempfile::tempdir().expect("tempdir");
         git2::Repository::init(dir.path()).expect("repo");
+        let user_dir = tempfile::tempdir().expect("user dir");
+        let project = dir.path().join("config.toml");
+        let local = dir.path().join("config.local.toml");
+        let user = user_dir.path().join("user.toml");
+        std::fs::write(&project, "[project]\nbackends = ['docker']\n").expect("project");
+        std::fs::write(&user, "provision = []\n").expect("user");
+
+        let error = super::load_final_from(&project, &local, Some(&user), Some(dir.path()))
+            .expect_err("the user step list is refused");
+        assert!(error.to_string().contains("project-owned"), "{error}");
+    }
+
+    #[test]
+    fn load_final_refuses_a_user_configuration_inside_the_project() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        git2::Repository::init(dir.path()).expect("repo");
         let project = dir.path().join("config.toml");
         let local = dir.path().join("config.local.toml");
         let user = dir.path().join("user.toml");
         std::fs::write(&project, "[project]\nbackends = ['docker']\n").expect("project");
-        std::fs::write(&user, "provision = []\n").expect("user");
+        std::fs::write(&user, "backend = 'docker'\n").expect("user");
 
-        let error = super::load_final_from(&project, &local, Some(&user))
-            .expect_err("the user step list is refused");
-        assert!(error.to_string().contains("project-owned"), "{error}");
+        let error = super::load_final_from(&project, &local, Some(&user), Some(dir.path()))
+            .expect_err("a user config inside the project is refused");
+        assert!(error.to_string().contains("inside the checkout"), "{error}");
     }
 
     #[test]
@@ -1246,33 +1285,50 @@ bind = "0.0.0.0"
 
     #[test]
     fn a_user_configuration_cannot_declare_project_steps() {
-        for text in [
-            "provision = []\n",
-            "[[provision]]\nidentity = 'fetch'\nkind = 'command'\nrun = 'true'\n",
-            "[backends.docker]\nprovision = []\n",
-            "[project]\nbackends = ['docker']\n",
-            "[[ports]]\nname = 'web'\ntarget = 8080\n",
-            "[git]\nsnapshot-mode = 'remote'\n",
+        for (text, key) in [
+            ("provision = []\n", "provision"),
+            (
+                "[[provision]]\nidentity = 'fetch'\nkind = 'command'\nrun = 'true'\n",
+                "provision",
+            ),
+            (
+                "[backends.docker]\nprovision = []\n",
+                "backends.docker.provision",
+            ),
+            ("[project]\nbackends = ['docker']\n", "project"),
+            ("[[ports]]\nname = 'web'\ntarget = 8080\n", "ports"),
+            ("[git]\nsnapshot-mode = 'remote'\n", "git"),
         ] {
             let user: ProjectFile = toml::from_str(text).expect("user parses");
             let error = super::reject_project_keys_in_user(&user)
                 .expect_err("project-owned keys are refused");
             assert!(error.to_string().contains("project-owned"), "{error}");
+            assert!(
+                error.to_string().contains(key),
+                "the refusal should name {key}: {error}"
+            );
         }
     }
 
     #[test]
     fn the_user_config_path_must_be_absolute_and_outside_the_checkout() {
-        let error = super::validate_user_config_path(std::path::Path::new("config.toml"))
+        let error = super::validate_user_config_path(std::path::Path::new("config.toml"), None)
             .expect_err("relative path refused");
         assert!(error.to_string().contains("absolute"), "{error}");
 
-        let inside = std::env::current_dir().expect("cwd").join("config.toml");
-        let error = super::validate_user_config_path(&inside).expect_err("inside refused");
+        let error =
+            super::validate_user_config_path(std::path::Path::new("/tmp/../etc/config.toml"), None)
+                .expect_err("a parent traversal is refused");
+        assert!(error.to_string().contains("'..'"), "{error}");
+
+        let cwd = std::env::current_dir().expect("cwd");
+        let inside = cwd.join("config.toml");
+        let error =
+            super::validate_user_config_path(&inside, Some(&cwd)).expect_err("inside refused");
         assert!(error.to_string().contains("inside the checkout"), "{error}");
 
         let outside = tempfile::tempdir().expect("tempdir");
-        super::validate_user_config_path(&outside.path().join("config.toml"))
+        super::validate_user_config_path(&outside.path().join("config.toml"), None)
             .expect("an absolute path outside the checkout is accepted");
     }
 
