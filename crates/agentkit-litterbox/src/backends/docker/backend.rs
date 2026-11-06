@@ -253,22 +253,38 @@ fn command_failure(step: &ProvisionStep, exit_code: i32, output: &str) -> Error 
 }
 
 /// A create that outlived its fixed budget.
-fn timeout_failure(step: &str, budget: Duration) -> Error {
-    let named = !step.is_empty();
-    let reason = if named {
-        format!("create exceeded the {budget:?} provisioning budget while running '{step}'")
-    } else {
-        format!(
-            "create exceeded the {budget:?} provisioning budget before running a provisioning \
-             step"
-        )
+fn timeout_failure(sandbox: &str, step: Option<&ProvisionStep>, budget: Duration) -> Error {
+    let (identity, kind, reason) = match step {
+        Some(step) => (
+            Some(step.identity().to_string()),
+            Some(step.kind().as_str().to_string()),
+            format!(
+                "create exceeded the {budget:?} provisioning budget while running '{}'",
+                step.identity()
+            ),
+        ),
+        None => (
+            None,
+            None,
+            format!(
+                "create exceeded the {budget:?} provisioning budget before running a \
+                 provisioning step"
+            ),
+        ),
     };
+    tracing::warn!(
+        sandbox = %sandbox,
+        step = identity.as_deref().unwrap_or(""),
+        kind = kind.as_deref().unwrap_or(""),
+        budget = ?budget,
+        "the create budget expired"
+    );
     Error::Provisioning {
         failure: Box::new(ProvisioningFailure {
             class: ProvisioningClass::Failed,
             backend: Some(BACKEND.to_string()),
-            step: named.then(|| step.to_string()),
-            kind: named.then(|| ProvisionKind::Command.as_str().to_string()),
+            step: identity,
+            kind,
             reason,
             remedy: "reduce the work the provisioning steps perform, or split the create"
                 .to_string(),
@@ -294,7 +310,7 @@ const CREATE_BUDGET: Duration = Duration::from_secs(2 * 60 * 60);
 fn run_steps<'a, F>(
     sandbox: &'a str,
     provision: &'a [ProvisionStep],
-    last_step: &'a Mutex<String>,
+    last_step: &'a Mutex<Option<ProvisionStep>>,
     mut exec: F,
 ) -> BoxFuture<'a, Result<Vec<StepProvenance>, Error>>
 where
@@ -306,7 +322,7 @@ where
             let ProvisionStep::Command { identity, run } = step;
             *last_step
                 .lock()
-                .unwrap_or_else(|poison| poison.into_inner()) = identity.clone();
+                .unwrap_or_else(|poison| poison.into_inner()) = Some(step.clone());
             let started = Instant::now();
             tracing::info!(
                 sandbox = %sandbox,
@@ -426,7 +442,7 @@ impl Backend for DockerBackend {
                 }
             }
 
-            let last_step = Mutex::new(String::new());
+            let last_step = Mutex::new(None);
             let budget = CREATE_BUDGET;
             let provision = run_steps(
                 &request.name,
@@ -458,7 +474,7 @@ impl Backend for DockerBackend {
                         .lock()
                         .map(|step| step.clone())
                         .unwrap_or_else(|poison| poison.into_inner().clone());
-                    return Err(timeout_failure(&step, budget));
+                    return Err(timeout_failure(&request.name, step.as_ref(), budget));
                 }
             };
             environment.provenance.steps = steps;
@@ -1213,7 +1229,7 @@ mod tests {
 
     #[test]
     fn a_timeout_names_the_step_and_the_budget_without_a_phantom_step() {
-        match timeout_failure("fetch", Duration::from_secs(60)) {
+        match timeout_failure("demo", Some(&step("fetch")), Duration::from_secs(60)) {
             Error::Provisioning { failure } => {
                 assert_eq!(failure.step.as_deref(), Some("fetch"));
                 assert_eq!(failure.kind.as_deref(), Some("command"));
@@ -1222,7 +1238,7 @@ mod tests {
             other => panic!("expected Provisioning, got {other:?}"),
         }
 
-        match timeout_failure("", Duration::from_secs(60)) {
+        match timeout_failure("demo", None, Duration::from_secs(60)) {
             Error::Provisioning { failure } => {
                 assert_eq!(failure.step, None);
                 assert_eq!(failure.kind, None);
@@ -1293,7 +1309,7 @@ mod tests {
             step_with("z-first", "touch first"),
             step_with("a-second", "cat first"),
         ];
-        let last = std::sync::Mutex::new(String::new());
+        let last = std::sync::Mutex::new(None);
         let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let recorded = seen.clone();
         let completed = run_steps("demo", &steps, &last, move |identity, run| {
@@ -1325,15 +1341,18 @@ mod tests {
             "each step runs with its own command, in list order"
         );
         assert_eq!(
-            *last.lock().unwrap_or_else(|poison| poison.into_inner()),
-            "a-second"
+            last.lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .as_ref()
+                .map(ProvisionStep::identity),
+            Some("a-second")
         );
     }
 
     #[tokio::test]
     async fn the_step_loop_names_the_failing_step_and_keeps_completed_ones() {
         let steps = vec![step("first"), step("second")];
-        let last = std::sync::Mutex::new(String::new());
+        let last = std::sync::Mutex::new(None);
         let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let recorded = seen.clone();
         let error = run_steps("demo", &steps, &last, move |identity, run| {
@@ -1378,8 +1397,11 @@ mod tests {
             "the failing step still ran with its own command"
         );
         assert_eq!(
-            *last.lock().unwrap_or_else(|poison| poison.into_inner()),
-            "second"
+            last.lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .as_ref()
+                .map(ProvisionStep::identity),
+            Some("second")
         );
     }
 
