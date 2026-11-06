@@ -615,24 +615,6 @@ pub enum PlannedStep {
     },
 }
 
-impl PlannedStep {
-    /// The step identity, when one is known.
-    pub fn identity(&self) -> &str {
-        match self {
-            Self::Resolved { step, .. } => step.identity(),
-            Self::Failed { failure } => failure.step.as_deref().unwrap_or("unknown"),
-        }
-    }
-
-    /// The step kind, when one is known.
-    pub fn kind(&self) -> &str {
-        match self {
-            Self::Resolved { step, .. } => step.kind().as_str(),
-            Self::Failed { failure } => failure.kind.as_deref().unwrap_or("unknown"),
-        }
-    }
-}
-
 /// A preflight plan: the steps in order plus a whole-call failure.
 #[derive(Debug)]
 pub struct Preflight {
@@ -663,16 +645,8 @@ pub fn preflight(
                             refusal,
                         });
                     }
-                    StepOutcome::Failed(Error::Provisioning { failure }) => {
+                    StepOutcome::Failed(failure) => {
                         steps.push(PlannedStep::Failed { failure: *failure });
-                    }
-                    // A step-level error that is not a provisioning failure
-                    // must fail the whole plan rather than be dropped.
-                    StepOutcome::Failed(error) => {
-                        return Preflight {
-                            steps,
-                            failure: Some(error),
-                        };
                     }
                 }
             }
