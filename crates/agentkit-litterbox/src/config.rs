@@ -407,13 +407,10 @@ pub fn merge(local: ProjectFile, project: ProjectFile) -> Result<Config, ConfigE
         ));
     }
 
-    // An explicitly empty local definitions list is a deliberate removal
-    // (EC-004) and drops the project's sequences with it. A non-empty local
-    // list still leaves each project sequence in place unless the local file
-    // supplied that backend's list; validation then rejects a dangling
-    // identity rather than silently disabling the sequence.
-    let local_definitions_empty = local.provision.as_ref().is_some_and(Vec::is_empty);
-    let inherit_project_sequences = !local_definitions_empty;
+    // A local definitions list replaces the project's definitions but leaves
+    // each backend sequence in place unless the local file supplied that
+    // backend's list. Validation then rejects a dangling identity rather than
+    // silently disabling the sequence.
     let mut backends = local.backends;
     let mut backend_sequences = BTreeMap::new();
 
@@ -439,15 +436,7 @@ pub fn merge(local: ProjectFile, project: ProjectFile) -> Result<Config, ConfigE
             ));
         }
         if let Some(sequence) = sequence {
-            if inherit_project_sequences {
-                backend_sequences.entry(name.clone()).or_insert(sequence);
-            } else {
-                let name = escaped(name);
-                notices.push(format!(
-                    "project configuration's backends.{name}.provision is ignored because the \
-                     local override removes the project's [[provision]] definitions"
-                ));
-            }
+            backend_sequences.entry(name.clone()).or_insert(sequence);
         }
     }
 
@@ -832,20 +821,20 @@ installable = "./nix"
     }
 
     #[test]
-    fn an_empty_local_definition_list_removes_the_project_steps() {
+    fn an_empty_local_definition_list_is_rejected_by_dangling_sequences() {
         let project: ProjectFile = toml::from_str(
             "[[provision]]\nidentity = 'fetch'\nkind = 'command'\nrun = 'true'\n\
              [backends.bubblewrap]\nprovision = ['fetch']\n",
         )
         .expect("project");
         let local: ProjectFile = toml::from_str("provision = []\n").expect("local");
-        let config = merge(local, project).expect("merge");
+        let mut config = merge(local, project).expect("merge");
         assert!(config.provision_definitions.is_empty());
-        assert!(
-            config.backend_sequences.is_empty(),
-            "the removed definitions' sequences are dropped: {:?}",
-            config.backend_sequences
-        );
+        assert_eq!(config.backend_sequences["bubblewrap"], vec!["fetch"]);
+        let error = config
+            .validate_provisioning()
+            .expect_err("the dangling sequence is refused");
+        assert!(error.reason.contains("does not define"), "{error}");
     }
 
     #[test]
