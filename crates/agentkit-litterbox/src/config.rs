@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::domain::ScmMode;
-use crate::sandbox::contract::{ProvisionStep, ProvisioningClass, ProvisioningFailure};
+use crate::sandbox::contract::ProvisionStep;
 
 /// A port the project expects to be forwarded.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -89,14 +89,6 @@ pub struct Config {
     pub notices: Vec<String>,
 }
 
-/// Why a command step is refused when the project has no consent.
-pub const COMMAND_STEP_REASON: &str = "this project defines a command step; add its namespace to allowed-projects, or set \
-     allow-project-setup = true, in .agentkit/litterbox/config.local.toml to let it run";
-
-/// What the user can do about a refused command step.
-pub const COMMAND_STEP_REMEDY: &str =
-    "add the project to allowed-projects or set allow-project-setup";
-
 impl Config {
     /// Whether this project's command steps may run.
     pub fn command_steps_allowed(&self, project_slug: &str) -> bool {
@@ -105,30 +97,6 @@ impl Config {
                 .allowed_projects
                 .iter()
                 .any(|project| project == project_slug)
-    }
-
-    /// The structured refusal for a command step this project may not run.
-    pub fn command_step_refusal(
-        &self,
-        project_slug: &str,
-        backend: &str,
-        step: &ProvisionStep,
-    ) -> Option<ProvisioningFailure> {
-        if self.command_steps_allowed(project_slug) {
-            return None;
-        }
-        match step {
-            ProvisionStep::Command { .. } => Some(ProvisioningFailure {
-                class: ProvisioningClass::Denied,
-                backend: Some(backend.to_string()),
-                step: Some(step.identity().to_string()),
-                kind: Some(step.kind().as_str().to_string()),
-                reason: COMMAND_STEP_REASON.to_string(),
-                remedy: format!("{COMMAND_STEP_REMEDY}: add '{project_slug}' to allowed-projects"),
-                exit_code: None,
-                output: None,
-            }),
-        }
     }
 
     /// Check the provisioning schema without changing the configuration.
