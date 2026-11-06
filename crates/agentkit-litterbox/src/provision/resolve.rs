@@ -8,9 +8,7 @@
 
 use std::collections::HashMap;
 
-use crate::config::{
-    Config, ProvisionDefinition, ProvisioningIssue, escaped, valid_backend_name,
-};
+use crate::config::{Config, ProvisionDefinition, ProvisioningIssue, escaped, valid_backend_name};
 use crate::sandbox::contract::{
     Error, ProvisionStep, ProvisionSupport, ProvisioningClass, ProvisioningFailure,
 };
@@ -113,11 +111,11 @@ fn sequence_definitions<'a>(
     config: &'a Config,
     selected: &str,
 ) -> Result<Vec<&'a ProvisionDefinition>, Error> {
-    let Some(sequence) = config.backend_provision.get(selected) else {
+    let Some(sequence) = config.backend_sequences.get(selected) else {
         return Ok(Vec::new());
     };
     let definitions: HashMap<&str, &ProvisionDefinition> = config
-        .provision
+        .provision_definitions
         .iter()
         .map(|definition| (definition.identity(), definition))
         .collect();
@@ -321,8 +319,8 @@ mod tests {
                 backends,
                 ..Default::default()
             },
-            provision: definitions,
-            backend_provision: [(
+            provision_definitions: definitions,
+            backend_sequences: [(
                 "bubblewrap".to_string(),
                 sequence.into_iter().map(str::to_string).collect(),
             )]
@@ -595,10 +593,14 @@ mod tests {
                 backends: Some(vec!["bubblewrap".to_string()]),
                 ..Default::default()
             },
-            provision: vec![command("z-first"), command("a-second"), command("b-third")],
+            provision_definitions: vec![
+                command("z-first"),
+                command("a-second"),
+                command("b-third"),
+            ],
             ..Config::default()
         };
-        config.backend_provision.insert(
+        config.backend_sequences.insert(
             "bubblewrap".to_string(),
             vec![
                 "z-first".to_string(),
@@ -630,7 +632,7 @@ mod tests {
     #[test]
     fn preflight_steps_keeps_a_validation_failure_for_the_whole_call() {
         let config = Config {
-            provision: vec![command("fetch")],
+            provision_definitions: vec![command("fetch")],
             ..Config::default()
         };
         let error = preflight_steps(&config, "bubblewrap", &[]).expect_err("missing supported set");
@@ -647,7 +649,7 @@ mod tests {
                 backends: Some(vec!["bubblewrap".to_string()]),
                 ..Default::default()
             },
-            provision: vec![command("fetch")],
+            provision_definitions: vec![command("fetch")],
             ..Config::default()
         };
         assert!(
@@ -674,15 +676,15 @@ mod tests {
                 backends: Some(vec!["bubblewrap".to_string(), "docker".to_string()]),
                 ..Default::default()
             },
-            provision: vec![command("devshell"), command("fetch")],
+            provision_definitions: vec![command("devshell"), command("fetch")],
             ..Config::default()
         };
-        config.backend_provision.insert(
+        config.backend_sequences.insert(
             "bubblewrap".to_string(),
             vec!["devshell".to_string(), "fetch".to_string()],
         );
         config
-            .backend_provision
+            .backend_sequences
             .insert("docker".to_string(), vec!["fetch".to_string()]);
 
         let bubblewrap =
@@ -699,7 +701,7 @@ mod tests {
     fn an_invalid_identity_is_refused_by_validation() {
         for identity in ["", "1fetch", "fetch!", "fetch.ok"] {
             let config = Config {
-                provision: vec![command(identity)],
+                provision_definitions: vec![command(identity)],
                 ..Config::default()
             };
             let error = validate(&config).expect_err("invalid identity");
@@ -714,7 +716,7 @@ mod tests {
                 backends: Some(vec!["bubblewrap".to_string()]),
                 ..Default::default()
             },
-            provision: vec![command("fetch_ok-1")],
+            provision_definitions: vec![command("fetch_ok-1")],
             ..Config::default()
         };
         validate(&config).expect("a valid identity");
@@ -791,7 +793,7 @@ mod tests {
     #[test]
     fn a_project_level_issue_names_no_backend() {
         let config = Config {
-            provision: vec![command("fetch"), command("fetch")],
+            provision_definitions: vec![command("fetch"), command("fetch")],
             ..Config::default()
         };
         match validate(&config).expect_err("duplicate") {

@@ -501,10 +501,8 @@ async fn handle_doctor(backend: Option<String>, json: bool) -> ExitCode {
         Err(error) => return report(error),
     };
     let support = selected.core().provision_support();
-    let (readiness, capabilities) = tokio::join!(
-        selected.core().readiness(),
-        selected.core().capabilities()
-    );
+    let (readiness, capabilities) =
+        tokio::join!(selected.core().readiness(), selected.core().capabilities());
     let readiness = match readiness {
         Ok(readiness) => readiness,
         Err(error) => return report(error),
@@ -590,7 +588,9 @@ fn build_doctor_report(
                     remedy,
                 });
             }
-            PlannedStep::Failed { failure: step_failure } => {
+            PlannedStep::Failed {
+                failure: step_failure,
+            } => {
                 let step_error = Error::Provisioning {
                     failure: Box::new(step_failure.clone()),
                 };
@@ -875,11 +875,11 @@ mod tests {
                 slug: Some("project".to_string()),
                 backends: Some(vec!["docker".to_string()]),
             },
-            provision: vec![ProvisionDefinition::Command {
+            provision_definitions: vec![ProvisionDefinition::Command {
                 identity: "setup".to_string(),
                 run: "true".to_string(),
             }],
-            backend_provision: [("docker".to_string(), vec!["setup".to_string()])]
+            backend_sequences: [("docker".to_string(), vec!["setup".to_string()])]
                 .into_iter()
                 .collect(),
             ..Config::default()
@@ -1103,7 +1103,7 @@ mod tests {
     fn two_steps_keep_the_list_order_and_degraded_maps_to_its_state() {
         let mut config = provisioning_config();
         config.allow_project_setup = true;
-        config.provision = vec![
+        config.provision_definitions = vec![
             ProvisionDefinition::Command {
                 identity: "z-first".to_string(),
                 run: "true".to_string(),
@@ -1113,7 +1113,7 @@ mod tests {
                 run: "true".to_string(),
             },
         ];
-        config.backend_provision.insert(
+        config.backend_sequences.insert(
             "docker".to_string(),
             vec!["z-first".to_string(), "a-second".to_string()],
         );

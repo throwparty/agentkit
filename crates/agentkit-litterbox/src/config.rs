@@ -100,10 +100,10 @@ pub struct Config {
     /// What the project declares.
     pub project: ProjectConfig,
     /// The step definitions, by identity. This is not a backend's sequence.
-    pub provision: Vec<ProvisionDefinition>,
+    pub provision_definitions: Vec<ProvisionDefinition>,
     /// Each backend's ordered step identities. This is the sequence, not the
     /// definitions.
-    pub backend_provision: BTreeMap<String, Vec<String>>,
+    pub backend_sequences: BTreeMap<String, Vec<String>>,
     /// Ports the project expects.
     pub ports: Vec<PortRequest>,
     /// How forwarded ports are exposed.
@@ -155,9 +155,7 @@ impl Config {
                 step: Some(step.identity().to_string()),
                 kind: Some(step.kind().as_str().to_string()),
                 reason: COMMAND_STEP_REASON.to_string(),
-                remedy: format!(
-                    "{COMMAND_STEP_REMEDY}: add '{project_slug}' to allowed-projects"
-                ),
+                remedy: format!("{COMMAND_STEP_REMEDY}: add '{project_slug}' to allowed-projects"),
                 exit_code: None,
                 output: None,
             }),
@@ -170,14 +168,14 @@ impl Config {
     /// a configuration error and the resolver turns the same issue into a
     /// structured provisioning failure.
     pub fn check_provisioning(&self) -> Result<(), ProvisioningIssue> {
-        if self.provision.len() > MAX_PROVISION_STEPS {
+        if self.provision_definitions.len() > MAX_PROVISION_STEPS {
             return Err(ProvisioningIssue {
                 backend: None,
                 step: None,
                 reason: format!(
                     "the project declares {} provisioning steps; the limit is \
                      {MAX_PROVISION_STEPS}",
-                    self.provision.len()
+                    self.provision_definitions.len()
                 ),
                 remedy: "remove steps the project does not need".to_string(),
             });
@@ -185,7 +183,7 @@ impl Config {
 
         let mut identities = HashSet::new();
 
-        for definition in &self.provision {
+        for definition in &self.provision_definitions {
             let identity = definition.identity();
             if !valid_identity(identity) {
                 let identity = escaped(identity);
@@ -226,7 +224,7 @@ impl Config {
             }
         }
 
-        for (backend, sequence) in &self.backend_provision {
+        for (backend, sequence) in &self.backend_sequences {
             if !valid_backend_name(backend) {
                 let backend = escaped(backend);
                 return Err(ProvisioningIssue {
@@ -283,7 +281,7 @@ impl Config {
             }
         }
 
-        if !self.provision.is_empty() {
+        if !self.provision_definitions.is_empty() {
             match self.project.backends.as_deref() {
                 None => {
                     return Err(ProvisioningIssue {
@@ -326,14 +324,14 @@ impl Config {
             .map(String::as_str)
             .collect();
         let used: HashSet<&str> = self
-            .backend_provision
+            .backend_sequences
             .values()
             .flatten()
             .map(String::as_str)
             .collect();
 
         let mut notices = Vec::new();
-        for definition in &self.provision {
+        for definition in &self.provision_definitions {
             if !used.contains(definition.identity()) {
                 notices.push(format!(
                     "provisioning step '{}' is not used by any backend's sequence",
@@ -341,7 +339,7 @@ impl Config {
                 ));
             }
         }
-        for backend in self.backend_provision.keys() {
+        for backend in self.backend_sequences.keys() {
             if !supported.contains(backend.as_str()) {
                 let display = escaped(backend);
                 notices.push(format!(
@@ -480,13 +478,13 @@ pub fn merge(local: ProjectFile, project: ProjectFile) -> Result<Config, ConfigE
     let local_definitions_empty = local.provision.as_ref().is_some_and(Vec::is_empty);
     let inherit_project_sequences = !local_definitions_empty;
     let mut backends = local.backends;
-    let mut backend_provision = BTreeMap::new();
+    let mut backend_sequences = BTreeMap::new();
 
     for (name, value) in &mut backends {
         if let toml::Value::Table(table) = value
             && let Some(sequence) = take_provision(name, table)?
         {
-            backend_provision.insert(name.clone(), sequence);
+            backend_sequences.insert(name.clone(), sequence);
         }
     }
 
@@ -505,7 +503,7 @@ pub fn merge(local: ProjectFile, project: ProjectFile) -> Result<Config, ConfigE
         }
         if let Some(sequence) = sequence {
             if inherit_project_sequences {
-                backend_provision.entry(name.clone()).or_insert(sequence);
+                backend_sequences.entry(name.clone()).or_insert(sequence);
             } else {
                 let name = escaped(name);
                 notices.push(format!(
@@ -523,8 +521,8 @@ pub fn merge(local: ProjectFile, project: ProjectFile) -> Result<Config, ConfigE
             slug: local.project.slug.or(project.project.slug),
             backends: local.project.backends.or(project.project.backends),
         },
-        provision: local.provision.or(project.provision).unwrap_or_default(),
-        backend_provision,
+        provision_definitions: local.provision.or(project.provision).unwrap_or_default(),
+        backend_sequences,
         ports: if local.ports.is_empty() {
             project.ports
         } else {
@@ -768,7 +766,7 @@ provision = ["fetch"]
         );
 
         let config = merge(ProjectFile::default(), file).expect("merge");
-        assert_eq!(config.backend_provision["bubblewrap"], vec!["fetch"]);
+        assert_eq!(config.backend_sequences["bubblewrap"], vec!["fetch"]);
         assert!(
             config.backends.is_empty(),
             "a project table contributes no machine settings"
@@ -796,7 +794,7 @@ provision = ["local-step"]
         )
         .expect("local");
         let config = merge(local, project).expect("merge");
-        assert_eq!(config.backend_provision["bubblewrap"], vec!["local-step"]);
+        assert_eq!(config.backend_sequences["bubblewrap"], vec!["local-step"]);
     }
 
     #[test]
@@ -810,7 +808,7 @@ image = "nope"
         )
         .expect("project");
         let config = merge(ProjectFile::default(), project).expect("merge");
-        assert_eq!(config.backend_provision["bubblewrap"], vec!["fetch"]);
+        assert_eq!(config.backend_sequences["bubblewrap"], vec!["fetch"]);
         assert!(
             config.backends.is_empty(),
             "project machine settings are not carried"
@@ -841,7 +839,7 @@ installable = "./nix"
     }
 
     #[test]
-    fn a_backend_provision_that_is_not_an_array_is_refused() {
+    fn a_backend_sequence_that_is_not_an_array_is_refused() {
         let project: ProjectFile =
             toml::from_str("[backends.bubblewrap]\nprovision = 'fetch'\n").expect("parses");
         let error = merge(ProjectFile::default(), project).expect_err("non-array refused");
@@ -892,8 +890,8 @@ installable = "./nix"
         )
         .expect("local");
         let config = merge(local, project).expect("merge");
-        assert_eq!(config.provision.len(), 1);
-        assert_eq!(config.provision[0].identity(), "local-step");
+        assert_eq!(config.provision_definitions.len(), 1);
+        assert_eq!(config.provision_definitions[0].identity(), "local-step");
     }
 
     #[test]
@@ -905,11 +903,11 @@ installable = "./nix"
         .expect("project");
         let local: ProjectFile = toml::from_str("provision = []\n").expect("local");
         let config = merge(local, project).expect("merge");
-        assert!(config.provision.is_empty());
+        assert!(config.provision_definitions.is_empty());
         assert!(
-            config.backend_provision.is_empty(),
+            config.backend_sequences.is_empty(),
             "the removed definitions' sequences are dropped: {:?}",
-            config.backend_provision
+            config.backend_sequences
         );
     }
 
@@ -920,7 +918,7 @@ installable = "./nix"
         let local: ProjectFile =
             toml::from_str("[backends.bubblewrap]\nprovision = []\n").expect("local");
         let config = merge(local, project).expect("merge");
-        assert_eq!(config.backend_provision["bubblewrap"], Vec::<String>::new());
+        assert_eq!(config.backend_sequences["bubblewrap"], Vec::<String>::new());
     }
 
     #[test]
@@ -929,7 +927,7 @@ installable = "./nix"
             toml::from_str("[backends.docker]\nimage = 'busybox'\nprovision = ['fetch']\n")
                 .expect("local");
         let config = merge(local, project()).expect("merge");
-        assert_eq!(config.backend_provision["docker"], vec!["fetch"]);
+        assert_eq!(config.backend_sequences["docker"], vec!["fetch"]);
         let docker = config.backends["docker"].as_table().expect("docker table");
         assert_eq!(
             docker.get("image").and_then(toml::Value::as_str),
