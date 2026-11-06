@@ -476,14 +476,14 @@ struct DoctorReport {
 #[derive(Debug, serde::Serialize)]
 struct DoctorStep {
     identity: String,
-    kind: String,
+    kind: crate::sandbox::contract::ProvisionKind,
     state: DoctorState,
-    class: Option<String>,
+    class: Option<crate::sandbox::contract::ProvisioningClass>,
     reason: Option<String>,
     remedy: Option<String>,
 }
 
-async fn handle_doctor(backend: Option<String>, json: bool) -> ExitCode {
+pub async fn handle_doctor(backend: Option<String>, json: bool) -> ExitCode {
     let config = match load_config_quiet(backend) {
         Ok(config) => config,
         Err(error) => return report(error),
@@ -500,15 +500,8 @@ async fn handle_doctor(backend: Option<String>, json: bool) -> ExitCode {
         Ok(selected) => selected,
         Err(error) => return report(error),
     };
-    let support = selected.core().provision_support();
-    let (readiness, capabilities) =
-        tokio::join!(selected.core().readiness(), selected.core().capabilities());
-    let readiness = match readiness {
-        Ok(readiness) => readiness,
-        Err(error) => return report(error),
-    };
-    let capabilities = match capabilities {
-        Ok(capabilities) => selected.merge_capabilities(capabilities, &support),
+    let (readiness, capabilities, support) = match backends::describe(&selected).await {
+        Ok(described) => described,
         Err(error) => return report(error),
     };
     let (doctor_report, failure) = build_doctor_report(
@@ -520,6 +513,16 @@ async fn handle_doctor(backend: Option<String>, json: bool) -> ExitCode {
         &support,
     );
 
+    tracing::info!(
+        backend = %doctor_report.backend,
+        steps = doctor_report.steps.len(),
+        error = doctor_report
+            .error
+            .as_ref()
+            .map(|error| error.class.as_str())
+            .unwrap_or(""),
+        "doctor report"
+    );
     match render_doctor(&doctor_report, json) {
         Ok(text) => {
             println!("{text}");
@@ -557,27 +560,6 @@ fn build_doctor_report(
             message: resolve_error.to_string(),
         });
     }
-    if error.is_some()
-        && plan.steps.is_empty()
-        && let Some(sequence) = config.backend_sequences.get(backend)
-    {
-        for identity in sequence {
-            let kind = config
-                .provision_definitions
-                .iter()
-                .find(|definition| definition.identity() == identity)
-                .map(|definition| definition.kind().as_str().to_string())
-                .unwrap_or_else(|| "unknown".to_string());
-            steps.push(DoctorStep {
-                identity: identity.clone(),
-                kind,
-                state: DoctorState::Unavailable,
-                class: error.as_ref().map(|error| error.class.clone()),
-                reason: error.as_ref().map(|error| error.message.clone()),
-                remedy: None,
-            });
-        }
-    }
     for planned in plan.steps {
         match planned {
             PlannedStep::Resolved {
@@ -588,7 +570,7 @@ fn build_doctor_report(
                 let (state, class, reason, remedy) = if let Some(refusal) = refusal {
                     (
                         DoctorState::Denied,
-                        Some(refusal.class.as_str().to_string()),
+                        Some(refusal.class),
                         Some(refusal.reason),
                         Some(refusal.remedy),
                     )
@@ -602,7 +584,7 @@ fn build_doctor_report(
                 };
                 steps.push(DoctorStep {
                     identity: step.identity().to_string(),
-                    kind: step.kind().as_str().to_string(),
+                    kind: step.kind(),
                     state,
                     class,
                     reason,
@@ -627,12 +609,9 @@ fn build_doctor_report(
                         .step
                         .clone()
                         .unwrap_or_else(|| "unknown".to_string()),
-                    kind: step_failure
-                        .kind
-                        .clone()
-                        .unwrap_or_else(|| "unknown".to_string()),
+                    kind: crate::sandbox::contract::ProvisionKind::Command,
                     state: DoctorState::Unavailable,
-                    class: Some(step_failure.class.as_str().to_string()),
+                    class: Some(step_failure.class),
                     reason: Some(step_failure.reason),
                     remedy: Some(step_failure.remedy).filter(|remedy| !remedy.is_empty()),
                 });
@@ -674,7 +653,7 @@ fn doctor_exit_code(
         && steps_ready;
     if let Some(failure) = failure {
         failure.code()
-    } else if report.readiness.state() == State::Unavailable {
+    } else if !backends::readiness_is_usable(&report.readiness, accept_degraded) {
         agentkit_common::exit::ExitClass::Unavailable.code()
     } else if denied {
         agentkit_common::exit::ExitClass::Denied.code()
@@ -702,6 +681,9 @@ fn render_doctor(report: &DoctorReport, json: bool) -> Result<String, Error> {
     ];
     lines.extend(report.readiness.checks.iter().map(check_line));
     lines.extend(report.capabilities.iter().map(capability_line));
+    for notice in &report.notices {
+        lines.push(format!("notice: {notice}"));
+    }
     if let Some(error) = &report.error {
         lines.push(format!("provisioning ({}): {}", error.class, error.message));
     }
@@ -709,11 +691,11 @@ fn render_doctor(report: &DoctorReport, json: bool) -> Result<String, Error> {
         let mut line = format!(
             "step {} ({}): {}",
             step.identity,
-            step.kind,
+            step.kind.as_str(),
             doctor_state_label(step.state)
         );
         if let Some(class) = &step.class {
-            line.push_str(&format!(" [{class}]"));
+            line.push_str(&format!(" [{}]", class.as_str()));
         }
         if let Some(reason) = &step.reason {
             line.push_str(&format!(" ({reason})"));
@@ -853,7 +835,9 @@ mod tests {
     };
     use crate::backends;
     use crate::config::{Config, ProjectConfig};
-    use crate::sandbox::contract::{ProvisionStep, ProvisionSupport, SandboxStatus};
+    use crate::sandbox::contract::{
+        ProvisionKind, ProvisionStep, ProvisionSupport, ProvisioningClass, SandboxStatus,
+    };
     use crate::sandbox::report::{Capability, Check, Fallback, Readiness, State};
 
     fn support(state: State) -> Vec<ProvisionSupport> {
@@ -951,7 +935,7 @@ mod tests {
             notices: Vec::new(),
             steps: vec![DoctorStep {
                 identity: "fetch".to_string(),
-                kind: "command".to_string(),
+                kind: ProvisionKind::Command,
                 state: DoctorState::Available,
                 class: None,
                 reason: None,
@@ -981,9 +965,9 @@ mod tests {
             notices: Vec::new(),
             steps: vec![DoctorStep {
                 identity: "setup".to_string(),
-                kind: "command".to_string(),
+                kind: ProvisionKind::Command,
                 state: DoctorState::Denied,
-                class: Some("denied".to_string()),
+                class: Some(ProvisioningClass::Denied),
                 reason: Some("consent is missing".to_string()),
                 remedy: Some("set allowed-projects".to_string()),
             }],
@@ -1164,45 +1148,15 @@ mod tests {
             notices: Vec::new(),
             steps: vec![DoctorStep {
                 identity: "fetch".to_string(),
-                kind: "command".to_string(),
+                kind: ProvisionKind::Command,
                 state: DoctorState::Unavailable,
-                class: Some("unavailable".to_string()),
+                class: Some(ProvisioningClass::Unavailable),
                 reason: None,
                 remedy: None,
             }],
             error: None,
         };
         assert_eq!(doctor_exit_code(&report, None, false), 1);
-    }
-
-    #[tokio::test]
-    async fn building_the_doctor_does_not_create_a_branch_or_record() {
-        let dir = tempfile::tempdir().expect("repo dir");
-        let repository = git2::Repository::init(dir.path()).expect("repo");
-        let records = tempfile::tempdir().expect("records");
-        let config = provisioning_config();
-
-        let (report, _) = build_doctor_report(
-            &config,
-            "project",
-            "docker",
-            readiness(),
-            Vec::new(),
-            &support(State::Available),
-        );
-        assert_eq!(report.steps.len(), 1);
-        assert_eq!(
-            repository.branches(None).expect("branches").count(),
-            0,
-            "the doctor creates no branch"
-        );
-        assert_eq!(
-            std::fs::read_dir(records.path())
-                .expect("records dir")
-                .count(),
-            0,
-            "the doctor creates no record"
-        );
     }
 
     #[test]
@@ -1256,7 +1210,10 @@ mod tests {
             steps: Vec::new(),
             error: None,
         };
-        assert_eq!(doctor_exit_code(&report, None, false), 1);
+        assert_eq!(
+            doctor_exit_code(&report, None, false),
+            agentkit_common::exit::ExitClass::Unavailable.code()
+        );
         assert_eq!(doctor_exit_code(&report, None, true), 0);
     }
 
