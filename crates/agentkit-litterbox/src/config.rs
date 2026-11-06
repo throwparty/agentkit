@@ -11,9 +11,7 @@ use std::collections::{BTreeMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::domain::ScmMode;
-use crate::sandbox::contract::{
-    ProvisionKind, ProvisionStep, ProvisioningClass, ProvisioningFailure,
-};
+use crate::sandbox::contract::{ProvisionStep, ProvisioningClass, ProvisioningFailure};
 
 /// A port the project expects to be forwarded.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -37,35 +35,6 @@ impl Default for ForwardingConfig {
     fn default() -> Self {
         Self {
             bind: "127.0.0.1".to_string(),
-        }
-    }
-}
-
-/// One provisioning step a project declares.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
-pub enum ProvisionDefinition {
-    /// A command run once, confined, in the sandbox.
-    Command {
-        /// Stable identity within the project.
-        identity: String,
-        /// The shell command to run.
-        run: String,
-    },
-}
-
-impl ProvisionDefinition {
-    /// The step's identity.
-    pub fn identity(&self) -> &str {
-        match self {
-            Self::Command { identity, .. } => identity,
-        }
-    }
-
-    /// The step's kind.
-    pub fn kind(&self) -> ProvisionKind {
-        match self {
-            Self::Command { .. } => ProvisionKind::Command,
         }
     }
 }
@@ -100,7 +69,7 @@ pub struct Config {
     /// What the project declares.
     pub project: ProjectConfig,
     /// The step definitions, by identity. This is not a backend's sequence.
-    pub provision_definitions: Vec<ProvisionDefinition>,
+    pub provision_definitions: Vec<ProvisionStep>,
     /// Each backend's ordered step identities. This is the sequence, not the
     /// definitions.
     pub backend_sequences: BTreeMap<String, Vec<String>>,
@@ -411,7 +380,7 @@ pub struct ProjectFile {
     pub project: ProjectConfig,
     /// The provisioning steps the project declares.
     #[serde(default)]
-    pub provision: Option<Vec<ProvisionDefinition>>,
+    pub provision: Option<Vec<ProvisionStep>>,
     /// Ports the project expects.
     #[serde(default)]
     pub ports: Vec<PortRequest>,

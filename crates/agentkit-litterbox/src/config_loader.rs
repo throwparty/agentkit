@@ -361,7 +361,8 @@ mod tests {
         MAX_CONFIG_BYTES, parse_project, read_config_file, reject_moved_sections,
         validate_forwarding, validate_local_file, validate_ports, validate_provisioning,
     };
-    use crate::config::{Config, PortRequest, ProjectFile, ProvisionDefinition, merge};
+    use crate::config::{Config, PortRequest, ProjectFile, merge};
+    use crate::sandbox::contract::ProvisionStep;
 
     fn config_with(ports: Vec<PortRequest>) -> Config {
         Config {
@@ -647,15 +648,15 @@ bind = "0.0.0.0"
         reject_moved_sections(text).expect("no moved section");
     }
 
-    fn command(identity: &str) -> ProvisionDefinition {
-        ProvisionDefinition::Command {
+    fn command(identity: &str) -> ProvisionStep {
+        ProvisionStep::Command {
             identity: identity.to_string(),
             run: "true".to_string(),
         }
     }
 
     fn provisioning_config(
-        definitions: Vec<ProvisionDefinition>,
+        definitions: Vec<ProvisionStep>,
         backends: Option<Vec<String>>,
         sequences: &[(&str, &[&str])],
     ) -> Config {
@@ -694,7 +695,7 @@ bind = "0.0.0.0"
 
     #[test]
     fn provisioning_caps_the_number_of_steps() {
-        let definitions: Vec<ProvisionDefinition> = (0..33)
+        let definitions: Vec<ProvisionStep> = (0..33)
             .map(|index| command(&format!("step-{index}")))
             .collect();
         let mut config =
@@ -705,7 +706,7 @@ bind = "0.0.0.0"
 
     #[test]
     fn provisioning_caps_one_backends_sequence() {
-        let definitions: Vec<ProvisionDefinition> = (0..33)
+        let definitions: Vec<ProvisionStep> = (0..33)
             .map(|index| command(&format!("step-{index}")))
             .collect();
         let identities: Vec<String> = (0..33).map(|index| format!("step-{index}")).collect();

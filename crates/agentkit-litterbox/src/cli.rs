@@ -852,8 +852,8 @@ mod tests {
         listing_failed, render_backends, render_doctor, shell_exit_code,
     };
     use crate::backends;
-    use crate::config::{Config, ProjectConfig, ProvisionDefinition};
-    use crate::sandbox::contract::{ProvisionSupport, SandboxStatus};
+    use crate::config::{Config, ProjectConfig};
+    use crate::sandbox::contract::{ProvisionStep, ProvisionSupport, SandboxStatus};
     use crate::sandbox::report::{Capability, Check, Fallback, Readiness, State};
 
     fn support(state: State) -> Vec<ProvisionSupport> {
@@ -872,7 +872,7 @@ mod tests {
                 slug: Some("project".to_string()),
                 backends: Some(vec!["docker".to_string()]),
             },
-            provision_definitions: vec![ProvisionDefinition::Command {
+            provision_definitions: vec![ProvisionStep::Command {
                 identity: "setup".to_string(),
                 run: "true".to_string(),
             }],
@@ -1101,11 +1101,11 @@ mod tests {
         let mut config = provisioning_config();
         config.allow_project_setup = true;
         config.provision_definitions = vec![
-            ProvisionDefinition::Command {
+            ProvisionStep::Command {
                 identity: "z-first".to_string(),
                 run: "true".to_string(),
             },
-            ProvisionDefinition::Command {
+            ProvisionStep::Command {
                 identity: "a-second".to_string(),
                 run: "true".to_string(),
             },
@@ -1173,6 +1173,36 @@ mod tests {
             error: None,
         };
         assert_eq!(doctor_exit_code(&report, None, false), 1);
+    }
+
+    #[tokio::test]
+    async fn building_the_doctor_does_not_create_a_branch_or_record() {
+        let dir = tempfile::tempdir().expect("repo dir");
+        let repository = git2::Repository::init(dir.path()).expect("repo");
+        let records = tempfile::tempdir().expect("records");
+        let config = provisioning_config();
+
+        let (report, _) = build_doctor_report(
+            &config,
+            "project",
+            "docker",
+            readiness(),
+            Vec::new(),
+            &support(State::Available),
+        );
+        assert_eq!(report.steps.len(), 1);
+        assert_eq!(
+            repository.branches(None).expect("branches").count(),
+            0,
+            "the doctor creates no branch"
+        );
+        assert_eq!(
+            std::fs::read_dir(records.path())
+                .expect("records dir")
+                .count(),
+            0,
+            "the doctor creates no record"
+        );
     }
 
     #[test]
