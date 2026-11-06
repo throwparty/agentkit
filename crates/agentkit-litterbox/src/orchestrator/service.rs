@@ -539,11 +539,13 @@ pub fn resolve_project_slug(config: &Config) -> Result<String, SandboxError> {
 }
 
 /// Why a command step is refused when the project has no consent.
-const COMMAND_STEP_REASON: &str = "this project defines a command step; add its namespace to allowed-projects, or set \
-     allow-project-setup = true, in .agentkit/litterbox/config.local.toml to let it run";
+const COMMAND_STEP_REASON: &str = "this project defines a command step; add its namespace to \
+     allowed-projects, or set allow-project-setup = true, in \
+     ~/.config/agentkit/litterbox/config.toml to let it run";
 
 /// What the user can do about a refused command step.
-const COMMAND_STEP_REMEDY: &str = "add the project to allowed-projects or set allow-project-setup";
+const COMMAND_STEP_REMEDY: &str = "grant setup consent in \
+     ~/.config/agentkit/litterbox/config.toml";
 
 /// The structured refusal for a command step this project may not run.
 fn command_step_refusal(
@@ -562,7 +564,7 @@ fn command_step_refusal(
             Some(step.identity().to_string()),
             Some(step.kind().as_str().to_string()),
             COMMAND_STEP_REASON,
-            format!("{COMMAND_STEP_REMEDY}: add '{project_slug}' to allowed-projects"),
+            format!("{COMMAND_STEP_REMEDY}, adding '{project_slug}' to allowed-projects"),
         )),
     }
 }
@@ -1589,6 +1591,18 @@ mod seam_tests {
                 assert!(failure.reason.contains("allowed-projects"), "{failure:?}");
                 assert!(
                     failure.reason.contains("allow-project-setup"),
+                    "{failure:?}"
+                );
+                assert!(
+                    failure
+                        .reason
+                        .contains("~/.config/agentkit/litterbox/config.toml"),
+                    "{failure:?}"
+                );
+                assert!(
+                    failure
+                        .remedy
+                        .contains("~/.config/agentkit/litterbox/config.toml"),
                     "{failure:?}"
                 );
                 assert!(!failure.remedy.is_empty(), "{failure:?}");
