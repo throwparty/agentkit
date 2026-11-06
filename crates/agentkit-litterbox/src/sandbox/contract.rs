@@ -236,6 +236,7 @@ pub struct Inspection {
 
 /// The class of a provisioning failure, independent of the surface.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum ProvisioningClass {
     /// The project's configuration is unusable.
     Misconfigured,

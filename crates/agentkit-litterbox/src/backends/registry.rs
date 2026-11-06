@@ -7,7 +7,7 @@
 use serde::Serialize;
 
 use crate::config::Config;
-use crate::sandbox::contract::Error;
+use crate::sandbox::contract::{Error, ProvisionSupport};
 use crate::sandbox::report::{Capability, Readiness, State};
 use crate::sandbox::selected::Selected;
 
@@ -183,6 +183,18 @@ pub struct BackendReport {
 /// Report every compiled-in backend, its readiness and its capability entries.
 ///
 /// This builds a backend even when it cannot run, so the report can say why.
+/// One backend's readiness, capabilities and provisioning support.
+pub async fn describe(
+    backend: &Selected,
+) -> Result<(Readiness, Vec<Capability>, Vec<ProvisionSupport>), Error> {
+    let support = backend.core().provision_support();
+    let (readiness, capabilities) =
+        tokio::join!(backend.core().readiness(), backend.core().capabilities());
+    let readiness = readiness?;
+    let capabilities = backend.merge_capabilities(capabilities?, &support);
+    Ok((readiness, capabilities, support))
+}
+
 pub async fn introspect(config: &Config) -> Vec<BackendReport> {
     let selected = selected_name(config);
     let mut reports = Vec::new();
@@ -193,25 +205,14 @@ pub async fn introspect(config: &Config) -> Vec<BackendReport> {
         let is_selected = *name == selected;
 
         let report = match build(&candidate) {
-            Ok(backend) => match backend.core().readiness().await {
-                Ok(readiness) => {
-                    let (extras, error) = match backend.core().capabilities().await {
-                        Ok(capabilities) => (capabilities, None),
-                        Err(error) => (
-                            Vec::new(),
-                            Some(format!("capabilities could not be reported: {error}")),
-                        ),
-                    };
-                    let support = backend.core().provision_support();
-                    let capabilities = backend.merge_capabilities(extras, &support);
-                    BackendReport {
-                        name: (*name).to_string(),
-                        selected: is_selected,
-                        readiness: Some(readiness),
-                        capabilities,
-                        error,
-                    }
-                }
+            Ok(backend) => match describe(&backend).await {
+                Ok((readiness, capabilities, _)) => BackendReport {
+                    name: (*name).to_string(),
+                    selected: is_selected,
+                    readiness: Some(readiness),
+                    capabilities,
+                    error: None,
+                },
                 Err(error) => BackendReport {
                     name: (*name).to_string(),
                     selected: is_selected,
