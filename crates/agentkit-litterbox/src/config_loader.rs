@@ -199,6 +199,16 @@ fn read_user_config_at(
 /// points `LITTERBOX_USER_CONFIG` or `XDG_CONFIG_HOME` at a file in the
 /// repository must not be able to supply them.
 fn validate_user_config_path(path: &Path, project_root: Option<&Path>) -> Result<(), ConfigError> {
+    let project = Repository::discover(".").ok();
+    validate_user_config_against(path, project_root, project.as_ref())
+}
+
+/// The containment rule, with the project repository supplied for testing.
+fn validate_user_config_against(
+    path: &Path,
+    project_root: Option<&Path>,
+    project: Option<&Repository>,
+) -> Result<(), ConfigError> {
     if !path.is_absolute() {
         return Err(ConfigError::ParseError(format!(
             "{} must be an absolute path",
@@ -240,7 +250,7 @@ fn validate_user_config_path(path: &Path, project_root: Option<&Path>) -> Result
         }
     }
 
-    let Ok(project) = Repository::discover(".") else {
+    let Some(project) = project else {
         // Host-scoped commands may run outside a repository; without a
         // checkout there is no project to contain the path against.
         return Ok(());
@@ -1330,6 +1340,29 @@ bind = "0.0.0.0"
         let outside = tempfile::tempdir().expect("tempdir");
         super::validate_user_config_path(&outside.path().join("config.toml"), None)
             .expect("an absolute path outside the checkout is accepted");
+    }
+
+    #[test]
+    fn a_user_configuration_inside_a_linked_worktree_is_refused() {
+        let main = tempfile::tempdir().expect("main");
+        let repo = git2::Repository::init(main.path()).expect("init");
+        let mut index = repo.index().expect("index");
+        let tree_id = index.write_tree().expect("tree");
+        let tree = repo.find_tree(tree_id).expect("find tree");
+        let signature = git2::Signature::now("test", "test@example.com").expect("signature");
+        repo.commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
+            .expect("commit");
+        drop(tree);
+
+        let parent = tempfile::tempdir().expect("linked parent");
+        let linked = parent.path().join("worktree");
+        repo.worktree("linked", &linked, None)
+            .expect("create linked worktree");
+        let user = linked.join("config.toml");
+
+        let error = super::validate_user_config_against(&user, None, Some(&repo))
+            .expect_err("a linked worktree is the same project");
+        assert!(error.to_string().contains("worktree"), "{error}");
     }
 
     #[test]
