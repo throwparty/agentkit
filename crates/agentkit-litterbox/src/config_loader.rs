@@ -4,7 +4,7 @@
 //! override. The person running the code owns the mechanism; the committed file
 //! may declare what the project needs but cannot select or configure a backend.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -58,13 +58,22 @@ pub fn load_final() -> Result<Config, ConfigError> {
     reject_machine_keys_in_local(&local)?;
     let user = read_user_config()?;
 
+    let ProjectFile {
+        backend,
+        backends,
+        forwarding,
+        accept_degraded,
+        allow_project_setup,
+        allowed_projects,
+        ..
+    } = user;
     let mut local = local;
-    local.backend = user.backend;
-    local.backends = user.backends;
-    local.forwarding = user.forwarding;
-    local.accept_degraded = user.accept_degraded;
-    local.allow_project_setup = user.allow_project_setup;
-    local.allowed_projects = user.allowed_projects;
+    local.backend = backend;
+    local.backends = combine_backends(backends, std::mem::take(&mut local.backends));
+    local.forwarding = forwarding;
+    local.accept_degraded = accept_degraded;
+    local.allow_project_setup = allow_project_setup;
+    local.allowed_projects = allowed_projects;
 
     let mut config = merge(local, project)?;
     validate_forwarding(&config)?;
@@ -91,21 +100,54 @@ pub fn load_local_only() -> Result<Config, ConfigError> {
 }
 
 /// Machine-owned settings and setup consent belong outside the checkout.
+///
+/// A backend table may still appear in the local override, because
+/// `[backends.<name>].provision` is the project-owned sequence. Every other
+/// key there selects or configures the mechanism and is refused.
 fn reject_machine_keys_in_local(local: &ProjectFile) -> Result<(), ConfigError> {
+    let machine_backend_key = local.backends.iter().find_map(|(name, value)| match value {
+        toml::Value::Table(table) => table
+            .keys()
+            .find(|key| key.as_str() != "provision")
+            .map(|key| format!("backends.{name}.{key}")),
+        _ => Some(format!("backends.{name}")),
+    });
     if local.backend.is_some()
-        || !local.backends.is_empty()
+        || machine_backend_key.is_some()
         || local.forwarding.is_some()
         || local.accept_degraded
         || local.allow_project_setup
         || !local.allowed_projects.is_empty()
     {
-        return Err(ConfigError::ParseError(
-            "machine settings and setup consent belong in the user configuration at \
+        let key = machine_backend_key.unwrap_or_else(|| "the setting".to_string());
+        return Err(ConfigError::ParseError(format!(
+            "{key} belongs in the user configuration at \
              ~/.config/agentkit/litterbox/config.toml, not in the repository-local override"
-                .to_string(),
-        ));
+        )));
     }
     Ok(())
+}
+
+/// Machine-owned backend settings, with the project-owned sequences a local
+/// override may supply laid over them.
+fn combine_backends(
+    user: BTreeMap<String, toml::Value>,
+    local: BTreeMap<String, toml::Value>,
+) -> BTreeMap<String, toml::Value> {
+    let mut backends = user;
+    for (name, value) in local {
+        let toml::Value::Table(sequence) = value else {
+            backends.insert(name, value);
+            continue;
+        };
+        let mut merged = match backends.remove(&name) {
+            Some(toml::Value::Table(existing)) => existing,
+            _ => toml::value::Table::new(),
+        };
+        merged.extend(sequence);
+        backends.insert(name, toml::Value::Table(merged));
+    }
+    backends
 }
 
 /// Read the user-scoped configuration, if present.
@@ -407,7 +449,7 @@ fn validate_provisioning(config: &mut Config) -> Result<(), ConfigError> {
 mod tests {
 
     use super::{
-        MAX_CONFIG_BYTES, parse_project, read_config_file, reject_moved_sections,
+        MAX_CONFIG_BYTES, combine_backends, parse_project, read_config_file, reject_moved_sections,
         validate_forwarding, validate_local_file, validate_ports, validate_provisioning,
     };
     use crate::config::{Config, ConfigError, PortRequest, ProjectFile, merge};
@@ -925,10 +967,56 @@ bind = "0.0.0.0"
     fn a_local_override_may_carry_project_keys() {
         let local: ProjectFile = toml::from_str(
             "[project]\nbackends = ['docker']\n\
-             [[provision]]\nidentity = 'fetch'\nkind = 'command'\nrun = 'true'\n",
+             [[provision]]\nidentity = 'fetch'\nkind = 'command'\nrun = 'true'\n\
+             [backends.docker]\nprovision = ['fetch']\n",
         )
         .expect("local parses");
         super::reject_machine_keys_in_local(&local).expect("project keys are accepted");
+    }
+
+    #[test]
+    fn a_local_backend_sequence_reaches_the_merged_sequences() {
+        let user: ProjectFile =
+            toml::from_str("[backends.docker]\nimage = 'busybox'\n").expect("user config");
+        let mut local: ProjectFile = toml::from_str(
+            "[[provision]]\nidentity = 'fetch'\nkind = 'command'\nrun = 'true'\n\
+             [backends.docker]\nprovision = ['fetch']\n",
+        )
+        .expect("local config");
+        local.backends = combine_backends(user.backends, local.backends);
+
+        let config = merge(local, ProjectFile::default()).expect("merge");
+        assert_eq!(config.backend_sequences["docker"], vec!["fetch"]);
+        assert_eq!(
+            config.backend_settings["docker"]["image"].as_str(),
+            Some("busybox")
+        );
+    }
+
+    #[test]
+    fn a_local_backend_sequence_survives_the_user_settings() {
+        let user: ProjectFile =
+            toml::from_str("backend = 'docker'\n[backends.docker]\nimage = 'busybox@sha256:abc'\n")
+                .expect("user config parses");
+        let local: ProjectFile = toml::from_str(
+            "[backends.docker]\nprovision = ['fetch']\n[backends.bubblewrap]\nprovision = []\n",
+        )
+        .expect("local parses");
+
+        let combined = combine_backends(user.backends, local.backends);
+        assert_eq!(
+            combined["docker"]["image"].as_str(),
+            Some("busybox@sha256:abc"),
+            "machine settings are preserved"
+        );
+        assert_eq!(combined["docker"]["provision"][0].as_str(), Some("fetch"));
+        assert_eq!(
+            combined["bubblewrap"]["provision"]
+                .as_array()
+                .expect("an array")
+                .len(),
+            0
+        );
     }
 
     #[test]
