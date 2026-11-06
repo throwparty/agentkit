@@ -218,7 +218,7 @@ fn check_support(
                     .unwrap_or_else(|| "the mechanism is degraded".to_string())
             ),
             entry.remedy.clone().unwrap_or_else(|| {
-                "accept the degraded mechanism in .agentkit/litterbox/config.local.toml".to_string()
+                "set accept-degraded = true in ~/.config/agentkit/litterbox/config.toml".to_string()
             }),
         )),
         State::Unavailable => Err(provisioning(
@@ -584,7 +584,16 @@ mod tests {
         match resolve(&config, "bubblewrap", &degraded).expect_err("degraded refused") {
             Error::Provisioning { failure } => {
                 assert!(failure.reason.contains("degraded"), "{failure:?}");
-                assert!(!failure.remedy.is_empty(), "{failure:?}");
+                assert!(
+                    failure.remedy.contains("accept-degraded = true"),
+                    "{failure:?}"
+                );
+                assert!(
+                    failure
+                        .remedy
+                        .contains("~/.config/agentkit/litterbox/config.toml"),
+                    "{failure:?}"
+                );
             }
             other => panic!("expected Provisioning, got {other}"),
         }
