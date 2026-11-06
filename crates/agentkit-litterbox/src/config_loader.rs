@@ -16,6 +16,17 @@ use crate::sandbox::contract::forwarded_port_env_var;
 const PROJECT_FILE: &str = ".agentkit/litterbox/config.toml";
 const LOCAL_FILE: &str = ".agentkit/litterbox/config.local.toml";
 
+/// Where the machine-owned settings and setup consent live, outside the checkout.
+fn user_config_path() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("LITTERBOX_USER_CONFIG") {
+        return Some(PathBuf::from(path));
+    }
+    std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
+        .map(|base| base.join("agentkit/litterbox/config.toml"))
+}
+
 /// The top-level keys a configuration file may use, kept beside the loader so a
 /// new `ProjectFile` field has one place to declare its accepted key.
 const CONFIG_KEYS: &[&str] = &[
@@ -44,6 +55,16 @@ pub fn load_final() -> Result<Config, ConfigError> {
         Some(text) => parse_project(&text)?,
         None => ProjectFile::default(),
     };
+    reject_machine_keys_in_local(&local)?;
+    let user = read_user_config()?;
+
+    let mut local = local;
+    local.backend = user.backend;
+    local.backends = user.backends;
+    local.forwarding = user.forwarding;
+    local.accept_degraded = user.accept_degraded;
+    local.allow_project_setup = user.allow_project_setup;
+    local.allowed_projects = user.allowed_projects;
 
     let mut config = merge(local, project)?;
     validate_forwarding(&config)?;
@@ -61,13 +82,41 @@ pub fn load_local_only() -> Result<Config, ConfigError> {
         Some(text) => parse_project(&text)?,
         None => ProjectFile::default(),
     };
-    let mut config = merge(local, ProjectFile::default())?;
+    reject_machine_keys_in_local(&local)?;
+    let user = read_user_config()?;
+    let mut config = merge(user, ProjectFile::default())?;
     validate_forwarding(&config)?;
     warn_public_ports(&mut config);
-    // Provisioning is a project-level decision: the local file may replace it,
-    // but only the merged project configuration can decide whether the
-    // supported set and sequences agree.
     Ok(config)
+}
+
+/// Machine-owned settings and setup consent belong outside the checkout.
+fn reject_machine_keys_in_local(local: &ProjectFile) -> Result<(), ConfigError> {
+    if local.backend.is_some()
+        || !local.backends.is_empty()
+        || local.forwarding.is_some()
+        || local.accept_degraded
+        || local.allow_project_setup
+        || !local.allowed_projects.is_empty()
+    {
+        return Err(ConfigError::ParseError(
+            "machine settings and setup consent belong in the user configuration at \
+             ~/.config/agentkit/litterbox/config.toml, not in the repository-local override"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Read the user-scoped configuration, if present.
+fn read_user_config() -> Result<ProjectFile, ConfigError> {
+    let Some(path) = user_config_path() else {
+        return Ok(ProjectFile::default());
+    };
+    match read_config_file(&path)? {
+        Some(text) => parse_project(&text),
+        None => Ok(ProjectFile::default()),
+    }
 }
 
 /// The maximum size of a configuration file. Configuration is small; a committed
@@ -854,6 +903,32 @@ bind = "0.0.0.0"
             .expect_err("setup-command rejected");
         assert!(error.to_string().contains("[[provision]]"), "{error}");
         assert!(error.to_string().contains("backends"), "{error}");
+    }
+
+    #[test]
+    fn a_local_override_cannot_carry_machine_settings() {
+        for text in [
+            "backend = 'docker'\n",
+            "[backends.docker]\nimage = 'busybox'\n",
+            "allow-project-setup = true\n",
+            "allowed-projects = ['project']\n",
+            "accept-degraded = true\n",
+        ] {
+            let local: ProjectFile = toml::from_str(text).expect("local parses");
+            let error =
+                super::reject_machine_keys_in_local(&local).expect_err("machine keys are refused");
+            assert!(error.to_string().contains("user configuration"), "{error}");
+        }
+    }
+
+    #[test]
+    fn a_local_override_may_carry_project_keys() {
+        let local: ProjectFile = toml::from_str(
+            "[project]\nbackends = ['docker']\n\
+             [[provision]]\nidentity = 'fetch'\nkind = 'command'\nrun = 'true'\n",
+        )
+        .expect("local parses");
+        super::reject_machine_keys_in_local(&local).expect("project keys are accepted");
     }
 
     #[test]

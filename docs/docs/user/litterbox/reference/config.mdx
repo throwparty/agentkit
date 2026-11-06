@@ -14,14 +14,17 @@ the choice is yours.
 
 ## Where the files live
 
-| Scope          | Path                                                                                  |
-| -------------- | ------------------------------------------------------------------------------------- |
-| Project        | `.agentkit/litterbox/config.toml` in the repository                                   |
-| Local override | `.agentkit/litterbox/config.local.toml` in the repository, ignored by version control |
+| Scope           | Path                                                                         |
+| --------------- | ---------------------------------------------------------------------------- |
+| Project         | `.agentkit/litterbox/config.toml` in the repository                          |
+| Local override  | `.agentkit/litterbox/config.local.toml` in the repository, project keys only |
+| User config     | `~/.config/agentkit/litterbox/config.toml`, machine-owned                   |
 
-Merge order is defaults, then project, then local override.
+Merge order is defaults, then the user config, then the project, then the local
+project override. The repository-local file may not carry machine settings or
+setup consent; those live in the user config outside the checkout.
 
-## Local override
+## User configuration
 
 ```toml
 # The sandboxing mechanism. Omit to use the default.
@@ -127,19 +130,20 @@ selected backend and its readiness, the supported backends, and each step in the
 selected backend's order with its state and remedy. It does not create anything.
 `--json` emits the same report for scripts and tests.
 
-## Overriding project settings
+## Local project override
 
-`.agentkit/litterbox/config.local.toml` takes the project file's shape. A
-`[project]`, `[[ports]]` or `[git]` entry there overrides the committed value;
-`[project] backends`, `[[provision]]` and `[backends.<name>].provision` are
-replaced wholesale, and an empty list is a deliberate removal rather than a
-fallback to the project. It is also where the machine-owned settings above
-live. Keep it untracked: it describes this checkout and this machine, not the
-project. Litterbox refuses a local override that is tracked by Git, reached
-through a symlink, or larger than a small configuration file; cloning a
-repository must not be able to grant itself setup consent or choose its own
-backend. A committed project file that sets `allow-project-setup` or
-`allowed-projects` is rejected at load; those keys belong here.
+`.agentkit/litterbox/config.local.toml` takes the project file's project-owned
+shape. A `[project]`, `[[ports]]` or `[git]` entry there overrides the committed
+value; `[project] backends`, `[[provision]]` and
+`[backends.<name>].provision` are replaced wholesale, and an empty list is a
+deliberate removal rather than a fallback to the project. Keep it untracked: it
+describes this checkout, not the machine.
+
+Machine settings and setup consent are rejected here; they belong in
+`~/.config/agentkit/litterbox/config.toml`. Litterbox refuses a local override
+that is tracked by Git, reached through a symlink, or larger than a small
+configuration file; cloning a repository must not be able to grant itself setup
+consent or choose its own backend.
 
 A provisioning identity starts with a lowercase letter and continues with
 lowercase letters, digits, hyphens or underscores. The same rule applies in the
