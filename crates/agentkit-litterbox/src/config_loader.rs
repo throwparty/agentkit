@@ -44,19 +44,31 @@ const CONFIG_KEYS: &[&str] = &[
 
 /// Load the merged configuration.
 pub fn load_final() -> Result<Config, ConfigError> {
-    let project = match read_config_file(Path::new(PROJECT_FILE))? {
+    load_final_from(
+        Path::new(PROJECT_FILE),
+        Path::new(LOCAL_FILE),
+        user_config_path().as_deref(),
+    )
+}
+
+/// Load the merged configuration from explicit paths.
+fn load_final_from(
+    project_path: &Path,
+    local_path: &Path,
+    user_path: Option<&Path>,
+) -> Result<Config, ConfigError> {
+    let project = match read_config_file(project_path)? {
         Some(text) => parse_project(&text)?,
-        None => return Err(ConfigError::FileNotFound(PathBuf::from(PROJECT_FILE))),
+        None => return Err(ConfigError::FileNotFound(project_path.to_path_buf())),
     };
 
-    let local_path = Path::new(LOCAL_FILE);
     validate_local_file(local_path)?;
     let local = match read_config_file(local_path)? {
         Some(text) => parse_project(&text)?,
         None => ProjectFile::default(),
     };
     reject_machine_keys_in_local(&local)?;
-    let user = read_user_config()?;
+    let user = read_user_config_at(user_path)?;
     let mut config = merge_layers(project, local, user)?;
     validate_forwarding(&config)?;
     validate_ports(&config)?;
@@ -101,7 +113,7 @@ pub fn load_local_only() -> Result<Config, ConfigError> {
         None => ProjectFile::default(),
     };
     reject_machine_keys_in_local(&local)?;
-    let user = read_user_config()?;
+    let user = read_user_config_at(user_config_path().as_deref())?;
     let mut config = merge(user, ProjectFile::default())?;
     validate_forwarding(&config)?;
     warn_public_ports(&mut config);
@@ -160,12 +172,12 @@ fn combine_backends(
 }
 
 /// Read the user-scoped configuration, if present.
-fn read_user_config() -> Result<ProjectFile, ConfigError> {
-    let Some(path) = user_config_path() else {
+fn read_user_config_at(path: Option<&Path>) -> Result<ProjectFile, ConfigError> {
+    let Some(path) = path else {
         return Ok(ProjectFile::default());
     };
-    validate_user_config_path(&path)?;
-    match read_config_file(&path)? {
+    validate_user_config_path(path)?;
+    match read_config_file(path)? {
         Some(text) => {
             let user = parse_project(&text)?;
             reject_project_keys_in_user(&user)?;
@@ -1129,14 +1141,23 @@ bind = "0.0.0.0"
              [backends.docker]\nprovision = ['local-step']\n",
         )
         .expect("local");
-        let user: ProjectFile =
-            toml::from_str("backend = 'docker'\n[backends.docker]\nimage = 'busybox'\n")
-                .expect("user");
+        let user: ProjectFile = toml::from_str(
+            "backend = 'docker'\naccept-degraded = true\nallow-project-setup = true\n\
+             allowed-projects = ['project-1234']\n\
+             [forwarding]\nbind = '0.0.0.0'\n\
+             [backends.docker]\nimage = 'busybox'\n",
+        )
+        .expect("user");
 
         let mut config = super::merge_layers(project, local, user).expect("merge");
         config
             .validate_provisioning()
             .expect("the merged layers are valid");
+        assert_eq!(config.backend.as_deref(), Some("docker"));
+        assert_eq!(config.forwarding.bind, "0.0.0.0");
+        assert!(config.accept_degraded);
+        assert!(config.allow_project_setup);
+        assert_eq!(config.allowed_projects, vec!["project-1234"]);
         assert_eq!(config.provision_definitions[0].identity(), "local-step");
         assert_eq!(config.backend_sequences["docker"], vec!["local-step"]);
         assert_eq!(
@@ -1144,6 +1165,57 @@ bind = "0.0.0.0"
             Some("busybox"),
             "user backend settings survive the local sequence"
         );
+    }
+
+    #[test]
+    fn load_final_applies_the_user_and_local_layers() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        git2::Repository::init(dir.path()).expect("repo");
+        let project = dir.path().join("config.toml");
+        let local = dir.path().join("config.local.toml");
+        let user = dir.path().join("user.toml");
+        std::fs::write(
+            &project,
+            "[project]\nbackends = ['docker']\n\
+             [[provision]]\nidentity = 'fetch'\nkind = 'command'\nrun = 'true'\n\
+             [backends.docker]\nprovision = ['fetch']\n",
+        )
+        .expect("project");
+        std::fs::write(
+            &local,
+            "[[provision]]\nidentity = 'local-step'\nkind = 'command'\nrun = 'true'\n\
+             [backends.docker]\nprovision = ['local-step']\n",
+        )
+        .expect("local");
+        std::fs::write(
+            &user,
+            "backend = 'docker'\n[backends.docker]\nimage = 'busybox'\n",
+        )
+        .expect("user");
+
+        let config = super::load_final_from(&project, &local, Some(&user)).expect("load");
+        assert_eq!(config.backend.as_deref(), Some("docker"));
+        assert_eq!(config.provision_definitions[0].identity(), "local-step");
+        assert_eq!(config.backend_sequences["docker"], vec!["local-step"]);
+        assert_eq!(
+            config.backend_settings["docker"]["image"].as_str(),
+            Some("busybox")
+        );
+    }
+
+    #[test]
+    fn load_final_rejects_a_project_key_in_the_user_configuration() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        git2::Repository::init(dir.path()).expect("repo");
+        let project = dir.path().join("config.toml");
+        let local = dir.path().join("config.local.toml");
+        let user = dir.path().join("user.toml");
+        std::fs::write(&project, "[project]\nbackends = ['docker']\n").expect("project");
+        std::fs::write(&user, "provision = []\n").expect("user");
+
+        let error = super::load_final_from(&project, &local, Some(&user))
+            .expect_err("the user step list is refused");
+        assert!(error.to_string().contains("project-owned"), "{error}");
     }
 
     #[test]
