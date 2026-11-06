@@ -114,40 +114,31 @@ impl Sandboxes {
     pub async fn create(&self, name: &str) -> Result<SandboxRecord, Error> {
         let name = self.valid_name(name)?;
         let selected = self.selected_for_operation("create a sandbox").await?;
-        let plan = preflight(
+        let provision = match crate::provision::resolve(
             &self.config,
-            &self.project_slug,
             selected.name(),
             &selected.core().provision_support(),
-        );
-        if let Some(error) = plan.failure {
-            tracing::warn!(
-                sandbox = %name,
-                backend = %selected.name(),
-                class = %error.class().as_str(),
-                %error,
-                "provisioning refused before create"
-            );
-            return Err(error);
-        }
-        let mut provision = Vec::with_capacity(plan.steps.len());
-        for planned in plan.steps {
-            match planned {
-                PlannedStep::Resolved { step, refusal, .. } => {
-                    if let Some(failure) = refusal {
-                        log_refusal(&name, selected.name(), &failure);
-                        return Err(Error::Provisioning {
-                            failure: Box::new(failure),
-                        });
-                    }
-                    provision.push(step);
-                }
-                PlannedStep::Failed { failure } => {
-                    log_refusal(&name, selected.name(), &failure);
-                    return Err(Error::Provisioning {
-                        failure: Box::new(failure),
-                    });
-                }
+        ) {
+            Ok(steps) => steps,
+            Err(error) => {
+                tracing::warn!(
+                    sandbox = %name,
+                    backend = %selected.name(),
+                    class = %error.class().as_str(),
+                    %error,
+                    "provisioning refused before create"
+                );
+                return Err(error);
+            }
+        };
+        for step in &provision {
+            if let Some(failure) =
+                command_step_refusal(&self.config, &self.project_slug, selected.name(), step)
+            {
+                log_refusal(&name, selected.name(), &failure);
+                return Err(Error::Provisioning {
+                    failure: Box::new(failure),
+                });
             }
         }
         tracing::info!(
