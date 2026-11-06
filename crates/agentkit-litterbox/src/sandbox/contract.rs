@@ -83,6 +83,14 @@ impl ProvisionKind {
             Self::Command => "command",
         }
     }
+
+    /// The kind a surface name denotes.
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "command" => Some(Self::Command),
+            _ => None,
+        }
+    }
 }
 
 /// What a backend says about one provisioning kind.
