@@ -1,7 +1,9 @@
 //! The doctor entry point does not mutate the repository it inspects.
 #![allow(clippy::await_holding_lock)]
 
-use std::path::Path;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::path::{Path, PathBuf};
 
 static CWD: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -28,10 +30,11 @@ fn branches(dir: &Path) -> usize {
         .count()
 }
 
-/// Everything in the checkout except `.git`, so a record, workspace or other
-/// file written by the doctor is visible even when no branch was created.
-fn snapshot(dir: &Path) -> Vec<(std::path::PathBuf, u64)> {
-    fn walk(dir: &Path, root: &Path, out: &mut Vec<(std::path::PathBuf, u64)>) {
+/// Everything under `dir`, with file content hashes, so a record, workspace or
+/// rewritten file written by the doctor is visible even when no branch was
+/// created. Directories are recorded as `None`.
+fn snapshot(dir: &Path) -> Vec<(PathBuf, Option<u64>)> {
+    fn walk(dir: &Path, root: &Path, out: &mut Vec<(PathBuf, Option<u64>)>) {
         for entry in std::fs::read_dir(dir).expect("read_dir") {
             let entry = entry.expect("entry");
             let path = entry.path();
@@ -39,15 +42,20 @@ fn snapshot(dir: &Path) -> Vec<(std::path::PathBuf, u64)> {
                 continue;
             }
             let metadata = entry.metadata().expect("metadata");
+            let relative = path.strip_prefix(root).expect("relative").to_path_buf();
             if metadata.is_dir() {
+                out.push((relative, None));
                 walk(&path, root, out);
             } else {
-                out.push((
-                    path.strip_prefix(root).expect("relative").to_path_buf(),
-                    metadata.len(),
-                ));
+                let contents = std::fs::read(&path).expect("read");
+                let mut hasher = DefaultHasher::new();
+                contents.hash(&mut hasher);
+                out.push((relative, Some(hasher.finish())));
             }
         }
+    }
+    if !dir.exists() {
+        return Vec::new();
     }
     let mut out = Vec::new();
     walk(dir, dir, &mut out);
@@ -80,15 +88,25 @@ async fn a_misconfigured_doctor_run_creates_no_branch() {
 }
 
 #[tokio::test]
-async fn a_ready_doctor_run_creates_no_branch() {
+async fn a_provisioned_doctor_run_creates_no_branch_or_record() {
     let _guard = CWD.lock().expect("cwd lock");
     let dir = repository();
+    std::env::set_current_dir(dir.path()).expect("cwd");
+    let config = agentkit_litterbox::config_loader::load_final().expect("config");
+    let slug = agentkit_litterbox::orchestrator::resolve_project_slug(&config).expect("slug");
+    let records = agentkit_litterbox::metadata_store::directory(&slug);
+
     let before_branches = branches(dir.path());
     let before_files = snapshot(dir.path());
-    std::env::set_current_dir(dir.path()).expect("cwd");
+    let before_records = snapshot(&records);
 
-    let _ = agentkit_litterbox::cli::handle_doctor(None, false).await;
+    let exit = agentkit_litterbox::cli::handle_doctor(None, false).await;
 
+    assert_ne!(
+        exit,
+        std::process::ExitCode::SUCCESS,
+        "the fixture withholds consent, so the doctor is not ready"
+    );
     assert_eq!(
         branches(dir.path()),
         before_branches,
@@ -98,5 +116,10 @@ async fn a_ready_doctor_run_creates_no_branch() {
         snapshot(dir.path()),
         before_files,
         "the doctor wrote a file into the checkout"
+    );
+    assert_eq!(
+        snapshot(&records),
+        before_records,
+        "the doctor wrote to the metadata store"
     );
 }
