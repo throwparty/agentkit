@@ -57,7 +57,21 @@ pub fn load_final() -> Result<Config, ConfigError> {
     };
     reject_machine_keys_in_local(&local)?;
     let user = read_user_config()?;
+    let mut config = merge_layers(project, local, user)?;
+    validate_forwarding(&config)?;
+    validate_ports(&config)?;
+    warn_public_ports(&mut config);
+    validate_provisioning(&mut config)?;
+    Ok(config)
+}
 
+/// Overlay the user configuration and the local project override, then merge
+/// them with the committed file.
+fn merge_layers(
+    project: ProjectFile,
+    local: ProjectFile,
+    user: ProjectFile,
+) -> Result<Config, ConfigError> {
     let ProjectFile {
         backend,
         backends,
@@ -75,12 +89,7 @@ pub fn load_final() -> Result<Config, ConfigError> {
     local.allow_project_setup = allow_project_setup;
     local.allowed_projects = allowed_projects;
 
-    let mut config = merge(local, project)?;
-    validate_forwarding(&config)?;
-    validate_ports(&config)?;
-    warn_public_ports(&mut config);
-    validate_provisioning(&mut config)?;
-    Ok(config)
+    merge(local, project)
 }
 
 /// Load only the local override, for commands that are host-scoped.
@@ -1057,6 +1066,36 @@ bind = "0.0.0.0"
         assert_eq!(
             config.backend_settings["docker"]["image"].as_str(),
             Some("busybox")
+        );
+    }
+
+    #[test]
+    fn the_merged_layers_keep_local_steps_and_user_settings() {
+        let project: ProjectFile = toml::from_str(
+            "[project]\nbackends = ['docker']\n\
+             [[provision]]\nidentity = 'fetch'\nkind = 'command'\nrun = 'true'\n\
+             [backends.docker]\nprovision = ['fetch']\n",
+        )
+        .expect("project");
+        let local: ProjectFile = toml::from_str(
+            "[[provision]]\nidentity = 'local-step'\nkind = 'command'\nrun = 'true'\n\
+             [backends.docker]\nprovision = ['local-step']\n",
+        )
+        .expect("local");
+        let user: ProjectFile =
+            toml::from_str("backend = 'docker'\n[backends.docker]\nimage = 'busybox'\n")
+                .expect("user");
+
+        let mut config = super::merge_layers(project, local, user).expect("merge");
+        config
+            .validate_provisioning()
+            .expect("the merged layers are valid");
+        assert_eq!(config.provision_definitions[0].identity(), "local-step");
+        assert_eq!(config.backend_sequences["docker"], vec!["local-step"]);
+        assert_eq!(
+            config.backend_settings["docker"]["image"].as_str(),
+            Some("busybox"),
+            "user backend settings survive the local sequence"
         );
     }
 
