@@ -5,7 +5,7 @@ use crate::config::Config;
 use crate::config_loader;
 use crate::mcp;
 use crate::orchestrator::{PlannedStep, Sandboxes, preflight};
-use crate::sandbox::contract::{Error, SandboxStatus};
+use crate::sandbox::contract::{Error, ProvisionKind, SandboxStatus};
 use crate::sandbox::report::{Readiness, State};
 use clap::{CommandFactory, Parser, Subcommand};
 
@@ -476,7 +476,7 @@ struct DoctorReport {
 #[derive(Debug, serde::Serialize)]
 struct DoctorStep {
     identity: String,
-    kind: crate::sandbox::contract::ProvisionKind,
+    kind: Option<crate::sandbox::contract::ProvisionKind>,
     state: DoctorState,
     class: Option<crate::sandbox::contract::ProvisioningClass>,
     reason: Option<String>,
@@ -590,7 +590,7 @@ fn build_doctor_report(
                 };
                 steps.push(DoctorStep {
                     identity: step.identity().to_string(),
-                    kind: step.kind(),
+                    kind: Some(step.kind()),
                     state,
                     class,
                     reason,
@@ -615,7 +615,7 @@ fn build_doctor_report(
                         .step
                         .clone()
                         .unwrap_or_else(|| "unknown".to_string()),
-                    kind: crate::sandbox::contract::ProvisionKind::Command,
+                    kind: step_failure.kind.as_deref().and_then(ProvisionKind::parse),
                     state: DoctorState::Unavailable,
                     class: Some(step_failure.class),
                     reason: Some(step_failure.reason),
@@ -708,7 +708,7 @@ fn render_doctor(report: &DoctorReport, json: bool) -> Result<String, Error> {
         let mut line = format!(
             "step {} ({}): {}",
             step.identity,
-            step.kind.as_str(),
+            step.kind.map(ProvisionKind::as_str).unwrap_or("unknown"),
             doctor_state_label(step.state)
         );
         if let Some(class) = &step.class {
@@ -999,7 +999,7 @@ mod tests {
             notices: Vec::new(),
             steps: vec![DoctorStep {
                 identity: "fetch".to_string(),
-                kind: ProvisionKind::Command,
+                kind: Some(ProvisionKind::Command),
                 state: DoctorState::Available,
                 class: None,
                 reason: None,
@@ -1058,6 +1058,33 @@ mod tests {
     }
 
     #[test]
+    fn a_doctor_step_without_a_kind_is_not_labelled_command() {
+        let report = DoctorReport {
+            backend: "docker".to_string(),
+            project_slug: "project".to_string(),
+            readiness: Readiness {
+                backend: "docker".to_string(),
+                checks: Vec::new(),
+            },
+            capabilities: Vec::new(),
+            supported_backends: None,
+            notices: Vec::new(),
+            steps: vec![DoctorStep {
+                identity: "fetch".to_string(),
+                kind: None,
+                state: DoctorState::Unavailable,
+                class: Some(ProvisioningClass::Unavailable),
+                reason: None,
+                remedy: None,
+            }],
+            error: None,
+        };
+
+        let text = render_doctor(&report, false).expect("renders");
+        assert!(text.contains("step fetch (unknown): unavailable"), "{text}");
+    }
+
+    #[test]
     fn a_denied_step_and_a_structured_error_are_reported() {
         let report = DoctorReport {
             backend: "docker".to_string(),
@@ -1071,7 +1098,7 @@ mod tests {
             notices: Vec::new(),
             steps: vec![DoctorStep {
                 identity: "setup".to_string(),
-                kind: ProvisionKind::Command,
+                kind: Some(ProvisionKind::Command),
                 state: DoctorState::Denied,
                 class: Some(ProvisioningClass::Denied),
                 reason: Some("consent is missing".to_string()),
@@ -1255,7 +1282,7 @@ mod tests {
             notices: Vec::new(),
             steps: vec![DoctorStep {
                 identity: "fetch".to_string(),
-                kind: ProvisionKind::Command,
+                kind: Some(ProvisionKind::Command),
                 state: DoctorState::Unavailable,
                 class: Some(ProvisioningClass::Unavailable),
                 reason: None,
