@@ -11,7 +11,7 @@ use crate::metadata_store::{self, LoadedSandbox, StoredSandbox};
 use crate::provision::StepOutcome;
 use crate::sandbox::contract::{
     CreateRequest, Error, Execution, Forward, Inspection, ProvisionStep, ProvisionSupport,
-    ProvisioningFailure, RequestedPort, SandboxRecord, SandboxStatus, Workspace,
+    ProvisioningClass, ProvisioningFailure, RequestedPort, SandboxRecord, SandboxStatus, Workspace,
 };
 use crate::sandbox::selected::Selected;
 use crate::scm::{Scm, ThreadSafeScm};
@@ -559,6 +559,35 @@ pub fn resolve_project_slug(config: &Config) -> Result<String, SandboxError> {
     ))
 }
 
+/// Why a command step is refused when the project has no consent.
+const COMMAND_STEP_REASON: &str = "this project defines a command step; add its namespace to allowed-projects, or set \
+     allow-project-setup = true, in .agentkit/litterbox/config.local.toml to let it run";
+
+/// What the user can do about a refused command step.
+const COMMAND_STEP_REMEDY: &str = "add the project to allowed-projects or set allow-project-setup";
+
+/// The structured refusal for a command step this project may not run.
+fn command_step_refusal(
+    config: &Config,
+    project_slug: &str,
+    backend: &str,
+    step: &ProvisionStep,
+) -> Option<ProvisioningFailure> {
+    if config.command_steps_allowed(project_slug) {
+        return None;
+    }
+    match step {
+        ProvisionStep::Command { .. } => Some(ProvisioningFailure::new(
+            ProvisioningClass::Denied,
+            Some(backend.to_string()),
+            Some(step.identity().to_string()),
+            Some(step.kind().as_str().to_string()),
+            COMMAND_STEP_REASON,
+            format!("{COMMAND_STEP_REMEDY}: add '{project_slug}' to allowed-projects"),
+        )),
+    }
+}
+
 /// Log a structured provisioning refusal with its class and step fields.
 fn log_refusal(sandbox: &str, backend: &str, failure: &ProvisioningFailure) {
     tracing::warn!(
@@ -632,7 +661,7 @@ pub fn preflight(
                 match result {
                     StepOutcome::Resolved(resolved) => {
                         let refusal =
-                            config.command_step_refusal(project_slug, backend, &resolved.step);
+                            command_step_refusal(config, project_slug, backend, &resolved.step);
                         steps.push(PlannedStep::Resolved {
                             step: resolved.step,
                             support: resolved.support,
