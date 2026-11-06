@@ -16,8 +16,8 @@ src/
 │   ├── contract.rs       ProvisionStep, ProvisionKind, CreateRequest.provision,
 │   │                     Backend::provision_support; EnvironmentSource removed
 │   ├── environment.rs    Provisioned provenance: per-step variables and changes
-│   ├── facets.rs         Backend capability facets
-│   └── testing.rs        TestBackend supports Command and records CreateRequest
+│   └── facets.rs         Backend capability facets
+├── testing.rs            TestBackend supports Command and records CreateRequest (test-only)
 ├── provision/
 │   ├── mod.rs            module declarations and re-exports
 │   └── resolve.rs        resolve(config, selected, support) -> Result<Vec<ProvisionStep>, Error>
@@ -170,7 +170,7 @@ Extracts provision from each backend table before the backend parses; validates 
 
 One place that turns identities into typed steps
 
-src/provision/resolve.rs: takes Config, the selected backend name and its kinds; checks the supported set, resolves in order and checks kind support; returns the steps or a contract error; unit tests cover order, duplicates, unknown identities, unsupported kinds and unlisted backends.
+src/provision/resolve.rs: takes Config, the selected backend name and its provision support; checks the supported set, resolves in order and checks kind support; `resolve` returns the steps or a contract error, and `preflight_steps` returns per-step outcomes; unit tests cover order, duplicates, unknown identities, unsupported kinds and unlisted backends.
 
 
 ### Orchestrator

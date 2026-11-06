@@ -151,6 +151,11 @@ fn undefined_identity(selected: &str, identity: &str) -> Error {
 /// Configuration and compatibility failures still fail the whole call; a
 /// per-step kind or degradation failure is returned in the vector so a
 /// preflight report can show every other step.
+///
+/// The kind set is currently closed to `command`, and support is reported per
+/// kind, so a sequence cannot mix a resolved step with a failed one today.
+/// The `Failed` arm is the seam for a second kind; until then a mixed-outcome
+/// test would have nothing to construct.
 pub fn preflight_steps(
     config: &Config,
     selected: &str,
