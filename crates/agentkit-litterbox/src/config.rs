@@ -406,7 +406,7 @@ pub fn merge(local: ProjectFile, project: ProjectFile) -> Result<Config, ConfigE
     if project.allow_project_setup || !project.allowed_projects.is_empty() {
         return Err(ConfigError::ParseError(
             "project configuration must not set setup consent; grant it in \
-             .agentkit/litterbox/config.local.toml"
+             ~/.config/agentkit/litterbox/config.toml"
                 .to_string(),
         ));
     }
@@ -872,6 +872,12 @@ installable = "./nix"
         let error = merge(ProjectFile::default(), project).expect_err("consent refused");
         assert!(
             error.to_string().contains("must not set setup consent"),
+            "{error}"
+        );
+        assert!(
+            error
+                .to_string()
+                .contains("~/.config/agentkit/litterbox/config.toml"),
             "{error}"
         );
     }
