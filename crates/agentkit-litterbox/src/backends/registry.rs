@@ -74,12 +74,11 @@ fn refusal(readiness: &Readiness, accept_degraded: bool) -> Option<Refusal> {
     let unusable = readiness.state() == State::Unavailable;
     // A degraded check with a fallback means the mechanism substitutes
     // something weaker. That is refused unless the user accepted it.
-    let bounded_degradation = readiness.state() == State::Degraded
-        && !accept_degraded
+    let bounded_degradation = !accept_degraded
         && readiness
             .checks
             .iter()
-            .any(|check| check.state != State::Available && check.fallback.is_some());
+            .any(|check| check.state.needs_acceptance(&check.fallback));
 
     if !unusable && !bounded_degradation {
         return None;

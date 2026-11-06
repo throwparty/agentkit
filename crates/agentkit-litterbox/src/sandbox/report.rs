@@ -88,6 +88,16 @@ pub struct Capability {
     pub fallback: Option<Fallback>,
 }
 
+impl State {
+    /// Whether this state requires the user to accept a degradation.
+    ///
+    /// A degraded state without a fallback is the mechanism's own weaker mode;
+    /// only a degradation that substitutes something needs acceptance.
+    pub fn needs_acceptance(self, fallback: &Option<Fallback>) -> bool {
+        self == Self::Degraded && fallback.is_some()
+    }
+}
+
 /// How a sandbox reaches the network.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum EgressPosture {

@@ -235,7 +235,7 @@ fn check_support(
         State::Available => Ok(entry.clone()),
         // A degraded kind with no fallback is the mechanism's own weaker mode;
         // the contract gates only a degradation that substitutes something.
-        State::Degraded if entry.fallback.is_none() => Ok(entry.clone()),
+        State::Degraded if !entry.state.needs_acceptance(&entry.fallback) => Ok(entry.clone()),
         State::Degraded if accept_degraded => Ok(entry.clone()),
         State::Degraded => Err(provisioning(
             ProvisioningClass::Unavailable,
