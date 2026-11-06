@@ -1030,6 +1030,7 @@ mod tests {
         let json = render_doctor(&report, true).expect("renders");
         let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid json");
         assert_eq!(parsed["backend"], "docker");
+        assert_eq!(parsed["supported_backends"][0], "docker");
         assert_eq!(parsed["notices"][0], "a warning the doctor must carry");
         assert_eq!(parsed["steps"][0]["identity"], "setup");
         assert_eq!(parsed["steps"][0]["kind"], "command");

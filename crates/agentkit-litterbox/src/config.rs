@@ -285,7 +285,11 @@ impl Config {
                 ));
             }
         }
-        self.notices.extend(notices);
+        for notice in notices {
+            if !self.notices.contains(&notice) {
+                self.notices.push(notice);
+            }
+        }
 
         Ok(())
     }

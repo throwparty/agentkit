@@ -446,6 +446,12 @@ mod tests {
         assert!(operations.contains(&"resource limits"), "{operations:?}");
         assert!(operations.contains(&"port forwarding"), "{operations:?}");
         assert!(operations.contains(&"proxied egress"), "{operations:?}");
+        let provision = docker
+            .capabilities
+            .iter()
+            .find(|capability| capability.operation == "provision:command")
+            .expect("provisioning support is reported");
+        assert_eq!(provision.state, crate::sandbox::report::State::Available);
     }
 
     #[tokio::test]
