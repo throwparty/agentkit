@@ -309,24 +309,31 @@ impl ProvisioningFailure {
 /// Render a provisioning failure so a step, remedy and exit status are named
 /// even in a bare message.
 fn provisioning_message(failure: &ProvisioningFailure) -> String {
+    let reason: String = failure
+        .reason
+        .chars()
+        .flat_map(char::escape_default)
+        .collect();
+    let remedy: String = failure
+        .remedy
+        .chars()
+        .flat_map(char::escape_default)
+        .collect();
     let mut message = String::new();
     if let Some(backend) = &failure.backend {
         message.push_str(&format!("{backend}: "));
     }
     match (&failure.step, &failure.kind) {
         (Some(step), Some(kind)) => {
-            message.push_str(&format!(
-                "provisioning step '{step}' ({kind}): {}",
-                failure.reason
-            ));
+            message.push_str(&format!("provisioning step '{step}' ({kind}): {reason}"));
         }
         (Some(step), None) => {
-            message.push_str(&format!("provisioning step '{step}': {}", failure.reason));
+            message.push_str(&format!("provisioning step '{step}': {reason}"));
         }
-        _ => message.push_str(&failure.reason),
+        _ => message.push_str(&reason),
     }
-    if !failure.remedy.is_empty() {
-        message.push_str(&format!(" -- {}", failure.remedy));
+    if !remedy.is_empty() {
+        message.push_str(&format!(" -- {remedy}"));
     }
     if let Some(exit_code) = failure.exit_code {
         message.push_str(&format!(" (exit code {exit_code})"));
@@ -583,6 +590,29 @@ mod tests {
         assert!(!json.contains("container"), "{json}");
         assert!(!json.contains("SECRET-VALUE"), "{json}");
         assert!(json.contains("TOKEN"), "{json}");
+    }
+
+    #[test]
+    fn a_provisioning_display_names_the_backend_step_remedy_and_escaped_output() {
+        let error = Error::Provisioning {
+            failure: Box::new(super::ProvisioningFailure {
+                class: super::ProvisioningClass::Failed,
+                backend: Some("docker".to_string()),
+                step: Some("fetch".to_string()),
+                kind: Some("command".to_string()),
+                reason: "it failed".to_string(),
+                remedy: "fix the step".to_string(),
+                exit_code: Some(7),
+                output: Some("raw\u{1b}[2J".to_string()),
+            }),
+        };
+        let rendered = error.to_string();
+        assert!(rendered.contains("docker"), "{rendered}");
+        assert!(rendered.contains("fetch"), "{rendered}");
+        assert!(rendered.contains("command"), "{rendered}");
+        assert!(rendered.contains("fix the step"), "{rendered}");
+        assert!(rendered.contains("exit code 7"), "{rendered}");
+        assert!(!rendered.contains('\u{1b}'), "{rendered}");
     }
 
     #[tokio::test]
