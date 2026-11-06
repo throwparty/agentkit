@@ -551,12 +551,7 @@ fn port(port: &crate::config::PortRequest) -> RequestedPort {
 /// A configured slug becomes a path component, so it is validated rather than
 /// trusted: a value the slug rules would change is refused, naming the setting.
 pub fn resolve_project_slug(config: &Config) -> Result<String, SandboxError> {
-    let definitions = toml::to_string(&config.provision_definitions).unwrap_or_default();
-    Ok(format!(
-        "{}-{}",
-        base_slug(config)?,
-        namespace_suffix(&definitions)
-    ))
+    Ok(format!("{}-{}", base_slug(config)?, namespace_suffix()))
 }
 
 /// Why a command step is refused when the project has no consent.
@@ -716,37 +711,21 @@ fn base_slug(config: &Config) -> Result<String, SandboxError> {
 }
 
 /// A stable, short suffix for the current repository.
-fn namespace_suffix(definitions: &str) -> String {
-    // Bind the namespace to the repository's remote and to the provisioning
-    // definitions the user approved, so different content in the same checkout
-    // does not inherit consent.
-    let identity = git2::Repository::discover(".")
-        .ok()
-        .and_then(|repository| {
-            repository
-                .find_remote("origin")
-                .ok()
-                .and_then(|remote| remote.url().ok().map(str::to_string))
-        })
-        .map(|url| url.trim_end_matches(".git").to_ascii_lowercase())
-        .unwrap_or_else(|| {
-            std::env::current_dir()
-                .and_then(|dir| dir.canonicalize())
-                .map(|dir| dir.to_string_lossy().into_owned())
-                .unwrap_or_else(|_| "unknown".to_string())
-        });
+fn namespace_suffix() -> String {
+    let path = std::env::current_dir()
+        .and_then(|dir| dir.canonicalize())
+        .map(|dir| dir.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| "unknown".to_string());
 
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in identity
-        .as_bytes()
-        .iter()
-        .chain(std::iter::once(&0u8))
-        .chain(definitions.as_bytes())
-    {
+    for byte in path.as_bytes() {
         hash ^= u64::from(*byte);
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
-    format!("{hash:016x}")
+    // The low 32 bits, as every existing namespace, metadata directory and
+    // consent entry was built: `08x` is a minimum width, so the full hash
+    // would rename existing projects.
+    format!("{:08x}", hash as u32)
 }
 
 fn directory_slug() -> String {
@@ -1666,8 +1645,20 @@ mod seam_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_project_slug;
+    use super::{namespace_suffix, resolve_project_slug};
     use crate::config::{Config, ProjectConfig};
+
+    #[test]
+    fn the_namespace_suffix_stays_eight_lowercase_hex_digits() {
+        let suffix = namespace_suffix();
+        assert_eq!(suffix.len(), 8, "{suffix}");
+        assert!(
+            suffix
+                .chars()
+                .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
+            "{suffix}"
+        );
+    }
 
     #[test]
     fn a_configured_slug_wins_over_the_directory_name() {
