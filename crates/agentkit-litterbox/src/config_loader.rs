@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use git2::Repository;
 
-use crate::config::{Config, ConfigError, ProjectFile, escaped, merge};
+use crate::config::{Config, ConfigError, ProjectConfig, ProjectFile, escaped, merge};
 use crate::sandbox::contract::forwarded_port_env_var;
 
 const PROJECT_FILE: &str = ".agentkit/litterbox/config.toml";
@@ -196,24 +196,64 @@ fn validate_user_config_path(path: &Path) -> Result<(), ConfigError> {
             path.display()
         )));
     }
-    let Some(workdir) = Repository::discover(".")
-        .ok()
-        .and_then(|repository| repository.workdir().map(Path::to_path_buf))
-    else {
-        return Ok(());
+
+    let inside = |root: &Path| path.starts_with(root);
+    let inside_error = || {
+        ConfigError::ParseError(format!(
+            "{} is inside the checkout; keep the user configuration outside the repository",
+            path.display()
+        ))
     };
-    let workdir = workdir.canonicalize().unwrap_or(workdir);
+
+    // Fail closed without needing a repository: a path under the directory
+    // being operated on is never a machine-owned user configuration.
+    let cwd = std::env::current_dir()
+        .ok()
+        .and_then(|dir| dir.canonicalize().ok());
+    if let Some(cwd) = &cwd
+        && inside(cwd)
+    {
+        return Err(inside_error());
+    }
+
     let resolved = path
         .parent()
         .and_then(|parent| parent.canonicalize().ok())
         .map(|parent| parent.join(path.file_name().unwrap_or_default()));
-    if let Some(resolved) = resolved
-        && resolved.starts_with(&workdir)
+    if let (Some(resolved), Some(cwd)) = (&resolved, &cwd)
+        && resolved.starts_with(cwd)
     {
-        return Err(ConfigError::ParseError(format!(
-            "{} is inside the checkout; keep the user configuration outside the repository",
-            path.display()
-        )));
+        return Err(inside_error());
+    }
+
+    let Ok(project) = Repository::discover(".") else {
+        return Ok(());
+    };
+    if let Some(resolved) = &resolved {
+        if let Some(workdir) = project.workdir() {
+            let workdir = workdir
+                .canonicalize()
+                .unwrap_or_else(|_| workdir.to_path_buf());
+            if resolved.starts_with(&workdir) {
+                return Err(inside_error());
+            }
+        }
+        // A linked worktree is outside the main workdir but still this
+        // project: compare the shared git directory.
+        if let Some(parent) = path.parent()
+            && let Ok(candidate) = Repository::discover(parent)
+            && let (Ok(candidate_common), Ok(project_common)) = (
+                candidate.commondir().canonicalize(),
+                project.commondir().canonicalize(),
+            )
+            && candidate_common == project_common
+        {
+            return Err(ConfigError::ParseError(format!(
+                "{} is inside a worktree of this repository; keep the user configuration \
+                 outside it",
+                path.display()
+            )));
+        }
     }
     Ok(())
 }
@@ -227,8 +267,15 @@ fn reject_project_keys_in_user(user: &ProjectFile) -> Result<(), ConfigError> {
         }
         _ => None,
     });
-    if user.provision.is_some() || backend_provision.is_some() {
-        let key = backend_provision.unwrap_or_else(|| "provision".to_string());
+    let key = user
+        .provision
+        .as_ref()
+        .map(|_| "provision".to_string())
+        .or_else(|| (user.project != ProjectConfig::default()).then(|| "project".to_string()))
+        .or_else(|| (!user.ports.is_empty()).then(|| "ports".to_string()))
+        .or_else(|| user.git.snapshot_mode.is_some().then(|| "git".to_string()))
+        .or(backend_provision);
+    if let Some(key) = key {
         return Err(ConfigError::ParseError(format!(
             "{key} is project-owned; declare it in the project configuration or the local \
              override, not the user configuration"
@@ -1131,6 +1178,9 @@ bind = "0.0.0.0"
             "provision = []\n",
             "[[provision]]\nidentity = 'fetch'\nkind = 'command'\nrun = 'true'\n",
             "[backends.docker]\nprovision = []\n",
+            "[project]\nbackends = ['docker']\n",
+            "[[ports]]\nname = 'web'\ntarget = 8080\n",
+            "[git]\nsnapshot-mode = 'remote'\n",
         ] {
             let user: ProjectFile = toml::from_str(text).expect("user parses");
             let error = super::reject_project_keys_in_user(&user)
