@@ -475,7 +475,7 @@ struct DoctorReport {
 /// One provisioning step in the doctor's report.
 #[derive(Debug, serde::Serialize)]
 struct DoctorStep {
-    identity: String,
+    identity: Option<String>,
     kind: Option<crate::sandbox::contract::ProvisionKind>,
     state: DoctorState,
     class: Option<crate::sandbox::contract::ProvisioningClass>,
@@ -589,7 +589,7 @@ fn build_doctor_report(
                     (state, None, support.reason, support.remedy)
                 };
                 steps.push(DoctorStep {
-                    identity: step.identity().to_string(),
+                    identity: Some(step.identity().to_string()),
                     kind: Some(step.kind()),
                     state,
                     class,
@@ -611,10 +611,7 @@ fn build_doctor_report(
                     });
                 }
                 steps.push(DoctorStep {
-                    identity: step_failure
-                        .step
-                        .clone()
-                        .unwrap_or_else(|| "unknown".to_string()),
+                    identity: step_failure.step.clone(),
                     kind: step_failure.kind.as_deref().and_then(ProvisionKind::parse),
                     state: DoctorState::Unavailable,
                     class: Some(step_failure.class),
@@ -707,7 +704,7 @@ fn render_doctor(report: &DoctorReport, json: bool) -> Result<String, Error> {
     for step in &report.steps {
         let mut line = format!(
             "step {} ({}): {}",
-            step.identity,
+            step.identity.as_deref().unwrap_or("<unnamed>"),
             step.kind.map(ProvisionKind::as_str).unwrap_or("unknown"),
             doctor_state_label(step.state)
         );
@@ -998,7 +995,7 @@ mod tests {
             supported_backends: Some(vec!["docker".to_string()]),
             notices: Vec::new(),
             steps: vec![DoctorStep {
-                identity: "fetch".to_string(),
+                identity: Some("fetch".to_string()),
                 kind: Some(ProvisionKind::Command),
                 state: DoctorState::Available,
                 class: None,
@@ -1070,7 +1067,7 @@ mod tests {
             supported_backends: None,
             notices: Vec::new(),
             steps: vec![DoctorStep {
-                identity: "fetch".to_string(),
+                identity: None,
                 kind: None,
                 state: DoctorState::Unavailable,
                 class: Some(ProvisioningClass::Unavailable),
@@ -1081,7 +1078,20 @@ mod tests {
         };
 
         let text = render_doctor(&report, false).expect("renders");
-        assert!(text.contains("step fetch (unknown): unavailable"), "{text}");
+        assert!(
+            text.contains("step <unnamed> (unknown): unavailable"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn provision_kind_parse_names_only_known_kinds() {
+        assert_eq!(
+            ProvisionKind::parse("command"),
+            Some(ProvisionKind::Command)
+        );
+        assert_eq!(ProvisionKind::parse("nix"), None);
+        assert_eq!(ProvisionKind::parse(""), None);
     }
 
     #[test]
@@ -1097,7 +1107,7 @@ mod tests {
             supported_backends: Some(vec!["docker".to_string()]),
             notices: Vec::new(),
             steps: vec![DoctorStep {
-                identity: "setup".to_string(),
+                identity: Some("setup".to_string()),
                 kind: Some(ProvisionKind::Command),
                 state: DoctorState::Denied,
                 class: Some(ProvisioningClass::Denied),
@@ -1243,7 +1253,7 @@ mod tests {
         let identities: Vec<&str> = report
             .steps
             .iter()
-            .map(|step| step.identity.as_str())
+            .filter_map(|step| step.identity.as_deref())
             .collect();
         assert_eq!(identities, vec!["z-first", "a-second"]);
         assert!(
@@ -1281,7 +1291,7 @@ mod tests {
             supported_backends: None,
             notices: Vec::new(),
             steps: vec![DoctorStep {
-                identity: "fetch".to_string(),
+                identity: Some("fetch".to_string()),
                 kind: Some(ProvisionKind::Command),
                 state: DoctorState::Unavailable,
                 class: Some(ProvisioningClass::Unavailable),
@@ -1364,6 +1374,8 @@ mod tests {
         );
         assert_eq!(report.steps.len(), 1);
         assert_eq!(report.steps[0].state, DoctorState::Unavailable);
+        assert_eq!(report.steps[0].identity.as_deref(), Some("setup"));
+        assert_eq!(report.steps[0].kind, Some(ProvisionKind::Command));
         let error = report.error.as_ref().expect("a structured error");
         assert_eq!(error.class, "unsupported");
         assert_eq!(
