@@ -484,25 +484,31 @@ struct DoctorStep {
 }
 
 pub async fn handle_doctor(backend: Option<String>, json: bool) -> ExitCode {
+    let requested_backend = backend.clone();
     let config = match load_config_quiet(backend) {
         Ok(config) => config,
-        Err(error) => return report(error),
+        Err(error) => return report_doctor_failure(error, json, requested_backend.as_deref()),
     };
     let project_slug = match crate::orchestrator::resolve_project_slug(&config) {
         Ok(slug) => slug,
         Err(error) => {
-            return report(Error::Misconfigured {
-                message: error.to_string(),
-            });
+            return report_doctor_failure(
+                Error::Misconfigured {
+                    message: error.to_string(),
+                },
+                json,
+                config.backend.as_deref(),
+            );
         }
     };
     let selected = match backends::build(&config) {
         Ok(selected) => selected,
-        Err(error) => return report(error),
+        Err(error) => return report_doctor_failure(error, json, config.backend.as_deref()),
     };
+    let selected_name = selected.name().to_string();
     let (readiness, capabilities, support) = match backends::describe(&selected).await {
         Ok(described) => described,
-        Err(error) => return report(error),
+        Err(error) => return report_doctor_failure(error, json, Some(&selected_name)),
     };
     let (doctor_report, failure) = build_doctor_report(
         &config,
@@ -838,16 +844,63 @@ fn report(error: Error) -> ExitCode {
     ExitCode::from(error.exit_class().code())
 }
 
+/// Report a failure that happened before the backend could be described.
+///
+/// `--json` promises a parseable report on every path, so an early failure is
+/// rendered in the same shape with the facts that were never available left
+/// empty and the class and message in `error`.
+fn report_doctor_failure(error: Error, json: bool, backend: Option<&str>) -> ExitCode {
+    if !json {
+        return report(error);
+    }
+    let doctor_report = doctor_failure_report(&error, backend);
+    match render_doctor(&doctor_report, true) {
+        Ok(text) => {
+            println!("{text}");
+            ExitCode::from(error.exit_class().code())
+        }
+        Err(render_error) => report(render_error),
+    }
+}
+
+/// The structured report for a failure before the backend could be described.
+fn doctor_failure_report(error: &Error, backend: Option<&str>) -> DoctorReport {
+    let backend = backend.unwrap_or("unknown").to_string();
+    let message = error.to_string();
+    DoctorReport {
+        project_slug: String::new(),
+        readiness: Readiness {
+            backend: backend.clone(),
+            checks: vec![crate::sandbox::report::Check {
+                primitive: "preflight".to_string(),
+                state: State::Unavailable,
+                reason: Some(message.clone()),
+                remedy: None,
+                fallback: None,
+            }],
+        },
+        capabilities: Vec::new(),
+        supported_backends: None,
+        notices: Vec::new(),
+        steps: Vec::new(),
+        error: Some(DoctorError {
+            class: error.class().as_str().to_string(),
+            message,
+        }),
+        backend,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         DoctorError, DoctorReport, DoctorState, DoctorStep, build_doctor_report, doctor_exit_code,
-        listing_failed, render_backends, render_doctor, shell_exit_code,
+        doctor_failure_report, listing_failed, render_backends, render_doctor, shell_exit_code,
     };
     use crate::backends;
     use crate::config::{Config, ProjectConfig};
     use crate::sandbox::contract::{
-        ProvisionKind, ProvisionStep, ProvisionSupport, ProvisioningClass, SandboxStatus,
+        Error, ProvisionKind, ProvisionStep, ProvisionSupport, ProvisioningClass, SandboxStatus,
     };
     use crate::sandbox::report::{Capability, Check, Fallback, Readiness, State};
 
@@ -981,6 +1034,27 @@ mod tests {
 
         let text = render_doctor(&report, false).expect("renders");
         assert!(text.contains("supported backends: any"), "{text}");
+    }
+
+    #[test]
+    fn an_early_failure_still_renders_a_json_report() {
+        let error = Error::Misconfigured {
+            message: "bad configuration".to_string(),
+        };
+        let report = doctor_failure_report(&error, Some("docker"));
+        let json = render_doctor(&report, true).expect("renders");
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid json");
+        assert_eq!(parsed["backend"], "docker");
+        assert_eq!(parsed["project_slug"], "");
+        assert_eq!(parsed["error"]["class"], "misconfigured");
+        assert!(
+            parsed["error"]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("bad configuration")),
+            "{parsed}"
+        );
+        assert_eq!(parsed["readiness"]["checks"][0]["state"], "Unavailable");
+        assert_eq!(parsed["steps"].as_array().map(Vec::len), Some(0));
     }
 
     #[test]
