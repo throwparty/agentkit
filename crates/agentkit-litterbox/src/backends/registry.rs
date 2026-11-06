@@ -6,7 +6,7 @@
 
 use serde::Serialize;
 
-use crate::config::Config;
+use crate::config::{Config, escaped};
 use crate::sandbox::contract::{Error, ProvisionSupport};
 use crate::sandbox::report::{Capability, Readiness, State};
 use crate::sandbox::selected::Selected;
@@ -47,14 +47,22 @@ pub fn build(config: &Config) -> Result<Selected, Error> {
                 .unwrap_or_else(|| toml::Value::Table(Default::default()));
             constructor(&section)
         }
-        None => Err(Error::Unavailable {
-            backend: name.to_string(),
-            reason: format!(
-                "this binary does not build a backend named '{name}'; it contains {}",
-                available_names().join(", ")
-            ),
-            remedy: "choose one of the backends listed by `litterbox backends`".to_string(),
-        }),
+        None => {
+            let display = escaped(name);
+            let available = available_names()
+                .iter()
+                .map(|candidate| escaped(candidate))
+                .collect::<Vec<_>>()
+                .join(", ");
+            Err(Error::Unavailable {
+                backend: display.clone(),
+                reason: format!(
+                    "this binary does not build a backend named '{display}'; it contains \
+                     {available}"
+                ),
+                remedy: "choose one of the backends listed by `litterbox backends`".to_string(),
+            })
+        }
     }
 }
 
@@ -242,6 +250,24 @@ mod tests {
     use crate::config::Config;
     use crate::sandbox::contract::Error;
     use crate::sandbox::report::{Check, Fallback, Readiness, State};
+
+    #[test]
+    fn an_unbuilt_backend_name_is_escaped_in_the_report() {
+        let config = Config {
+            backend: Some("bad\nname".to_string()),
+            ..Config::default()
+        };
+        match build(&config) {
+            Err(Error::Unavailable {
+                backend, reason, ..
+            }) => {
+                assert_eq!(backend, "bad\\nname");
+                assert!(!reason.contains('\n'), "{reason}");
+            }
+            Err(other) => panic!("expected Unavailable, got {other:?}"),
+            Ok(_) => panic!("expected the unbuilt backend to be refused"),
+        }
+    }
 
     #[test]
     fn an_unbuilt_backend_is_unavailable_not_unsupported() {
