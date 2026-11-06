@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use crate::config::{Config, ProvisionDefinition, ProvisioningIssue, escaped, valid_backend_name};
+use crate::config::{Config, ProvisioningIssue, escaped, valid_backend_name};
 use crate::sandbox::contract::{
     Error, ProvisionStep, ProvisionSupport, ProvisioningClass, ProvisioningFailure,
 };
@@ -110,11 +110,11 @@ fn check_selected(config: &Config, selected: &str) -> Result<(), Error> {
 fn sequence_definitions<'a>(
     config: &'a Config,
     selected: &str,
-) -> Result<Vec<&'a ProvisionDefinition>, Error> {
+) -> Result<Vec<&'a ProvisionStep>, Error> {
     let Some(sequence) = config.backend_sequences.get(selected) else {
         return Ok(Vec::new());
     };
-    let definitions: HashMap<&str, &ProvisionDefinition> = config
+    let definitions: HashMap<&str, &ProvisionStep> = config
         .provision_definitions
         .iter()
         .map(|definition| (definition.identity(), definition))
@@ -214,7 +214,7 @@ pub fn resolve(
 /// Refuse a step whose kind the backend cannot apply, or whose degradation the
 /// user has not accepted.
 fn check_support(
-    definition: &ProvisionDefinition,
+    definition: &ProvisionStep,
     selected: &str,
     support: &[ProvisionSupport],
     accept_degraded: bool,
@@ -272,9 +272,9 @@ fn check_support(
 }
 
 /// The typed step a definition becomes.
-fn step(definition: &ProvisionDefinition) -> ProvisionStep {
+fn step(definition: &ProvisionStep) -> ProvisionStep {
     match definition {
-        ProvisionDefinition::Command { identity, run } => ProvisionStep::Command {
+        ProvisionStep::Command { identity, run } => ProvisionStep::Command {
             identity: identity.clone(),
             run: run.clone(),
         },
@@ -296,14 +296,14 @@ fn list(backends: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{StepOutcome, preflight_steps, resolve, resolve_steps, validate};
-    use crate::config::{Config, ProjectConfig, ProvisionDefinition};
+    use crate::config::{Config, ProjectConfig};
     use crate::sandbox::contract::{
         Error, ProvisionKind, ProvisionStep, ProvisionSupport, ProvisioningClass,
     };
     use crate::sandbox::report::{Fallback, State};
 
-    fn command(identity: &str) -> ProvisionDefinition {
-        ProvisionDefinition::Command {
+    fn command(identity: &str) -> ProvisionStep {
+        ProvisionStep::Command {
             identity: identity.to_string(),
             run: "true".to_string(),
         }
@@ -311,7 +311,7 @@ mod tests {
 
     fn config(
         backends: Option<Vec<String>>,
-        definitions: Vec<ProvisionDefinition>,
+        definitions: Vec<ProvisionStep>,
         sequence: Vec<&str>,
     ) -> Config {
         Config {

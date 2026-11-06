@@ -103,8 +103,9 @@ pub struct ProvisionSupport {
     pub fallback: Option<crate::sandbox::report::Fallback>,
 }
 
-/// A resolved provisioning step, ready for a backend to apply.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+/// A provisioning step: the project's declaration and the resolved value.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum ProvisionStep {
     /// A command run once, confined, with the environment produced so far.
     Command {

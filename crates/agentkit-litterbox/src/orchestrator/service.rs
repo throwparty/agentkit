@@ -1004,7 +1004,7 @@ mod seam_tests {
         let provision = command
             .as_ref()
             .map(|run| {
-                vec![crate::config::ProvisionDefinition::Command {
+                vec![crate::sandbox::contract::ProvisionStep::Command {
                     identity: "setup".to_string(),
                     run: run.clone(),
                 }]
@@ -1225,7 +1225,7 @@ mod seam_tests {
                 slug: Some("project".to_string()),
                 backends: Some(vec!["test".to_string()]),
             },
-            provision_definitions: vec![crate::config::ProvisionDefinition::Command {
+            provision_definitions: vec![crate::sandbox::contract::ProvisionStep::Command {
                 identity: "setup".to_string(),
                 run: "echo permitted".to_string(),
             }],
@@ -1291,7 +1291,7 @@ mod seam_tests {
                 slug: Some("project".to_string()),
                 backends: Some(vec!["other".to_string()]),
             },
-            provision_definitions: vec![crate::config::ProvisionDefinition::Command {
+            provision_definitions: vec![crate::sandbox::contract::ProvisionStep::Command {
                 identity: "setup".to_string(),
                 run: "echo refused".to_string(),
             }],
@@ -1345,7 +1345,7 @@ mod seam_tests {
                     slug: Some("project".to_string()),
                     backends: Some(vec!["test".to_string()]),
                 },
-                provision_definitions: vec![crate::config::ProvisionDefinition::Command {
+                provision_definitions: vec![crate::sandbox::contract::ProvisionStep::Command {
                     identity: "setup".to_string(),
                     run: "echo refused".to_string(),
                 }],
@@ -1396,15 +1396,15 @@ mod seam_tests {
                 backends: Some(vec!["test".to_string(), "other".to_string()]),
             },
             provision_definitions: vec![
-                crate::config::ProvisionDefinition::Command {
+                crate::sandbox::contract::ProvisionStep::Command {
                     identity: "z-first".to_string(),
                     run: "true".to_string(),
                 },
-                crate::config::ProvisionDefinition::Command {
+                crate::sandbox::contract::ProvisionStep::Command {
                     identity: "a-second".to_string(),
                     run: "true".to_string(),
                 },
-                crate::config::ProvisionDefinition::Command {
+                crate::sandbox::contract::ProvisionStep::Command {
                     identity: "other-only".to_string(),
                     run: "true".to_string(),
                 },
@@ -1564,7 +1564,7 @@ mod seam_tests {
                 slug: Some("project".to_string()),
                 backends: Some(vec!["test".to_string()]),
             },
-            provision_definitions: vec![crate::config::ProvisionDefinition::Command {
+            provision_definitions: vec![crate::sandbox::contract::ProvisionStep::Command {
                 identity: "setup".to_string(),
                 run: "echo permitted".to_string(),
             }],
