@@ -557,6 +557,27 @@ fn build_doctor_report(
             message: resolve_error.to_string(),
         });
     }
+    if error.is_some()
+        && plan.steps.is_empty()
+        && let Some(sequence) = config.backend_sequences.get(backend)
+    {
+        for identity in sequence {
+            let kind = config
+                .provision_definitions
+                .iter()
+                .find(|definition| definition.identity() == identity)
+                .map(|definition| definition.kind().as_str().to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            steps.push(DoctorStep {
+                identity: identity.clone(),
+                kind,
+                state: DoctorState::Unavailable,
+                class: error.as_ref().map(|error| error.class.clone()),
+                reason: error.as_ref().map(|error| error.message.clone()),
+                remedy: None,
+            });
+        }
+    }
     for planned in plan.steps {
         match planned {
             PlannedStep::Resolved {
@@ -679,36 +700,8 @@ fn render_doctor(report: &DoctorReport, json: bool) -> Result<String, Error> {
         ),
         format!("project: {}", report.project_slug),
     ];
-    for check in &report.readiness.checks {
-        let mut line = format!("    {}: {}", check.primitive, state_label(check.state));
-        if let Some(reason) = &check.reason {
-            line.push_str(&format!(" ({reason})"));
-        }
-        if let Some(remedy) = &check.remedy {
-            line.push_str(&format!(" -- {remedy}"));
-        }
-        lines.push(line);
-    }
-    for capability in &report.capabilities {
-        let mut line = format!(
-            "    {}: {}",
-            capability.operation,
-            state_label(capability.state)
-        );
-        if let Some(reason) = &capability.reason {
-            line.push_str(&format!(" ({reason})"));
-        }
-        if let Some(remedy) = &capability.remedy {
-            line.push_str(&format!(" -- {remedy}"));
-        }
-        lines.push(line);
-    }
-    if let Some(backends) = &report.supported_backends {
-        lines.push(format!("supported backends: {}", backends.join(", ")));
-    }
-    for notice in &report.notices {
-        lines.push(format!("notice: {notice}"));
-    }
+    lines.extend(report.readiness.checks.iter().map(check_line));
+    lines.extend(report.capabilities.iter().map(capability_line));
     if let Some(error) = &report.error {
         lines.push(format!("provisioning ({}): {}", error.class, error.message));
     }
@@ -731,6 +724,32 @@ fn render_doctor(report: &DoctorReport, json: bool) -> Result<String, Error> {
         lines.push(line);
     }
     Ok(lines.join("\n"))
+}
+
+fn check_line(check: &crate::sandbox::report::Check) -> String {
+    let mut line = format!("    {}: {}", check.primitive, state_label(check.state));
+    if let Some(reason) = &check.reason {
+        line.push_str(&format!(" ({reason})"));
+    }
+    if let Some(remedy) = &check.remedy {
+        line.push_str(&format!(" -- {remedy}"));
+    }
+    line
+}
+
+fn capability_line(capability: &crate::sandbox::report::Capability) -> String {
+    let mut line = format!(
+        "    {}: {}",
+        capability.operation,
+        state_label(capability.state)
+    );
+    if let Some(reason) = &capability.reason {
+        line.push_str(&format!(" ({reason})"));
+    }
+    if let Some(remedy) = &capability.remedy {
+        line.push_str(&format!(" -- {remedy}"));
+    }
+    line
 }
 
 fn doctor_state_label(state: DoctorState) -> &'static str {
@@ -771,30 +790,8 @@ fn report_lines(report: &backends::BackendReport) -> Vec<String> {
         state_label(readiness.state())
     )];
 
-    for check in &readiness.checks {
-        let mut line = format!("    {}: {}", check.primitive, state_label(check.state));
-        if let Some(reason) = &check.reason {
-            line.push_str(&format!(" ({reason})"));
-        }
-        if let Some(remedy) = &check.remedy {
-            line.push_str(&format!(" -- {remedy}"));
-        }
-        lines.push(line);
-    }
-    for capability in &report.capabilities {
-        let mut line = format!(
-            "    {}: {}",
-            capability.operation,
-            state_label(capability.state)
-        );
-        if let Some(reason) = &capability.reason {
-            line.push_str(&format!(" ({reason})"));
-        }
-        if let Some(remedy) = &capability.remedy {
-            line.push_str(&format!(" -- {remedy}"));
-        }
-        lines.push(line);
-    }
+    lines.extend(readiness.checks.iter().map(check_line));
+    lines.extend(report.capabilities.iter().map(capability_line));
 
     lines
 }
