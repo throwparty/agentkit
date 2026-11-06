@@ -678,6 +678,17 @@ fn render_doctor(report: &DoctorReport, json: bool) -> Result<String, Error> {
             state_label(report.readiness.state())
         ),
         format!("project: {}", report.project_slug),
+        format!(
+            "supported backends: {}",
+            match report.supported_backends.as_deref() {
+                Some(backends) if !backends.is_empty() => backends
+                    .iter()
+                    .map(|backend| crate::config::escaped(backend))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                _ => "any".to_string(),
+            }
+        ),
     ];
     lines.extend(report.readiness.checks.iter().map(check_line));
     lines.extend(report.capabilities.iter().map(capability_line));
@@ -946,9 +957,30 @@ mod tests {
 
         let text = render_doctor(&report, false).expect("renders");
         assert!(text.contains("docker"), "{text}");
+        assert!(text.contains("supported backends: docker"), "{text}");
         assert!(text.contains("fetch"), "{text}");
         assert!(text.contains("provision:command"), "{text}");
         assert!(text.contains("available"), "{text}");
+    }
+
+    #[test]
+    fn the_doctor_text_names_an_unrestricted_backend_set() {
+        let report = DoctorReport {
+            backend: "docker".to_string(),
+            project_slug: "project".to_string(),
+            readiness: Readiness {
+                backend: "docker".to_string(),
+                checks: Vec::new(),
+            },
+            capabilities: Vec::new(),
+            supported_backends: None,
+            notices: Vec::new(),
+            steps: Vec::new(),
+            error: None,
+        };
+
+        let text = render_doctor(&report, false).expect("renders");
+        assert!(text.contains("supported backends: any"), "{text}");
     }
 
     #[test]
