@@ -1309,6 +1309,12 @@ mod seam_tests {
                 .is_empty(),
             "the refusal happens before a branch exists"
         );
+        assert!(
+            metadata_store::load_sandbox_at(records.path(), "demo")
+                .expect("readable records")
+                .is_none(),
+            "the refusal writes no record"
+        );
         assert!(backend.requests().is_empty(), "the backend was never asked");
     }
 

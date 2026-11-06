@@ -95,7 +95,8 @@ snapshot-mode = "direct"
   the rules would change is refused rather than silently rewritten.
 - `project.backends` names the backends the project's provisioning supports. It is
   required when `[[provision]]` defines a step. The local override may replace it;
-  selecting a backend it does not list is refused with both names.
+  selecting a backend it does not list is refused with both names. An empty list
+  with no steps means no restriction; with steps it must name at least one.
 - `[[provision]]` defines a step once, by `identity`. `kind = "command"` runs `run`
   once, confined, with the workspace as its working directory, after the
   workspace is materialised, in the order the selected backend lists it. A

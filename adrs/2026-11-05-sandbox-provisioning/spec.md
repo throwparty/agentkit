@@ -35,7 +35,7 @@ Today the provider contract carries exactly one environment and one setup comman
 
 ### FR-001: Core: Provisioning Step
 
-A provisioning step has an identity unique within the project, a kind, and settings the kind defines. The identity is stable, starts with a lowercase ASCII letter, and continues with lowercase letters, digits, hyphens or underscores; it is how a backend's sequence references the step, how a failure names it and how inspection reports it. A step runs at most once in one sandbox.
+A provisioning step has an identity unique within the project, a kind, and settings the kind defines. The identity is stable, starts with a lowercase ASCII letter, and continues with lowercase letters, digits, hyphens or underscores; it is how a backend's sequence references the step, how a failure names it and how inspection reports it. A step runs at most once in one sandbox. A project may declare at most 32 steps.
 
 **Slug:** `provisioning-step`
 
@@ -47,7 +47,7 @@ Step kinds are compiled in and typed. This ADR defines `command`; `nix-devshell-
 
 ### FR-003: Core: Backend Sequence
 
-Each backend carries an ordered `provision` list of step identities, under `[backends.<name>].provision`. The list order is the execution order; there is no implicit ordering by kind. A repeated identity in one list is an error. A backend with no `provision` key, or an empty list, runs no steps. A list naming an identity the project does not define is an error naming the identity and the backend.
+Each backend carries an ordered `provision` list of step identities, under `[backends.<name>].provision`. The list order is the execution order; there is no implicit ordering by kind. A repeated identity in one list is an error. A backend with no `provision` key, or an empty list, runs no steps. A list naming an identity the project does not define is an error naming the identity and the backend. One sequence may list at most 32 identities.
 
 **Slug:** `backend-sequence`
 

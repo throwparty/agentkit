@@ -361,7 +361,7 @@ mod tests {
         MAX_CONFIG_BYTES, parse_project, read_config_file, reject_moved_sections,
         validate_forwarding, validate_local_file, validate_ports, validate_provisioning,
     };
-    use crate::config::{Config, PortRequest, ProjectFile, merge};
+    use crate::config::{Config, ConfigError, PortRequest, ProjectFile, merge};
     use crate::sandbox::contract::ProvisionStep;
 
     fn config_with(ports: Vec<PortRequest>) -> Config {
@@ -695,17 +695,34 @@ bind = "0.0.0.0"
 
     #[test]
     fn provisioning_caps_the_number_of_steps() {
-        let definitions: Vec<ProvisionStep> = (0..33)
+        let at_limit: Vec<ProvisionStep> = (0..32)
             .map(|index| command(&format!("step-{index}")))
             .collect();
-        let mut config =
-            provisioning_config(definitions, Some(vec!["bubblewrap".to_string()]), &[]);
+        let mut config = provisioning_config(at_limit, Some(vec!["bubblewrap".to_string()]), &[]);
+        validate_provisioning(&mut config).expect("32 steps are accepted");
+
+        let over: Vec<ProvisionStep> = (0..33)
+            .map(|index| command(&format!("step-{index}")))
+            .collect();
+        let mut config = provisioning_config(over, Some(vec!["bubblewrap".to_string()]), &[]);
         let error = validate_provisioning(&mut config).expect_err("too many steps");
         assert!(error.to_string().contains("limit is 32"), "{error}");
     }
 
     #[test]
     fn provisioning_caps_one_backends_sequence() {
+        let definitions: Vec<ProvisionStep> = (0..32)
+            .map(|index| command(&format!("step-{index}")))
+            .collect();
+        let identities: Vec<String> = (0..32).map(|index| format!("step-{index}")).collect();
+        let identities: Vec<&str> = identities.iter().map(String::as_str).collect();
+        let mut config = provisioning_config(
+            definitions,
+            Some(vec!["bubblewrap".to_string()]),
+            &[("bubblewrap", identities.as_slice())],
+        );
+        validate_provisioning(&mut config).expect("32 sequence entries are accepted");
+
         let definitions: Vec<ProvisionStep> = (0..33)
             .map(|index| command(&format!("step-{index}")))
             .collect();
@@ -728,7 +745,24 @@ bind = "0.0.0.0"
             &[("bubblewrap", &["Fetch"])],
         );
         let error = validate_provisioning(&mut config).expect_err("invalid identity");
-        assert!(error.to_string().contains("lowercase letter"), "{error}");
+        let ConfigError::Provisioning(issue) = error else {
+            panic!("expected a provisioning issue");
+        };
+        assert!(issue.reason.contains("lowercase letter"), "{issue}");
+        assert!(issue.reason.contains("Fetch"), "{issue}");
+        assert_eq!(issue.step.as_deref(), Some("Fetch"));
+
+        let mut config = provisioning_config(
+            vec![command("bad\nname")],
+            Some(vec!["bubblewrap".to_string()]),
+            &[("bubblewrap", &["bad\nname"])],
+        );
+        let error = validate_provisioning(&mut config).expect_err("control character refused");
+        let ConfigError::Provisioning(issue) = error else {
+            panic!("expected a provisioning issue");
+        };
+        assert!(!issue.reason.contains('\n'), "{issue}");
+        assert_eq!(issue.step.as_deref(), Some("bad\\nname"));
     }
 
     #[test]

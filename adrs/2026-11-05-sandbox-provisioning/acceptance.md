@@ -10,8 +10,9 @@ nix develop ./nix --command cargo test -p agentkit-litterbox --lib
 nix develop ./nix --command cargo test -p agentkit-litterbox --doc
 ```
 
-311 passed, 0 failed, 8 ignored in the library target. The ignored tests are the
+313 passed, 0 failed, 8 ignored in the library target. The ignored tests are the
 Docker suite. The doc target runs the compile_fail facet doctest: 1 passed.
+The doctor integration test target has 2 passed, including a misconfigured run.
 
 ## Docker suite
 
@@ -31,7 +32,7 @@ nix develop ./nix --command arch-lint check
 nix develop ./nix --command bash hack/arch-lint-negative.sh
 ```
 
-Clippy is clean. `arch-lint check` reports 0 errors across 352 files. The
+Clippy is clean. `arch-lint check` reports 0 errors across 353 files. The
 negative fixture rejects the planted contract→backend, contract→provision,
 CLI→backend, CLI→SCM, CLI→provision, MCP→provision, MCP error→backend,
 config→backend, config→provision, registry→orchestrator, registry→provision,
@@ -50,7 +51,7 @@ orchestrator→backend, backend→provision and provision→orchestrator imports
 | AC-007 consent unchanged | `orchestrator::service::seam_tests::a_listed_project_may_run_its_setup_command`, `accepting_every_project_permits_its_setup_command`, `a_project_setup_command_needs_permission`; the permit tests assert the recorded request carries the step |
 | AC-008 atomic failure | `orchestrator::service::seam_tests::a_failed_create_removes_the_branch_it_made`, Docker `a_failed_command_step_names_the_step_and_rolls_back` |
 | AC-009 provenance per step | `sandbox::environment::tests::a_step_reports_its_identity_kind_and_variable_names_without_values`, Docker `command_steps_run_in_order_in_the_workspace` (inspects the record create returned), and the label round-trip in `enumeration_rebuilds_the_record_from_labels` |
-| AC-010 doctor does not mutate | `cli::tests::the_doctor_builder_marks_a_command_step_denied_without_mutating`, `a_denied_step_is_reported_in_json_with_its_notices`, `a_resolver_error_sets_the_class_and_the_exit_code`; the builder is pure and the handler only reads config, readiness, capabilities and support. No negative filesystem assertion is made. |
+| AC-010 doctor does not mutate | `cli::tests::the_doctor_builder_marks_a_command_step_denied_without_mutating`, `a_denied_step_is_reported_in_json_with_its_notices`, `a_resolver_error_sets_the_class_and_the_exit_code`, and `tests/doctor.rs` (`a_ready_doctor_run_creates_no_branch`, `a_misconfigured_doctor_run_creates_no_branch`) which drive the entry point and assert the branch list is unchanged. |
 | AC-011 matrix does not leak | `orchestrator::service::seam_tests::a_request_carries_only_the_selected_backends_steps` |
 | AC-012 local override | `config::tests::the_local_supported_set_replaces_the_project_one`, `the_local_definitions_replace_the_project_definitions`, `an_empty_local_definition_list_removes_the_project_steps`, `an_empty_local_sequence_removes_the_project_sequence` |
 | AC-013 empty sequence | `provision::resolve::tests::a_backend_with_no_sequence_runs_no_steps`, `no_definitions_and_no_supported_set_is_empty` |

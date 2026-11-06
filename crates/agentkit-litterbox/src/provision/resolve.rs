@@ -261,7 +261,7 @@ fn list(backends: &[String]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{ResolvedStep, StepOutcome, preflight_steps, validate};
+    use super::{ResolvedStep, StepOutcome, preflight_steps, undefined_identity, validate};
     use crate::config::{Config, ProjectConfig};
     use crate::sandbox::contract::{
         Error, ProvisionKind, ProvisionStep, ProvisionSupport, ProvisioningClass,
@@ -536,6 +536,32 @@ mod tests {
             ),
         )
         .expect("accepted degraded kind");
+    }
+
+    #[test]
+    fn an_undefined_identity_names_the_identity_and_backend() {
+        match undefined_identity("bubblewrap", "missing") {
+            Error::Provisioning { failure } => {
+                assert_eq!(failure.class, ProvisioningClass::Misconfigured);
+                assert_eq!(failure.backend.as_deref(), Some("bubblewrap"));
+                assert_eq!(failure.step.as_deref(), Some("missing"));
+                assert!(failure.reason.contains("missing"), "{failure:?}");
+            }
+            other => panic!("expected Provisioning, got {other}"),
+        }
+    }
+
+    #[test]
+    fn a_degraded_kind_without_a_fallback_is_usable() {
+        let config = config(
+            Some(vec!["bubblewrap".to_string()]),
+            vec![command("fetch")],
+            vec!["fetch"],
+        );
+        let resolved = resolve_steps(&config, "bubblewrap", &support(State::Degraded))
+            .expect("a degraded kind with no substitute is usable");
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].support.state, State::Degraded);
     }
 
     #[test]
