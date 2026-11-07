@@ -29,12 +29,43 @@ Normative terminology and conventions for AgentKit components. Tackle (see `adrs
 - **Policy script** — a Rhai script registered at a decision point (e.g. `pre_tool_use`); returns a verdict, cannot act.
 - **Behaviour script** — a Rhai script registered at a workflow event (e.g. `session_forked`, `post_turn`); acts via the host API, does not gate, and never invokes tools directly — it drives the model via `send_prompt`, whose tool calls pass through the normal permission pipeline.
 
+## Upstream vocabularies
+
+Terms defined by technologies we did not write. They are a resource of the
+capability prompt for that technology, at
+`.agentkit/tackle/prompts/<technology>/glossary.md`, linked from the components
+that use them. A glossary defines only the terms a component needs, cites the
+upstream manual, and never defines an AgentKit concept or a component's
+narrowing of one.
+
+- [Nix](.agentkit/tackle/prompts/nix/glossary.md) — store paths, closures,
+  flakes, devShells, and the difference between evaluation and realisation.
+
+## Capability prompts
+
+Reusable knowledge for an agent, as a Tackle prompt package under
+`.agentkit/tackle/prompts/<technology>/`. `PROMPT.md` is the behaviour, and the
+resources beside it are the reference a model reads when it needs them; the
+package is one artefact per technology and is tracked with the repository. The
+prompt is `model_invokable` so the model can load it on demand, and
+`user_invokable` so `/nix` works. It carries the mental model, the behaviours
+verified on a supported host with the command that proves each one, and the
+traps. It does not restate its glossary.
+
+- [`nix`](.agentkit/tackle/prompts/nix/PROMPT.md) — devShells, closures,
+  evaluation versus realisation; vocabulary in the same package.
+
 ## Component vocabularies
 
 - [Litterbox](crates/agentkit-litterbox/CONTEXT.md) — sandboxes, backends, the provider contract, and how a sandbox reports itself.
 
 ## Conventions
 
+- Terminology has two homes. A term AgentKit introduces goes in the owning component's `CONTEXT.md`; a term from an upstream technology goes in that technology's prompt package at `.agentkit/tackle/prompts/<technology>/glossary.md` and is linked, never copied. A component's `CONTEXT.md` says which glossaries it uses.
+- One sentence per term, stating what it is and what it is not. A term that needs a paragraph is not yet understood.
+- Never write an upstream word unqualified where it collides with ours: say **Nix build sandbox** or **Litterbox sandbox**, never bare *sandbox*.
+- Reusable agent knowledge is a Tackle prompt package under `.agentkit/tackle/prompts/<technology>/`: `PROMPT.md` for behaviour, resources for reference. `.agents/skills/` holds opencode-local skills only, which are not shared with the repository (it is gitignored).
+- A capability prompt is warranted when a component's behaviour depends on a technology's version-specific details and each fact can be re-verified on a supported host by a command. It references its glossary; it does not replace it.
 - Project configuration lives at `./.agentkit/<component>/config.toml`; user configuration at `~/.config/agentkit/<component>/` (platform-adjusted via `agentkit-common`). Project configuration overrides user configuration except where security-relevant fields are restricted to user configuration.
 - Litterbox project configuration lives at `.agentkit/litterbox/config.toml`; the machine-owned choice of backend, its settings and port exposure live in the untracked `.agentkit/litterbox/config.local.toml`, not a user file.
 - Component state (databases, durable files) lives under the platform data directory via `agentkit-common`'s `data_dir`, never inside the repository.

@@ -25,6 +25,12 @@ Normative terminology for the Litterbox component. It covers the sandbox model t
 - **Sequence** — the ordered list of step identities under `[backends.<name>].provision`. Order is execution order, with no implicit ordering by kind; a backend runs only its own sequence, and the project declares compatibility in `[project] backends` without selecting a backend.
 - **Provisioning failure** — a structured refusal or failure naming the class, backend, step identity, kind, reason and remedy. A refused command is denied; an unsupported kind is unsupported; a command that exits non-zero is failed with its exit code and bounded output.
 - **Step provenance** — the identity and kind of each step that ran, and the variables it changed by name and kind. It never carries a value.
+- **Host step** — a step kind whose work happens on the host during create, before the sandbox exists: it produces effects rather than running in the sandbox. The devShell step is one; a command step is not.
+- **Effect** — what a host step contributes to a sandbox, in the vocabulary the contract owns: environment variables, read-only path grants and written files. A backend applies the effects it can honour and refuses the rest, naming the effect and the remedy; the contract names no devShell, flake or store.
+- **Read-only grant** — a host path the sandbox may read and not write. A devShell's store closure becomes one grant per store path.
+- **Written file** — a file placed inside the sandbox at create, read-only, at a path the backend reports.
+- **Store view** — the set of store paths a sandbox can see: a devShell's closure, or the whole store. It is a machine setting, because it trades reachability against the chance that a build reaches a path the derivation never declared; the closure is the default.
+- **Differential environment** — the environment taken from a devShell by difference: every exported variable from `print-dev-env`, plus the post-hook value of every variable the shell hook changed, computed under a sanitised caller. Neither `print-dev-env` nor `nix develop` alone is this; the difference is ours to define.
 
 ## What a sandbox reports
 
@@ -41,6 +47,17 @@ Normative terminology for the Litterbox component. It covers the sandbox model t
 - **User configuration** — the person's choice of backend, that backend's settings, setup consent and where forwarded ports bind, in `~/.config/agentkit/litterbox/config.toml`. The only place a mechanism is chosen.
 - **Local override** — the untracked `.agentkit/litterbox/config.local.toml`, carrying project-owned replacements only; machine settings and consent are rejected there.
 - **Project configuration** — what the project needs: its provisioning definitions, the backends its provisioning supports, expected ports and snapshot mode. It cannot select a backend or dictate confinement.
+
+## Upstream vocabulary
+
+This component uses terms from technologies it does not define. The vocabulary
+is a resource of the capability prompt for that technology under
+`.agentkit/tackle/prompts/`, linked from the root `CONTEXT.md`; read the
+glossary for the word, and the prompt for how the tool behaves.
+
+- [Nix](../../.agentkit/tackle/prompts/nix/glossary.md) — store paths, closures,
+  flakes, devShells, evaluation and realisation. Working knowledge: the
+  [`nix`](../../.agentkit/tackle/prompts/nix/PROMPT.md) prompt.
 
 ## Language
 
