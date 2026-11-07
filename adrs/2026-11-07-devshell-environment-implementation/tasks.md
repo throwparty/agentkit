@@ -158,7 +158,7 @@ Update `cli.rs` and `orchestrator::preflight`. `DoctorStep.kind` becomes `Option
 | Depends On | T-006,T-008,T-009 |
 | References | doctor,doctor-no-mutation,host-requirements,store-view-setting,legible-unavailability,dirty-tree |
 
-### T-013: Test backend, conformance and cross-process
+### T-013: [x] Test backend, conformance and cross-process
 
 Make `TestBackend`'s contribution support configurable, record the `ResolvedStep` values in the record, apply the recorded environment on `exec`, and return the provenance from `inspect`. Register the test-only third kind. Add the position test and the cross-process test: create a record through `metadata_store`, spawn the test binary with an environment variable, and assert the child reads the same environment and provenance. Add a second-create test for a changed flake.
 
