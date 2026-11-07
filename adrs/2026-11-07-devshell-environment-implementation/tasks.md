@@ -28,7 +28,7 @@ Replace `Backend::provision_support` with `contribution_support`. Update `Select
 | Depends On | T-001 |
 | References | contribution-support,contribution-refused,boundaries |
 
-### T-003: Provenance and environment rebasing
+### T-003: [x] Provenance and environment rebasing
 
 Change `StepProvenance.kind` to `String`. Add `Contributions::environment_for(&self, workspace: &Path) -> Environment`, which builds the runtime environment and rewrites only the variables named in `workspace_variables`, replacing the recorded `workspace_root` prefix with the sandbox workspace. Leave store paths untouched. Keep host paths in `Provenance.host_paths`.
 
