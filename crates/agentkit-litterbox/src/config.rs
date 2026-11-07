@@ -59,6 +59,17 @@ pub struct GitConfig {
     pub snapshot_mode: Option<ScmMode>,
 }
 
+/// Which store view a devshell step binds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum StoreView {
+    /// The devShell's store closure.
+    #[default]
+    Closure,
+    /// The whole Nix store.
+    Whole,
+}
+
 /// The merged configuration.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Config {
@@ -77,6 +88,8 @@ pub struct Config {
     pub ports: Vec<PortRequest>,
     /// How forwarded ports are exposed.
     pub forwarding: ForwardingConfig,
+    /// Which store view a devshell step binds.
+    pub store_view: StoreView,
     /// Whether a degraded mechanism may be used.
     pub accept_degraded: bool,
     /// Whether any repository may run its own setup command.
@@ -368,6 +381,9 @@ pub struct ProjectFile {
     pub backends: BTreeMap<String, toml::Value>,
     /// How forwarded ports are exposed on this machine.
     pub forwarding: Option<ForwardingConfig>,
+    /// Which store view a devshell step uses on this machine.
+    #[serde(default, rename = "store-view")]
+    pub store_view: Option<StoreView>,
     /// Accept a degraded mechanism rather than refusing.
     #[serde(default, rename = "accept-degraded")]
     pub accept_degraded: bool,
@@ -395,6 +411,13 @@ pub fn merge(local: ProjectFile, project: ProjectFile) -> Result<Config, ConfigE
         notices.push(
             "project configuration sets where forwarded ports bind; that is the machine's \
              decision, so it is ignored"
+                .to_string(),
+        );
+    }
+    if project.store_view.is_some() {
+        notices.push(
+            "project configuration sets the store view; that is the machine's decision, so it \
+             is ignored"
                 .to_string(),
         );
     }
@@ -465,6 +488,7 @@ pub fn merge(local: ProjectFile, project: ProjectFile) -> Result<Config, ConfigE
             local.ports
         },
         forwarding: local.forwarding.unwrap_or_default(),
+        store_view: local.store_view.unwrap_or_default(),
         accept_degraded: local.accept_degraded,
         allow_project_setup: local.allow_project_setup,
         allowed_projects: local.allowed_projects,
@@ -696,10 +720,7 @@ provision = ["fetch"]
         let definitions = file.provision.as_ref().expect("definitions");
         assert_eq!(definitions.len(), 1);
         assert_eq!(definitions[0].identity(), "fetch");
-        assert_eq!(
-            definitions[0].kind(),
-            crate::sandbox::contract::ProvisionKind::Command
-        );
+        assert_eq!(definitions[0].kind(), "command");
 
         let config = merge(ProjectFile::default(), file).expect("merge");
         assert_eq!(config.backend_sequences["bubblewrap"], vec!["fetch"]);
@@ -711,6 +732,32 @@ provision = ["fetch"]
             config.project.backends.as_deref(),
             Some(["bubblewrap".to_string(), "docker".to_string()].as_slice())
         );
+    }
+
+    #[test]
+    fn the_store_view_is_machine_owned() {
+        let project: ProjectFile = toml::from_str("store-view = 'whole'\n").expect("parses");
+        let local: ProjectFile = toml::from_str("store-view = 'closure'\n").expect("parses");
+        let config = merge(local, project).expect("merge");
+        assert_eq!(config.store_view, StoreView::Closure);
+        assert!(
+            config
+                .notices
+                .iter()
+                .any(|notice| notice.contains("store view")),
+            "{:?}",
+            config.notices
+        );
+
+        let config = merge(
+            ProjectFile {
+                store_view: Some(StoreView::Whole),
+                ..Default::default()
+            },
+            ProjectFile::default(),
+        )
+        .expect("merge");
+        assert_eq!(config.store_view, StoreView::Whole);
     }
 
     #[test]
@@ -760,18 +807,23 @@ image = "nope"
     }
 
     #[test]
-    fn an_unknown_provisioning_kind_is_rejected() {
+    fn an_unknown_provisioning_kind_parses_and_is_kept_for_validation() {
         let text = r#"
 [[provision]]
 identity = "x"
 kind = "nix"
 installable = "./nix"
 "#;
-        let error = toml::from_str::<ProjectFile>(text).expect_err("unknown kind is rejected");
-        let message = error.to_string();
-        assert!(message.contains("unknown variant"), "{message}");
-        assert!(message.contains("nix"), "{message}");
-        assert!(message.contains("command"), "{message}");
+        let file: ProjectFile = toml::from_str(text).expect("the generic step accepts the kind");
+        let definitions = file.provision.expect("definitions");
+        assert_eq!(definitions[0].kind(), "nix");
+        assert_eq!(
+            definitions[0]
+                .settings
+                .get("installable")
+                .and_then(toml::Value::as_str),
+            Some("./nix")
+        );
     }
 
     #[test]

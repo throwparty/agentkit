@@ -37,6 +37,7 @@ const CONFIG_KEYS: &[&str] = &[
     "backend",
     "backends",
     "forwarding",
+    "store-view",
     "accept-degraded",
     "allow-project-setup",
     "allowed-projects",
@@ -91,6 +92,7 @@ fn merge_layers(
         backend,
         backends,
         forwarding,
+        store_view,
         accept_degraded,
         allow_project_setup,
         allowed_projects,
@@ -100,6 +102,7 @@ fn merge_layers(
     local.backend = backend;
     local.backends = combine_backends(backends, std::mem::take(&mut local.backends));
     local.forwarding = forwarding;
+    local.store_view = store_view;
     local.accept_degraded = accept_degraded;
     local.allow_project_setup = allow_project_setup;
     local.allowed_projects = allowed_projects;
@@ -139,6 +142,7 @@ fn reject_machine_keys_in_local(local: &ProjectFile) -> Result<(), ConfigError> 
     if local.backend.is_some()
         || machine_backend_key.is_some()
         || local.forwarding.is_some()
+        || local.store_view.is_some()
         || local.accept_degraded
         || local.allow_project_setup
         || !local.allowed_projects.is_empty()
@@ -603,12 +607,23 @@ fn validate_ports(config: &Config) -> Result<(), ConfigError> {
 
 /// Validate the provisioning schema after the local override is merged.
 ///
-/// The rules live in `Config::validate_provisioning`, so the resolver applies
-/// the same ones without the loader depending on the resolver.
+/// The generic rules live in `Config::validate_provisioning`; the kind registry
+/// validates each kind's settings. The loader does not depend on the resolver.
 fn validate_provisioning(config: &mut Config) -> Result<(), ConfigError> {
     config
         .validate_provisioning()
-        .map_err(ConfigError::Provisioning)
+        .map_err(ConfigError::Provisioning)?;
+    for step in &config.provision_definitions {
+        crate::provision::kind::validate(step).map_err(|error| {
+            ConfigError::Provisioning(crate::config::ProvisioningIssue {
+                backend: None,
+                step: Some(step.identity().to_string()),
+                reason: error.reason,
+                remedy: error.remedy,
+            })
+        })?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -619,7 +634,7 @@ mod tests {
         validate_forwarding, validate_local_file, validate_ports, validate_provisioning,
     };
     use crate::config::{Config, ConfigError, PortRequest, ProjectFile, merge};
-    use crate::sandbox::contract::ProvisionStep;
+    use crate::sandbox::contract::{ProvisionStep, StoreView};
 
     fn config_with(ports: Vec<PortRequest>) -> Config {
         Config {
@@ -752,6 +767,7 @@ mod tests {
         let text = r#"
 backend = "bubblewrap"
 accept-degraded = true
+store-view = "whole"
 
 [project]
 slug = "project"
@@ -906,9 +922,10 @@ bind = "0.0.0.0"
     }
 
     fn command(identity: &str) -> ProvisionStep {
-        ProvisionStep::Command {
+        ProvisionStep {
             identity: identity.to_string(),
-            run: "true".to_string(),
+            kind: "command".to_string(),
+            settings: [("run".to_string(), toml::Value::String("true".to_string()))].into(),
         }
     }
 
@@ -1042,6 +1059,36 @@ bind = "0.0.0.0"
         );
         let error = validate_provisioning(&mut config).expect_err("unknown reference");
         assert!(error.to_string().contains("does not define"), "{error}");
+    }
+
+    #[test]
+    fn provisioning_rejects_an_unknown_kind() {
+        let mut config = provisioning_config(
+            vec![ProvisionStep {
+                identity: "x".to_string(),
+                kind: "nix".to_string(),
+                settings: Default::default(),
+            }],
+            Some(vec!["bubblewrap".to_string()]),
+            &[("bubblewrap", &["x"])],
+        );
+        let error = validate_provisioning(&mut config).expect_err("unknown kind");
+        assert!(error.to_string().contains("nix"), "{error}");
+    }
+
+    #[test]
+    fn provisioning_rejects_a_missing_installable() {
+        let mut config = provisioning_config(
+            vec![ProvisionStep {
+                identity: "dev".to_string(),
+                kind: "devshell".to_string(),
+                settings: Default::default(),
+            }],
+            Some(vec!["bubblewrap".to_string()]),
+            &[("bubblewrap", &["dev"])],
+        );
+        let error = validate_provisioning(&mut config).expect_err("missing installable");
+        assert!(error.to_string().contains("installable"), "{error}");
     }
 
     #[test]
@@ -1234,6 +1281,40 @@ bind = "0.0.0.0"
             config.backend_settings["docker"]["image"].as_str(),
             Some("busybox")
         );
+    }
+
+    #[test]
+    fn load_final_applies_the_user_store_view() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        git2::Repository::init(dir.path()).expect("repo");
+        let user_dir = tempfile::tempdir().expect("user dir");
+        let project = dir.path().join("config.toml");
+        let local = dir.path().join("config.local.toml");
+        let user = user_dir.path().join("user.toml");
+        std::fs::write(&project, "[project]\nbackends = ['docker']\n").expect("project");
+        std::fs::write(&user, "store-view = 'whole'\n").expect("user");
+
+        let config =
+            super::load_final_from(&project, &local, Some(&user), Some(dir.path())).expect("load");
+        assert_eq!(
+            config.store_view,
+            StoreView::Whole,
+            "the user's store view reaches the merged configuration"
+        );
+    }
+
+    #[test]
+    fn a_local_override_cannot_choose_the_store_view() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        git2::Repository::init(dir.path()).expect("repo");
+        let project = dir.path().join("config.toml");
+        let local = dir.path().join("config.local.toml");
+        std::fs::write(&project, "[project]\nbackends = ['docker']\n").expect("project");
+        std::fs::write(&local, "store-view = 'closure'\n").expect("local");
+
+        let error = super::load_final_from(&project, &local, None, Some(dir.path()))
+            .expect_err("the repository-local override may not choose the store view");
+        assert!(error.to_string().contains("user configuration"), "{error}");
     }
 
     #[test]
