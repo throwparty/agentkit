@@ -12,6 +12,7 @@
 #![allow(clippy::result_large_err)]
 
 mod checks;
+mod closure;
 mod failure;
 mod model;
 mod prepare;
