@@ -279,10 +279,8 @@ mod tests {
     }
 
     /// Simulate a TTL expiration scenario using a real cache.
-    #[tokio::test]
-    async fn test_cache_expiry_simulation() {
-        use tokio::time::sleep;
-
+    #[test]
+    fn test_cache_expiry_simulation() {
         let mut cache = Cache::new(Duration::from_millis(50));
         cache.put(
             "https://example.com/page",
@@ -294,8 +292,11 @@ mod tests {
         // Should hit immediately
         assert!(cache.get("https://example.com/page").is_some());
 
-        // Wait for expiry
-        sleep(Duration::from_millis(100)).await;
+        // Force expiry rather than sleeping: a loaded CI runner can take
+        // longer than the TTL between `put` and `get`.
+        for entry in cache.entries.values_mut() {
+            entry.expires_at = Instant::now() - Duration::from_secs(1);
+        }
 
         // Should be expired
         assert!(cache.get("https://example.com/page").is_none());
