@@ -117,7 +117,7 @@ impl Sandboxes {
         let provision = match crate::provision::resolve(
             &self.config,
             selected.name(),
-            &selected.core().provision_support(),
+            &selected.core().contribution_support(),
         ) {
             Ok(steps) => steps,
             Err(error) => {

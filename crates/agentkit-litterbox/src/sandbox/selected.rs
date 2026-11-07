@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use super::contract::{Backend, Error, ProvisionSupport};
+use super::contract::{Backend, ContributionSupport, Error};
 use super::facets::{Forwarding, Lifecycle, Limits};
 use super::report::{Capability, State};
 
@@ -101,17 +101,17 @@ impl Selected {
 
     /// Merge a backend's own capability entries with the facet-derived ones.
     ///
-    /// Provisioning kinds come from the contract's support report; a backend's
-    /// own entry replaces any standard entry for the same operation.
+    /// Contribution support comes from the contract's support report; a
+    /// backend's own entry replaces any standard entry for the same operation.
     pub fn merge_capabilities(
         &self,
         extras: Vec<Capability>,
-        support: &[ProvisionSupport],
+        support: &[ContributionSupport],
     ) -> Vec<Capability> {
         let mut capabilities = self.standard_capabilities();
         for support in support {
             capabilities.push(Capability {
-                operation: format!("provision:{}", support.kind.as_str()),
+                operation: format!("contribution:{}", support.sort.as_str()),
                 state: support.state,
                 reason: support.reason.clone(),
                 remedy: support.remedy.clone(),

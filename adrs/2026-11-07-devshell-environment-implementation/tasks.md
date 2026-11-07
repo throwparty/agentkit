@@ -15,7 +15,7 @@ In `sandbox/contract.rs`, remove `ProvisionKind` and the `ProvisionStep` enum. A
 | Depends On |  |
 | References | kind-registry,contributions,contribution-support,request-contributions,no-new-dependency |
 
-### T-002: Backend contract and capabilities
+### T-002: [x] Backend contract and capabilities
 
 Replace `Backend::provision_support` with `contribution_support`. Update `Selected::merge_capabilities` to emit `contribution:<sort>` entries. Update `sandbox/facets.rs`, `orchestrator/bulk.rs`, `testing.rs` and the Docker backend with stubs that report no contribution sorts. Update every site that constructs `ProvisionSupport`.
 

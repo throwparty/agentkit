@@ -9,9 +9,8 @@ use std::sync::{Arc, Mutex};
 use futures_util::future::BoxFuture;
 
 use crate::sandbox::contract::{
-    Backend, CreateRequest, Error, Execution, Inspection, ProvisionKind, ProvisionStep,
-    ProvisionSupport, ProvisioningClass, ProvisioningFailure, SandboxRecord, SandboxStatus, Scope,
-    Workspace,
+    Backend, ContributionSupport, CreateRequest, Error, Execution, Inspection, ProvisionStep,
+    ProvisioningClass, ProvisioningFailure, SandboxRecord, SandboxStatus, Scope, Workspace,
 };
 use crate::sandbox::environment::{Origin, Provenance, StepProvenance};
 use crate::sandbox::facets::Lifecycle;
@@ -359,17 +358,8 @@ impl Backend for TestBackend {
         Box::pin(async { Ok(Vec::new()) })
     }
 
-    fn provision_support(&self) -> Vec<ProvisionSupport> {
-        vec![ProvisionSupport {
-            kind: ProvisionKind::Command,
-            state: self.provision_state,
-            reason: Some("the test backend reports this state".to_string()),
-            remedy: Some("accept it or choose another backend".to_string()),
-            fallback: (self.provision_state == State::Degraded).then(|| Fallback {
-                name: "a weaker mechanism".to_string(),
-                does_not_bound: "some of the host".to_string(),
-            }),
-        }]
+    fn contribution_support(&self) -> Vec<ContributionSupport> {
+        Vec::new()
     }
 }
 
@@ -823,11 +813,8 @@ mod tests {
     }
 
     #[test]
-    fn the_test_backend_reports_only_command() {
-        let support = TestBackend::new().provision_support();
-        assert_eq!(support.len(), 1);
-        assert_eq!(support[0].kind, ProvisionKind::Command);
-        assert_eq!(support[0].state, State::Available);
+    fn the_test_backend_reports_no_contributions() {
+        assert!(TestBackend::new().contribution_support().is_empty());
     }
 
     #[tokio::test]
