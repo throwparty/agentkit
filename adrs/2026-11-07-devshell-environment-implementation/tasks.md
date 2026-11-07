@@ -132,7 +132,7 @@ Update `orchestrator/service.rs`. After resolution, refuse a step whose kind req
 | Depends On | T-008,T-009 |
 | References | host-placement,consent,consent-gate,fail-closed,hook-fails,no-realisation |
 
-### T-011: Docker backend
+### T-011: [x] Docker backend
 
 Update `backends/docker/backend.rs` for the new contract. `contribution_support` returns an empty list. `create` runs only `ResolvedStep` values with a `SandboxAction`, in order, and records the command steps in the provenance. Keep `DockerData` as container, forwards and `Provenance`. `exec`, `inspect` and `delete` are unchanged. Do not add host-step application.
 
