@@ -1,0 +1,14 @@
+flowchart TB
+    CFG["[[provision]] in project config"] --> LOADER["config loader"]
+    LOADER --> REG["kind registry<br/>parse and validate"]
+    REG --> RES["resolver<br/>sequence and contribution support"]
+    RES --> ORCH["orchestrator"]
+    ORCH --> CONSENT["consent check"]
+    CONSENT --> PREP["host preparation<br/>checks, capture, closure"]
+    PREP --> REQ["CreateRequest<br/>ResolvedStep and Contributions"]
+    REQ --> BACK["backend create"]
+    BACK --> REC[("SandboxRecord.data")]
+    REC --> OPS["exec, inspect, delete"]
+    DOC["doctor"] --> RES
+    DOC --> CHECK["kind check<br/>no hook, no create"]
+    CHECK --> REPORT["doctor report<br/>requirements, installable,<br/>closure count, store view"]
