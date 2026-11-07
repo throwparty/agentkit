@@ -67,7 +67,7 @@ Update `config.rs` so `ProjectFile.provision` and `Config.provision_definitions`
 | Depends On | T-004 |
 | References | kind-registry,devshell-step,step-shape-refused,config-compatibility,store-view-setting |
 
-### T-006: Host checks and closure
+### T-006: [x] Host checks and closure
 
 Add `provision/prepare/runner.rs` with a `CommandRunner` trait, a system runner and a recorded runner. Add `checks.rs` for nix version, flakes, installable evaluation and store validity, each with a reason and remedy. Add `closure.rs` for `path-info -r` or the store root for the whole view. Add `check` and `prepare` entry points in `mod.rs`. All process execution goes through the runner.
 
