@@ -2,7 +2,7 @@
 
 ## Tasks
 
-### T-001: Contract value types
+### T-001: [x] Contract value types
 
 In `sandbox/contract.rs`, remove `ProvisionKind` and the `ProvisionStep` enum. Add `ProvisionStep { identity, kind, settings }` with a custom deserializer that removes `identity` and `kind` and keeps the remaining keys as a `BTreeMap<String, toml::Value>`. Add `Placement { Host, Sandbox }`, `ContributionSort { Environment, Mount }`, `Contributions { variables, provenance, mounts, workspace_root, workspace_variables }`, `ContributionSupport { sort, state, reason, remedy, fallback }`, `SandboxAction { run }` and `ResolvedStep { identity, kind, placement, sandbox, contributions }`. Replace `CreateRequest.provision` with `Vec<ResolvedStep>`.
 
