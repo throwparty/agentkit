@@ -67,10 +67,6 @@ impl Caller {
         Ok(Self { home })
     }
 
-    pub fn home(&self) -> &Path {
-        &self.home
-    }
-
     /// The environment every host command receives. Nothing of the caller's
     /// session is here, so a credential is absent because it was never present.
     pub fn env(&self) -> Vec<(String, String)> {
@@ -111,7 +107,6 @@ pub struct Output {
     pub status: ExitStatus,
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
-    pub stdout_truncated: bool,
     pub stderr_truncated: bool,
 }
 
@@ -202,7 +197,6 @@ pub fn run(
         status,
         stdout: stdout.bytes,
         stderr: stderr.bytes,
-        stdout_truncated: stdout.truncated,
         stderr_truncated: stderr.truncated,
     })
 }
@@ -419,13 +413,23 @@ mod tests {
 
     #[test]
     fn two_callers_hold_different_homes() {
+        let home_of = |caller: &Caller| {
+            PathBuf::from(
+                caller
+                    .env()
+                    .into_iter()
+                    .find(|(name, _)| name == "HOME")
+                    .map(|(_, value)| value)
+                    .expect("a caller supplies HOME"),
+            )
+        };
         let first = Caller::new().expect("first");
         let second = Caller::new().expect("second");
-        assert_ne!(first.home(), second.home());
-        let first_home = first.home().to_path_buf();
+        assert_ne!(home_of(&first), home_of(&second));
+        let first_home = home_of(&first);
         drop(first);
         assert!(!first_home.exists(), "the dropped caller removes its own home");
-        assert!(second.home().exists(), "and not its neighbour's");
+        assert!(home_of(&second).exists(), "and not its neighbour's");
     }
 
     #[test]

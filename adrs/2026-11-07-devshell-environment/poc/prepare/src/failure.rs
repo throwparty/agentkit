@@ -85,11 +85,6 @@ impl Failure {
         Self::new(Class::Failed, reason)
     }
 
-    pub fn with_reason(mut self, reason: impl Into<String>) -> Self {
-        self.reason = reason.into();
-        self
-    }
-
     pub fn with_step(mut self, identity: impl Into<String>, kind: impl Into<String>) -> Self {
         self.step = Some(identity.into());
         self.kind = Some(kind.into());
@@ -114,10 +109,6 @@ impl Failure {
     pub fn with_output(mut self, output: impl Into<String>) -> Self {
         self.output = Some(output.into());
         self
-    }
-
-    pub fn is(&self, class: Class) -> bool {
-        self.class == class
     }
 }
 
