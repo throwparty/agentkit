@@ -539,7 +539,7 @@ mod tests {
 
     use super::{
         Config, ConfigError, ForwardingConfig, PortRequest, ProjectConfig, ProjectFile,
-        ProvisioningIssue, merge, take_provision,
+        ProvisioningIssue, StoreView, merge, take_provision,
     };
 
     fn local() -> ProjectFile {

@@ -277,6 +277,43 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires nix and a valid devShell; run with --ignored"]
+    fn this_repository_captures_and_closes_over_the_devshell() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("repository root");
+        let installable = root.join("nix").to_string_lossy().to_string();
+        let runner = SystemRunner::default();
+        let step = devshell_step(&installable);
+        let ctx = PrepareContext {
+            project_root: &root,
+            store_view: StoreView::Closure,
+            runner: &runner,
+        };
+        let prepared = prepare(&step, &ctx).expect("prepare the devShell");
+        assert!(
+            prepared
+                .contributions
+                .environment
+                .contains_key("CARGO_HOME"),
+            "the environment is the devShell's"
+        );
+        assert!(
+            !prepared.contributions.mounts.is_empty(),
+            "the closure has paths"
+        );
+        assert!(
+            !prepared
+                .contributions
+                .mounts
+                .iter()
+                .any(|mount| mount.ends_with("bin/nix")),
+            "the closure carries no nix binary"
+        );
+    }
+
+    #[test]
     fn a_missing_nix_is_reported() {
         let report = check(
             "./nix",

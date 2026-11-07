@@ -1346,7 +1346,7 @@ mod tests {
             last.lock()
                 .unwrap_or_else(|poison| poison.into_inner())
                 .as_ref()
-                .map(ProvisionStep::identity),
+                .map(ResolvedStep::identity),
             Some("a-second")
         );
     }
@@ -1402,7 +1402,7 @@ mod tests {
             last.lock()
                 .unwrap_or_else(|poison| poison.into_inner())
                 .as_ref()
-                .map(ProvisionStep::identity),
+                .map(ResolvedStep::identity),
             Some("second")
         );
     }
@@ -1683,10 +1683,7 @@ mod tests {
         crate::testing::exercise_failed_create_with(
             &backend,
             &name,
-            vec![ProvisionStep::Command {
-                identity: "fail".to_string(),
-                run: "exit 7".to_string(),
-            }],
+            vec![step_with("fail", "exit 7")],
         )
         .await?;
         Ok(())

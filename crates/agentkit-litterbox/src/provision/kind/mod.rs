@@ -50,7 +50,7 @@ impl SettingsError {
 }
 
 /// One provisioning kind.
-pub trait Kind: Send + Sync {
+pub trait Kind: Send + Sync + std::fmt::Debug {
     /// What this kind is.
     fn describe(&self) -> KindDescription;
 

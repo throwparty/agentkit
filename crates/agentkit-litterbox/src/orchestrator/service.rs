@@ -1134,7 +1134,9 @@ mod seam_tests {
     use super::Sandboxes;
     use crate::config::Config;
     use crate::metadata_store::{self, StoredSandbox};
-    use crate::sandbox::contract::{Error, ProvisioningClass, SandboxRecord};
+    use crate::sandbox::contract::{
+        Error, ProvisionStep, ProvisioningClass, ResolvedStep, SandboxRecord,
+    };
     use crate::sandbox::report::State;
     use crate::sandbox::selected::Selected;
     use crate::scm::{Scm, ThreadSafeScm};
@@ -1163,6 +1165,26 @@ mod seam_tests {
         Selected::new("test", backend.clone()).with_lifecycle(backend)
     }
 
+    fn command_step(identity: &str, run: &str) -> ProvisionStep {
+        ProvisionStep {
+            identity: identity.to_string(),
+            kind: "command".to_string(),
+            settings: [("run".to_string(), toml::Value::String(run.to_string()))].into(),
+        }
+    }
+
+    fn devshell_step(identity: &str, installable: &str) -> ProvisionStep {
+        ProvisionStep {
+            identity: identity.to_string(),
+            kind: "devshell".to_string(),
+            settings: [(
+                "installable".to_string(),
+                toml::Value::String(installable.to_string()),
+            )]
+            .into(),
+        }
+    }
+
     fn orchestrator(
         dir: &Path,
         records: PathBuf,
@@ -1182,12 +1204,7 @@ mod seam_tests {
         let scm = ThreadSafeScm::open(dir).expect("scm");
         let provision = command
             .as_ref()
-            .map(|run| {
-                vec![crate::sandbox::contract::ProvisionStep::Command {
-                    identity: "setup".to_string(),
-                    run: run.clone(),
-                }]
-            })
+            .map(|run| vec![command_step("setup", run)])
             .unwrap_or_default();
         let backend_sequences = command
             .as_ref()
@@ -1404,10 +1421,7 @@ mod seam_tests {
                 slug: Some("project".to_string()),
                 backends: Some(vec!["test".to_string()]),
             },
-            provision_definitions: vec![crate::sandbox::contract::ProvisionStep::Command {
-                identity: "setup".to_string(),
-                run: "echo permitted".to_string(),
-            }],
+            provision_definitions: vec![command_step("setup", "echo permitted")],
             backend_sequences: std::collections::BTreeMap::from([(
                 "test".to_string(),
                 vec!["setup".to_string()],
@@ -1432,7 +1446,7 @@ mod seam_tests {
         let identities: Vec<&str> = requests[0]
             .provision
             .iter()
-            .map(crate::sandbox::contract::ProvisionStep::identity)
+            .map(ResolvedStep::identity)
             .collect();
         assert_eq!(identities, vec!["setup"]);
     }
@@ -1470,10 +1484,7 @@ mod seam_tests {
                 slug: Some("project".to_string()),
                 backends: Some(vec!["other".to_string()]),
             },
-            provision_definitions: vec![crate::sandbox::contract::ProvisionStep::Command {
-                identity: "setup".to_string(),
-                run: "echo refused".to_string(),
-            }],
+            provision_definitions: vec![command_step("setup", "echo refused")],
             backend_sequences: std::collections::BTreeMap::from([(
                 "test".to_string(),
                 vec!["setup".to_string()],
@@ -1530,10 +1541,7 @@ mod seam_tests {
                     slug: Some("project".to_string()),
                     backends: Some(vec!["test".to_string()]),
                 },
-                provision_definitions: vec![crate::sandbox::contract::ProvisionStep::Command {
-                    identity: "setup".to_string(),
-                    run: "echo refused".to_string(),
-                }],
+                provision_definitions: vec![devshell_step("setup", "./nix")],
                 backend_sequences: std::collections::BTreeMap::from([(
                     "test".to_string(),
                     vec!["setup".to_string()],
@@ -1581,18 +1589,9 @@ mod seam_tests {
                 backends: Some(vec!["test".to_string(), "other".to_string()]),
             },
             provision_definitions: vec![
-                crate::sandbox::contract::ProvisionStep::Command {
-                    identity: "z-first".to_string(),
-                    run: "true".to_string(),
-                },
-                crate::sandbox::contract::ProvisionStep::Command {
-                    identity: "a-second".to_string(),
-                    run: "true".to_string(),
-                },
-                crate::sandbox::contract::ProvisionStep::Command {
-                    identity: "other-only".to_string(),
-                    run: "true".to_string(),
-                },
+                command_step("z-first", "true"),
+                command_step("a-second", "true"),
+                command_step("other-only", "true"),
             ],
             backend_sequences: std::collections::BTreeMap::from([
                 (
@@ -1624,7 +1623,7 @@ mod seam_tests {
         let identities: Vec<&str> = requests[0]
             .provision
             .iter()
-            .map(crate::sandbox::contract::ProvisionStep::identity)
+            .map(ResolvedStep::identity)
             .collect();
         assert_eq!(identities, vec!["z-first", "a-second"]);
         assert_eq!(requests[0].forward_bind, "0.0.0.0");
@@ -1749,10 +1748,7 @@ mod seam_tests {
                 slug: Some("project".to_string()),
                 backends: Some(vec!["test".to_string()]),
             },
-            provision_definitions: vec![crate::sandbox::contract::ProvisionStep::Command {
-                identity: "setup".to_string(),
-                run: "echo permitted".to_string(),
-            }],
+            provision_definitions: vec![command_step("setup", "echo permitted")],
             backend_sequences: std::collections::BTreeMap::from([(
                 "test".to_string(),
                 vec!["setup".to_string()],

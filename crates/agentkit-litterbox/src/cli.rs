@@ -6,7 +6,7 @@ use crate::config_loader;
 use crate::mcp;
 use crate::orchestrator::{HostReport, PlannedStep, Preflight, Sandboxes, preflight_host};
 use crate::sandbox::contract::{
-    ContributionSupport, Error, ProvisioningClass, ProvisioningFailure, SandboxStatus, StoreView,
+    ContributionSupport, Error, ProvisioningClass, SandboxStatus, StoreView,
 };
 use crate::sandbox::report::{Readiness, State};
 use clap::{CommandFactory, Parser, Subcommand};
@@ -536,7 +536,7 @@ pub async fn handle_doctor(backend: Option<String>, json: bool) -> ExitCode {
         readiness,
         capabilities,
         &support,
-        plan,
+        Some(plan),
         host_reports,
     );
 
@@ -575,13 +575,15 @@ fn build_doctor_report(
     readiness: Readiness,
     capabilities: Vec<crate::sandbox::report::Capability>,
     support: &[ContributionSupport],
-    plan: Preflight,
+    plan: Option<Preflight>,
     host_reports: Vec<HostReport>,
 ) -> (DoctorReport, Option<agentkit_common::exit::ExitClass>) {
     let mut steps = Vec::new();
     let mut error = None;
     let mut failure = None;
 
+    let plan = plan
+        .unwrap_or_else(|| crate::orchestrator::preflight(config, project_slug, backend, support));
     if let Some(resolve_error) = plan.failure {
         failure = Some(resolve_error.exit_class());
         error = Some(DoctorError {
@@ -996,6 +998,8 @@ fn doctor_failure_report(error: &Error, backend: Option<&str>) -> DoctorReport {
         capabilities: Vec::new(),
         supported_backends: None,
         notices: Vec::new(),
+        store_view: StoreView::Closure,
+        support: Vec::new(),
         steps: Vec::new(),
         error: Some(DoctorError {
             class: error.class().as_str().to_string(),
@@ -1014,18 +1018,39 @@ mod tests {
     use crate::backends;
     use crate::config::{Config, ProjectConfig};
     use crate::sandbox::contract::{
-        Error, ProvisionKind, ProvisionStep, ProvisionSupport, ProvisioningClass, SandboxStatus,
+        ContributionSort, ContributionSupport, Error, ProvisionStep, ProvisioningClass,
+        SandboxStatus, StoreView,
     };
     use crate::sandbox::report::{Capability, Check, Fallback, Readiness, State};
 
-    fn support(state: State) -> Vec<ProvisionSupport> {
-        vec![ProvisionSupport {
-            kind: crate::sandbox::contract::ProvisionKind::Command,
+    fn support(state: State) -> Vec<ContributionSupport> {
+        vec![ContributionSupport {
+            sort: ContributionSort::Environment,
             state,
             reason: Some("the mechanism is degraded".to_string()),
             remedy: Some("accept it".to_string()),
             fallback: None,
         }]
+    }
+
+    fn command(identity: &str, run: &str) -> ProvisionStep {
+        ProvisionStep {
+            identity: identity.to_string(),
+            kind: "command".to_string(),
+            settings: [("run".to_string(), toml::Value::String(run.to_string()))].into(),
+        }
+    }
+
+    fn devshell(identity: &str, installable: &str) -> ProvisionStep {
+        ProvisionStep {
+            identity: identity.to_string(),
+            kind: "devshell".to_string(),
+            settings: [(
+                "installable".to_string(),
+                toml::Value::String(installable.to_string()),
+            )]
+            .into(),
+        }
     }
 
     fn provisioning_config() -> Config {
@@ -1034,10 +1059,7 @@ mod tests {
                 slug: Some("project".to_string()),
                 backends: Some(vec!["docker".to_string()]),
             },
-            provision_definitions: vec![ProvisionStep::Command {
-                identity: "setup".to_string(),
-                run: "true".to_string(),
-            }],
+            provision_definitions: vec![command("setup", "true")],
             backend_sequences: [("docker".to_string(), vec!["setup".to_string()])]
                 .into_iter()
                 .collect(),
@@ -1111,13 +1133,18 @@ mod tests {
             }],
             supported_backends: Some(vec!["docker".to_string()]),
             notices: Vec::new(),
+            store_view: StoreView::Closure,
+            support: Vec::new(),
             steps: vec![DoctorStep {
                 identity: Some("fetch".to_string()),
-                kind: Some(ProvisionKind::Command),
+                kind: Some("command".to_string()),
                 state: DoctorState::Available,
                 class: None,
                 reason: None,
                 remedy: None,
+                installable: None,
+                closure_count: None,
+                requirements: Vec::new(),
             }],
             error: None,
         };
@@ -1142,6 +1169,8 @@ mod tests {
             capabilities: Vec::new(),
             supported_backends: None,
             notices: Vec::new(),
+            store_view: StoreView::Closure,
+            support: Vec::new(),
             steps: Vec::new(),
             error: None,
         };
@@ -1183,6 +1212,8 @@ mod tests {
             capabilities: Vec::new(),
             supported_backends: None,
             notices: Vec::new(),
+            store_view: StoreView::Closure,
+            support: Vec::new(),
             steps: vec![DoctorStep {
                 identity: None,
                 kind: None,
@@ -1190,6 +1221,9 @@ mod tests {
                 class: Some(ProvisioningClass::Unavailable),
                 reason: None,
                 remedy: None,
+                installable: None,
+                closure_count: None,
+                requirements: Vec::new(),
             }],
             error: None,
         };
@@ -1199,13 +1233,10 @@ mod tests {
     }
 
     #[test]
-    fn provision_kind_parse_names_only_known_kinds() {
-        assert_eq!(
-            ProvisionKind::parse("command"),
-            Some(ProvisionKind::Command)
-        );
-        assert_eq!(ProvisionKind::parse("nix"), None);
-        assert_eq!(ProvisionKind::parse(""), None);
+    fn the_kind_registry_names_only_known_kinds() {
+        assert!(crate::provision::kind::registry::lookup("command").is_some());
+        assert!(crate::provision::kind::registry::lookup("nix").is_none());
+        assert!(crate::provision::kind::registry::lookup("").is_none());
     }
 
     #[test]
@@ -1220,13 +1251,18 @@ mod tests {
             capabilities: Vec::new(),
             supported_backends: Some(vec!["docker".to_string()]),
             notices: Vec::new(),
+            store_view: StoreView::Closure,
+            support: Vec::new(),
             steps: vec![DoctorStep {
                 identity: Some("setup".to_string()),
-                kind: Some(ProvisionKind::Command),
+                kind: Some("command".to_string()),
                 state: DoctorState::Denied,
                 class: Some(ProvisioningClass::Denied),
                 reason: Some("consent is missing".to_string()),
                 remedy: Some("set allowed-projects".to_string()),
+                installable: None,
+                closure_count: None,
+                requirements: Vec::new(),
             }],
             error: Some(DoctorError {
                 class: "misconfigured".to_string(),
@@ -1250,6 +1286,8 @@ mod tests {
             readiness(),
             Vec::new(),
             &support(State::Available),
+            None,
+            Vec::new(),
         );
         assert_eq!(config, before, "the builder does not mutate the config");
         assert!(failure.is_none());
@@ -1283,6 +1321,8 @@ mod tests {
             readiness(),
             Vec::new(),
             &support(State::Available),
+            None,
+            Vec::new(),
         );
         let json = render_doctor(&report, true).expect("renders");
         let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid json");
@@ -1309,6 +1349,8 @@ mod tests {
             readiness(),
             Vec::new(),
             &support(State::Available),
+            None,
+            Vec::new(),
         );
         let error = report.error.as_ref().expect("a structured error");
         assert_eq!(error.class, "misconfigured");
@@ -1330,6 +1372,8 @@ mod tests {
             readiness(),
             Vec::new(),
             &support(State::Available),
+            None,
+            Vec::new(),
         );
         assert_eq!(report.steps[0].state, DoctorState::Available);
         assert_eq!(
@@ -1339,19 +1383,11 @@ mod tests {
     }
 
     #[test]
-    fn two_steps_keep_the_list_order_and_degraded_maps_to_its_state() {
+    fn two_steps_keep_the_list_order() {
         let mut config = provisioning_config();
         config.allow_project_setup = true;
-        config.provision_definitions = vec![
-            ProvisionStep::Command {
-                identity: "z-first".to_string(),
-                run: "true".to_string(),
-            },
-            ProvisionStep::Command {
-                identity: "a-second".to_string(),
-                run: "true".to_string(),
-            },
-        ];
+        config.provision_definitions =
+            vec![command("z-first", "true"), command("a-second", "true")];
         config.backend_sequences.insert(
             "docker".to_string(),
             vec!["z-first".to_string(), "a-second".to_string()],
@@ -1363,6 +1399,8 @@ mod tests {
             readiness(),
             Vec::new(),
             &support(State::Available),
+            None,
+            Vec::new(),
         );
         let identities: Vec<&str> = report
             .steps
@@ -1376,23 +1414,6 @@ mod tests {
                 .iter()
                 .all(|step| step.state == DoctorState::Available)
         );
-
-        config.accept_degraded = true;
-        let (degraded, failure) = build_doctor_report(
-            &config,
-            "project",
-            "docker",
-            readiness(),
-            Vec::new(),
-            &support(State::Degraded),
-        );
-        assert_eq!(degraded.steps[0].state, DoctorState::Degraded);
-        assert_eq!(
-            degraded.steps[0].reason.as_deref(),
-            Some("the mechanism is degraded")
-        );
-        assert_eq!(degraded.steps[0].remedy.as_deref(), Some("accept it"));
-        assert_eq!(doctor_exit_code(&degraded, failure, true), 0);
     }
 
     #[test]
@@ -1404,13 +1425,18 @@ mod tests {
             capabilities: Vec::new(),
             supported_backends: None,
             notices: Vec::new(),
+            store_view: StoreView::Closure,
+            support: Vec::new(),
             steps: vec![DoctorStep {
                 identity: Some("fetch".to_string()),
-                kind: Some(ProvisionKind::Command),
+                kind: Some("command".to_string()),
                 state: DoctorState::Unavailable,
                 class: Some(ProvisioningClass::Unavailable),
                 reason: None,
                 remedy: None,
+                installable: None,
+                closure_count: None,
+                requirements: Vec::new(),
             }],
             error: None,
         };
@@ -1435,6 +1461,8 @@ mod tests {
             capabilities: Vec::new(),
             supported_backends: None,
             notices: Vec::new(),
+            store_view: StoreView::Closure,
+            support: Vec::new(),
             steps: Vec::new(),
             error: None,
         };
@@ -1465,6 +1493,8 @@ mod tests {
             capabilities: Vec::new(),
             supported_backends: None,
             notices: Vec::new(),
+            store_view: StoreView::Closure,
+            support: Vec::new(),
             steps: Vec::new(),
             error: None,
         };
@@ -1476,8 +1506,13 @@ mod tests {
     }
 
     #[test]
-    fn an_unavailable_kind_sets_the_class_and_the_exit_code() {
-        let config = provisioning_config();
+    fn an_unavailable_contribution_sets_the_class_and_the_exit_code() {
+        let mut config = provisioning_config();
+        config.allow_project_setup = true;
+        config.provision_definitions = vec![devshell("dev", "./nix")];
+        config
+            .backend_sequences
+            .insert("docker".to_string(), vec!["dev".to_string()]);
         let (report, failure) = build_doctor_report(
             &config,
             "project",
@@ -1485,11 +1520,13 @@ mod tests {
             readiness(),
             Vec::new(),
             &support(State::Unavailable),
+            None,
+            Vec::new(),
         );
         assert_eq!(report.steps.len(), 1);
         assert_eq!(report.steps[0].state, DoctorState::Unavailable);
-        assert_eq!(report.steps[0].identity.as_deref(), Some("setup"));
-        assert_eq!(report.steps[0].kind, Some(ProvisionKind::Command));
+        assert_eq!(report.steps[0].identity.as_deref(), Some("dev"));
+        assert_eq!(report.steps[0].kind.as_deref(), Some("devshell"));
         let error = report.error.as_ref().expect("a structured error");
         assert_eq!(error.class, "unsupported");
         assert_eq!(

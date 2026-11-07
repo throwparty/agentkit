@@ -49,13 +49,36 @@ fn devshell_step(identity: &str, environment: BTreeMap<String, String>) -> Resol
     }
 }
 
+/// The provenance a persisted record carries: its steps, in list order.
+fn persisted_provenance(steps: &[ResolvedStep]) -> Provenance {
+    Provenance {
+        origin: Origin::Default,
+        variables: Vec::new(),
+        host_paths: Vec::new(),
+        steps: steps
+            .iter()
+            .flat_map(|step| {
+                if step.contributions.provenance.steps.is_empty() {
+                    vec![StepProvenance {
+                        identity: step.identity.clone(),
+                        kind: step.kind.clone(),
+                        variables: Vec::new(),
+                    }]
+                } else {
+                    step.contributions.provenance.steps.clone()
+                }
+            })
+            .collect(),
+    }
+}
+
 /// An in-memory backend that honours the contract without confining anything.
 pub struct TestBackend {
     records: Mutex<Vec<SandboxRecord>>,
     files: Mutex<std::collections::HashMap<String, Vec<u8>>>,
     paused: Mutex<std::collections::HashSet<String>>,
     requests: Mutex<Vec<CreateRequest>>,
-    environments: Mutex<std::collections::HashMap<String, Provenance>>,
+    deleted: Mutex<std::collections::HashSet<String>>,
     exec_environments: Mutex<std::collections::HashMap<String, BTreeMap<String, String>>>,
     support: Vec<ContributionSupport>,
     fail_create: bool,
@@ -77,7 +100,7 @@ impl TestBackend {
             files: Mutex::new(std::collections::HashMap::new()),
             paused: Mutex::new(std::collections::HashSet::new()),
             requests: Mutex::new(Vec::new()),
-            environments: Mutex::new(std::collections::HashMap::new()),
+            deleted: Mutex::new(std::collections::HashSet::new()),
             exec_environments: Mutex::new(std::collections::HashMap::new()),
             support: Vec::new(),
             fail_create: false,
@@ -93,7 +116,7 @@ impl TestBackend {
             files: Mutex::new(std::collections::HashMap::new()),
             paused: Mutex::new(std::collections::HashSet::new()),
             requests: Mutex::new(Vec::new()),
-            environments: Mutex::new(std::collections::HashMap::new()),
+            deleted: Mutex::new(std::collections::HashSet::new()),
             exec_environments: Mutex::new(std::collections::HashMap::new()),
             support: Vec::new(),
             fail_create: true,
@@ -109,7 +132,7 @@ impl TestBackend {
             files: Mutex::new(std::collections::HashMap::new()),
             paused: Mutex::new(std::collections::HashSet::new()),
             requests: Mutex::new(Vec::new()),
-            environments: Mutex::new(std::collections::HashMap::new()),
+            deleted: Mutex::new(std::collections::HashSet::new()),
             exec_environments: Mutex::new(std::collections::HashMap::new()),
             support: Vec::new(),
             fail_create: false,
@@ -120,16 +143,19 @@ impl TestBackend {
 
     /// A backend that reports the given contribution support state.
     pub fn with_provision_state(mut self, state: State) -> Self {
-        self.support = vec![ContributionSupport {
-            sort: ContributionSort::Environment,
-            state,
-            reason: Some("the test backend reports this state".to_string()),
-            remedy: Some("accept it or choose another backend".to_string()),
-            fallback: (state == State::Degraded).then(|| Fallback {
-                name: "a weaker mechanism".to_string(),
-                does_not_bound: "some of the host".to_string(),
-            }),
-        }];
+        self.support = [ContributionSort::Environment, ContributionSort::Mount]
+            .into_iter()
+            .map(|sort| ContributionSupport {
+                sort,
+                state,
+                reason: Some("the test backend reports this state".to_string()),
+                remedy: Some("accept it or choose another backend".to_string()),
+                fallback: (state == State::Degraded).then(|| Fallback {
+                    name: "a weaker mechanism".to_string(),
+                    does_not_bound: "some of the host".to_string(),
+                }),
+            })
+            .collect();
         self
     }
 
@@ -242,33 +268,10 @@ impl Backend for TestBackend {
                 .lock()
                 .map_err(|_| Error::failed("test backend lock poisoned"))?
                 .push(record.clone());
-            let steps = request
-                .provision
-                .iter()
-                .flat_map(|step| {
-                    if step.contributions.provenance.steps.is_empty() {
-                        vec![StepProvenance {
-                            identity: step.identity.clone(),
-                            kind: step.kind.clone(),
-                            variables: Vec::new(),
-                        }]
-                    } else {
-                        step.contributions.provenance.steps.clone()
-                    }
-                })
-                .collect();
-            self.environments
+            self.deleted
                 .lock()
                 .map_err(|_| Error::failed("test backend lock poisoned"))?
-                .insert(
-                    request.name.clone(),
-                    Provenance {
-                        origin: Origin::Default,
-                        variables: Vec::new(),
-                        host_paths: Vec::new(),
-                        steps,
-                    },
-                );
+                .remove(&request.name);
             Ok(record)
         })
     }
@@ -389,18 +392,25 @@ impl Backend for TestBackend {
         sandbox: &'a SandboxRecord,
     ) -> BoxFuture<'a, Result<Inspection, Error>> {
         Box::pin(async move {
-            let exists = self
-                .records
+            // The record is the persisted handle, so a fresh backend reads the
+            // provenance from it. Only a delete this backend performed makes a
+            // record missing.
+            let stored: StoredSteps = sandbox
+                .data
+                .clone()
+                .try_into()
+                .map_err(|error: toml::de::Error| Error::failed(error.to_string()))?;
+            let deleted = self
+                .deleted
                 .lock()
                 .map_err(|_| Error::failed("test backend lock poisoned"))?
-                .iter()
-                .any(|record| record.name == sandbox.name);
+                .contains(&sandbox.name);
             let paused = self
                 .paused
                 .lock()
                 .map_err(|_| Error::failed("test backend lock poisoned"))?
                 .contains(&sandbox.name);
-            let status = if !exists {
+            let status = if deleted {
                 SandboxStatus::Missing
             } else if paused {
                 SandboxStatus::Paused
@@ -413,18 +423,7 @@ impl Backend for TestBackend {
                 status,
                 egress: EgressPosture::Denied,
                 workspace: self.workspace.clone(),
-                environment: self
-                    .environments
-                    .lock()
-                    .map_err(|_| Error::failed("test backend lock poisoned"))?
-                    .get(&sandbox.name)
-                    .cloned()
-                    .unwrap_or(Provenance {
-                        origin: Origin::Default,
-                        variables: Vec::new(),
-                        host_paths: Vec::new(),
-                        steps: Vec::new(),
-                    }),
+                environment: persisted_provenance(&stored.steps),
                 forwards: Vec::new(),
             })
         })
@@ -440,6 +439,10 @@ impl Backend for TestBackend {
                 .lock()
                 .map_err(|_| Error::failed("test backend lock poisoned"))?
                 .remove(&sandbox.name);
+            self.deleted
+                .lock()
+                .map_err(|_| Error::failed("test backend lock poisoned"))?
+                .insert(sandbox.name.clone());
             self.exec_environments
                 .lock()
                 .map_err(|_| Error::failed("test backend lock poisoned"))?
@@ -714,7 +717,7 @@ pub async fn exercise_provisioning<S: Backend + ?Sized>(backend: &S) -> Result<(
             .environment
             .steps
             .iter()
-            .all(|step| step.kind == ProvisionKind::Command),
+            .all(|step| step.kind == "command"),
         "the backend reports each step's kind"
     );
 
@@ -841,7 +844,8 @@ mod tests {
         exercise_failed_create, exercise_lifecycle,
     };
     use crate::sandbox::contract::{
-        Backend, ContributionSort, CreateRequest, ResolvedStep, SandboxRecord, Workspace,
+        Backend, ContributionSort, CreateRequest, ResolvedStep, SandboxRecord, SandboxStatus,
+        Workspace,
     };
     use crate::sandbox::report::State;
 
@@ -1016,16 +1020,60 @@ mod tests {
         assert!(marker.exists(), "the child test did not run");
     }
 
-    #[test]
-    fn record_child_helper() {
+    #[tokio::test]
+    async fn record_child_helper() {
         let Ok(path) = std::env::var("LBX_CHILD_RECORD") else {
             return;
         };
         let stored: crate::metadata_store::StoredSandbox =
             toml::from_str(&std::fs::read_to_string(path).expect("record")).expect("record toml");
-        let rendered = stored.sandbox.data.to_string();
-        assert!(rendered.contains("TOKEN"), "{rendered}");
-        assert!(rendered.contains("secret"), "{rendered}");
+
+        let persisted: StoredSteps = stored
+            .sandbox
+            .data
+            .clone()
+            .try_into()
+            .expect("the record carries the resolved steps");
+        assert_eq!(persisted.steps.len(), 1);
+        assert_eq!(
+            persisted.steps[0].contributions.environment,
+            BTreeMap::from([("TOKEN".to_string(), "secret".to_string())]),
+            "the record carries the saved contributions"
+        );
+
+        // A fresh backend has seen no create: it reads the persisted record.
+        let backend = TestBackend::new();
+        let inspection = backend.inspect(&stored.sandbox).await.expect("inspect");
+        assert_eq!(inspection.status, SandboxStatus::Active);
+        assert_eq!(inspection.workspace, "/sandbox");
+        assert_eq!(
+            inspection
+                .environment
+                .steps
+                .iter()
+                .map(|step| step.identity.as_str())
+                .collect::<Vec<_>>(),
+            vec!["dev"],
+            "the provenance comes from the persisted record"
+        );
+        assert!(
+            inspection.environment.variables.is_empty(),
+            "provenance carries no value"
+        );
+
+        backend
+            .exec(
+                &stored.sandbox,
+                &["sh".to_string(), "-c".to_string(), "true".to_string()],
+            )
+            .await
+            .expect("exec");
+        assert_eq!(
+            backend.exec_environment("demo").expect("environment"),
+            BTreeMap::from([("TOKEN".to_string(), "secret".to_string())]),
+            "a fresh backend applies the persisted environment"
+        );
+
         std::fs::write(
             std::env::var("LBX_CHILD_MARKER").expect("marker path"),
             "ok",

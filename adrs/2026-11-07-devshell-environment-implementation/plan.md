@@ -39,7 +39,6 @@ src/
 
 The registry is a table of `Kind` objects, each with a name, a placement, the contribution sorts it produces, whether it needs consent, a pure `validate` for settings, a read-only `check` for the doctor, and a `prepare` for create. The closed set of settings lives in `provision::kind`, not the contract. The contract carries only what a backend needs: where a step runs, the sandbox action to execute, and the contributions to apply. The resolver is still pure and I/O-free; it validates, checks contribution support and returns planned steps. Host preparation is the only module that spawns nix, and the orchestrator is its only caller. The doctor calls `check`, which runs the read-only queries, never `prepare`, so no hook runs and nothing is written.
 
-
 ```mermaid
 flowchart TB
     CFG["[[provision]] in project config"] --> LOADER["config loader"]
@@ -76,20 +75,17 @@ Give the backend a kind-free request and a contribution vocabulary
 
 Replace ProvisionKind and the ProvisionStep enum with a generic ProvisionStep carrying identity, kind and a BTreeMap of settings. Add Placement { Host, Sandbox }, ContributionSort { Environment, Mount }, Contributions { variables, provenance, mounts, workspace_root, workspace_variables }, ContributionSupport { sort, state, reason, remedy, fallback }, SandboxAction { run } and ResolvedStep { identity, kind, placement, sandbox, contributions }. Replace CreateRequest.provision with Vec<ResolvedStep>. Change StepProvenance.kind to String. Add Contributions::environment_for(workspace) to build the runtime Environment and rewrite only the recorded workspace variables.
 
-
 ### kind-registry
 
 Own the closed kind set outside the contract
 
 Add provision/kind with a Kind trait and a compiled-in table. Each Kind returns a KindDescription with its name, placement, contribution sorts and consent requirement, validates its settings, and exposes check and prepare. Keep an internal Parsed enum in the kind module for the settings; the contract never sees it. An unknown kind or an unknown setting fails with the identity and the kind. The command kind validates run and produces a SandboxAction. The devshell kind validates installable and produces contributions through the prepare module.
 
-
 ### host-preparation
 
 Check the host, capture the environment and derive the closure
 
-Add provision/prepare. CommandRunner is a trait over process execution with a system runner and a recorded runner for tests. checks runs nix --version, print-dev-env and path-info without realising a devShell; print-dev-env may write a flake source path for a dirty tree, and the report says so. environment runs print-dev-env --json for the baseline and output path, then evaluates the print-dev-env script once in a bash child. The child starts from a caller environment with HOME, PATH, PWD, OLDPWD, SHLVL and _, dumps env -0 before and after, and returns the diff. Restore NIX_BUILD_TOP, TMP, TMPDIR, TEMP, TEMPDIR and terminfo to their before values. Keep exported-but-empty variables. Record the workspace root and the variables whose values contain it. Record a host path for a value that is a single absolute path outside the store and the workspace. closure runs path-info -r over the output path, or returns the store root for the whole view. check runs checks plus closure for the doctor. prepare runs checks, environment and closure for create.
-
+Add provision/prepare. CommandRunner is a trait over process execution with a system runner and a recorded runner for tests. checks runs nix --version, print-dev-env and path-info without realising a devShell; print-dev-env may write a flake source path for a dirty tree, and the report says so. environment runs print-dev-env --json for the baseline and output path, then evaluates the print-dev-env script once in a bash child. The child starts from a caller environment with HOME, PATH, PWD, OLDPWD, SHLVL and \_, dumps env -0 before and after, and returns the diff. Restore NIX_BUILD_TOP, TMP, TMPDIR, TEMP, TEMPDIR and terminfo to their before values. Keep exported-but-empty variables. Record the workspace root and the variables whose values contain it. Record a host path for a value that is a single absolute path outside the store and the workspace. closure runs path-info -r over the output path, or returns the store root for the whole view. check runs checks plus closure for the doctor. prepare runs checks, environment and closure for create.
 
 ### resolver
 
@@ -97,13 +93,11 @@ Resolve the selected backend's sequence without I/O
 
 Keep resolve and preflight_steps pure. Read each definition's kind from the registry, validate its settings, compare its contribution sorts with the backend's contribution_support, and return planned steps carrying the generic step, the kind description and the support entry. A missing sort is Unsupported naming the step, backend, sort, reason and remedy. A missing kind or bad setting is Misconfigured. The resolver no longer matches on a kind enum.
 
-
 ### orchestrator
 
 Own consent, preparation order and the request
 
 In create, resolve, check consent for every step whose kind requires it, prepare every planned step on a blocking thread, then create the branch, stage the workspace and build CreateRequest. A preparation failure returns before the branch exists. The request carries ResolvedStep values in sequence order. Keep the doctor's preflight shared with create: preflight resolves and reports per-step outcomes, and a separate check_host step fills the host reports for the doctor.
-
 
 ### docker-backend
 
@@ -111,13 +105,11 @@ Keep Docker's behaviour and refuse host contributions
 
 contribution_support returns an empty list, so any step with a contribution is refused before create. create runs only ResolvedStep values with a SandboxAction, in order, and records the command steps' provenance. DockerData keeps container, forwards and Provenance. exec, inspect and delete are unchanged. The provision:command capability becomes no provisioning capability.
 
-
 ### doctor
 
 Report the kind, the host requirements and the store view
 
 Change DoctorStep.kind to Option<String>. Add the contribution support entries, the store view and, for each host step, the requirement checks, the installable, whether it is valid and the closure count. Map a failed requirement to Unavailable with its reason and remedy. A devshell step in a project without consent maps to Denied. The doctor calls check, never prepare, and creates no sandbox, workspace or branch. Evaluation may write a flake source path on a dirty tree, and the report says so.
-
 
 ### config
 
@@ -125,13 +117,11 @@ Parse the generic step and the machine-owned store view
 
 Give ProvisionStep a custom deserializer that removes identity and kind and keeps the remaining keys in settings. validate_provisioning keeps the generic rules and calls the registry for kind-specific validation. Add StoreView { Closure, Whole } to Config, honoured only from the local override; a project value is ignored with a notice. Default to Closure.
 
-
 ### testing
 
 Prove the contribution model without a production backend
 
 Make TestBackend's contribution support configurable and record the ResolvedStep values in the record. exec applies the recorded environment and mounts to the command it runs; inspect returns the provenance. Add a test-only third kind to the registry, behind cfg(test), which produces an environment contribution but has no contract variant. Add a child-process test: create a record with the test backend, write it through metadata_store, spawn the test binary with an environment variable, and assert the child reads the same environment and provenance.
-
 
 ### arch-lint
 
@@ -139,20 +129,16 @@ Declare the new dependency direction
 
 Split the provision scope into litterbox-kinds at src/provision/kind/**, litterbox-prepare at src/provision/prepare/** and litterbox-provision for the resolver. Allow config to reach kinds and prepare to reach kinds. Deny every backend the kinds, prepare and resolver scopes. Deny prepare the backends, orchestrator, surfaces, persistence, SCM and configuration scopes. Add a negative fixture for each new deny edge.
 
-
 ### documentation
 
 Document the configuration and the report
 
 Add the devshell step, installable, store view and consent to the configuration reference. Document the doctor's host report with the existing preflight output. Add kind, contribution, host step and store view to CONTEXT.md. Extend the nix capability prompt with the print-dev-env evaluation and the six restores.
 
-
 ## Data Flow
 
-The loader parses [[provision]] into a generic step, removes identity and kind, and keeps the remaining keys as settings. The registry validates the kind and its settings at load and rejects an unknown kind or key with the identity. The resolver reads the selected backend's sequence, asks the registry for each kind's placement, contribution sorts and consent requirement, compares the sorts with contribution_support, and returns planned steps. The orchestrator checks consent, then prepares each step on a blocking thread. A command step becomes a SandboxAction. A devshell step checks the host, evaluates the print-dev-env script once, restores the six nix variables, derives the closure and returns contributions. The orchestrator builds CreateRequest with ResolvedStep values in order and calls the backend. The backend runs the sandbox actions, applies the contributions and writes its own payload to SandboxRecord.data. Later exec and inspect calls read that payload, so a second process sees the same environment and provenance. The doctor takes the same resolver path, but calls check instead of prepare, so it reports the requirements, installable, closure count and store view without running the hook or creating anything.
-
+The loader parses \[[provision]\] into a generic step, removes identity and kind, and keeps the remaining keys as settings. The registry validates the kind and its settings at load and rejects an unknown kind or key with the identity. The resolver reads the selected backend's sequence, asks the registry for each kind's placement, contribution sorts and consent requirement, compares the sorts with contribution_support, and returns planned steps. The orchestrator checks consent, then prepares each step on a blocking thread. A command step becomes a SandboxAction. A devshell step checks the host, evaluates the print-dev-env script once, restores the six nix variables, derives the closure and returns contributions. The orchestrator builds CreateRequest with ResolvedStep values in order and calls the backend. The backend runs the sandbox actions, applies the contributions and writes its own payload to SandboxRecord.data. Later exec and inspect calls read that payload, so a second process sees the same environment and provenance. The doctor takes the same resolver path, but calls check instead of prepare, so it reports the requirements, installable, closure count and store view without running the hook or creating anything.
 
 ## Deployment
 
 No new binary, service or dependency. The change lands in agentkit-litterbox and every in-repo consumer is updated with it. A project without a devshell step behaves as today. Docker refuses a devshell step with a structured Unsupported failure. No production backend applies the contributions until linux-bwrap-provider and darwin-sandbox-provider. Host preparation runs nix as a child process on a blocking thread; the doctor's checks do not realise a devShell and create evaluates the hook only after consent. The host tests require nix and a valid devShell and are selected separately from the unit tests, which use recorded output and never touch the network or build a derivation.
-

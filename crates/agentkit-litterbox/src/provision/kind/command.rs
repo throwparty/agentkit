@@ -5,6 +5,7 @@ use crate::sandbox::contract::{Placement, SandboxAction};
 use super::{Kind, KindDescription, Settings, SettingsError, reject_unknown, required_string};
 
 /// A command run once, confined, in the sandbox.
+#[derive(Debug)]
 pub struct CommandKind;
 
 impl Kind for CommandKind {
