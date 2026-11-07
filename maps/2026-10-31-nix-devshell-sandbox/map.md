@@ -8,8 +8,8 @@ Created: 2026-10-31
 
 | Metric | Value |
 |--------|-------|
-| Tickets | 26 |
-| Answered | 26 |
+| Tickets | 32 |
+| Answered | 32 |
 | Open | 0 |
 | Probing | 0 |
 | Abandoned | 0 |
@@ -231,6 +231,56 @@ Created: 2026-10-31
 | State | answered |
 | Answer | Yes. Naming a backend declares compatibility; selection stays in the machine-owned local override. FR-021's never-names-a-backend becomes never-selects-a-backend, and a selected backend the project does not list is reported rather than silently running without its steps |
 | Evidence | adrs/2026-11-03-sandbox-provider-contract/spec.toon (FR-021, EC-004) |
+
+### T-027: Where should a provisioning kind live: the contract's closed ProvisionKind enum, or a registry outside the contract?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Answer | A compiled-in registry outside the contract. A step carries identity, kind and the settings that kind owns, and the backend receives the contributions instead of the step |
+| Evidence | [evidence/T-027.md](evidence/T-027.md) |
+
+### T-028: What should a backend report about a step: support per kind, or support for the contributions it applies, and is that report static or derived from readiness?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Depends on | T-027 |
+| Answer | Static support for contribution sorts: an environment and read-only mounts. Readiness stays dynamic and host-specific, so a mechanism's ability to apply a contribution is a compile-time property |
+| Evidence | [evidence/T-028.md](evidence/T-028.md) |
+
+### T-029: Should the exported-but-empty build-phase variables from print-dev-env be contributed, or dropped?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Answer | Contributed. nix develop and nix-direnv both leave them exported, so dropping them diverges from the development shell. This checkout has 18, not the 11 the prototype findings recorded |
+| Evidence | [evidence/T-029.md](evidence/T-029.md) |
+
+### T-030: Which variables should the step contribute: a denylist of shell and Nix variables, or the print-dev-env script's assignments with the six Nix temp variables restored as nix-direnv does?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Answer | The nix-direnv rule. Evaluate the print-dev-env script once in the same shell, then restore NIX_BUILD_TOP, TMP, TMPDIR, TEMP, TEMPDIR and terminfo. HOME, PWD, OLDPWD, SHLVL and _ are already in the caller, so they never become contributions |
+| Evidence | [evidence/T-030.md](evidence/T-030.md) |
+
+### T-031: Who writes the prepared environment and store view into the sandbox record, and in what shape?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Answer | The backend writes its own SandboxRecord.data payload and reads it in exec, inspect and delete. The contract requires the same environment and mounts on later commands and provenance on inspect, and defines no payload shape |
+| Evidence | [evidence/T-031.md](evidence/T-031.md) |
+
+### T-032: What does the kind field in per-step provenance hold once kinds leave the contract?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Depends on | T-027 |
+| Answer | The registry's kind name as a string. The contract keeps identity and the kind name for attribution and no longer names a closed kind type |
+| Evidence | [evidence/T-032.md](evidence/T-032.md) |
 
 ## Decision
 

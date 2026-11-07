@@ -1,6 +1,6 @@
 # Handover: `nix-devshell-sandbox`
 
-Map complete: 26 tickets, none open. Detail in `evidence/`, decisions in `map.toon`.
+Map complete: 32 tickets, none open. Detail in `evidence/`, decisions in `map.toon`.
 
 `sandbox-provisioning` is implemented at
 `adrs/2026-11-05-sandbox-provisioning`. It owns identity-named, typed steps, an
@@ -8,19 +8,23 @@ ordered provision list on each backend, the FR-021 amendment that a project may
 name a backend to declare compatibility but not select one, machine overrides,
 the `setup-command` migration and the doctor/preflight report.
 
-Next is `devshell-environment`, which is a prototype, not production: adding a
-kind raises two questions the spec cannot answer without evidence, and both
-change types that already exist. Its findings feed
-`devshell-environment-implementation`, and the two native backends depend on
-that implementation rather than on the prototype. The devShell preparation does
-not realise derivations: readiness checks the devShell is already valid in the
-store, and create refuses if it is not. Automatic mechanism selection is
+The prototype at `adrs/2026-11-07-devshell-environment` is complete. Its
+findings answered the decisions the production ADR would otherwise guess: kinds
+live in a compiled-in registry outside the contract (T-027), a backend reports
+static support for contribution sorts (T-028), the environment keeps the
+exported-but-empty variables (T-029) and follows the nix-direnv rule (T-030),
+the backend owns the persisted payload (T-031), and provenance keeps the kind
+name as a string (T-032). Next is `devshell-environment-implementation`, which
+consumes those answers and implements the kind. The two native backends depend
+on that implementation rather than on the prototype. The devShell preparation
+does not realise derivations: readiness evaluates nothing, and create refuses an
+unrealised devShell as unavailable before the shell hook runs. Automatic mechanism selection is
 deferred to its own ADR (`automatic-backend-selection`). Proxy is the longest
 pole for a usable sandbox: without it both native backends are offline-only.
 
 ## ADRs
 
-What the prototype decision changes: the prototype answers two questions, the
+What the prototype decision changes: the prototype answered six decisions, the
 production ADR consumes the answers, and the backends wait for the shape rather
 than guess it. Until production lands, no backend applies a devShell and Docker
 remains the only backend, rejecting the kind.
@@ -29,24 +33,24 @@ remains the only backend, rejecting the kind.
 flowchart TB
     D["Decision: this ADR prototypes; production is a follow-up ADR"]
 
-    D --> P["B devshell-environment<br/>prototype under adrs/2026-11-07-devshell-environment/poc/"]
+    D --> P["B devshell-environment<br/>prototype complete at adrs/2026-11-07-devshell-environment"]
     D --> I["H devshell-environment-implementation<br/>production"]
     D --> W["C linux-bwrap-provider and D darwin-sandbox-provider<br/>wait for H"]
 
-    P --> Q["Two questions the prototype must answer"]
-    Q --> Q1["Q1 where does a kind live?"]
-    Q --> Q2["Q2 what does a backend report?"]
+    P --> F["Six decisions the findings settled"]
+    F --> F1["T-027 kind lives in a registry outside the contract"]
+    F --> F2["T-028 backend reports static contribution support"]
+    F --> F3["T-029 empty build-phase variables are kept"]
+    F --> F4["T-030 environment follows the nix-direnv rule"]
+    F --> F5["T-031 backend owns the persisted payload"]
+    F --> F6["T-032 provenance carries the kind name as a string"]
 
-    Q1 --> Q1a["contract enum:<br/>Devshell joins ProvisionKind<br/>every new kind is a contract change"]
-    Q1 --> Q1b["registry outside the contract:<br/>step is identity + kind + settings<br/>a new kind is one module"]
-
-    Q2 --> Q2a["kind support:<br/>a backend that supports a kind applies all its contributions"]
-    Q2 --> Q2b["requirements and contributions:<br/>a backend reports what it can meet and apply, and may refuse one"]
-
-    Q1a --> I
-    Q1b --> I
-    Q2a --> I
-    Q2b --> I
+    F1 --> I
+    F2 --> I
+    F3 --> I
+    F4 --> I
+    F5 --> I
+    F6 --> I
 
     I --> B["contract and provisioning types change once,<br/>in the shape the findings support"]
     B --> C["C renders environment and mounts"]
