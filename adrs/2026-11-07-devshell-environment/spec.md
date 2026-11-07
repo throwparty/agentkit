@@ -2,39 +2,7 @@
 
 **Status:** proposed  **Created:** 2026-11-07  **Author:** adrian
 
-Litterbox provisions a sandbox from the project's `[[provision]]` steps (adrs/2026-11-05-sandbox-provisioning). Today the only kind is `command`, which runs inside the sandbox, and `CreateRequest` (crates/agentkit-litterbox/src/sandbox/contract.rs) carries no environment from the host and no store paths. A project that builds with Nix therefore has to run nix inside the sandbox, which the map excluded: with the daemon socket a confined command grew the host store and the daemon accepted builds outside the sandbox (maps/2026-10-31-nix-devshell-sandbox/evidence/T-018.md), and without it nothing evaluates. The same map established that a devShell can be prepared on the host instead: its exported variables plus the shell hook's additions and overrides reach a bubblewrap holder intact (T-011, T-016), and its store closure is a sufficient bind set (T-022). The contract as written has nowhere to carry either (T-023). This ADR adds a host step kind, `devshell`, and the effect vocabulary that lets a kind contribute something to a sandbox without the contract learning what Nix is: environment variables, read-only path grants and written files. Terminology is normative in crates/agentkit-litterbox/CONTEXT.md, upstream Nix terms are in .agentkit/tackle/prompts/nix/glossary.md, and the behaviours this specification relies on are verified in .agentkit/tackle/prompts/nix/PROMPT.md. Two questions decide the production shape and are not yet answered: whether a kind lives in the contract's closed `ProvisionKind` enum or in a registry outside it, and whether a backend reports kind support or effect support. This ADR specifies the design and produces a prototype that settles both against a real backend; it does not build the production implementation, which a follow-up ADR owns. 
-
-
-```mermaid
-flowchart TB
-    D["Decision: this ADR prototypes; production is a follow-up ADR"]
-
-    D --> P["B devshell-environment<br/>prototype under adrs/2026-11-07-devshell-environment/poc/"]
-    D --> I["H devshell-environment-implementation<br/>production"]
-    D --> W["C linux-bwrap-provider and D darwin-sandbox-provider<br/>wait for H"]
-
-    P --> Q["Two questions the prototype must answer"]
-    Q --> Q1["Q1 where does a kind live?"]
-    Q --> Q2["Q2 what does a backend report?"]
-
-    Q1 --> Q1a["contract enum:<br/>Devshell joins ProvisionKind<br/>every new kind is a contract change"]
-    Q1 --> Q1b["registry outside the contract:<br/>step is identity + kind + settings<br/>a new kind is one module"]
-
-    Q2 --> Q2a["kinds:<br/>supporting a kind means applying all its effects"]
-    Q2 --> Q2b["effects:<br/>a backend may refuse one effect and name the remedy"]
-
-    Q1a --> I
-    Q1b --> I
-    Q2a --> I
-    Q2b --> I
-
-    I --> B["contract and provisioning types change once,<br/>in the shape the findings support"]
-    B --> C["C renders environment, grants and written file"]
-    B --> A["D renders environment, grants and written file"]
-
-    P -.-> U["until H lands:<br/>no backend applies a devShell;<br/>Docker stays the only backend and rejects the kind;<br/>this specification stays provisional"]
-
-```
+Litterbox provisions a sandbox from the project's `[[provision]]` steps (adrs/2026-11-05-sandbox-provisioning). Today the only kind is `command`, which runs inside the sandbox, and `CreateRequest` (crates/agentkit-litterbox/src/sandbox/contract.rs) carries no environment from the host and no store paths. A project that builds with Nix therefore has to run nix inside the sandbox, which the map excluded: with the daemon socket a confined command grew the host store and the daemon accepted builds outside the sandbox (maps/2026-10-31-nix-devshell-sandbox/evidence/T-018.md), and without it nothing evaluates. The same map established that a devShell can be prepared on the host instead: its exported variables plus the shell hook's additions and overrides reach a bubblewrap holder intact (T-011, T-016), and its store closure is a sufficient bind set (T-022). The contract as written has nowhere to carry either (T-023). This ADR adds a host step kind, `devshell`, and the effect vocabulary that lets a kind contribute something to a sandbox without the contract learning what Nix is: environment variables, read-only path grants and written files. Terminology is normative in crates/agentkit-litterbox/CONTEXT.md, upstream Nix terms are in .agentkit/tackle/prompts/nix/glossary.md, and the behaviours this specification relies on are verified in .agentkit/tackle/prompts/nix/PROMPT.md. Two questions decide the production shape and are not yet answered: whether a kind lives in the contract's closed `ProvisionKind` enum or in a registry outside it, and whether a backend reports kind support or effect support. This ADR specifies the design and produces a prototype that settles both against a real backend; it does not build the production implementation, which a follow-up ADR owns.
 
 
 ## Problem

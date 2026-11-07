@@ -6,28 +6,58 @@ Map complete: 26 tickets, none open. Detail in `evidence/`, decisions in `map.to
 `adrs/2026-11-05-sandbox-provisioning`. It owns identity-named, typed steps, an
 ordered provision list on each backend, the FR-021 amendment that a project may
 name a backend to declare compatibility but not select one, machine overrides,
-the `setup-command` migration and the doctor/preflight report. Next is
-`nix-devshell-env-capture`, then `linux-bwrap-provider`. The capture does not
-realise derivations: readiness checks the devShell is already realised, and
-create refuses if it is not. Automatic mechanism selection is deferred to its own
-ADR (`automatic-backend-selection`). Proxy is the longest pole for a usable
-sandbox: without it both native backends are offline-only.
+the `setup-command` migration and the doctor/preflight report.
+
+Next is `devshell-environment`, which is a prototype, not production: adding a
+kind raises two questions the spec cannot answer without evidence, and both
+change types that already exist. Its findings feed
+`devshell-environment-implementation`, and the two native backends depend on
+that implementation rather than on the prototype. The devShell preparation does
+not realise derivations: readiness checks the devShell is already valid in the
+store, and create refuses if it is not. Automatic mechanism selection is
+deferred to its own ADR (`automatic-backend-selection`). Proxy is the longest
+pole for a usable sandbox: without it both native backends are offline-only.
 
 ## ADRs
 
+What the prototype decision changes: the prototype answers two questions, the
+production ADR consumes the answers, and the backends wait for the shape rather
+than guess it. Until production lands, no backend applies a devShell and Docker
+remains the only backend, rejecting the kind.
+
 ```mermaid
-flowchart LR
-    contract["sandbox-provider-contract"] --> provision[sandbox-provisioning]
-    contract --> proxy[egress-proxy]
-    contract --> auto[automatic-backend-selection]
-    provision --> capture[nix-devshell-env-capture]
-    provision --> linux[linux-bwrap-provider]
-    provision --> darwin[darwin-sandbox-provider]
-    capture --> linux
-    capture --> darwin
-    proxy -.->|endpoint| linux
-    proxy -.->|endpoint| darwin
+flowchart TB
+    D["Decision: this ADR prototypes; production is a follow-up ADR"]
+
+    D --> P["B devshell-environment<br/>prototype under adrs/2026-11-07-devshell-environment/poc/"]
+    D --> I["H devshell-environment-implementation<br/>production"]
+    D --> W["C linux-bwrap-provider and D darwin-sandbox-provider<br/>wait for H"]
+
+    P --> Q["Two questions the prototype must answer"]
+    Q --> Q1["Q1 where does a kind live?"]
+    Q --> Q2["Q2 what does a backend report?"]
+
+    Q1 --> Q1a["contract enum:<br/>Devshell joins ProvisionKind<br/>every new kind is a contract change"]
+    Q1 --> Q1b["registry outside the contract:<br/>step is identity + kind + settings<br/>a new kind is one module"]
+
+    Q2 --> Q2a["kinds:<br/>supporting a kind means applying all its effects"]
+    Q2 --> Q2b["effects:<br/>a backend may refuse one effect and name the remedy"]
+
+    Q1a --> I
+    Q1b --> I
+    Q2a --> I
+    Q2b --> I
+
+    I --> B["contract and provisioning types change once,<br/>in the shape the findings support"]
+    B --> C["C renders environment, grants and written file"]
+    B --> A["D renders environment, grants and written file"]
+
+    P -.-> U["until H lands:<br/>no backend applies a devShell;<br/>Docker stays the only backend and rejects the kind;<br/>this specification stays provisional"]
 ```
+
+Around it: `sandbox-provider-contract` (A) and `sandbox-provisioning` (G) are
+implemented; `egress-proxy` (E) and `automatic-backend-selection` (F) depend
+only on A.
 
 No "Nix provider" ADR: a devShell is an environment, not a backend.
 
