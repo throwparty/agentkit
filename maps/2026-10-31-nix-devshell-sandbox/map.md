@@ -8,8 +8,8 @@ Created: 2026-10-31
 
 | Metric | Value |
 |--------|-------|
-| Tickets | 32 |
-| Answered | 32 |
+| Tickets | 41 |
+| Answered | 41 |
 | Open | 0 |
 | Probing | 0 |
 | Abandoned | 0 |
@@ -204,7 +204,7 @@ Created: 2026-10-31
 | Field | Value |
 |-------|-------|
 | State | answered |
-| Answer | No. CreateRequest.environment carries variables only (EnvironmentSource::Captured), Workspace a host directory, and the orchestrator hardcodes EnvironmentSource::Mechanism; the T-022 closure has no field. The bwrap backend can bind all of /nix/store, which T-004 and T-016 proved sufficient, until the capture ADR amends the contract |
+| Answer | Yes, since devshell-environment-implementation: prepare fills Contributions.mounts with the T-022 closure, ResolvedStep carries it, and CreateRequest.provision delivers it. StoreView::Whole still collapses it to /nix/store. Rendering the list is the bwrap and Darwin backends' work |
 | Evidence | [evidence/T-023.md](evidence/T-023.md) |
 
 ### T-024: Does a holder survive the one-shot CLI process that created it, so a later process can join?
@@ -281,6 +281,80 @@ Created: 2026-10-31
 | Depends on | T-027 |
 | Answer | The registry's kind name as a string. The contract keeps identity and the kind name for attribution and no longer names a closed kind type |
 | Evidence | [evidence/T-032.md](evidence/T-032.md) |
+
+### T-033: Does the host sleep work as the holder command bound into the view?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Answer | Yes. sleep with a large integer duration holds the sandbox; no GNU infinity spelling is needed |
+| Evidence | [evidence/T-033.md](evidence/T-033.md) |
+
+### T-034: Does a killed client leave a zombie inside the sandbox?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Answer | No. The command is reparented outside the pid namespace and reaped there; zero defunct processes remained after the orphan exited |
+| Evidence | [evidence/T-034.md](evidence/T-034.md) |
+
+### T-035: Does a closure larger than 238 paths bind and start?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Answer | Yes. 1779 individual binds started in 69ms and ran a command; bwrap merged them into 52 mount entries, so a mount table check must verify coverage rather than one entry per path |
+| Evidence | [evidence/T-035.md](evidence/T-035.md) |
+
+### T-036: Do namespace inodes stay stable while the sandbox lives?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Answer | Yes. All seven inodes were identical after three joins, so a record can check them before every join, paired with the process start time |
+| Evidence | [evidence/T-036.md](evidence/T-036.md) |
+
+### T-037: Does this host offer cgroup v2 with a usable user scope?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Answer | Yes. cgroup2fs, a user manager and a transient scope that starts |
+| Evidence | [evidence/T-037.md](evidence/T-037.md) |
+
+### T-038: Does setns into the sandbox cgroup namespace work unprivileged?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Answer | Yes. The joined process saw the holder inode, so a command shares all seven namespaces |
+| Evidence | [evidence/T-038.md](evidence/T-038.md) |
+
+### T-039: Does bwrap's status document mean the sandbox is usable?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Answer | No. The document arrives early in setup: 43ms against 4246ms to a usable 1779-path view, and a join before the view is built fails. create must wait for the recorded mounts, not for the document |
+| Evidence | [evidence/T-039.md](evidence/T-039.md) |
+
+### T-040: Does every recorded mount present mean the sandbox is usable?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Depends on | T-039 |
+| Answer | Yes. In four runs the last recorded mount appeared 28 to 34ms before the first join succeeded, with the old root already detached, so create can poll the recorded mounts |
+| Evidence | [evidence/T-040.md](evidence/T-040.md) |
+
+### T-041: Can a process join the sandbox in-process, and in what namespace order?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Depends on | T-013 |
+| Answer | Yes, but not in nsenter's order. The sandbox's namespaces are owned by its user namespace's parent, so the join enters that parent first, then ipc, net, pid, mnt, uts and cgroup, then the sandbox user namespace. Joining the sandbox user namespace first grants capabilities there and every later join fails with EPERM |
+| Evidence | [evidence/T-041.md](evidence/T-041.md) |
 
 ## Decision
 
