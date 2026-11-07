@@ -4,10 +4,13 @@
 //! backend is a mechanism that implements this trait; the CLI and the MCP
 //! server hold a boxed trait object and do not know which one they hold.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
 
 use futures_util::future::BoxFuture;
+
+use crate::sandbox::environment::{Environment, Origin, Provenance};
 
 /// A sandbox as it is remembered between processes.
 ///
@@ -68,36 +71,43 @@ pub fn forwarded_port_env_var(name: &str) -> Result<String, String> {
     ))
 }
 
-/// A kind of provisioning step a backend may apply.
+/// Where a provisioning step runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum ProvisionKind {
-    /// A command run once, confined, in the sandbox.
-    Command,
+pub enum Placement {
+    /// On the host, before the sandbox exists.
+    Host,
+    /// Inside the sandbox, once it exists.
+    Sandbox,
 }
 
-impl ProvisionKind {
+/// A sort of contribution a host step produces.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum ContributionSort {
+    /// Environment variables a command receives.
+    Environment,
+    /// Read-only paths mounted into the sandbox.
+    Mount,
+}
+
+impl ContributionSort {
     /// The stable name a surface reports.
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Command => "command",
-        }
-    }
-
-    /// The kind a surface name denotes.
-    pub fn parse(name: &str) -> Option<Self> {
-        match name {
-            "command" => Some(Self::Command),
-            _ => None,
+            Self::Environment => "environment",
+            Self::Mount => "mount",
         }
     }
 }
 
-/// What a backend says about one provisioning kind.
+/// What a backend says about one contribution sort.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
-pub struct ProvisionSupport {
-    /// The kind.
-    pub kind: ProvisionKind,
+pub struct ContributionSupport {
+    /// The contribution sort.
+    pub sort: ContributionSort,
     /// Whether the backend can apply it.
     pub state: crate::sandbox::report::State,
     /// Why it is in this state.
@@ -105,38 +115,158 @@ pub struct ProvisionSupport {
     /// What the user can do about it.
     pub remedy: Option<String>,
     /// The weaker mechanism the backend substitutes when degraded.
-    ///
-    /// A degraded kind with a fallback is refused unless the user accepts it;
-    /// a degraded kind without one is usable as reported.
     pub fallback: Option<crate::sandbox::report::Fallback>,
 }
 
 /// A provisioning step: the project's declaration and the resolved value.
+///
+/// The kind is a name, not a closed enum. The registry in `provision::kind`
+/// owns the settings each kind accepts; the contract carries them opaquely so
+/// a backend never needs to know a kind.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
-pub enum ProvisionStep {
-    /// A command run once, confined, with the environment produced so far.
-    Command {
-        /// The step's stable identity.
-        identity: String,
-        /// The shell command to run.
-        run: String,
-    },
+pub struct ProvisionStep {
+    /// The step's stable identity.
+    pub identity: String,
+    /// The kind name.
+    pub kind: String,
+    /// The settings that kind owns, keyed by name.
+    #[serde(flatten)]
+    pub settings: BTreeMap<String, toml::Value>,
 }
 
 impl ProvisionStep {
     /// The step's identity.
     pub fn identity(&self) -> &str {
-        match self {
-            Self::Command { identity, .. } => identity,
-        }
+        &self.identity
     }
 
-    /// The step's kind.
-    pub fn kind(&self) -> ProvisionKind {
-        match self {
-            Self::Command { .. } => ProvisionKind::Command,
+    /// The step's kind name.
+    pub fn kind(&self) -> &str {
+        &self.kind
+    }
+}
+
+/// A command a sandbox step runs inside the sandbox.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SandboxAction {
+    /// The shell command to run.
+    pub run: String,
+}
+
+/// What a host step contributes to the sandbox.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Contributions {
+    /// Variable names and values the sandbox should receive.
+    pub environment: BTreeMap<String, String>,
+    /// Where the contributions came from and what changed.
+    pub provenance: Provenance,
+    /// Absolute read-only paths to mount.
+    pub mounts: Vec<PathBuf>,
+    /// The host path the recorded workspace variables name.
+    pub workspace_root: Option<PathBuf>,
+    /// The variables whose values name the workspace root.
+    pub workspace_variables: Vec<String>,
+}
+
+impl Default for Contributions {
+    fn default() -> Self {
+        Self {
+            environment: BTreeMap::new(),
+            provenance: Provenance {
+                origin: Origin::Default,
+                variables: Vec::new(),
+                host_paths: Vec::new(),
+                steps: Vec::new(),
+            },
+            mounts: Vec::new(),
+            workspace_root: None,
+            workspace_variables: Vec::new(),
         }
+    }
+}
+
+impl Contributions {
+    /// Build the runtime environment for a workspace path.
+    ///
+    /// Only the recorded workspace variables are rewritten; store paths are
+    /// left alone, because the store is mounted at its own path.
+    pub fn environment_for(&self, workspace: &str) -> Environment {
+        let mut variables = self.environment.clone();
+        if let Some(root) = &self.workspace_root {
+            let root = root.to_string_lossy();
+            for name in &self.workspace_variables {
+                if let Some(value) = variables.get_mut(name) {
+                    *value = rebase_workspace(value, &root, workspace);
+                }
+            }
+        }
+        Environment {
+            variables,
+            provenance: self.provenance.clone(),
+            workspace: workspace.to_string(),
+        }
+    }
+}
+
+/// Rewrite the workspace root where it names a whole path, leaving sibling paths
+/// such as `/repo-cache` and store paths that merely contain the text alone.
+fn rebase_workspace(value: &str, root: &str, workspace: &str) -> String {
+    if root.is_empty() {
+        return value.to_string();
+    }
+    let mut rebased = String::with_capacity(value.len());
+    let mut rest = value;
+    while let Some(offset) = rest.find(root) {
+        let after = offset + root.len();
+        let starts_a_path = rest[..offset]
+            .chars()
+            .next_back()
+            .is_none_or(|character| !continues_a_path(character));
+        let ends_a_path = rest[after..]
+            .chars()
+            .next()
+            .is_none_or(|character| character == '/' || !continues_a_path(character));
+        rebased.push_str(&rest[..offset]);
+        if starts_a_path && ends_a_path {
+            rebased.push_str(workspace);
+        } else {
+            rebased.push_str(root);
+        }
+        rest = &rest[after..];
+    }
+    rebased.push_str(rest);
+    rebased
+}
+
+/// Whether a character continues a path or a path component.
+fn continues_a_path(character: char) -> bool {
+    character.is_ascii_alphanumeric() || matches!(character, '_' | '-' | '.' | '/')
+}
+
+/// A step resolved against a backend: what to run and what to apply.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ResolvedStep {
+    /// The step's stable identity.
+    pub identity: String,
+    /// The kind name, for attribution.
+    pub kind: String,
+    /// Where the step runs.
+    pub placement: Placement,
+    /// The command to run inside the sandbox, when the step runs there.
+    pub sandbox: Option<SandboxAction>,
+    /// What the step contributes, when it runs on the host.
+    pub contributions: Contributions,
+}
+
+impl ResolvedStep {
+    /// The step's identity.
+    pub fn identity(&self) -> &str {
+        &self.identity
+    }
+
+    /// The step's kind name.
+    pub fn kind(&self) -> &str {
+        &self.kind
     }
 }
 
@@ -150,7 +280,7 @@ pub struct CreateRequest {
     /// The prepared workspace.
     pub workspace: Workspace,
     /// The ordered provisioning steps for this sandbox.
-    pub provision: Vec<ProvisionStep>,
+    pub provision: Vec<ResolvedStep>,
     /// The host address forwarded ports bind to, from user configuration.
     pub forward_bind: String,
     /// Ports the project expects to be forwarded.
@@ -495,7 +625,9 @@ mod tests {
 
     use futures_util::future::BoxFuture;
 
-    use super::{Backend, CreateRequest, Error, Execution, Inspection, SandboxRecord, Scope};
+    use super::{
+        Backend, CreateRequest, Error, Execution, Inspection, ProvisionStep, SandboxRecord, Scope,
+    };
 
     struct Stub;
 
@@ -622,6 +754,23 @@ mod tests {
         assert!(rendered.contains("fix the step"), "{rendered}");
         assert!(rendered.contains("exit code 7"), "{rendered}");
         assert!(!rendered.contains('\u{1b}'), "{rendered}");
+    }
+
+    #[test]
+    fn a_provision_step_keeps_its_settings() {
+        let step: ProvisionStep =
+            toml::from_str("identity = 'dev'\nkind = 'devshell'\ninstallable = './nix'\n")
+                .expect("a provision step parses");
+        assert_eq!(step.identity(), "dev");
+        assert_eq!(step.kind(), "devshell");
+        assert_eq!(
+            step.settings
+                .get("installable")
+                .and_then(toml::Value::as_str),
+            Some("./nix")
+        );
+        let rendered = toml::to_string(&step).expect("a provision step serialises");
+        assert!(rendered.contains("installable"), "{rendered}");
     }
 
     #[tokio::test]
