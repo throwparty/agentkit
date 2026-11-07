@@ -259,7 +259,9 @@ async fn v2_permission_request_shapes_the_ask_and_foreground_states() {
                         )),
                     )),
                     None => responder.respond(v2::RequestPermissionResponse::new(
-                        v2::RequestPermissionOutcome::Cancelled,
+                        v2::RequestPermissionOutcome::Cancelled(
+                            v2::CancelledPermissionOutcome::new(),
+                        ),
                     )),
                 }
             },

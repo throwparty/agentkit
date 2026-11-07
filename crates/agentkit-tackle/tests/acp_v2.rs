@@ -656,7 +656,7 @@ async fn v2_advertises_each_mcp_tool_as_a_direct_command() {
             let names: Vec<&str> = created
                 .available_commands
                 .iter()
-                .map(|command| command.name.as_str())
+                .map(|command| command.name())
                 .collect();
             assert!(
                 names.contains(&"!mcp.testfs.read_file"),
@@ -1946,7 +1946,9 @@ async fn v2_elicitation_reaches_the_client_and_returns_to_the_tool() {
                         ),
                     )),
                     None => responder.respond(v2::RequestPermissionResponse::new(
-                        v2::RequestPermissionOutcome::Cancelled,
+                        v2::RequestPermissionOutcome::Cancelled(
+                            v2::CancelledPermissionOutcome::new(),
+                        ),
                     )),
                 }
             },

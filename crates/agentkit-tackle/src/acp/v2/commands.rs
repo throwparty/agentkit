@@ -5,7 +5,7 @@ use super::negotiation::ConnectionNegotiation;
 use crate::state::TackleState;
 use agent_client_protocol::schema::v1::AvailableCommandInput;
 use agent_client_protocol::schema::v2::{
-    AvailableCommand, AvailableCommandInput as WireInput, TextCommandInput,
+    AvailableCommand, AvailableCommandInput as WireInput, Command, TextCommandInput,
 };
 
 /// The `available_commands` list for a session: the `!` prefix command, each
@@ -51,11 +51,11 @@ pub(super) async fn available_commands(
                 }
                 _ => String::new(),
             };
-            let mut out = AvailableCommand::new(command.name, command.description);
+            let mut out = Command::new(command.name, command.description);
             if !hint.is_empty() {
                 out = out.input(WireInput::Text(TextCommandInput::new(hint)));
             }
-            out
+            AvailableCommand::Command(out)
         })
         .collect();
     negotiation.cache_commands(commands.clone()).await;

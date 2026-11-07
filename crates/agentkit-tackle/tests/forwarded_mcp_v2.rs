@@ -199,7 +199,7 @@ async fn a_forwarded_mcp_server_is_advertised_and_callable() {
                         seen.commands = update
                             .available_commands
                             .iter()
-                            .map(|command| command.name.clone())
+                            .map(|command| command.name().to_owned())
                             .collect();
                     }
                     v2::SessionUpdate::StateUpdate(v2::StateUpdate::Idle(idle)) => {
@@ -231,7 +231,9 @@ async fn a_forwarded_mcp_server_is_advertised_and_callable() {
                         )),
                     )),
                     None => responder.respond(v2::RequestPermissionResponse::new(
-                        v2::RequestPermissionOutcome::Cancelled,
+                        v2::RequestPermissionOutcome::Cancelled(
+                            v2::CancelledPermissionOutcome::new(),
+                        ),
                     )),
                 }
             },
