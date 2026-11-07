@@ -11,7 +11,11 @@ fi
 export OPENCODE_CONFIG_DIR
 OPENCODE_CONFIG_DIR=$(pwd)/.opencode
 
-cargo build --bin agentkit-switchboard --bin agentkit-credential-keychain
+cargo build \
+  --bin agentkit-switchboard \
+  --bin agentkit-credential-keychain \
+  --bin agentkit-lens \
+  --bin agentkit-litterbox
 export PATH="$PWD/target/debug:$PATH"
 
 if command -v fuser &>/dev/null; then
