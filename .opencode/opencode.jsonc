@@ -8,7 +8,7 @@
         "apiKey": "dummy",
       },
       "models": {
-        "deepseek-v4-flash": { "name": "deepseek-v4-flash" },
+        "deepseek-v4.1-flash": { "name": "deepseek-v4.1-flash" },
         "glm-5": { "name": "glm-5" },
         "glm-5.1": { "name": "glm-5.1" },
         "glm-5.2": { "name": "glm-5.2" },
