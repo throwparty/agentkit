@@ -6,7 +6,7 @@ api_surface = "openai-chat-completions"
 base_url = "https://opencode.ai/zen/v1"
 billing = "pay_as_you_go"
 models = [
-  "deepseek-v4-flash",
+  "deepseek-v4.1-flash",
   "glm-5",
   "glm-5.1",
   "glm-5.2",
