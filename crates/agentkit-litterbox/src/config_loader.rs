@@ -623,6 +623,25 @@ fn validate_provisioning(config: &mut Config) -> Result<(), ConfigError> {
             })
         })?;
     }
+    for (backend, sequence) in &config.backend_sequences {
+        let steps: Vec<&ProvisionStep> = sequence
+            .iter()
+            .filter_map(|identity| {
+                config
+                    .provision_definitions
+                    .iter()
+                    .find(|step| step.identity() == identity)
+            })
+            .collect();
+        crate::provision::kind::validate_sequence(backend, &steps).map_err(|error| {
+            ConfigError::Provisioning(crate::config::ProvisioningIssue {
+                backend: Some(backend.clone()),
+                step: None,
+                reason: error.reason,
+                remedy: error.remedy,
+            })
+        })?;
+    }
     Ok(())
 }
 

@@ -106,7 +106,7 @@ Implement `kind/devshell.rs` and the devshell prepare entry point. `check` runs 
 | Depends On | T-004,T-006,T-007 |
 | References | devshell-step,contributions,store-closure,closure-equals-query,backend-cannot-mount,closure-too-large,no-nix-inside |
 
-### T-009: Resolver
+### T-009: [x] Resolver
 
 Rewrite `provision/resolve.rs` to use the registry. For each definition, look up the kind, validate its settings, compare the kind's contribution sorts with the backend's `contribution_support`, and return planned steps carrying the generic step and the kind description. Remove every match on `ProvisionKind`. A missing sort is Unsupported; a missing kind or setting is Misconfigured. Keep `resolve` and `preflight_steps` pure.
 

@@ -4,4 +4,4 @@ pub mod kind;
 pub mod prepare;
 mod resolve;
 
-pub use resolve::{ResolvedStep, StepOutcome, preflight_steps, resolve};
+pub use resolve::{PlannedStep, StepOutcome, preflight_steps, resolve};
