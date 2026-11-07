@@ -35,7 +35,9 @@ to = [
   "litterbox-scm",
   "litterbox-vcs-store",
   "litterbox-shared",
-  "litterbox-provision"
+  "litterbox-provision",
+  "litterbox-kinds",
+  "litterbox-prepare"
 ]
 message = "the contract imports nothing internal; put conversions and adapters outside sandbox."
 
@@ -51,7 +53,9 @@ to = [
   "litterbox-scm",
   "litterbox-vcs-store",
   "litterbox-shared",
-  "litterbox-provision"
+  "litterbox-provision",
+  "litterbox-kinds",
+  "litterbox-prepare"
 ]
 message = "a backend depends on the contract only; branches, records, commands and the shared kernel are not its business."
 
@@ -64,18 +68,34 @@ to = [
   "litterbox-mcp",
   "litterbox-scm",
   "litterbox-vcs-store",
-  "litterbox-provision"
+  "litterbox-provision",
+  "litterbox-kinds",
+  "litterbox-prepare"
 ]
 message = "the registry constructs a backend; it does not pair branches, persist records or serve surfaces."
 
 [[deny-scope-dep]]
 from = "litterbox-cli"
-to = ["litterbox-backend-docker", "litterbox-scm", "litterbox-vcs-store", "litterbox-provision"]
+to = [
+  "litterbox-backend-docker",
+  "litterbox-scm",
+  "litterbox-vcs-store",
+  "litterbox-provision",
+  "litterbox-kinds",
+  "litterbox-prepare"
+]
 message = "the CLI reaches a backend through the orchestrator and the registry, never its module; branches, bare clones and the provisioning resolver are the orchestrator's business."
 
 [[deny-scope-dep]]
 from = "litterbox-mcp"
-to = ["litterbox-backend-docker", "litterbox-scm", "litterbox-vcs-store", "litterbox-provision"]
+to = [
+  "litterbox-backend-docker",
+  "litterbox-scm",
+  "litterbox-vcs-store",
+  "litterbox-provision",
+  "litterbox-kinds",
+  "litterbox-prepare"
+]
 message = "the MCP server reaches a backend through the orchestrator and the registry, never its module; branches, bare clones and the provisioning resolver are the orchestrator's business."
 
 [[deny-scope-dep]]
@@ -89,9 +109,10 @@ to = [
   "litterbox-mcp",
   "litterbox-scm",
   "litterbox-vcs-store",
-  "litterbox-provision"
+  "litterbox-provision",
+  "litterbox-prepare"
 ]
-message = "configuration describes settings; it does not reach a mechanism, a record, a branch, a surface or the resolver."
+message = "configuration describes settings; it may reach the pure kind registry but never a mechanism, a record, a branch, a surface, the resolver or host preparation."
 
 [[deny-scope-dep]]
 from = "litterbox-persistence"
@@ -104,7 +125,9 @@ to = [
   "litterbox-config",
   "litterbox-scm",
   "litterbox-vcs-store",
-  "litterbox-shared"
+  "litterbox-shared",
+  "litterbox-kinds",
+  "litterbox-prepare"
 ]
 message = "persistence depends on the contract's record types only."
 
@@ -124,9 +147,45 @@ to = [
   "litterbox-mcp",
   "litterbox-scm",
   "litterbox-vcs-store",
-  "litterbox-shared"
+  "litterbox-shared",
+  "litterbox-prepare"
 ]
-message = "the resolver depends on the contract and configuration only; it does not reach a mechanism, a record, a branch or a surface."
+message = "the resolver depends on the contract, configuration and the pure kind registry; it does not reach a mechanism, host preparation, a record, a branch or a surface."
+
+[[deny-scope-dep]]
+from = "litterbox-kinds"
+to = [
+  "litterbox-backend-docker",
+  "litterbox-registry",
+  "litterbox-orchestrator",
+  "litterbox-persistence",
+  "litterbox-cli",
+  "litterbox-mcp",
+  "litterbox-config",
+  "litterbox-scm",
+  "litterbox-vcs-store",
+  "litterbox-shared",
+  "litterbox-provision",
+  "litterbox-prepare"
+]
+message = "the kind registry is pure: it depends on the contract only, and the resolver, configuration and preparation use it."
+
+[[deny-scope-dep]]
+from = "litterbox-prepare"
+to = [
+  "litterbox-backend-docker",
+  "litterbox-registry",
+  "litterbox-orchestrator",
+  "litterbox-persistence",
+  "litterbox-cli",
+  "litterbox-mcp",
+  "litterbox-config",
+  "litterbox-scm",
+  "litterbox-vcs-store",
+  "litterbox-shared",
+  "litterbox-provision"
+]
+message = "host preparation depends on the contract and the pure kind registry; the orchestrator is its only caller."
 
 [rules.no-unwrap-expect]
 enabled = false
@@ -167,8 +226,19 @@ name = "litterbox-orchestrator"
 paths = ["crates/agentkit-litterbox/src/orchestrator/**"]
 
 [[scopes]]
+name = "litterbox-kinds"
+paths = ["crates/agentkit-litterbox/src/provision/kind/**"]
+
+[[scopes]]
+name = "litterbox-prepare"
+paths = ["crates/agentkit-litterbox/src/provision/prepare/**"]
+
+[[scopes]]
 name = "litterbox-provision"
-paths = ["crates/agentkit-litterbox/src/provision/**"]
+paths = [
+  "crates/agentkit-litterbox/src/provision/mod.rs",
+  "crates/agentkit-litterbox/src/provision/resolve.rs"
+]
 
 [[scopes]]
 name = "litterbox-persistence"

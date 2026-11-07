@@ -171,7 +171,7 @@ Make `TestBackend`'s contribution support configurable, record the `ResolvedStep
 | Depends On | T-010,T-011 |
 | References | registry-proven,contributions-at-position,persistence,persistence-across-processes,no-values-on-surfaces,test-selection,devshell-changed |
 
-### T-014: Arch-lint
+### T-014: [x] Arch-lint
 
 Update `arch-lint.toml`. Split the provision scope into `litterbox-kinds` at `src/provision/kind/**`, `litterbox-prepare` at `src/provision/prepare/**` and `litterbox-provision` for the resolver. Allow config to reach kinds and prepare to reach kinds. Deny every backend the kinds, prepare and resolver scopes. Deny prepare the backends, orchestrator, surfaces, persistence, SCM and configuration scopes. Add a negative fixture for each new deny edge. Verify no production source refers to the prototype.
 
