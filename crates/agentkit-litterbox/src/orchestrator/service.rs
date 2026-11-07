@@ -611,16 +611,21 @@ fn step_refusal(
 }
 
 /// Turn a preparation error into a structured provisioning failure.
+fn failure_of(backend: &str, step: &ProvisionStep, error: PrepareError) -> ProvisioningFailure {
+    ProvisioningFailure::new(
+        error.class,
+        Some(backend.to_string()),
+        Some(step.identity.clone()),
+        Some(step.kind.clone()),
+        error.reason,
+        error.remedy,
+    )
+}
+
+/// Turn a preparation error into a contract error.
 fn preparation_failure(backend: &str, step: &ProvisionStep, error: PrepareError) -> Error {
     Error::Provisioning {
-        failure: Box::new(ProvisioningFailure::new(
-            error.class,
-            Some(backend.to_string()),
-            Some(step.identity.clone()),
-            Some(step.kind.clone()),
-            error.reason,
-            error.remedy,
-        )),
+        failure: Box::new(failure_of(backend, step, error)),
     }
 }
 
@@ -717,6 +722,141 @@ pub fn preflight(
             failure: Some(error),
         },
     }
+}
+
+/// One host requirement in a doctor report.
+#[derive(Clone, Debug)]
+pub struct HostRequirement {
+    /// The primitive or requirement.
+    pub name: String,
+    /// Whether it holds.
+    pub ok: bool,
+    /// What was found.
+    pub detail: String,
+    /// What the user can do when it does not hold.
+    pub remedy: Option<String>,
+}
+
+/// What the read-only host check found for one step.
+#[derive(Clone, Debug)]
+pub struct HostReport {
+    /// The step identity.
+    pub identity: String,
+    /// The installable the step names, when it has one.
+    pub installable: Option<String>,
+    /// The host requirements.
+    pub requirements: Vec<HostRequirement>,
+    /// The closure's path count, when it could be derived.
+    pub closure_count: Option<usize>,
+    /// Why the step cannot run here, when it cannot.
+    pub failure: Option<ProvisioningFailure>,
+}
+
+/// Build the doctor's plan and its read-only host reports.
+pub async fn preflight_host(
+    config: &Config,
+    project_slug: &str,
+    backend: &str,
+    support: &[ContributionSupport],
+) -> (Preflight, Vec<HostReport>) {
+    let plan = preflight(config, project_slug, backend, support);
+    let store_view = config.store_view;
+    let mut reports = Vec::new();
+    for planned in &plan.steps {
+        let PlannedStep::Resolved { step, refusal, .. } = planned else {
+            continue;
+        };
+        if refusal.is_some() {
+            continue;
+        }
+        let task_step = step.clone();
+        let deadline = Instant::now() + HOST_PREPARE_BUDGET;
+        let result = tokio::task::spawn_blocking(move || {
+            let runner = SystemRunner::with_deadline(deadline);
+            prepare::check_step(
+                &task_step,
+                &prepare::CheckContext {
+                    store_view,
+                    runner: &runner,
+                },
+            )
+        })
+        .await;
+
+        let (requirements, installable, closure_count, failure) = match result {
+            Ok(Ok(report)) => {
+                let failure = if !report.requirements.ok() {
+                    report
+                        .requirements
+                        .checks
+                        .iter()
+                        .find(|check| !check.ok)
+                        .map(|check| {
+                            ProvisioningFailure::new(
+                                ProvisioningClass::Unavailable,
+                                Some(backend.to_string()),
+                                Some(step.identity.clone()),
+                                Some(step.kind.clone()),
+                                check.detail.clone(),
+                                check
+                                    .remedy
+                                    .clone()
+                                    .unwrap_or_else(|| "run litterbox doctor".to_string()),
+                            )
+                        })
+                } else if let Err(error) = &report.closure {
+                    Some(failure_of(backend, step, error.clone()))
+                } else {
+                    None
+                };
+                let requirements = report
+                    .requirements
+                    .checks
+                    .iter()
+                    .map(|check| HostRequirement {
+                        name: check.name.to_string(),
+                        ok: check.ok,
+                        detail: check.detail.clone(),
+                        remedy: check.remedy.clone(),
+                    })
+                    .collect();
+                (
+                    requirements,
+                    report.installable,
+                    report.closure.as_ref().ok().map(Vec::len),
+                    failure,
+                )
+            }
+            Ok(Err(error)) => (
+                Vec::new(),
+                None,
+                None,
+                Some(failure_of(backend, step, error)),
+            ),
+            Err(error) => (
+                Vec::new(),
+                None,
+                None,
+                Some(ProvisioningFailure::new(
+                    ProvisioningClass::Unavailable,
+                    Some(backend.to_string()),
+                    Some(step.identity.clone()),
+                    Some(step.kind.clone()),
+                    format!("host check task failed: {error}"),
+                    "retry the doctor",
+                )),
+            ),
+        };
+
+        reports.push(HostReport {
+            identity: step.identity.clone(),
+            installable,
+            requirements,
+            closure_count,
+            failure,
+        });
+    }
+    (plan, reports)
 }
 
 /// The slug without the namespace suffix: what pre-change records are keyed on.

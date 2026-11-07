@@ -4,17 +4,50 @@
 //! [`TestBackend`] always, and against the Docker backend when a daemon is
 //! available, with no backend-specific branch in the suite itself.
 
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use futures_util::future::BoxFuture;
 
 use crate::sandbox::contract::{
-    Backend, ContributionSupport, CreateRequest, Error, Execution, Inspection, ProvisionStep,
-    ProvisioningClass, ProvisioningFailure, SandboxRecord, SandboxStatus, Scope, Workspace,
+    Backend, ContributionSort, ContributionSupport, Contributions, CreateRequest, Error, Execution,
+    Inspection, Placement, ProvisioningClass, ProvisioningFailure, ResolvedStep, SandboxAction,
+    SandboxRecord, SandboxStatus, Scope, Workspace,
 };
 use crate::sandbox::environment::{Origin, Provenance, StepProvenance};
 use crate::sandbox::facets::Lifecycle;
 use crate::sandbox::report::{EgressPosture, Fallback, Readiness, State};
+
+/// The resolved steps a test backend stores in its record payload.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+struct StoredSteps {
+    steps: Vec<ResolvedStep>,
+}
+
+fn command_step(identity: &str, run: &str) -> ResolvedStep {
+    ResolvedStep {
+        identity: identity.to_string(),
+        kind: "command".to_string(),
+        placement: Placement::Sandbox,
+        sandbox: Some(SandboxAction {
+            run: run.to_string(),
+        }),
+        contributions: Contributions::default(),
+    }
+}
+
+fn devshell_step(identity: &str, environment: BTreeMap<String, String>) -> ResolvedStep {
+    ResolvedStep {
+        identity: identity.to_string(),
+        kind: "devshell".to_string(),
+        placement: Placement::Host,
+        sandbox: None,
+        contributions: Contributions {
+            environment,
+            ..Contributions::default()
+        },
+    }
+}
 
 /// An in-memory backend that honours the contract without confining anything.
 pub struct TestBackend {
@@ -23,9 +56,10 @@ pub struct TestBackend {
     paused: Mutex<std::collections::HashSet<String>>,
     requests: Mutex<Vec<CreateRequest>>,
     environments: Mutex<std::collections::HashMap<String, Provenance>>,
+    exec_environments: Mutex<std::collections::HashMap<String, BTreeMap<String, String>>>,
+    support: Vec<ContributionSupport>,
     fail_create: bool,
     provision_failure: Option<String>,
-    provision_state: State,
     workspace: String,
 }
 
@@ -44,9 +78,10 @@ impl TestBackend {
             paused: Mutex::new(std::collections::HashSet::new()),
             requests: Mutex::new(Vec::new()),
             environments: Mutex::new(std::collections::HashMap::new()),
+            exec_environments: Mutex::new(std::collections::HashMap::new()),
+            support: Vec::new(),
             fail_create: false,
             provision_failure: None,
-            provision_state: State::Available,
             workspace: "/sandbox".to_string(),
         }
     }
@@ -59,9 +94,10 @@ impl TestBackend {
             paused: Mutex::new(std::collections::HashSet::new()),
             requests: Mutex::new(Vec::new()),
             environments: Mutex::new(std::collections::HashMap::new()),
+            exec_environments: Mutex::new(std::collections::HashMap::new()),
+            support: Vec::new(),
             fail_create: true,
             provision_failure: None,
-            provision_state: State::Available,
             workspace: "/sandbox".to_string(),
         }
     }
@@ -74,22 +110,72 @@ impl TestBackend {
             paused: Mutex::new(std::collections::HashSet::new()),
             requests: Mutex::new(Vec::new()),
             environments: Mutex::new(std::collections::HashMap::new()),
+            exec_environments: Mutex::new(std::collections::HashMap::new()),
+            support: Vec::new(),
             fail_create: false,
             provision_failure: Some(identity.to_string()),
-            provision_state: State::Available,
             workspace: "/sandbox".to_string(),
         }
     }
 
-    /// A backend that reports the given provisioning support state.
+    /// A backend that reports the given contribution support state.
     pub fn with_provision_state(mut self, state: State) -> Self {
-        self.provision_state = state;
+        self.support = vec![ContributionSupport {
+            sort: ContributionSort::Environment,
+            state,
+            reason: Some("the test backend reports this state".to_string()),
+            remedy: Some("accept it or choose another backend".to_string()),
+            fallback: (state == State::Degraded).then(|| Fallback {
+                name: "a weaker mechanism".to_string(),
+                does_not_bound: "some of the host".to_string(),
+            }),
+        }];
+        self
+    }
+
+    /// A backend that reports the given contribution sorts as available.
+    pub fn with_support(mut self, sorts: &[crate::sandbox::contract::ContributionSort]) -> Self {
+        self.support = sorts
+            .iter()
+            .map(|sort| ContributionSupport {
+                sort: *sort,
+                state: State::Available,
+                reason: None,
+                remedy: None,
+                fallback: None,
+            })
+            .collect();
         self
     }
 
     /// The create requests this backend has seen, in order.
     pub fn requests(&self) -> Vec<CreateRequest> {
         self.requests.lock().expect("test backend lock").clone()
+    }
+
+    /// The environment an exec would apply, recorded by name.
+    pub fn exec_environment(&self, name: &str) -> Option<BTreeMap<String, String>> {
+        self.exec_environments
+            .lock()
+            .expect("test backend lock")
+            .get(name)
+            .cloned()
+    }
+
+    fn environment_for(&self, sandbox: &SandboxRecord) -> Result<BTreeMap<String, String>, Error> {
+        let stored: StoredSteps = sandbox
+            .data
+            .clone()
+            .try_into()
+            .map_err(|error: toml::de::Error| Error::failed(error.to_string()))?;
+        Ok(stored
+            .steps
+            .iter()
+            .find_map(|step| {
+                (!step.contributions.environment.is_empty()).then_some(&step.contributions)
+            })
+            .map(|contributions| contributions.environment_for(&self.workspace).variables)
+            .unwrap_or_default())
     }
 }
 
@@ -142,11 +228,15 @@ impl Backend for TestBackend {
                     .map_err(|_| Error::failed("test backend lock poisoned"))?
                     .insert(format!("{}/README.md", self.workspace), bytes);
             }
+            let data = toml::Value::try_from(StoredSteps {
+                steps: request.provision.clone(),
+            })
+            .map_err(|error| Error::failed(error.to_string()))?;
             let record = SandboxRecord {
                 name: request.name.clone(),
                 backend: "test".to_string(),
                 project_slug: request.project_slug.clone(),
-                data: toml::Value::Table(Default::default()),
+                data,
             };
             self.records
                 .lock()
@@ -155,10 +245,16 @@ impl Backend for TestBackend {
             let steps = request
                 .provision
                 .iter()
-                .map(|step| StepProvenance {
-                    identity: step.identity().to_string(),
-                    kind: step.kind(),
-                    variables: Vec::new(),
+                .flat_map(|step| {
+                    if step.contributions.provenance.steps.is_empty() {
+                        vec![StepProvenance {
+                            identity: step.identity.clone(),
+                            kind: step.kind.clone(),
+                            variables: Vec::new(),
+                        }]
+                    } else {
+                        step.contributions.provenance.steps.clone()
+                    }
                 })
                 .collect();
             self.environments
@@ -196,10 +292,15 @@ impl Backend for TestBackend {
 
     fn exec<'a>(
         &'a self,
-        _sandbox: &'a SandboxRecord,
+        sandbox: &'a SandboxRecord,
         command: &'a [String],
     ) -> BoxFuture<'a, Result<Execution, Error>> {
         Box::pin(async move {
+            let environment = self.environment_for(sandbox)?;
+            self.exec_environments
+                .lock()
+                .map_err(|_| Error::failed("test backend lock poisoned"))?
+                .insert(sandbox.name.clone(), environment);
             let script = command.last().cloned().unwrap_or_default();
             if let Some(path) = script.split_whitespace().find(|part| part.starts_with('/')) {
                 let files = self
@@ -339,6 +440,10 @@ impl Backend for TestBackend {
                 .lock()
                 .map_err(|_| Error::failed("test backend lock poisoned"))?
                 .remove(&sandbox.name);
+            self.exec_environments
+                .lock()
+                .map_err(|_| Error::failed("test backend lock poisoned"))?
+                .remove(&sandbox.name);
             Ok(())
         })
     }
@@ -359,7 +464,7 @@ impl Backend for TestBackend {
     }
 
     fn contribution_support(&self) -> Vec<ContributionSupport> {
-        Vec::new()
+        self.support.clone()
     }
 }
 
@@ -584,14 +689,8 @@ pub async fn exercise_provisioning<S: Backend + ?Sized>(backend: &S) -> Result<(
             source: workspace.path().to_path_buf(),
         },
         provision: vec![
-            ProvisionStep::Command {
-                identity: "z-first".to_string(),
-                run: "true".to_string(),
-            },
-            ProvisionStep::Command {
-                identity: "a-second".to_string(),
-                run: "true".to_string(),
-            },
+            command_step("z-first", "true"),
+            command_step("a-second", "true"),
         ],
         forward_bind: "127.0.0.1".to_string(),
         ports: Vec::new(),
@@ -697,7 +796,7 @@ pub async fn exercise_failed_create<S: Backend + ?Sized>(backend: &S) -> Result<
 pub async fn exercise_failed_create_with<S: Backend + ?Sized>(
     backend: &S,
     name: &str,
-    provision: Vec<ProvisionStep>,
+    provision: Vec<ResolvedStep>,
 ) -> Result<(), Error> {
     let workspace = tempfile::tempdir()
         .map_err(|error| Error::failed(format!("could not stage a workspace: {error}")))?;
@@ -735,11 +834,14 @@ pub async fn exercise_failed_create_with<S: Backend + ?Sized>(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::{
-        TestBackend, exercise, exercise_absent_facet, exercise_failed_create, exercise_lifecycle,
+        StoredSteps, TestBackend, command_step, devshell_step, exercise, exercise_absent_facet,
+        exercise_failed_create, exercise_lifecycle,
     };
     use crate::sandbox::contract::{
-        Backend, CreateRequest, ProvisionKind, ProvisionStep, Workspace,
+        Backend, ContributionSort, CreateRequest, ResolvedStep, SandboxRecord, Workspace,
     };
     use crate::sandbox::report::State;
 
@@ -770,7 +872,7 @@ mod tests {
         exercise_absent_facet().expect("the refusal names its primitive, reason and remedy");
     }
 
-    fn request(provision: Vec<ProvisionStep>) -> CreateRequest {
+    fn request(provision: Vec<ResolvedStep>) -> CreateRequest {
         CreateRequest {
             name: "recorded".to_string(),
             project_slug: "conformance".to_string(),
@@ -787,14 +889,8 @@ mod tests {
     async fn the_test_backend_records_the_request_verbatim() {
         let backend = TestBackend::new();
         let provision = vec![
-            ProvisionStep::Command {
-                identity: "first".to_string(),
-                run: "true".to_string(),
-            },
-            ProvisionStep::Command {
-                identity: "second".to_string(),
-                run: "true".to_string(),
-            },
+            command_step("first", "true"),
+            command_step("second", "true"),
         ];
         backend
             .create(&request(provision.clone()))
@@ -817,13 +913,20 @@ mod tests {
         assert!(TestBackend::new().contribution_support().is_empty());
     }
 
+    #[test]
+    fn a_backend_reports_the_sorts_it_was_given() {
+        let support = TestBackend::new()
+            .with_support(&[ContributionSort::Environment])
+            .contribution_support();
+        assert_eq!(support.len(), 1);
+        assert_eq!(support[0].sort, ContributionSort::Environment);
+        assert_eq!(support[0].state, State::Available);
+    }
+
     #[tokio::test]
     async fn a_recorded_request_carries_only_its_own_steps() {
         let backend = TestBackend::new();
-        let provision = vec![ProvisionStep::Command {
-            identity: "fetch".to_string(),
-            run: "true".to_string(),
-        }];
+        let provision = vec![command_step("fetch", "true")];
         backend
             .create(&request(provision.clone()))
             .await
@@ -833,5 +936,100 @@ mod tests {
             recorded.provision, provision,
             "the request carries exactly the steps it was given"
         );
+    }
+
+    #[tokio::test]
+    async fn contributions_reach_the_backend_at_their_step() {
+        let backend = TestBackend::new();
+        let environment = BTreeMap::from([("TOKEN".to_string(), "secret".to_string())]);
+        let provision = vec![
+            command_step("before", "true"),
+            devshell_step("dev", environment.clone()),
+            command_step("after", "true"),
+        ];
+        backend.create(&request(provision)).await.expect("create");
+        let recorded = &backend.requests()[0];
+        assert!(recorded.provision[0].contributions.environment.is_empty());
+        assert_eq!(
+            recorded.provision[1].contributions.environment, environment,
+            "the devshell contributions sit at the devshell step"
+        );
+        assert!(recorded.provision[2].contributions.environment.is_empty());
+    }
+
+    #[tokio::test]
+    async fn exec_applies_the_recorded_environment() {
+        let backend = TestBackend::new();
+        let environment = BTreeMap::from([("TOKEN".to_string(), "secret".to_string())]);
+        let request = request(vec![devshell_step("dev", environment.clone())]);
+        let record = backend.create(&request).await.expect("create");
+        backend
+            .exec(
+                &record,
+                &["sh".to_string(), "-c".to_string(), "true".to_string()],
+            )
+            .await
+            .expect("exec");
+        assert_eq!(
+            backend.exec_environment("recorded").expect("environment"),
+            environment
+        );
+    }
+
+    #[test]
+    fn a_record_is_readable_in_another_process() {
+        let steps = vec![devshell_step(
+            "dev",
+            BTreeMap::from([("TOKEN".to_string(), "secret".to_string())]),
+        )];
+        let data = toml::Value::try_from(StoredSteps { steps }).expect("record data");
+        let record = SandboxRecord {
+            name: "demo".to_string(),
+            backend: "test".to_string(),
+            project_slug: "project".to_string(),
+            data,
+        };
+        let stored = crate::metadata_store::StoredSandbox {
+            sandbox: record,
+            branch_name: "branch".to_string(),
+            remote: false,
+        };
+        let dir = tempfile::tempdir().expect("tempdir");
+        crate::metadata_store::store_sandbox_at(dir.path(), "demo", &stored).expect("store");
+        let record_path = dir.path().join("demo.toml");
+        let marker = dir.path().join("child-ran");
+
+        let status = std::process::Command::new(std::env::current_exe().expect("test binary"))
+            .args([
+                "--exact",
+                "testing::tests::record_child_helper",
+                "--nocapture",
+            ])
+            .env(
+                "LBX_CHILD_RECORD",
+                record_path.to_string_lossy().to_string(),
+            )
+            .env("LBX_CHILD_MARKER", marker.to_string_lossy().to_string())
+            .status()
+            .expect("child process");
+        assert!(status.success(), "the child process failed");
+        assert!(marker.exists(), "the child test did not run");
+    }
+
+    #[test]
+    fn record_child_helper() {
+        let Ok(path) = std::env::var("LBX_CHILD_RECORD") else {
+            return;
+        };
+        let stored: crate::metadata_store::StoredSandbox =
+            toml::from_str(&std::fs::read_to_string(path).expect("record")).expect("record toml");
+        let rendered = stored.sandbox.data.to_string();
+        assert!(rendered.contains("TOKEN"), "{rendered}");
+        assert!(rendered.contains("secret"), "{rendered}");
+        std::fs::write(
+            std::env::var("LBX_CHILD_MARKER").expect("marker path"),
+            "ok",
+        )
+        .expect("marker");
     }
 }

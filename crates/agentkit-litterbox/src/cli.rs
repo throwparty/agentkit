@@ -4,8 +4,10 @@ use crate::backends;
 use crate::config::Config;
 use crate::config_loader;
 use crate::mcp;
-use crate::orchestrator::{PlannedStep, Sandboxes, preflight};
-use crate::sandbox::contract::{Error, ProvisionKind, SandboxStatus};
+use crate::orchestrator::{HostReport, PlannedStep, Preflight, Sandboxes, preflight_host};
+use crate::sandbox::contract::{
+    ContributionSupport, Error, ProvisioningClass, ProvisioningFailure, SandboxStatus, StoreView,
+};
 use crate::sandbox::report::{Readiness, State};
 use clap::{CommandFactory, Parser, Subcommand};
 
@@ -450,6 +452,7 @@ enum DoctorState {
     Degraded,
     Unavailable,
     Denied,
+    Failed,
 }
 
 /// A provisioning failure, with the class its message cannot carry.
@@ -468,19 +471,33 @@ struct DoctorReport {
     capabilities: Vec<crate::sandbox::report::Capability>,
     supported_backends: Option<Vec<String>>,
     notices: Vec<String>,
+    store_view: StoreView,
+    support: Vec<ContributionSupport>,
     steps: Vec<DoctorStep>,
     error: Option<DoctorError>,
+}
+
+/// One host requirement in the doctor's report.
+#[derive(Clone, Debug, serde::Serialize)]
+struct DoctorRequirement {
+    name: String,
+    ok: bool,
+    detail: String,
+    remedy: Option<String>,
 }
 
 /// One provisioning step in the doctor's report.
 #[derive(Debug, serde::Serialize)]
 struct DoctorStep {
     identity: Option<String>,
-    kind: Option<crate::sandbox::contract::ProvisionKind>,
+    kind: Option<String>,
     state: DoctorState,
-    class: Option<crate::sandbox::contract::ProvisioningClass>,
+    class: Option<ProvisioningClass>,
     reason: Option<String>,
     remedy: Option<String>,
+    installable: Option<String>,
+    closure_count: Option<usize>,
+    requirements: Vec<DoctorRequirement>,
 }
 
 pub async fn handle_doctor(backend: Option<String>, json: bool) -> ExitCode {
@@ -510,6 +527,8 @@ pub async fn handle_doctor(backend: Option<String>, json: bool) -> ExitCode {
         Ok(described) => described,
         Err(error) => return report_doctor_failure(error, json, Some(&selected_name)),
     };
+    let (plan, host_reports) =
+        preflight_host(&config, &project_slug, selected.name(), &support).await;
     let (doctor_report, failure) = build_doctor_report(
         &config,
         &project_slug,
@@ -517,6 +536,8 @@ pub async fn handle_doctor(backend: Option<String>, json: bool) -> ExitCode {
         readiness,
         capabilities,
         &support,
+        plan,
+        host_reports,
     );
 
     tracing::info!(
@@ -546,19 +567,21 @@ pub async fn handle_doctor(backend: Option<String>, json: bool) -> ExitCode {
 ///
 /// The builder is pure so the state mapping and the exit code can be tested
 /// without a CLI, a daemon or a mutation.
+#[allow(clippy::too_many_arguments)]
 fn build_doctor_report(
     config: &Config,
     project_slug: &str,
     backend: &str,
     readiness: Readiness,
     capabilities: Vec<crate::sandbox::report::Capability>,
-    support: &[crate::sandbox::contract::ProvisionSupport],
+    support: &[ContributionSupport],
+    plan: Preflight,
+    host_reports: Vec<HostReport>,
 ) -> (DoctorReport, Option<agentkit_common::exit::ExitClass>) {
     let mut steps = Vec::new();
     let mut error = None;
     let mut failure = None;
 
-    let plan = preflight(config, project_slug, backend, support);
     if let Some(resolve_error) = plan.failure {
         failure = Some(resolve_error.exit_class());
         error = Some(DoctorError {
@@ -570,9 +593,13 @@ fn build_doctor_report(
         match planned {
             PlannedStep::Resolved {
                 step,
-                support,
+                support: step_support,
                 refusal,
+                ..
             } => {
+                let host = host_reports
+                    .iter()
+                    .find(|report| report.identity == step.identity);
                 let (state, class, reason, remedy) = if let Some(refusal) = refusal {
                     (
                         DoctorState::Denied,
@@ -580,21 +607,39 @@ fn build_doctor_report(
                         Some(refusal.reason),
                         Some(refusal.remedy),
                     )
+                } else if let Some(failure) = host.and_then(|report| report.failure.as_ref()) {
+                    (
+                        doctor_state(failure.class),
+                        Some(failure.class),
+                        Some(failure.reason.clone()),
+                        Some(failure.remedy.clone()),
+                    )
                 } else {
-                    let state = match support.state {
-                        State::Available => DoctorState::Available,
-                        State::Degraded => DoctorState::Degraded,
-                        State::Unavailable => DoctorState::Unavailable,
-                    };
-                    (state, None, support.reason, support.remedy)
+                    contribution_state(&step_support)
                 };
                 steps.push(DoctorStep {
-                    identity: Some(step.identity().to_string()),
-                    kind: Some(step.kind()),
+                    identity: Some(step.identity.clone()),
+                    kind: Some(step.kind.clone()),
                     state,
                     class,
                     reason,
                     remedy,
+                    installable: host.and_then(|report| report.installable.clone()),
+                    closure_count: host.and_then(|report| report.closure_count),
+                    requirements: host
+                        .map(|report| {
+                            report
+                                .requirements
+                                .iter()
+                                .map(|requirement| DoctorRequirement {
+                                    name: requirement.name.clone(),
+                                    ok: requirement.ok,
+                                    detail: requirement.detail.clone(),
+                                    remedy: requirement.remedy.clone(),
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default(),
                 });
             }
             PlannedStep::Failed {
@@ -612,11 +657,14 @@ fn build_doctor_report(
                 }
                 steps.push(DoctorStep {
                     identity: step_failure.step.clone(),
-                    kind: step_failure.kind.as_deref().and_then(ProvisionKind::parse),
+                    kind: step_failure.kind.clone(),
                     state: DoctorState::Unavailable,
                     class: Some(step_failure.class),
                     reason: Some(step_failure.reason),
                     remedy: Some(step_failure.remedy).filter(|remedy| !remedy.is_empty()),
+                    installable: None,
+                    closure_count: None,
+                    requirements: Vec::new(),
                 });
             }
         }
@@ -630,11 +678,51 @@ fn build_doctor_report(
             capabilities,
             supported_backends: config.project.backends.clone(),
             notices: config.notices.clone(),
+            store_view: config.store_view,
+            support: support.to_vec(),
             steps,
             error,
         },
         failure,
     )
+}
+
+fn doctor_state(class: ProvisioningClass) -> DoctorState {
+    match class {
+        ProvisioningClass::Failed => DoctorState::Failed,
+        ProvisioningClass::Denied => DoctorState::Denied,
+        _ => DoctorState::Unavailable,
+    }
+}
+
+fn contribution_state(
+    support: &[ContributionSupport],
+) -> (
+    DoctorState,
+    Option<ProvisioningClass>,
+    Option<String>,
+    Option<String>,
+) {
+    if let Some(entry) = support
+        .iter()
+        .find(|entry| entry.state == State::Unavailable)
+    {
+        return (
+            DoctorState::Unavailable,
+            None,
+            entry.reason.clone(),
+            entry.remedy.clone(),
+        );
+    }
+    if let Some(entry) = support.iter().find(|entry| entry.state == State::Degraded) {
+        return (
+            DoctorState::Degraded,
+            None,
+            entry.reason.clone(),
+            entry.remedy.clone(),
+        );
+    }
+    (DoctorState::Available, None, None, None)
 }
 
 /// The process exit code the doctor reports.
@@ -693,6 +781,13 @@ fn render_doctor(report: &DoctorReport, json: bool) -> Result<String, Error> {
             }
         ),
     ];
+    lines.push(format!(
+        "store view: {}",
+        match report.store_view {
+            StoreView::Closure => "closure",
+            StoreView::Whole => "whole",
+        }
+    ));
     lines.extend(report.readiness.checks.iter().map(check_line));
     lines.extend(report.capabilities.iter().map(capability_line));
     for notice in &report.notices {
@@ -702,10 +797,10 @@ fn render_doctor(report: &DoctorReport, json: bool) -> Result<String, Error> {
         lines.push(format!("provisioning ({}): {}", error.class, error.message));
     }
     for step in &report.steps {
-        let subject = match (&step.identity, step.kind) {
-            (Some(identity), Some(kind)) => format!("step {identity} ({})", kind.as_str()),
+        let subject = match (&step.identity, step.kind.as_deref()) {
+            (Some(identity), Some(kind)) => format!("step {identity} ({kind})"),
             (Some(identity), None) => format!("step {identity}"),
-            (None, Some(kind)) => format!("step ({})", kind.as_str()),
+            (None, Some(kind)) => format!("step ({kind})"),
             (None, None) => "step".to_string(),
         };
         let mut line = format!("{subject}: {}", doctor_state_label(step.state));
@@ -719,6 +814,26 @@ fn render_doctor(report: &DoctorReport, json: bool) -> Result<String, Error> {
             line.push_str(&format!(" -- {remedy}"));
         }
         lines.push(line);
+        if let Some(installable) = &step.installable {
+            lines.push(format!("    installable: {installable}"));
+        }
+        if let Some(count) = step.closure_count {
+            lines.push(format!("    closure: {count} paths"));
+        }
+        for requirement in &step.requirements {
+            let mut line = format!(
+                "    {}: {}",
+                requirement.name,
+                if requirement.ok { "ok" } else { "MISSING" }
+            );
+            if !requirement.ok {
+                line.push_str(&format!(" ({})", requirement.detail));
+            }
+            if let Some(remedy) = &requirement.remedy {
+                line.push_str(&format!(" -- {remedy}"));
+            }
+            lines.push(line);
+        }
     }
     Ok(lines.join("\n"))
 }
@@ -755,6 +870,7 @@ fn doctor_state_label(state: DoctorState) -> &'static str {
         DoctorState::Degraded => "degraded",
         DoctorState::Unavailable => "unavailable",
         DoctorState::Denied => "denied",
+        DoctorState::Failed => "failed",
     }
 }
 
