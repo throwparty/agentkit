@@ -16,7 +16,7 @@ use crate::sandbox::contract::{
     Contributions, ProvisionStep, ProvisioningClass, SandboxAction, StoreView,
 };
 
-pub use checks::{Check, HostRequirements, check_host};
+pub use checks::{Check, HostRequirements, check_installable, check_readiness};
 pub use closure::closure;
 pub use runner::{CommandOutput, CommandRunner, SystemRunner};
 
@@ -56,8 +56,8 @@ impl PrepareError {
 pub struct CheckReport {
     /// The host requirements.
     pub requirements: HostRequirements,
-    /// The store view, or why it could not be derived.
-    pub closure: Result<Vec<PathBuf>, PrepareError>,
+    /// The store view, when a check derived it; the doctor does not evaluate.
+    pub closure: Option<Result<Vec<PathBuf>, PrepareError>>,
     /// The view in force.
     pub store_view: StoreView,
     /// The installable the report is about, when the kind has one.
@@ -129,7 +129,7 @@ pub fn check_step(
                 output_path: None,
                 baseline: None,
             },
-            closure: Ok(Vec::new()),
+            closure: None,
             store_view: ctx.store_view,
             installable: None,
         }),
@@ -141,26 +141,11 @@ pub fn check_step(
     }
 }
 
-/// Check the host and the store view without evaluating the shell hook.
+/// Check the host readiness without evaluating the installable.
 pub fn check(installable: &str, view: StoreView, runner: &dyn CommandRunner) -> CheckReport {
-    let requirements = checks::check_host(installable, runner);
-    let closure = if requirements.ok() {
-        match &requirements.output_path {
-            Some(path) => closure::closure(path, view, runner),
-            None => Err(PrepareError::new(
-                "the devShell has no output path",
-                "run nix develop on the host first",
-            )),
-        }
-    } else {
-        Err(PrepareError::new(
-            "host requirements are not met",
-            "run litterbox doctor to see the missing requirement",
-        ))
-    };
     CheckReport {
-        requirements,
-        closure,
+        requirements: checks::check_readiness(runner),
+        closure: None,
         store_view: view,
         installable: Some(installable.to_string()),
     }
@@ -243,20 +228,31 @@ mod tests {
     }
 
     #[test]
-    fn a_devshell_check_reports_requirements_and_closure() {
+    fn a_devshell_check_reports_readiness_without_evaluating() {
         let step = devshell_step("./nix");
+        let runner = Recorded::new(vec![
+            ok("nix 2.34.9"),
+            ok("fetch-tree flakes nix-command"),
+            ok("Store URL: daemon"),
+        ]);
         let ctx = CheckContext {
             store_view: StoreView::Closure,
-            runner: &Recorded::new(vec![
-                ok("nix 2.34.9"),
-                ok(JSON),
-                ok("/nix/store/abc-devshell"),
-                ok("/nix/store/a\n/nix/store/b"),
-            ]),
+            runner: &runner,
         };
         let report = check_step(&step, &ctx).expect("check");
         assert_eq!(report.installable.as_deref(), Some("./nix"));
-        assert_eq!(report.closure.expect("closure").len(), 2);
+        assert!(
+            report.closure.is_none(),
+            "the doctor does not evaluate the installable"
+        );
+        assert!(report.requirements.ok());
+        let names: Vec<&str> = report
+            .requirements
+            .checks
+            .iter()
+            .map(|check| check.name)
+            .collect();
+        assert_eq!(names, vec!["nix", "flakes enabled", "store answers"]);
     }
 
     #[test]
@@ -345,34 +341,45 @@ mod tests {
         );
     }
 
+    fn dry_run(derivations: &[&str]) -> String {
+        let mut report = String::from("this derivation will be built:\n");
+        for derivation in derivations {
+            report.push_str(&format!("  {derivation}\n"));
+        }
+        report
+    }
+
     #[test]
-    fn an_invalid_devshell_is_refused() {
-        let report = check(
-            "./nix",
-            StoreView::Closure,
-            &Recorded::new(vec![ok("nix 2.34.9"), ok(JSON), fail("path is not valid")]),
-        );
-        assert!(!report.requirements.ok());
-        assert_eq!(
-            report.requirements.checks[2].name,
-            "devShell is valid in the store"
-        );
-        assert!(report.closure.is_err());
+    fn an_unrealised_devshell_is_refused_before_print_dev_env() {
+        let step = devshell_step("./nix");
+        let runner = Recorded::new(vec![
+            ok("nix 2.34.9"),
+            ok("fetch-tree flakes nix-command"),
+            ok("Store URL: daemon"),
+            ok("x86_64-linux"),
+            ok("/nix/store/devshell.drv"),
+            ok_with_stderr(
+                "",
+                &dry_run(&["/nix/store/devshell.drv", "/nix/store/missing-input.drv"]),
+            ),
+        ]);
+        let ctx = PrepareContext {
+            project_root: Path::new("/repo"),
+            store_view: StoreView::Closure,
+            runner: &runner,
+        };
+        let error = prepare(&step, &ctx).expect_err("an unrealised devShell is refused");
+        assert!(error.reason.contains("would build"), "{error:?}");
+        assert!(error.remedy.contains("nix develop ./nix"), "{error:?}");
+        // The recorded runner panics when exhausted, so reaching here proves
+        // print-dev-env never ran.
     }
 
     #[test]
     fn the_closure_is_sorted_and_deduplicated() {
-        let report = check(
-            "./nix",
-            StoreView::Closure,
-            &Recorded::new(vec![
-                ok("nix 2.34.9"),
-                ok(JSON),
-                ok("/nix/store/abc-devshell"),
-                ok("/nix/store/b\n/nix/store/a\n/nix/store/a\n"),
-            ]),
-        );
-        let closure = report.closure.expect("closure");
+        let runner = Recorded::new(vec![ok("/nix/store/b\n/nix/store/a\n/nix/store/a\n")]);
+        let closure =
+            closure("/nix/store/abc-devshell", StoreView::Closure, &runner).expect("closure");
         assert_eq!(
             closure,
             vec![PathBuf::from("/nix/store/a"), PathBuf::from("/nix/store/b")]
@@ -381,41 +388,37 @@ mod tests {
 
     #[test]
     fn the_whole_view_is_one_mount() {
-        let report = check(
-            "./nix",
-            StoreView::Whole,
-            &Recorded::new(vec![
-                ok("nix 2.34.9"),
-                ok(JSON),
-                ok("/nix/store/abc-devshell"),
-            ]),
-        );
-        assert_eq!(
-            report.closure.expect("closure"),
-            vec![PathBuf::from("/nix/store")]
-        );
+        let runner = Recorded::new(Vec::new());
+        let closure = closure("/nix/store/abc-devshell", StoreView::Whole, &runner)
+            .expect("the whole view needs no query");
+        assert_eq!(closure, vec![PathBuf::from("/nix/store")]);
     }
 
     #[test]
     fn a_dirty_tree_is_reported() {
-        let report = check(
+        let requirements = checks::check_installable(
             "./nix",
-            StoreView::Closure,
             &Recorded::new(vec![
-                ok("nix 2.34.9"),
+                ok("x86_64-linux"),
+                ok("/nix/store/devshell.drv"),
+                ok_with_stderr("", &dry_run(&["/nix/store/devshell.drv"])),
                 ok_with_stderr(JSON, "warning: Git tree is dirty"),
                 ok("/nix/store/abc-devshell"),
-                ok("/nix/store/a"),
             ]),
         );
+        assert!(requirements.ok(), "{:?}", requirements.checks);
+        assert_eq!(
+            requirements.output_path.as_deref(),
+            Some("/nix/store/abc-devshell")
+        );
+        assert!(requirements.baseline.is_some());
         assert!(
-            report
-                .requirements
+            requirements
                 .checks
                 .iter()
                 .any(|check| check.name == "dirty tree"),
             "{:?}",
-            report.requirements.checks
+            requirements.checks
         );
     }
 
@@ -439,6 +442,9 @@ mod tests {
       pkgs = import nixpkgs {{ inherit system; }};
     in {{
       devShells.${{system}}.default = pkgs.mkShell {{
+        buildInputs = [
+          (pkgs.runCommand "unrealised-input-{marker}" {{ }} "mkdir -p $out")
+        ];
         shellHook = "echo {marker}";
       }};
     }};
@@ -455,14 +461,13 @@ mod tests {
             requirements.baseline.is_none(),
             "print-dev-env must not run for an unrealised devShell"
         );
-        assert!(
-            requirements
-                .checks
-                .iter()
-                .any(|check| check.name == "devShell is valid in the store" && !check.ok),
-            "{:?}",
-            requirements.checks
-        );
+        let failure = requirements
+            .checks
+            .iter()
+            .find(|check| !check.ok)
+            .expect("a failed requirement");
+        assert_eq!(failure.name, "devShell is realised in the store");
+        assert!(failure.detail.contains("would build"), "{failure:?}");
     }
 
     /// The Nix system name for the platform the tests run on.

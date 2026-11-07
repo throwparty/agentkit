@@ -804,7 +804,7 @@ pub async fn preflight_host(
                                     .unwrap_or_else(|| "run litterbox doctor".to_string()),
                             )
                         })
-                } else if let Err(error) = &report.closure {
+                } else if let Some(Err(error)) = &report.closure {
                     Some(failure_of(backend, step, error.clone()))
                 } else {
                     None
@@ -823,7 +823,11 @@ pub async fn preflight_host(
                 (
                     requirements,
                     report.installable,
-                    report.closure.as_ref().ok().map(Vec::len),
+                    report
+                        .closure
+                        .as_ref()
+                        .and_then(|closure| closure.as_ref().ok())
+                        .map(Vec::len),
                     failure,
                 )
             }
