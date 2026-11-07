@@ -19,7 +19,7 @@ use super::error::ComputeError;
 use super::naming::container_name_for_slug;
 use crate::sandbox::contract::{
     Backend, ContributionSupport, CreateRequest, Error, Execution, Forward, Inspection,
-    ProvisionStep, ProvisioningClass, ProvisioningFailure, SandboxRecord, SandboxStatus, Scope,
+    ProvisioningClass, ProvisioningFailure, ResolvedStep, SandboxRecord, SandboxStatus, Scope,
 };
 use crate::sandbox::environment::{
     Change, Environment, Origin, Provenance, StepProvenance, Variable,
@@ -192,9 +192,9 @@ impl DockerBackend {
 }
 
 /// A step that could not be started at all.
-fn step_failure(step: &ProvisionStep, error: ComputeError) -> Error {
+fn step_failure(step: &ResolvedStep, error: ComputeError) -> Error {
     let identity = step.identity();
-    let kind = step.kind().as_str().to_string();
+    let kind = step.kind().to_string();
     match error {
         ComputeError::Timeout { seconds } => Error::Provisioning {
             failure: Box::new(ProvisioningFailure {
@@ -236,14 +236,14 @@ fn step_failure(step: &ProvisionStep, error: ComputeError) -> Error {
 }
 
 /// A step that ran and exited non-zero.
-fn command_failure(step: &ProvisionStep, exit_code: i32, output: &str) -> Error {
+fn command_failure(step: &ResolvedStep, exit_code: i32, output: &str) -> Error {
     let identity = step.identity();
     Error::Provisioning {
         failure: Box::new(ProvisioningFailure {
             class: ProvisioningClass::Failed,
             backend: Some(BACKEND.to_string()),
             step: Some(identity.to_string()),
-            kind: Some(step.kind().as_str().to_string()),
+            kind: Some(step.kind().to_string()),
             reason: format!("provisioning step '{identity}' failed with exit code {exit_code}"),
             remedy: "inspect the step output, fix the command, and create again".to_string(),
             exit_code: Some(exit_code),
@@ -253,11 +253,11 @@ fn command_failure(step: &ProvisionStep, exit_code: i32, output: &str) -> Error 
 }
 
 /// A create that outlived its fixed budget.
-fn timeout_failure(sandbox: &str, step: Option<&ProvisionStep>, budget: Duration) -> Error {
+fn timeout_failure(sandbox: &str, step: Option<&ResolvedStep>, budget: Duration) -> Error {
     let (identity, kind, reason) = match step {
         Some(step) => (
             Some(step.identity().to_string()),
-            Some(step.kind().as_str().to_string()),
+            Some(step.kind().to_string()),
             format!(
                 "create exceeded the {budget:?} provisioning budget while running '{}'",
                 step.identity()
@@ -309,8 +309,8 @@ const CREATE_BUDGET: Duration = Duration::from_secs(2 * 60 * 60);
 /// Apply an ordered sequence, keeping only the steps that completed.
 fn run_steps<'a, F>(
     sandbox: &'a str,
-    provision: &'a [ProvisionStep],
-    last_step: &'a Mutex<Option<ProvisionStep>>,
+    provision: &'a [ResolvedStep],
+    last_step: &'a Mutex<Option<ResolvedStep>>,
     mut exec: F,
 ) -> BoxFuture<'a, Result<Vec<StepProvenance>, Error>>
 where
@@ -319,7 +319,10 @@ where
     Box::pin(async move {
         let mut steps = Vec::with_capacity(provision.len());
         for step in provision {
-            let ProvisionStep::Command { identity, run } = step;
+            let Some(action) = &step.sandbox else {
+                continue;
+            };
+            let identity = &step.identity;
             *last_step
                 .lock()
                 .unwrap_or_else(|poison| poison.into_inner()) = Some(step.clone());
@@ -327,10 +330,10 @@ where
             tracing::info!(
                 sandbox = %sandbox,
                 step = %identity,
-                kind = step.kind().as_str(),
+                kind = step.kind(),
                 "starting provisioning step"
             );
-            let result = exec(identity.as_str(), run.as_str())
+            let result = exec(identity.as_str(), action.run.as_str())
                 .await
                 .map_err(|error| step_failure(step, error))?;
             let elapsed_ms = started.elapsed().as_millis() as u64;
@@ -339,7 +342,7 @@ where
                 tracing::warn!(
                     sandbox = %sandbox,
                     step = %identity,
-                    kind = step.kind().as_str(),
+                    kind = step.kind(),
                     exit_code = result.exit_code,
                     output_len = output.len(),
                     "the provisioning step failed"
@@ -348,13 +351,13 @@ where
             }
             steps.push(StepProvenance {
                 identity: identity.clone(),
-                kind: step.kind(),
+                kind: step.kind().to_string(),
                 variables: Vec::new(),
             });
             tracing::info!(
                 sandbox = %sandbox,
                 step = %identity,
-                kind = step.kind().as_str(),
+                kind = step.kind(),
                 exit_code = result.exit_code,
                 elapsed_ms,
                 "provisioning step finished"
@@ -996,8 +999,8 @@ mod tests {
     use crate::backends::docker::compute;
     use crate::backends::docker::error::{BackendError, ComputeError, FailureKind};
     use crate::sandbox::contract::{
-        CreateRequest, Error, Execution, Forward, ProvisionStep, ProvisioningClass, RequestedPort,
-        SandboxRecord, Scope, Workspace,
+        Contributions, CreateRequest, Error, Execution, Forward, Placement, ProvisioningClass,
+        RequestedPort, ResolvedStep, SandboxAction, SandboxRecord, Scope, Workspace,
     };
     use crate::sandbox::environment::{Origin, Provenance};
     use crate::sandbox::facets::{Limits, ResourceLimits};
@@ -1205,14 +1208,19 @@ mod tests {
         assert_eq!(kept.chars().count(), super::ERROR_OUTPUT);
     }
 
-    fn step(identity: &str) -> ProvisionStep {
+    fn step(identity: &str) -> ResolvedStep {
         step_with(identity, "true")
     }
 
-    fn step_with(identity: &str, run: &str) -> ProvisionStep {
-        ProvisionStep::Command {
+    fn step_with(identity: &str, run: &str) -> ResolvedStep {
+        ResolvedStep {
             identity: identity.to_string(),
-            run: run.to_string(),
+            kind: "command".to_string(),
+            placement: Placement::Sandbox,
+            sandbox: Some(SandboxAction {
+                run: run.to_string(),
+            }),
+            contributions: Contributions::default(),
         }
     }
 
@@ -1496,18 +1504,12 @@ mod tests {
         let request = CreateRequest {
             name: crate::testing::run_name("provision"),
             provision: vec![
-                ProvisionStep::Command {
-                    identity: "z-write".to_string(),
-                    run: "printf setup > setup-marker".to_string(),
-                },
-                ProvisionStep::Command {
-                    identity: "a-env".to_string(),
-                    run: "printf '%s' \"$LITTERBOX_FWD_PORT_WEB\" > port-marker".to_string(),
-                },
-                ProvisionStep::Command {
-                    identity: "b-read".to_string(),
-                    run: "cat setup-marker > read-marker".to_string(),
-                },
+                step_with("z-write", "printf setup > setup-marker"),
+                step_with(
+                    "a-env",
+                    "printf '%s' \"$LITTERBOX_FWD_PORT_WEB\" > port-marker",
+                ),
+                step_with("b-read", "cat setup-marker > read-marker"),
             ],
             forward_bind: "127.0.0.1".to_string(),
             project_slug: "contract-test".to_string(),
@@ -1584,10 +1586,7 @@ mod tests {
         std::fs::write(workspace.path().join("README.md"), "hello")?;
         let request = CreateRequest {
             name: crate::testing::run_name("provision-fail"),
-            provision: vec![ProvisionStep::Command {
-                identity: "broken".to_string(),
-                run: "echo boom >&2; exit 7".to_string(),
-            }],
+            provision: vec![step_with("broken", "echo boom >&2; exit 7")],
             forward_bind: "127.0.0.1".to_string(),
             project_slug: "contract-test".to_string(),
             workspace: Workspace {
