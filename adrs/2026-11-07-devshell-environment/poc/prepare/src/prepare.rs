@@ -240,6 +240,10 @@ pub fn prepare(
         environment.iter().map(|(k, v)| format!("{k}={v}")),
     )?;
     write_private(&out.join("out"), &output)?;
+    write_private(
+        &out.join("manifest"),
+        &format!("installable={installable}\noutput_path={output}\n"),
+    )?;
 
     let measurements = Measurements {
         baseline_variables: baseline.exported.len(),
