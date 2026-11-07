@@ -42,6 +42,11 @@ allowed-projects = ["my-project-1a2b3c4d"]
 # weaker, instead of refusing to start.
 accept-degraded = false
 
+# Which store view a devshell step binds: "closure" (the default) or "whole".
+# The whole store exposes paths the project did not declare; use it only when a
+# workload reaches undeclared runtime dependencies.
+store-view = "closure"
+
 # Where forwarded ports bind on the host. Loopback unless you say otherwise,
 # and only ever set here.
 [forwarding]
@@ -109,6 +114,17 @@ snapshot-mode = "direct"
   project-owned key in a backend section; every other key there remains
   machine-owned and is ignored with a notice when the committed project file sets
   it.
+- `kind = "devshell"` enters the project's Nix development shell on the host and
+  contributes its environment and store closure to the sandbox. It takes
+  `installable`, the flake or path to enter, and one backend sequence may name
+  only one devshell step. Litterbox never realises the devShell: the output path
+  must already be valid in the store, and create refuses with the remedy of
+  running `nix develop <installable>` on the host first.
+- A devshell step evaluates the flake and runs its shell hook on the host, so it
+  needs the same consent as a command step: the project namespace is in
+  `allowed-projects`, or `allow-project-setup` permits every project. The
+  sandbox receives no nix daemon socket, no store write and no network, so a
+  command that expects to build fails as it would on a host without nix.
 - A project may define at most 32 provisioning steps and list at most 32
   identities in one backend's sequence.
 - `setup-command` used to live under `[project]`. It is now a `command` step; the
@@ -117,6 +133,10 @@ snapshot-mode = "direct"
   where those ports bind or who may reach them.
 - `git.snapshot-mode` is `"remote"` (the default) to keep snapshots in an isolated
   bare clone, or `"direct"` to keep them as branches in your working repository.
+- `store-view` is machine-owned, so the committed project file may not set it. The
+  default `closure` binds only the devShell's store closure; `whole` binds all of
+  `/nix/store`. `litterbox doctor` reports the view in force and the path count it
+  produces.
 
 `[project] setup-command` is removed. A configuration that still sets it fails
 to load with a message naming a `command` step and the per-backend list.

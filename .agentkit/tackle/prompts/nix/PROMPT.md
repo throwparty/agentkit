@@ -103,6 +103,16 @@ BASH_ENV=/tmp/probe.bash sh -c 'type probe_fn'   # expected to fail
 For the validity check without a build, point `nix path-info` at an unbuilt
 derivation and confirm it errors with `is not valid` and creates only the `.drv`.
 
+## Capturing a devShell environment
+
+Evaluate the `print-dev-env` script once in a bash child, not `nix develop --command env`.
+Start from a sanitised caller that already has `HOME`, `PATH`, `PWD`, `OLDPWD`, `SHLVL`
+and `_`, dump `env -0` before and after, and restore `NIX_BUILD_TOP`, `TMP`, `TMPDIR`,
+`TEMP`, `TEMPDIR` and `terminfo` to the caller's values. Keep the exported-but-empty
+build-phase variables. The difference against the caller is the contribution. nix-direnv's
+`_nix_import_env` is the reference for the restore list; it restores those six and
+nothing else.
+
 ## Where the truth lives
 
 - `{{ $.dir }}/glossary.md` — the words, and the boundary between upstream and

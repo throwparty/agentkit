@@ -11,7 +11,7 @@ Normative terminology for the Litterbox component. It covers the sandbox model t
 
 ## The contract
 
-- **Contract** — the `Backend` trait: create, enumerate, execute, upload, download, inspect, delete, report readiness and capabilities, and report the provisioning step kinds it can apply. It names no container, image, namespace or transport.
+- **Contract** — the `Backend` trait: create, enumerate, execute, upload, download, inspect, delete, report readiness and capabilities, and report the contribution sorts it can apply. It names no container, image, namespace, transport or step kind.
 - **Facet** — a group of optional operations reached through a supertrait of the contract: lifecycle (pause and resume), limits, forwarding. A mechanism implements the facets it can, and code that requires one does not compile against a backend that lacks it.
 - **Capability** — a backend's report that an operation is available, degraded or unavailable, with a reason and a remedy.
 - **Readiness** — the same three states applied to the primitives a mechanism needs on this host, checked before a sandbox is created and before a capability is used.
@@ -20,8 +20,9 @@ Normative terminology for the Litterbox component. It covers the sandbox model t
 
 ## Provisioning
 
-- **Provisioning step** — a project-declared unit of preparation with a stable identity, a typed kind and that kind's settings. Identities start with a lowercase letter and use lowercase letters, digits, hyphens and underscores; a step runs at most once in one sandbox.
-- **Step kind** — the typed behaviour a step selects. This release defines `command`, which runs a shell command once and confined, with the workspace as its working directory. Kinds are compiled in; an unknown kind fails configuration loading.
+- **Provisioning step** — a project-declared unit of preparation with a stable identity, a kind name and that kind's settings. Identities start with a lowercase letter and use lowercase letters, digits, hyphens and underscores; a step runs at most once in one sandbox.
+- **Kind registry** — the compiled-in set of provisioning kinds. It validates each kind's settings and owns the host preparation; the contract carries the generic step and never a kind-specific type. Adding a kind is one module and one entry.
+- **Step kind** — the behaviour a step selects by name. This release defines `command`, which runs a shell command once and confined with the workspace as its working directory, and `devshell`, which enters a Nix development shell on the host and contributes its environment and closure. Kinds are compiled in; an unknown kind fails configuration loading.
 - **Sequence** — the ordered list of step identities under `[backends.<name>].provision`. Order is execution order, with no implicit ordering by kind; a backend runs only its own sequence, and the project declares compatibility in `[project] backends` without selecting a backend.
 - **Provisioning failure** — a structured refusal or failure naming the class, backend, step identity, kind, reason and remedy. A refused command is denied; an unsupported kind is unsupported; a command that exits non-zero is failed with its exit code and bounded output.
 - **Step provenance** — the identity and kind of each step that ran, and the variables it changed by name and kind. It never carries a value.
@@ -30,7 +31,7 @@ Normative terminology for the Litterbox component. It covers the sandbox model t
 - **Contribution** — what a host step adds to the sandbox: environment variables and read-only mounts. A backend applies the contributions it can honour and refuses the rest, naming the contribution and the remedy; the contract names no devShell, flake or store.
 - **Mount** — a host path the sandbox sees at the same path, read-only. A devShell's store closure becomes one mount per store path.
 - **Store view** — the set of store paths a sandbox can see: a devShell's closure, or the whole store. It is a machine setting, because it trades reachability against the chance that a build reaches a path the derivation never declared; the closure is the default.
-- **Differential environment** — the environment taken from a devShell by difference: every exported variable from `print-dev-env`, plus the post-hook value of every variable the shell hook changed, computed under a sanitised caller. Neither `print-dev-env` nor `nix develop` alone is this; the difference is ours to define.
+- **Differential environment** — the environment taken from a devShell by difference against a sanitised caller, after evaluating the `print-dev-env` script once with the hook. `NIX_BUILD_TOP`, `TMP`, `TMPDIR`, `TEMP`, `TEMPDIR` and `terminfo` are restored to the caller, shell state never crosses, and exported-but-empty build-phase variables are kept. It follows nix-direnv's import rule rather than a denylist.
 
 ## What a sandbox reports
 

@@ -126,3 +126,28 @@ plant "crates/agentkit-litterbox/src/provision/resolve.rs" \
   "use crate::orchestrator::Sandboxes as _;" \
   "provision-to-orchestrator" \
   "litterbox-provision"
+
+plant "crates/agentkit-litterbox/src/cli.rs" \
+  "use crate::provision::prepare as _;" \
+  "cli-to-prepare" \
+  "litterbox-cli"
+
+plant "crates/agentkit-litterbox/src/backends/docker/backend.rs" \
+  "use crate::provision::kind as _;" \
+  "backend-to-kinds" \
+  "litterbox-backend-docker"
+
+plant "crates/agentkit-litterbox/src/config.rs" \
+  "use crate::provision::prepare as _;" \
+  "config-to-prepare" \
+  "litterbox-config"
+
+plant "crates/agentkit-litterbox/src/provision/kind/mod.rs" \
+  "use crate::orchestrator::Sandboxes as _;" \
+  "kinds-to-orchestrator" \
+  "litterbox-kinds"
+
+plant "crates/agentkit-litterbox/src/provision/prepare/mod.rs" \
+  "use crate::orchestrator::Sandboxes as _;" \
+  "prepare-to-orchestrator" \
+  "litterbox-prepare"
