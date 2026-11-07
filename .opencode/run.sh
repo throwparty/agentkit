@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
 set -eu -o pipefail
 
+# Run the launcher under the repository's Nix development shell. It carries the
+# Rust toolchain, dbus and OpenSSL the built binaries link against, and the
+# credential helper resolves from the build directory below.
+if [ "${IN_NIX_SHELL:-}" != "impure" ]; then
+  exec nix develop ./nix --command bash "$0" "$@"
+fi
+
 export OPENCODE_CONFIG_DIR
 OPENCODE_CONFIG_DIR=$(pwd)/.opencode
 
-cargo build --bin agentkit-switchboard
+cargo build --bin agentkit-switchboard --bin agentkit-credential-keychain
+export PATH="$PWD/target/debug:$PATH"
 
 if command -v fuser &>/dev/null; then
   fuser -k 3812/tcp 2>/dev/null || true
