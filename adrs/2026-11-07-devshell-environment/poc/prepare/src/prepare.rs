@@ -12,7 +12,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use crate::checks::output_path;
-use crate::failure::{Class, Failure};
+use crate::failure::Failure;
 use crate::model::{Contributions, Settings, Step};
 use crate::util::{
     Caller, Records, argv, private_dir, read_nul, run, write_nul_strings, write_private,
@@ -446,6 +446,7 @@ pub fn baseline(json: &[u8]) -> Result<Baseline, Failure> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::failure::Class;
 
     fn baseline_of(variables: &[(&str, &str)]) -> Baseline {
         Baseline {

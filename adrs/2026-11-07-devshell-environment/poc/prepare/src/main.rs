@@ -7,9 +7,7 @@
 // A failure is built once per failed operation, never in a loop; boxing it
 // would only add noise to every constructor and call site.
 #![allow(clippy::result_large_err)]
-// Requirements arrive with the check that uses them; until then every helper
-// is defined ahead of its call site.
-#![allow(dead_code)]
+
 
 mod checks;
 mod closure;
@@ -17,6 +15,7 @@ mod failure;
 mod launch;
 mod model;
 mod prepare;
+mod requirements;
 mod util;
 
 
@@ -24,7 +23,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use failure::Failure;
-use model::{Settings, Step};
+use model::{Requirement, Scope, Settings, Step};
 use prepare::Consent;
 use util::Caller;
 
@@ -40,7 +39,8 @@ fn main() {
 #[derive(Default)]
 struct Cli {
     command: Option<String>,
-    step: Option<PathBuf>,
+    step: Vec<PathBuf>,
+    json: bool,
     installable: Option<String>,
     project: Option<PathBuf>,
     out: Option<PathBuf>,
@@ -49,6 +49,7 @@ struct Cli {
     whole: bool,
     allow_project_setup: bool,
     require_paths: Vec<String>,
+    require_host_paths: Vec<String>,
     workload: Vec<String>,
 }
 
@@ -65,7 +66,11 @@ fn run() -> Result<(), Failure> {
     match command.as_str() {
         "check" => {
             let checks = checks::readiness(&nix, &caller);
-            print!("{}", checks::report(&checks));
+            if cli.json {
+                println!("{}", checks::report_json(&checks));
+            } else {
+                print!("{}", checks::report(&checks));
+            }
             match checks::refusal(&checks) {
                 Some(refusal) => Err(refusal),
                 None => Ok(()),
@@ -133,6 +138,20 @@ fn run_all(cli: &Cli, nix: &std::path::Path, caller: &Caller) -> Result<(), Fail
     let view = launch::View::new(mounts, &workspace, cli.whole)?;
     println!("{}", view.store_view());
 
+    let mut requirements: Vec<Requirement> = cli
+        .require_paths
+        .iter()
+        .map(|name| Requirement {
+            scope: Scope::Sandbox,
+            name: name.clone(),
+        })
+        .collect();
+    requirements.extend(cli.require_host_paths.iter().map(|name| Requirement {
+        scope: Scope::Host,
+        name: name.clone(),
+    }));
+    requirements::check("bwrap", &view, &requirements)?;
+
     let bwrap = match &cli.bwrap {
         Some(path) => path.clone(),
         None => util::resolve("bwrap")?,
@@ -176,14 +195,27 @@ fn run_all(cli: &Cli, nix: &std::path::Path, caller: &Caller) -> Result<(), Fail
 }
 
 fn step_of(cli: &Cli) -> Result<Step, Failure> {
-    if let Some(path) = &cli.step {
-        let text = std::fs::read_to_string(path).map_err(|error| {
-            Failure::misconfigured(format!("could not read {}: {error}", path.display()))
-        })?;
-        let table: toml::Table = toml::from_str(&text).map_err(|error| {
-            Failure::misconfigured(format!("{}: {error}", path.display()))
-        })?;
-        return model::parse_step(&table);
+    if !cli.step.is_empty() {
+        let mut tables = Vec::new();
+        for path in &cli.step {
+            let text = std::fs::read_to_string(path).map_err(|error| {
+                Failure::misconfigured(format!("could not read {}: {error}", path.display()))
+            })?;
+            let table: toml::Table = toml::from_str(&text).map_err(|error| {
+                Failure::misconfigured(format!("{}: {error}", path.display()))
+            })?;
+            tables.push(table);
+        }
+        // A sequence is parsed as a sequence, so the one-devshell-step rule is
+        // the rule the harness enforces, not one a reader has to remember.
+        let steps = model::parse_sequence(&tables)?;
+        return steps
+            .into_iter()
+            .find(|step| step.kind() == "devshell")
+            .ok_or_else(|| {
+                Failure::misconfigured("the sequence declares no devshell step")
+                    .with_remedy("add a step with kind = devshell")
+            });
     }
     let installable = cli.installable.clone().ok_or_else(|| {
         Failure::misconfigured("a step is required: pass --step <file> or --installable <ref>")
@@ -269,13 +301,17 @@ fn parse_cli(args: impl Iterator<Item = String>) -> Result<Cli, Failure> {
                 cli.workload.extend(args.by_ref());
                 break;
             }
-            "--step" => cli.step = Some(PathBuf::from(value(&mut args, "--step")?)),
+            "--step" => cli.step.push(PathBuf::from(value(&mut args, "--step")?)),
+            "--json" => cli.json = true,
             "--installable" => cli.installable = Some(value(&mut args, "--installable")?),
             "--project" => cli.project = Some(PathBuf::from(value(&mut args, "--project")?)),
             "--out" => cli.out = Some(PathBuf::from(value(&mut args, "--out")?)),
             "--workspace" => cli.workspace = Some(PathBuf::from(value(&mut args, "--workspace")?)),
             "--bwrap" => cli.bwrap = Some(PathBuf::from(value(&mut args, "--bwrap")?)),
             "--require-path" => cli.require_paths.push(value(&mut args, "--require-path")?),
+            "--require-host-path" => cli
+                .require_host_paths
+                .push(value(&mut args, "--require-host-path")?),
             "--whole" => cli.whole = true,
             "--allow-project-setup" => cli.allow_project_setup = true,
             other if other.starts_with("--") => {
@@ -319,6 +355,7 @@ fn usage() -> String {
          \x20 --bwrap <path>            the bubblewrap binary (default: bwrap on PATH)\n\
          \x20 --whole                   the whole store view instead of the closure\n\
          \x20 --allow-project-setup     consent to evaluate this project's code on the host\n\
-         \x20 --require-path <path>     a path the sandbox must provide (repeatable)\n",
+         \x20 --require-path <path>     a path the sandbox must provide (repeatable)\n\
+         \x20 --require-host-path <path> a path this host must provide (repeatable)\n",
     )
 }

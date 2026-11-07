@@ -79,7 +79,14 @@ impl View {
     }
 
     /// Whether the launcher creates this path rather than binding a host one.
+    ///
+    /// A path inside the workspace is never synthetic, even when the workspace
+    /// happens to live under one of these directories: the workspace is a real
+    /// bind, so what it holds is what the host holds.
     pub fn is_synthetic(&self, path: &Path) -> bool {
+        if path == self.workspace || path.starts_with(&self.workspace) {
+            return false;
+        }
         SYNTHETIC.iter().any(|dir| {
             let dir = Path::new(dir);
             path == dir || path.starts_with(dir)
@@ -93,10 +100,15 @@ impl View {
 
     /// The store view in force, for the doctor and the record.
     pub fn store_view(&self) -> String {
+        let launcher = self.synthetic().len();
         if self.whole {
-            "store view: whole (/nix/store)".to_string()
+            format!("store view: whole (/nix/store), {launcher} launcher paths")
         } else {
-            format!("store view: closure ({} store paths)", self.store_paths())
+            format!(
+                "store view: closure ({} store paths), {} host files, {launcher} launcher paths",
+                self.store_paths(),
+                self.reads.len() - self.store_paths()
+            )
         }
     }
 
@@ -229,7 +241,13 @@ mod tests {
     use super::*;
 
     fn view(reads: &[&str]) -> View {
-        let workspace = std::env::temp_dir().canonicalize().expect("temp resolves");
+        // Not temp_dir itself: a workspace at /tmp would make every /tmp path
+        // workspace-rooted, which is the opposite of what these tests assert.
+        let workspace = std::env::temp_dir()
+            .join(format!("devshell-poc-view-{}", std::process::id()))
+            .join("workspace");
+        std::fs::create_dir_all(&workspace).expect("workspace");
+        let workspace = workspace.canonicalize().expect("workspace resolves");
         View::new(
             reads.iter().map(PathBuf::from).collect(),
             &workspace,

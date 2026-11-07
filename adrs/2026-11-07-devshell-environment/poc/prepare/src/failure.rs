@@ -45,6 +45,7 @@ pub struct Failure {
     pub reason: String,
     pub step: Option<String>,
     pub kind: Option<String>,
+    pub backend: Option<String>,
     pub primitive: Option<String>,
     pub remedy: Option<String>,
     pub exit: Option<i32>,
@@ -58,6 +59,7 @@ impl Failure {
             reason: reason.into(),
             step: None,
             kind: None,
+            backend: None,
             primitive: None,
             remedy: None,
             exit: None,
@@ -91,6 +93,11 @@ impl Failure {
         self
     }
 
+    pub fn with_backend(mut self, backend: impl Into<String>) -> Self {
+        self.backend = Some(backend.into());
+        self
+    }
+
     pub fn with_primitive(mut self, primitive: impl Into<String>) -> Self {
         self.primitive = Some(primitive.into());
         self
@@ -120,6 +127,9 @@ impl fmt::Display for Failure {
             if let Some(kind) = &self.kind {
                 write!(formatter, " ({kind})")?;
             }
+        }
+        if let Some(backend) = &self.backend {
+            write!(formatter, "\n  backend: {backend}")?;
         }
         if let Some(primitive) = &self.primitive {
             write!(formatter, "\n  primitive: {primitive}")?;
