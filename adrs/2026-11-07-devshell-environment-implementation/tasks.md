@@ -184,7 +184,7 @@ Update `arch-lint.toml`. Split the provision scope into `litterbox-kinds` at `sr
 | Depends On | T-009,T-010 |
 | References | boundaries,kind-registry,contribution-support,prototype-not-shipped |
 
-### T-015: Documentation
+### T-015: [x] Documentation
 
 Update the configuration reference with the `devshell` step, `installable`, the `store-view` setting and the consent rule. Document the doctor's host report with the existing preflight output. Add kind, contribution, host step and store view to `crates/agentkit-litterbox/CONTEXT.md`. Extend `.agentkit/tackle/prompts/nix/PROMPT.md` with the `print-dev-env` evaluation and the six restores.
 
