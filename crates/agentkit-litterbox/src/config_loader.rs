@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use git2::Repository;
 
 use crate::config::{Config, ConfigError, ProjectConfig, ProjectFile, escaped, merge};
-use crate::sandbox::contract::forwarded_port_env_var;
+use crate::sandbox::contract::{ProvisionStep, forwarded_port_env_var};
 
 const PROJECT_FILE: &str = ".agentkit/litterbox/config.toml";
 const LOCAL_FILE: &str = ".agentkit/litterbox/config.local.toml";

@@ -659,7 +659,7 @@ mod tests {
             vec![
                 devshell("z-first", "./nix"),
                 command("a-second"),
-                devshell("b-third", "./other"),
+                command("b-third"),
             ],
             vec!["z-first", "a-second", "b-third"],
         );
@@ -667,6 +667,6 @@ mod tests {
         assert_eq!(outcomes.len(), 3);
         assert!(matches!(outcomes[0], StepOutcome::Failed(_)));
         assert!(matches!(outcomes[1], StepOutcome::Resolved(_)));
-        assert!(matches!(outcomes[2], StepOutcome::Failed(_)));
+        assert!(matches!(outcomes[2], StepOutcome::Resolved(_)));
     }
 }

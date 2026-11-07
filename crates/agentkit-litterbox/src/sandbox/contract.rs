@@ -134,7 +134,7 @@ pub struct ContributionSupport {
 /// The kind is a name, not a closed enum. The registry in `provision::kind`
 /// owns the settings each kind accepts; the contract carries them opaquely so
 /// a backend never needs to know a kind.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ProvisionStep {
     /// The step's stable identity.
     pub identity: String,

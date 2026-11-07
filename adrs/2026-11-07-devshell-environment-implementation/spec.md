@@ -1,9 +1,8 @@
 # DevShell Environment Implementation
 
-**Status:** proposed  **Created:** 2026-11-07  **Author:** adrian
+**Status:** implemented **Created:** 2026-11-07 **Author:** adrian
 
 `adrs/2026-11-07-devshell-environment` specifies the `devshell` kind as a prototype and ships no production type. Its findings, and the six decisions recorded in `maps/2026-10-31-nix-devshell-sandbox` as T-027 to T-032, settle the shape this ADR implements. Kinds move out of the contract into a compiled-in registry, so a step is an identity, a kind name and the settings that kind owns, and the backend receives contributions rather than a kind. A backend reports static support for contribution sorts, which today are an environment and read-only mounts. The environment is captured by evaluating the `print-dev-env` script once in a sanitised shell and restoring the six variables nix-direnv restores. That keeps the exported-but-empty build-phase variables and never carries HOME, PWD, OLDPWD, SHLVL, `_` or the caller's temporary paths. A backend persists whatever it needs in its own `SandboxRecord.data` payload. Provenance keeps the kind as a string. The current contract cannot express any of this. `ProvisionKind` and `ProvisionStep` are closed enums at `crates/agentkit-litterbox/src/sandbox/contract.rs:74,117`. `Backend::provision_support` reports per kind at `contract.rs:98,489`. `CreateRequest` carries `provision: Vec<ProvisionStep>` and no contributions at `contract.rs:145-153`. The resolver refuses a kind the backend does not report at `crates/agentkit-litterbox/src/provision/resolve.rs:204-260`. The doctor prints a `ProvisionKind` at `crates/agentkit-litterbox/src/cli.rs:479`. Consent covers only `ProvisionStep::Command` at `crates/agentkit-litterbox/src/orchestrator/service.rs:542-560`. Docker reports only the command kind at `crates/agentkit-litterbox/src/backends/docker/backend.rs:720-728`. Terminology is normative in `crates/agentkit-litterbox/CONTEXT.md`, upstream Nix terms are in `.agentkit/tackle/prompts/nix/glossary.md`, and the behaviours this specification relies on are verified in `.agentkit/tackle/prompts/nix/PROMPT.md`.
-
 
 ## Problem
 
@@ -35,7 +34,6 @@ A project cannot use the `devshell` kind that the prototype proved. The contract
 - Caching a prepared devShell across creates; it is derived from the store on each create.
 - A Nix backend; a devShell is an environment, not a mechanism.
 - Implementing host-step contributions in Docker; Docker keeps reporting them unsupported.
-
 
 ## Functional Requirements
 
@@ -332,69 +330,81 @@ With Docker selected and a devshell step in the sequence, create fails as Unsupp
 A shell hook that exits non-zero fails create as Failed, with the step identity and bounded output, and leaves no branch, workspace or compute. The doctor reports the same reason.
 
 **Slug:** `hook-fails`
+
 ### EC-002: Step: Hook Prints
 
 A shell hook that prints to stdout does not corrupt the environment, because records go to a file or a spare descriptor. A test with a banner-printing hook asserts every record is a well-formed assignment.
 
 **Slug:** `hook-prints`
+
 ### EC-003: Step: Not A DevShell
 
 An installable that evaluates but produces no devShell environment, such as a package rather than a shell, fails as Misconfigured naming the installable and what it produced.
 
 **Slug:** `not-a-devshell`
+
 ### EC-004: Host: Flakes Disabled
 
 With flakes disabled in the host's Nix configuration, readiness and create fail as Unavailable naming the experimental feature and the setting that enables it.
 
 **Slug:** `flakes-disabled`
+
 ### EC-005: Core: Backend Cannot Mount
 
 A backend that cannot mount the closure refuses with its own limit, the contribution, the reason and the remedy. The user can select the whole store view or a backend that can. No path is silently dropped.
 
 **Slug:** `backend-cannot-mount`
+
 ### EC-006: Core: Workspace Elsewhere
 
 When the workspace is presented at a path other than the project root, the recorded workspace-rooted values are rewritten and no store path is. A translation that would rewrite a store path is a defect and fails its test.
 
 **Slug:** `workspace-elsewhere`
+
 ### EC-007: Step: Shell Hook Execs A Shell
 
 A shell hook or a caller's shell rc that execs another shell changes what the hook sees before it returns. The step takes the environment that is left when the hook exits and does not follow the exec. Recorded as a risk, not handled.
 
 **Slug:** `hook-execs-shell`
+
 ### EC-008: Host: Dirty Tree
 
 A dirty Git tree changes the flake source, so `print-dev-env` may write a source path to the store and the closure may differ from a clean checkout's. A create that fails after this leaves that store write behind, and the report does not claim otherwise.
 
 **Slug:** `dirty-tree`
+
 ### EC-009: Shared: Docker Selected
 
 With a devshell step in the project and Docker selected, create fails as Unsupported naming the backend, step and contribution, and Docker is never called. The doctor reports the same.
 
 **Slug:** `docker-selected`
+
 ### EC-010: Step: DevShell Changed After Create
 
 A sandbox created before the flake changed keeps the contributions it was created with. Creating again prepares them again and may differ, and inspection names the preparation's origin so the difference is visible.
 
 **Slug:** `devshell-changed`
+
 ### EC-011: Shared: Command Needs Shell State
 
 A command that relies on a devShell bash function fails as it would in a plain shell, because no shell state is carried. The doctor says the sandbox carries none, and the remedy is a command that does not depend on it or a future contribution that adds it deliberately.
 
 **Slug:** `command-needs-shell-state`
+
 ### EC-012: Core: Closure Too Large
 
 A closure larger than a backend's mount limit is refused by that backend with the limit, the contribution, the reason and the remedy. The whole store view or another backend may still work, and the doctor reports the limit.
 
 **Slug:** `closure-too-large`
+
 ### EC-013: Config: Two DevShell Steps
 
 Two devshell steps in one backend's sequence are Misconfigured, naming both identities, because one sandbox carries one prepared environment.
 
 **Slug:** `two-devshell-steps`
+
 ### EC-014: Host: Nix Absent
 
 With no nix executable, the host requirement fails before any evaluation, and neither the doctor nor create writes a record or a store path.
 
 **Slug:** `nix-absent`
-

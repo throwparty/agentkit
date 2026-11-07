@@ -5,6 +5,7 @@ use crate::sandbox::contract::{ContributionSort, Placement};
 use super::{Kind, KindDescription, Settings, SettingsError, reject_unknown, required_string};
 
 /// A development shell entered on the host.
+#[derive(Debug)]
 pub struct DevshellKind;
 
 impl Kind for DevshellKind {

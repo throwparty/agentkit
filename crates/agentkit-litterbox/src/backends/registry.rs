@@ -7,7 +7,7 @@
 use serde::Serialize;
 
 use crate::config::{Config, escaped};
-use crate::sandbox::contract::{Error, ProvisionSupport};
+use crate::sandbox::contract::{ContributionSupport, Error};
 use crate::sandbox::report::{Capability, Readiness, State};
 use crate::sandbox::selected::Selected;
 
@@ -194,7 +194,7 @@ pub struct BackendReport {
 /// One backend's readiness, capabilities and provisioning support.
 pub async fn describe(
     backend: &Selected,
-) -> Result<(Readiness, Vec<Capability>, Vec<ProvisionSupport>), Error> {
+) -> Result<(Readiness, Vec<Capability>, Vec<ContributionSupport>), Error> {
     let support = backend.core().contribution_support();
     let (readiness, capabilities) =
         tokio::join!(backend.core().readiness(), backend.core().capabilities());

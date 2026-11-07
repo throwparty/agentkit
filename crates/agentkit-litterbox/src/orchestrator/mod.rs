@@ -10,5 +10,6 @@ pub mod service;
 
 pub use bulk::PauseSummary;
 pub use service::{
-    Listing, PlannedStep, Preflight, SandboxIo, Sandboxes, preflight, resolve_project_slug,
+    HostReport, HostRequirement, Listing, PlannedStep, Preflight, SandboxIo, Sandboxes, preflight,
+    preflight_host, resolve_project_slug,
 };
