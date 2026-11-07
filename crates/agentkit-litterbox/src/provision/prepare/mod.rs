@@ -5,11 +5,14 @@
 
 pub mod checks;
 pub mod closure;
+pub mod devshell;
+pub mod environment;
 pub mod runner;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use crate::sandbox::contract::StoreView;
+use crate::provision::kind;
+use crate::sandbox::contract::{Contributions, ProvisionStep, SandboxAction, StoreView};
 
 pub use checks::{Check, HostRequirements, check_host};
 pub use closure::closure;
@@ -43,6 +46,85 @@ pub struct CheckReport {
     pub closure: Result<Vec<PathBuf>, PrepareError>,
     /// The view in force.
     pub store_view: StoreView,
+    /// The installable the report is about, when the kind has one.
+    pub installable: Option<String>,
+}
+
+/// What a step contributes when it is prepared.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Prepared {
+    /// The command to run inside the sandbox, when the step runs there.
+    pub sandbox: Option<SandboxAction>,
+    /// What the step contributes, when it runs on the host.
+    pub contributions: Contributions,
+}
+
+/// Everything host preparation needs.
+pub struct PrepareContext<'a> {
+    /// The checkout the installable is relative to.
+    pub project_root: &'a Path,
+    /// The store view in force.
+    pub store_view: StoreView,
+    /// The process runner.
+    pub runner: &'a dyn CommandRunner,
+}
+
+/// Everything a read-only host check needs.
+pub struct CheckContext<'a> {
+    /// The store view in force.
+    pub store_view: StoreView,
+    /// The process runner.
+    pub runner: &'a dyn CommandRunner,
+}
+
+/// Prepare one planned step.
+pub fn prepare(step: &ProvisionStep, ctx: &PrepareContext<'_>) -> Result<Prepared, PrepareError> {
+    let kind =
+        kind::validate(step).map_err(|error| PrepareError::new(error.reason, error.remedy))?;
+    match kind.describe().name {
+        "command" => {
+            let sandbox = kind::command::action(&step.settings)
+                .map_err(|error| PrepareError::new(error.reason, error.remedy))?;
+            Ok(Prepared {
+                sandbox: Some(sandbox),
+                contributions: Contributions::default(),
+            })
+        }
+        "devshell" => Ok(Prepared {
+            sandbox: None,
+            contributions: devshell::prepare(step, ctx)?,
+        }),
+        other => Err(PrepareError::new(
+            format!("unknown provisioning kind '{other}'"),
+            "use a kind this build supports",
+        )),
+    }
+}
+
+/// Check one planned step without evaluating the shell hook.
+pub fn check_step(
+    step: &ProvisionStep,
+    ctx: &CheckContext<'_>,
+) -> Result<CheckReport, PrepareError> {
+    let kind =
+        kind::validate(step).map_err(|error| PrepareError::new(error.reason, error.remedy))?;
+    match kind.describe().name {
+        "command" => Ok(CheckReport {
+            requirements: HostRequirements {
+                checks: Vec::new(),
+                output_path: None,
+                baseline: None,
+            },
+            closure: Ok(Vec::new()),
+            store_view: ctx.store_view,
+            installable: None,
+        }),
+        "devshell" => devshell::check(step, ctx),
+        other => Err(PrepareError::new(
+            format!("unknown provisioning kind '{other}'"),
+            "use a kind this build supports",
+        )),
+    }
 }
 
 /// Check the host and the store view without evaluating the shell hook.
@@ -66,6 +148,7 @@ pub fn check(installable: &str, view: StoreView, runner: &dyn CommandRunner) -> 
         requirements,
         closure,
         store_view: view,
+        installable: Some(installable.to_string()),
     }
 }
 
@@ -131,6 +214,52 @@ mod tests {
             stdout: Vec::new(),
             stderr: stderr.as_bytes().to_vec(),
         }
+    }
+
+    fn devshell_step(installable: &str) -> ProvisionStep {
+        ProvisionStep {
+            identity: "dev".to_string(),
+            kind: "devshell".to_string(),
+            settings: [(
+                "installable".to_string(),
+                toml::Value::String(installable.to_string()),
+            )]
+            .into(),
+        }
+    }
+
+    #[test]
+    fn a_devshell_check_reports_requirements_and_closure() {
+        let step = devshell_step("./nix");
+        let ctx = CheckContext {
+            store_view: StoreView::Closure,
+            runner: &Recorded::new(vec![
+                ok("nix 2.34.9"),
+                ok(JSON),
+                ok("/nix/store/abc-devshell"),
+                ok("/nix/store/a\n/nix/store/b"),
+            ]),
+        };
+        let report = check_step(&step, &ctx).expect("check");
+        assert_eq!(report.installable.as_deref(), Some("./nix"));
+        assert_eq!(report.closure.expect("closure").len(), 2);
+    }
+
+    #[test]
+    fn a_command_step_prepares_a_sandbox_action() {
+        let step = ProvisionStep {
+            identity: "fetch".to_string(),
+            kind: "command".to_string(),
+            settings: [("run".to_string(), toml::Value::String("true".to_string()))].into(),
+        };
+        let ctx = PrepareContext {
+            project_root: Path::new("/repo"),
+            store_view: StoreView::Closure,
+            runner: &Recorded::new(Vec::new()),
+        };
+        let prepared = prepare(&step, &ctx).expect("prepare");
+        assert_eq!(prepared.sandbox.expect("action").run, "true");
+        assert!(prepared.contributions.environment.is_empty());
     }
 
     #[test]

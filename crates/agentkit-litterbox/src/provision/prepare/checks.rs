@@ -22,6 +22,8 @@ pub struct HostRequirements {
     pub checks: Vec<Check>,
     /// The devShell's output path, when evaluation found one.
     pub output_path: Option<String>,
+    /// The raw `print-dev-env --json` output, when evaluation succeeded.
+    pub baseline: Option<Vec<u8>>,
 }
 
 impl HostRequirements {
@@ -51,6 +53,7 @@ pub fn check_host(installable: &str, runner: &dyn CommandRunner) -> HostRequirem
         return HostRequirements {
             checks,
             output_path: None,
+            baseline: None,
         };
     }
 
@@ -64,13 +67,18 @@ pub fn check_host(installable: &str, runner: &dyn CommandRunner) -> HostRequirem
         None,
         None,
     );
-    let (ok, detail, path) = match &json {
+    let (ok, detail, path, baseline) = match &json {
         Ok(output) if output.success() => match output_path(&output.stdout) {
-            Some(path) => (true, path.clone(), Some(path)),
-            None => (false, "no out variable in the devShell".to_string(), None),
+            Some(path) => (true, path.clone(), Some(path), Some(output.stdout.clone())),
+            None => (
+                false,
+                "no out variable in the devShell".to_string(),
+                None,
+                Some(output.stdout.clone()),
+            ),
         },
-        Ok(output) => (false, output.first_line(), None),
-        Err(error) => (false, error.clone(), None),
+        Ok(output) => (false, output.first_line(), None, None),
+        Err(error) => (false, error.clone(), None, None),
     };
 
     if !ok && detail.contains("flakes") {
@@ -85,6 +93,7 @@ pub fn check_host(installable: &str, runner: &dyn CommandRunner) -> HostRequirem
         return HostRequirements {
             checks,
             output_path: None,
+            baseline: None,
         };
     }
 
@@ -112,6 +121,7 @@ pub fn check_host(installable: &str, runner: &dyn CommandRunner) -> HostRequirem
         return HostRequirements {
             checks,
             output_path: None,
+            baseline,
         };
     };
 
@@ -131,6 +141,7 @@ pub fn check_host(installable: &str, runner: &dyn CommandRunner) -> HostRequirem
     HostRequirements {
         checks,
         output_path: Some(path),
+        baseline,
     }
 }
 

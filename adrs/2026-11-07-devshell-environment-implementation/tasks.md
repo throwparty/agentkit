@@ -80,7 +80,7 @@ Add `provision/prepare/runner.rs` with a `CommandRunner` trait, a system runner 
 | Depends On | T-001 |
 | References | host-requirements,no-realisation,store-closure,no-nix-refused,unrealised-refused,flakes-disabled,nix-absent,dirty-tree,no-new-supervisor,legible-unavailability |
 
-### T-007: Environment capture
+### T-007: [x] Environment capture
 
 Add `provision/prepare/environment.rs`. Run `print-dev-env --json` for the baseline and output path, then evaluate the `print-dev-env` script once in a bash child. Start the child from a caller with HOME, PATH, PWD, OLDPWD, SHLVL and `_`; dump `env -0` before and after; compute the diff; restore `NIX_BUILD_TOP`, `TMP`, `TMPDIR`, `TEMP`, `TEMPDIR` and `terminfo`. Keep exported-but-empty variables. Record `workspace_root` and the variables whose values contain it. Record a host path for a value that is a single absolute path outside the store and the workspace. Redirect hook output to a bounded file; a non-zero hook is Failed with the output.
 
@@ -93,7 +93,7 @@ Add `provision/prepare/environment.rs`. Run `print-dev-env --json` for the basel
 | Depends On | T-006 |
 | References | environment-capture,environment-is-direnv,empty-variables-kept,no-shell-state,no-shell-state-accepted,hook-fails,hook-prints,hook-execs-shell,command-needs-shell-state,no-values-on-surfaces |
 
-### T-008: Devshell kind prepare and contributions
+### T-008: [x] Devshell kind prepare and contributions
 
 Implement `kind/devshell.rs` and the devshell prepare entry point. `check` runs the host checks and the closure query without evaluating the hook. `prepare` runs the checks, the capture and the closure and returns `Contributions` with the environment, provenance, mounts, workspace root and workspace variables. Reject a second devshell step in one backend sequence. Keep nix out of the contributions.
 

@@ -1,6 +1,6 @@
 //! The `command` kind: a shell command run inside the sandbox.
 
-use crate::sandbox::contract::Placement;
+use crate::sandbox::contract::{Placement, SandboxAction};
 
 use super::{Kind, KindDescription, Settings, SettingsError, reject_unknown, required_string};
 
@@ -23,4 +23,11 @@ impl Kind for CommandKind {
         required_string(settings, "run")?;
         Ok(())
     }
+}
+
+/// The sandbox action a command step names.
+pub fn action(settings: &Settings) -> Result<SandboxAction, SettingsError> {
+    Ok(SandboxAction {
+        run: required_string(settings, "run")?,
+    })
 }
