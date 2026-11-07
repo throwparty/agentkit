@@ -342,7 +342,7 @@ pub fn private_dir(path: &Path) -> Result<(), Failure> {
 
 /// Write NUL-separated records to a file only the caller can read.
 pub fn write_nul_strings(path: &Path, values: impl Iterator<Item = String>) -> Result<(), Failure> {
-    let mut file = private_file(path)?;
+    let mut file = create_private(path)?;
     for value in values {
         file.write_all(value.as_bytes())
             .and_then(|_| file.write_all(&[0]))
@@ -356,7 +356,7 @@ pub fn write_nul_paths(path: &Path, values: &[PathBuf]) -> Result<(), Failure> {
 }
 
 /// A file created 0600 that refuses to follow a symlink or reuse a path.
-fn private_file(path: &Path) -> Result<File, Failure> {
+pub fn create_private(path: &Path) -> Result<File, Failure> {
     let _ = fs::remove_file(path);
     let mut options = OpenOptions::new();
     options.write(true).create_new(true).mode(0o600);
@@ -367,7 +367,7 @@ fn private_file(path: &Path) -> Result<File, Failure> {
 
 /// Write a value-bearing text file, refusing to follow a symlink.
 pub fn write_private(path: &Path, text: &str) -> Result<(), Failure> {
-    let mut file = private_file(path)?;
+    let mut file = create_private(path)?;
     file.write_all(text.as_bytes())
         .map_err(|error| Failure::failed(format!("could not write {}: {error}", path.display())))
 }

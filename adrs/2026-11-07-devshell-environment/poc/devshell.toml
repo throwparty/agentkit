@@ -1,0 +1,3 @@
+identity = "rust"
+kind = "devshell"
+installable = "./nix"
