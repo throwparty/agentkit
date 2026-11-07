@@ -87,4 +87,7 @@ if [ "$ready" -ne 1 ]; then
   exit 1
 fi
 
-opencode "$@"
+# The shared background service may have been started outside the devShell, and
+# it is the server, not the TUI, that spawns MCP servers. A private server
+# inherits this shell, so cargo and the built helpers are on its PATH.
+opencode --standalone "$@"
