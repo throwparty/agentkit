@@ -11,6 +11,7 @@
 // would only add noise to every constructor and call site.
 #![allow(clippy::result_large_err)]
 
+mod checks;
 mod failure;
 mod model;
 mod util;

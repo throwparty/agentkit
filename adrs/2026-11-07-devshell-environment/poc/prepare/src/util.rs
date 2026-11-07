@@ -42,10 +42,14 @@ fn is_name(name: &str) -> bool {
 /// A sequence so two private directories in one process never share a name.
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+/// The minimal PATH every host command receives. Binaries the harness runs are
+/// resolved to absolute paths first, so this only has to serve the child's own
+/// needs: the shell, coreutils and the toolchain a devShell hook calls.
+const CALLER_PATH: &str = "/run/current-system/sw/bin:/usr/local/bin:/usr/bin:/bin";
+
 /// The caller the harness supplies to every host process: HOME and nothing else.
 pub struct Caller {
     home: PathBuf,
-    path: String,
 }
 
 impl Caller {
@@ -60,8 +64,7 @@ impl Caller {
             std::process::id()
         ));
         private_dir(&home)?;
-        let path = std::env::var("PATH").unwrap_or_default();
-        Ok(Self { home, path })
+        Ok(Self { home })
     }
 
     pub fn home(&self) -> &Path {
@@ -73,7 +76,7 @@ impl Caller {
     pub fn env(&self) -> Vec<(String, String)> {
         vec![
             ("HOME".to_string(), self.home.display().to_string()),
-            ("PATH".to_string(), self.path.clone()),
+            ("PATH".to_string(), CALLER_PATH.to_string()),
         ]
     }
 }
@@ -82,6 +85,11 @@ impl Drop for Caller {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.home);
     }
+}
+
+/// Arguments from literals, for the fixed command lines the harness runs.
+pub fn argv(args: &[&str]) -> Vec<String> {
+    args.iter().map(|arg| (*arg).to_string()).collect()
 }
 
 /// Resolve a program to an absolute path once, so a PATH entry cannot later
