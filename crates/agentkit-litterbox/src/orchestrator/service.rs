@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use tar::Archive;
@@ -9,13 +10,21 @@ use crate::config::Config;
 use crate::domain::{SandboxError, ScmMode};
 use crate::metadata_store::{self, LoadedSandbox, StoredSandbox};
 use crate::provision::StepOutcome;
+use crate::provision::kind::KindDescription;
+use crate::provision::prepare::{self, PrepareContext, PrepareError, SystemRunner};
 use crate::sandbox::contract::{
-    CreateRequest, Error, Execution, Forward, Inspection, ProvisionStep, ProvisionSupport,
-    ProvisioningClass, ProvisioningFailure, RequestedPort, SandboxRecord, SandboxStatus, Workspace,
+    ContributionSupport, CreateRequest, Error, Execution, Forward, Inspection, ProvisionStep,
+    ProvisioningClass, ProvisioningFailure, RequestedPort, ResolvedStep, SandboxRecord,
+    SandboxStatus, Workspace,
 };
 use crate::sandbox::selected::Selected;
 use crate::scm::{Scm, ThreadSafeScm};
 use crate::vcs_store::VcsStore;
+
+/// How long host preparation may take before its commands are killed and
+/// reaped. Preparation runs before a backend's create budget starts, so it
+/// carries its own.
+const HOST_PREPARE_BUDGET: Duration = Duration::from_secs(30 * 60);
 
 /// Sandboxes in one project, coordinated across SCM, a backend and the store.
 pub struct Sandboxes {
@@ -114,37 +123,79 @@ impl Sandboxes {
     pub async fn create(&self, name: &str) -> Result<SandboxRecord, Error> {
         let name = self.valid_name(name)?;
         let selected = self.selected_for_operation("create a sandbox").await?;
-        let provision = match crate::provision::resolve(
-            &self.config,
-            selected.name(),
-            &selected.core().contribution_support(),
-        ) {
-            Ok(steps) => steps,
-            Err(error) => {
-                tracing::warn!(
-                    sandbox = %name,
-                    backend = %selected.name(),
-                    class = %error.class().as_str(),
-                    %error,
-                    "provisioning refused before create"
-                );
-                return Err(error);
-            }
-        };
-        for step in &provision {
-            if let Some(failure) =
-                command_step_refusal(&self.config, &self.project_slug, selected.name(), step)
-            {
+        let support = selected.core().contribution_support();
+        let outcomes =
+            match crate::provision::preflight_steps(&self.config, selected.name(), &support) {
+                Ok(outcomes) => outcomes,
+                Err(error) => {
+                    tracing::warn!(
+                        sandbox = %name,
+                        backend = %selected.name(),
+                        class = %error.class().as_str(),
+                        %error,
+                        "provisioning refused before create"
+                    );
+                    return Err(error);
+                }
+            };
+
+        let project_root = std::env::current_dir()
+            .map_err(|error| Error::failed(format!("could not read the project root: {error}")))?;
+        let mut provision = Vec::with_capacity(outcomes.len());
+        for outcome in outcomes {
+            let planned = match outcome {
+                StepOutcome::Resolved(planned) => planned,
+                StepOutcome::Failed(failure) => {
+                    log_refusal(&name, selected.name(), &failure);
+                    return Err(Error::Provisioning { failure });
+                }
+            };
+            if let Some(failure) = step_refusal(
+                &self.config,
+                &self.project_slug,
+                selected.name(),
+                &planned.step,
+                planned.description.requires_consent,
+            ) {
                 log_refusal(&name, selected.name(), &failure);
                 return Err(Error::Provisioning {
                     failure: Box::new(failure),
                 });
             }
+
+            let step = planned.step.clone();
+            let root = project_root.clone();
+            let store_view = self.config.store_view;
+            let deadline = Instant::now() + HOST_PREPARE_BUDGET;
+            let prepared = tokio::task::spawn_blocking(move || {
+                // The runner enforces the deadline per command and reaps what it
+                // kills, so a timeout here would not leave the task running.
+                let runner = SystemRunner::with_deadline(deadline);
+                prepare::prepare(
+                    &step,
+                    &PrepareContext {
+                        project_root: &root,
+                        store_view,
+                        runner: &runner,
+                    },
+                )
+            })
+            .await
+            .map_err(|error| Error::failed(format!("host preparation task failed: {error}")))?
+            .map_err(|error| preparation_failure(selected.name(), &planned.step, error))?;
+
+            provision.push(ResolvedStep {
+                identity: planned.step.identity.clone(),
+                kind: planned.step.kind.clone(),
+                placement: planned.description.placement,
+                sandbox: prepared.sandbox,
+                contributions: prepared.contributions,
+            });
         }
         tracing::info!(
             sandbox = %name,
             backend = %selected.name(),
-            steps = ?provision.iter().map(ProvisionStep::identity).collect::<Vec<_>>(),
+            steps = ?provision.iter().map(ResolvedStep::identity).collect::<Vec<_>>(),
             "resolved the provisioning sequence"
         );
 
@@ -529,33 +580,46 @@ pub fn resolve_project_slug(config: &Config) -> Result<String, SandboxError> {
     Ok(format!("{}-{}", base_slug(config)?, namespace_suffix()))
 }
 
-/// Why a command step is refused when the project has no consent.
-const COMMAND_STEP_REASON: &str = "this project defines a command step; add its namespace to \
-     allowed-projects, or set allow-project-setup = true, in \
+/// Why a step that runs project code is refused when the project has no consent.
+const STEP_REASON: &str = "this project defines a provisioning step that runs or evaluates \
+     project code; add its namespace to allowed-projects, or set allow-project-setup = true, in \
      ~/.config/agentkit/litterbox/config.toml to let it run";
 
-/// What the user can do about a refused command step.
-const COMMAND_STEP_REMEDY: &str = "grant setup consent in \
+/// What the user can do about a refused step.
+const STEP_REMEDY: &str = "grant setup consent in \
      ~/.config/agentkit/litterbox/config.toml";
 
-/// The structured refusal for a command step this project may not run.
-fn command_step_refusal(
+/// The structured refusal for a step this project may not run.
+fn step_refusal(
     config: &Config,
     project_slug: &str,
     backend: &str,
     step: &ProvisionStep,
+    requires_consent: bool,
 ) -> Option<ProvisioningFailure> {
-    if config.command_steps_allowed(project_slug) {
+    if !requires_consent || config.command_steps_allowed(project_slug) {
         return None;
     }
-    match step {
-        ProvisionStep::Command { .. } => Some(ProvisioningFailure::new(
-            ProvisioningClass::Denied,
+    Some(ProvisioningFailure::new(
+        ProvisioningClass::Denied,
+        Some(backend.to_string()),
+        Some(step.identity.clone()),
+        Some(step.kind.clone()),
+        STEP_REASON,
+        format!("{STEP_REMEDY}, adding '{project_slug}' to allowed-projects"),
+    ))
+}
+
+/// Turn a preparation error into a structured provisioning failure.
+fn preparation_failure(backend: &str, step: &ProvisionStep, error: PrepareError) -> Error {
+    Error::Provisioning {
+        failure: Box::new(ProvisioningFailure::new(
+            error.class,
             Some(backend.to_string()),
-            Some(step.identity().to_string()),
-            Some(step.kind().as_str().to_string()),
-            COMMAND_STEP_REASON,
-            format!("{COMMAND_STEP_REMEDY}, adding '{project_slug}' to allowed-projects"),
+            Some(step.identity.clone()),
+            Some(step.kind.clone()),
+            error.reason,
+            error.remedy,
         )),
     }
 }
@@ -578,11 +642,13 @@ fn log_refusal(sandbox: &str, backend: &str, failure: &ProvisioningFailure) {
 pub enum PlannedStep {
     /// The step resolved, with an optional consent refusal.
     Resolved {
-        /// The typed step.
+        /// The generic step.
         step: ProvisionStep,
-        /// The backend's support entry for its kind.
-        support: ProvisionSupport,
-        /// Consent refusal for a command step, when one applies.
+        /// The kind's placement, contribution sorts and consent requirement.
+        description: KindDescription,
+        /// The backend's support entries for the step's contribution sorts.
+        support: Vec<ContributionSupport>,
+        /// Consent refusal for a step that needs it, when one applies.
         refusal: Option<ProvisioningFailure>,
     },
     /// The step could not be resolved.
@@ -606,19 +672,33 @@ pub fn preflight(
     config: &Config,
     project_slug: &str,
     backend: &str,
-    support: &[ProvisionSupport],
+    support: &[ContributionSupport],
 ) -> Preflight {
     match crate::provision::preflight_steps(config, backend, support) {
         Ok(results) => {
             let mut steps = Vec::with_capacity(results.len());
             for result in results {
                 match result {
-                    StepOutcome::Resolved(resolved) => {
-                        let refusal =
-                            command_step_refusal(config, project_slug, backend, &resolved.step);
+                    StepOutcome::Resolved(planned) => {
+                        let refusal = step_refusal(
+                            config,
+                            project_slug,
+                            backend,
+                            &planned.step,
+                            planned.description.requires_consent,
+                        );
+                        let step_support = planned
+                            .description
+                            .sorts
+                            .iter()
+                            .filter_map(|sort| {
+                                support.iter().find(|entry| entry.sort == *sort).cloned()
+                            })
+                            .collect();
                         steps.push(PlannedStep::Resolved {
-                            step: resolved.step,
-                            support: resolved.support,
+                            step: planned.step,
+                            description: planned.description,
+                            support: step_support,
                             refusal,
                         });
                     }

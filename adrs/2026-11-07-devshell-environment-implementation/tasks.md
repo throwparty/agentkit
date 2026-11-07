@@ -119,7 +119,7 @@ Rewrite `provision/resolve.rs` to use the registry. For each definition, look up
 | Depends On | T-002,T-004 |
 | References | contribution-support,contribution-refused,failure-classes,not-a-devshell,backend-cannot-mount |
 
-### T-010: Orchestrator consent and preparation order
+### T-010: [x] Orchestrator consent and preparation order
 
 Update `orchestrator/service.rs`. After resolution, refuse a step whose kind requires consent unless the project is in `allowed-projects` or `allow-project-setup`. Prepare every planned step on a blocking thread before creating the branch. A command step yields a `SandboxAction`; a devshell step yields contributions. Build `CreateRequest` with `ResolvedStep` values in sequence order, then create the branch, stage and call the backend. A preparation failure leaves no branch.
 

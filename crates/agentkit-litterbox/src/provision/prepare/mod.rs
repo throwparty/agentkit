@@ -12,7 +12,9 @@ pub mod runner;
 use std::path::{Path, PathBuf};
 
 use crate::provision::kind;
-use crate::sandbox::contract::{Contributions, ProvisionStep, SandboxAction, StoreView};
+use crate::sandbox::contract::{
+    Contributions, ProvisionStep, ProvisioningClass, SandboxAction, StoreView,
+};
 
 pub use checks::{Check, HostRequirements, check_host};
 pub use closure::closure;
@@ -21,6 +23,8 @@ pub use runner::{CommandOutput, CommandRunner, SystemRunner};
 /// Why a host step could not be prepared.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PrepareError {
+    /// The provisioning failure class.
+    pub class: ProvisioningClass,
     /// What is wrong.
     pub reason: String,
     /// What the user can do about it.
@@ -31,6 +35,16 @@ impl PrepareError {
     /// A preparation error with a reason and a remedy.
     pub fn new(reason: impl Into<String>, remedy: impl Into<String>) -> Self {
         Self {
+            class: ProvisioningClass::Unavailable,
+            reason: reason.into(),
+            remedy: remedy.into(),
+        }
+    }
+
+    /// A step that ran and failed.
+    pub fn failed(reason: impl Into<String>, remedy: impl Into<String>) -> Self {
+        Self {
+            class: ProvisioningClass::Failed,
             reason: reason.into(),
             remedy: remedy.into(),
         }

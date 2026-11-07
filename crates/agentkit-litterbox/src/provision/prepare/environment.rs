@@ -169,13 +169,13 @@ pub fn capture(
             .unwrap_or("the shell hook failed")
             .trim()
             .to_string();
-        return Err(PrepareError::new(
+        return Err(PrepareError::failed(
             reason,
             "fix the shell hook and try again",
         ));
     }
     if !after_path.exists() {
-        return Err(PrepareError::new(
+        return Err(PrepareError::failed(
             "the shell hook replaced or exited the shell before the environment was captured",
             "remove the exec from the hook or the shell rc",
         ));
