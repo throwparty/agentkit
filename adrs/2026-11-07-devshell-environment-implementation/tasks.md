@@ -54,7 +54,7 @@ Add `provision/kind` with a `Kind` trait, `KindDescription`, `SettingsError`, an
 | Depends On | T-001 |
 | References | kind-registry,devshell-step,step-shape-refused,two-devshell-steps,registry-proven |
 
-### T-005: Config generic step and store view
+### T-005: [x] Config generic step and store view
 
 Update `config.rs` so `ProjectFile.provision` and `Config.provision_definitions` hold the generic step. Keep the generic validation in `check_provisioning` and call the registry from `config_loader::validate_provisioning` for kind-specific settings. Add `StoreView { Closure, Whole }` to `Config`, read `store-view` from the local override only, and ignore a project value with a notice. Default to `Closure`.
 
