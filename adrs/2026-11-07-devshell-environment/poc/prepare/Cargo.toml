@@ -1,0 +1,22 @@
+[package]
+name = "devshell-poc"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Standalone: not a member of the agentkit workspace.
+[workspace]
+
+[[bin]]
+name = "devshell-poc"
+path = "src/main.rs"
+
+[lints.rust]
+warnings = "deny"
+
+[lints.clippy]
+all = "warn"
+
+[dependencies]
+serde_json = "1"
+toml = "0.8"
