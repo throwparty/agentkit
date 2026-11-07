@@ -145,7 +145,7 @@ Update `backends/docker/backend.rs` for the new contract. `contribution_support`
 | Depends On | T-002,T-009 |
 | References | docker-compatibility,docker-rejects,docker-selected,config-compatibility,no-socket-or-network |
 
-### T-012: Doctor
+### T-012: [x] Doctor
 
 Update `cli.rs` and `orchestrator::preflight`. `DoctorStep.kind` becomes `Option<String>`. Add the contribution support entries, the store view and, per host step, the requirement checks, the installable, whether it is valid and the closure count. A failed requirement is Unavailable with its reason and remedy; a missing consent is Denied. The doctor calls `check`, never `prepare`, and creates no sandbox, workspace or branch. Keep `--json` and the exit codes.
 
