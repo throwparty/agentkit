@@ -1,0 +1,10 @@
+flowchart LR
+    cfg["declared step<br/>identity, kind, installable"] --> checks["host checks<br/>nix, flakes, installable, validity"]
+    checks --> prepare["prepare<br/>print-dev-env, sanitised devShell entry, NUL capture"]
+    prepare --> env["environment and provenance"]
+    prepare --> closure["closure query<br/>path-info -r over the output path"]
+    env --> contrib["contributions<br/>environment and read-only mounts"]
+    closure --> contrib
+    contrib --> launch["lbx-bwrap view<br/>reads, environment, command"]
+    launch --> work["cargo test inside the sandbox"]
+    work --> findings["findings<br/>Q1 where a kind lives, Q2 what a backend reports"]
