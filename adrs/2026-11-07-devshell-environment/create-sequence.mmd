@@ -1,0 +1,17 @@
+sequenceDiagram
+    participant O as Orchestrator
+    participant R as Resolver
+    participant D as devshell kind
+    participant B as Backend
+    O->>R: resolve(config, backend)
+    R-->>O: ordered steps, kinds validated
+    O->>O: consent check for steps that run project code
+    O->>D: effects(installable, project root)
+    D->>D: path-info validity query, no build
+    D->>D: print-dev-env and the hook under a sanitised baseline
+    D->>D: path-info -r for the store closure
+    D-->>O: environment, grants and written file
+    O->>O: create branch and stage workspace
+    O->>B: create(request with steps and effects)
+    B-->>O: record
+    O->>O: persist the record and its effects

@@ -1,0 +1,27 @@
+flowchart TB
+    D["Decision: this ADR prototypes; production is a follow-up ADR"]
+
+    D --> P["B devshell-environment<br/>prototype under adrs/2026-11-07-devshell-environment/poc/"]
+    D --> I["H devshell-environment-implementation<br/>production"]
+    D --> W["C linux-bwrap-provider and D darwin-sandbox-provider<br/>wait for H"]
+
+    P --> Q["Two questions the prototype must answer"]
+    Q --> Q1["Q1 where does a kind live?"]
+    Q --> Q2["Q2 what does a backend report?"]
+
+    Q1 --> Q1a["contract enum:<br/>Devshell joins ProvisionKind<br/>every new kind is a contract change"]
+    Q1 --> Q1b["registry outside the contract:<br/>step is identity + kind + settings<br/>a new kind is one module"]
+
+    Q2 --> Q2a["kinds:<br/>supporting a kind means applying all its effects"]
+    Q2 --> Q2b["effects:<br/>a backend may refuse one effect and name the remedy"]
+
+    Q1a --> I
+    Q1b --> I
+    Q2a --> I
+    Q2b --> I
+
+    I --> B["contract and provisioning types change once,<br/>in the shape the findings support"]
+    B --> C["C renders environment, grants and written file"]
+    B --> A["D renders environment, grants and written file"]
+
+    P -.-> U["until H lands:<br/>no backend applies a devShell;<br/>Docker stays the only backend and rejects the kind;<br/>this specification stays provisional"]
