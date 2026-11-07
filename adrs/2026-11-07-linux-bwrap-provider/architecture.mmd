@@ -1,0 +1,25 @@
+flowchart LR
+    subgraph create
+        REQ[CreateRequest<br/>steps and contributions] --> CFG[config<br/>typed section]
+        REQ --> ENVV[environment<br/>merge and credential table]
+        REQ --> WS[workspace<br/>copy the staged tree]
+        REQ --> VIEW[view<br/>validate paths, render argv]
+        VIEW --> RUN[holder<br/>spawn bwrap in a scope]
+        RUN --> PAY[payload<br/>pids, inodes, mounts, provenance]
+    end
+
+    PAY --> STORE[(metadata store<br/>0600 record)]
+
+    subgraph command
+        STORE --> HOST[host seam<br/>validate the record]
+        HOST --> JOIN[join<br/>setns, fork, verify, exec]
+    end
+
+    subgraph control
+        STORE --> LIFE[lifecycle and limits<br/>freeze, thaw, kill, bounds]
+        STORE --> XFER[workspace transfers<br/>upload and download]
+    end
+
+    VIEW -. pure, unit tested .-> GOLDEN[golden argv]
+    HOST -. trait and fake .-> UNIT[unit tests with no sandbox]
+    JOIN -. ignored host tests .-> SUITE[host suite and conformance harness]

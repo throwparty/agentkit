@@ -1,0 +1,31 @@
+sequenceDiagram
+    autonumber
+    participant CLI as litterbox (one process per command)
+    participant Scope as systemd user scope
+    participant Launcher as bwrap (launcher, host namespaces)
+    participant Sandbox as sandbox pid 1
+    participant Join as joining client
+    participant Child as command (grandchild)
+
+    CLI->>Scope: start transient scope with the bounds
+    Scope->>Launcher: spawn detached, stdio null, cleared environment plus the contributions
+    Launcher->>Sandbox: unshare user, mount, pid, net, ipc, uts, cgroup and run the holder command
+    Launcher-->>CLI: sandbox pid and seven namespace inodes on the status descriptor
+    CLI->>CLI: write the record, including both pids and the mounts it was given
+
+    Note over Join,Child: every later command, from any process that holds the record
+    CLI->>Join: validate the record against /proc before joining
+    Join->>Sandbox: open the seven namespace descriptors
+    Join->>Child: setns the owning user namespace, then ipc, net, pid, mnt, uts, cgroup, then the sandbox user namespace, then fork again
+    Join->>Child: close descriptors, chroot through the pinned root, chdir, no-new-privileges, drop uid and caps
+    Child->>Child: read /proc/self/ns and compare with the record
+    Join->>Child: exec with the environment read from /proc/<sandbox pid>/environ
+    Child-->>Join: exit status, stdout, stderr
+
+    Note over CLI,Scope: pause and resume
+    CLI->>Scope: freeze, then confirm that no member made progress
+    CLI->>Scope: thaw
+
+    Note over CLI,Sandbox: delete
+    CLI->>Sandbox: SIGKILL the sandbox pid, the pid namespace dies with it
+    CLI->>CLI: remove the state directory
