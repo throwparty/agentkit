@@ -41,7 +41,7 @@ Change `StepProvenance.kind` to `String`. Add `Contributions::environment_for(&s
 | Depends On | T-001 |
 | References | provenance,workspace-mapping,no-values-on-surfaces,workspace-elsewhere,provenance-no-value |
 
-### T-004: Kind registry and settings
+### T-004: [x] Kind registry and settings
 
 Add `provision/kind` with a `Kind` trait, `KindDescription`, `SettingsError`, an internal `Parsed` enum, `command.rs`, `devshell.rs` and `registry.rs`. Each kind reports its name, placement, contribution sorts and consent requirement, validates its settings, and exposes `check` and `prepare` hooks. `command` accepts only `run`; `devshell` accepts only `installable`; an unknown kind or key fails with the identity and kind. Register a test-only third kind behind `cfg(test)`.
 
