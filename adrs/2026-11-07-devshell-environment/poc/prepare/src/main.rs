@@ -14,6 +14,7 @@
 mod checks;
 mod failure;
 mod model;
+mod prepare;
 mod util;
 
 use failure::Failure;
