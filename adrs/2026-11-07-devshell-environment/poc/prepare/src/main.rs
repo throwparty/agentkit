@@ -12,6 +12,7 @@
 #![allow(clippy::result_large_err)]
 
 mod failure;
+mod model;
 mod util;
 
 use failure::Failure;

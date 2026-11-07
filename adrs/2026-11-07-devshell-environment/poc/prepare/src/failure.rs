@@ -44,7 +44,7 @@ pub struct Failure {
     pub class: Class,
     pub reason: String,
     pub step: Option<String>,
-    pub kind: Option<&'static str>,
+    pub kind: Option<String>,
     pub primitive: Option<String>,
     pub remedy: Option<String>,
     pub exit: Option<i32>,
@@ -90,9 +90,9 @@ impl Failure {
         self
     }
 
-    pub fn with_step(mut self, identity: impl Into<String>, kind: &'static str) -> Self {
+    pub fn with_step(mut self, identity: impl Into<String>, kind: impl Into<String>) -> Self {
         self.step = Some(identity.into());
-        self.kind = Some(kind);
+        self.kind = Some(kind.into());
         self
     }
 
@@ -126,7 +126,7 @@ impl fmt::Display for Failure {
         write!(formatter, "{}: {}", self.class.as_str(), self.reason)?;
         if let Some(step) = &self.step {
             write!(formatter, "\n  step: {step}")?;
-            if let Some(kind) = self.kind {
+            if let Some(kind) = &self.kind {
                 write!(formatter, " ({kind})")?;
             }
         }
