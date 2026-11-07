@@ -195,7 +195,7 @@ pub struct BackendReport {
 pub async fn describe(
     backend: &Selected,
 ) -> Result<(Readiness, Vec<Capability>, Vec<ProvisionSupport>), Error> {
-    let support = backend.core().provision_support();
+    let support = backend.core().contribution_support();
     let (readiness, capabilities) =
         tokio::join!(backend.core().readiness(), backend.core().capabilities());
     let readiness = readiness?;
@@ -472,12 +472,13 @@ mod tests {
         assert!(operations.contains(&"resource limits"), "{operations:?}");
         assert!(operations.contains(&"port forwarding"), "{operations:?}");
         assert!(operations.contains(&"proxied egress"), "{operations:?}");
-        let provision = docker
-            .capabilities
-            .iter()
-            .find(|capability| capability.operation == "provision:command")
-            .expect("provisioning support is reported");
-        assert_eq!(provision.state, crate::sandbox::report::State::Available);
+        assert!(
+            docker
+                .capabilities
+                .iter()
+                .all(|capability| !capability.operation.starts_with("contribution:")),
+            "Docker reports no contribution support"
+        );
     }
 
     #[tokio::test]

@@ -18,8 +18,8 @@ use super::compute::{ContainerSpec, SandboxState};
 use super::error::ComputeError;
 use super::naming::container_name_for_slug;
 use crate::sandbox::contract::{
-    Backend, CreateRequest, Error, Execution, Forward, Inspection, ProvisionKind, ProvisionStep,
-    ProvisionSupport, ProvisioningClass, ProvisioningFailure, SandboxRecord, SandboxStatus, Scope,
+    Backend, ContributionSupport, CreateRequest, Error, Execution, Forward, Inspection,
+    ProvisionStep, ProvisioningClass, ProvisioningFailure, SandboxRecord, SandboxStatus, Scope,
 };
 use crate::sandbox::environment::{
     Change, Environment, Origin, Provenance, StepProvenance, Variable,
@@ -717,14 +717,8 @@ impl Backend for DockerBackend {
         })
     }
 
-    fn provision_support(&self) -> Vec<ProvisionSupport> {
-        vec![ProvisionSupport {
-            kind: ProvisionKind::Command,
-            state: State::Available,
-            reason: None,
-            remedy: None,
-            fallback: None,
-        }]
+    fn contribution_support(&self) -> Vec<ContributionSupport> {
+        Vec::new()
     }
 }
 

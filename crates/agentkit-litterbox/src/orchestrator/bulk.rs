@@ -127,7 +127,7 @@ mod tests {
             Box::pin(async { Ok(Vec::new()) })
         }
 
-        fn provision_support(&self) -> Vec<crate::sandbox::contract::ProvisionSupport> {
+        fn contribution_support(&self) -> Vec<crate::sandbox::contract::ContributionSupport> {
             Vec::new()
         }
     }

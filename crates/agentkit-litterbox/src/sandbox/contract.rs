@@ -611,12 +611,12 @@ pub trait Backend: Send + Sync {
     /// Report which optional operations this backend provides.
     fn capabilities(&self)
     -> BoxFuture<'_, Result<Vec<crate::sandbox::report::Capability>, Error>>;
-    /// Report which provisioning kinds this backend can apply, and why not.
+    /// Report which contribution sorts this backend can apply, and why not.
     ///
-    /// Support is a static statement about the kinds compiled into the
-    /// backend; host-dependent checks belong in [`Backend::readiness`], which
-    /// the orchestrator calls before create.
-    fn provision_support(&self) -> Vec<ProvisionSupport>;
+    /// Support is a static statement about the mechanism; host-dependent
+    /// checks belong in [`Backend::readiness`], which the orchestrator calls
+    /// before create.
+    fn contribution_support(&self) -> Vec<ContributionSupport>;
 }
 
 #[cfg(test)]
@@ -700,7 +700,7 @@ mod tests {
             Box::pin(async { Ok(Vec::new()) })
         }
 
-        fn provision_support(&self) -> Vec<super::ProvisionSupport> {
+        fn contribution_support(&self) -> Vec<super::ContributionSupport> {
             Vec::new()
         }
     }
