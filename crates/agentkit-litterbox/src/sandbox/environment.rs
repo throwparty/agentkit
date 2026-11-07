@@ -7,8 +7,6 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use super::contract::ProvisionKind;
-
 /// Where the environment as a whole came from.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Origin {
@@ -62,8 +60,8 @@ pub struct HostPath {
 pub struct StepProvenance {
     /// The step's identity.
     pub identity: String,
-    /// The step's kind.
-    pub kind: ProvisionKind,
+    /// The step's kind name.
+    pub kind: String,
     /// One entry per variable the step changed.
     pub variables: Vec<Variable>,
 }
@@ -194,7 +192,7 @@ mod tests {
         );
         environment.provenance.steps.push(super::StepProvenance {
             identity: "fetch".to_string(),
-            kind: crate::sandbox::contract::ProvisionKind::Command,
+            kind: "command".to_string(),
             variables: vec![super::Variable {
                 name: "TOKEN".to_string(),
                 change: Change::Set,
@@ -205,10 +203,7 @@ mod tests {
         let parsed: super::Provenance =
             serde_json::from_str(&rendered).expect("the provenance round-trips");
         assert_eq!(parsed.steps[0].identity, "fetch");
-        assert_eq!(
-            parsed.steps[0].kind,
-            crate::sandbox::contract::ProvisionKind::Command
-        );
+        assert_eq!(parsed.steps[0].kind, "command");
         assert_eq!(parsed.steps[0].variables[0].name, "TOKEN");
         assert_eq!(parsed.steps[0].variables[0].change, Change::Set);
         assert!(!rendered.contains("SECRET-VALUE"), "{rendered}");

@@ -626,7 +626,8 @@ mod tests {
     use futures_util::future::BoxFuture;
 
     use super::{
-        Backend, CreateRequest, Error, Execution, Inspection, ProvisionStep, SandboxRecord, Scope,
+        Backend, Contributions, CreateRequest, Error, Execution, Inspection, ProvisionStep,
+        SandboxRecord, Scope,
     };
 
     struct Stub;
@@ -771,6 +772,73 @@ mod tests {
         );
         let rendered = toml::to_string(&step).expect("a provision step serialises");
         assert!(rendered.contains("installable"), "{rendered}");
+    }
+
+    #[test]
+    fn only_workspace_variables_move_to_the_sandbox() {
+        let contributions = Contributions {
+            environment: std::collections::BTreeMap::from([
+                ("CARGO_HOME".to_string(), "/host/repo/.cargo".to_string()),
+                ("RUSTUP_HOME".to_string(), "/host/repo/.rustup".to_string()),
+                (
+                    "PATH".to_string(),
+                    "/host/repo/.cargo/bin:/nix/store/abc/bin".to_string(),
+                ),
+                (
+                    "NIX_LDFLAGS".to_string(),
+                    "-L/nix/store/abc/lib".to_string(),
+                ),
+            ]),
+            workspace_root: Some("/host/repo".into()),
+            workspace_variables: vec![
+                "CARGO_HOME".to_string(),
+                "RUSTUP_HOME".to_string(),
+                "PATH".to_string(),
+            ],
+            ..Contributions::default()
+        };
+        let environment = contributions.environment_for("/sandbox");
+        assert_eq!(environment.variables["CARGO_HOME"], "/sandbox/.cargo");
+        assert_eq!(environment.variables["RUSTUP_HOME"], "/sandbox/.rustup");
+        assert_eq!(
+            environment.variables["PATH"],
+            "/sandbox/.cargo/bin:/nix/store/abc/bin"
+        );
+        assert_eq!(environment.variables["NIX_LDFLAGS"], "-L/nix/store/abc/lib");
+        assert_eq!(environment.workspace, "/sandbox");
+    }
+
+    #[test]
+    fn only_workspace_rooted_components_move() {
+        let contributions = Contributions {
+            environment: std::collections::BTreeMap::from([
+                (
+                    "PATH".to_string(),
+                    "/host/repo/.cargo/bin:/host/repo-cache/bin:/nix/store/pkg/share/host/repo/bin"
+                        .to_string(),
+                ),
+                ("CARGO_HOME".to_string(), "/host/repo/.cargo".to_string()),
+                ("BACKUP".to_string(), "/host/repo.bak".to_string()),
+            ]),
+            workspace_root: Some("/host/repo".into()),
+            workspace_variables: vec![
+                "PATH".to_string(),
+                "CARGO_HOME".to_string(),
+                "BACKUP".to_string(),
+            ],
+            ..Contributions::default()
+        };
+        let environment = contributions.environment_for("/sandbox");
+        assert_eq!(
+            environment.variables["PATH"],
+            "/sandbox/.cargo/bin:/host/repo-cache/bin:/nix/store/pkg/share/host/repo/bin",
+            "a sibling directory and a store path keep their text"
+        );
+        assert_eq!(environment.variables["CARGO_HOME"], "/sandbox/.cargo");
+        assert_eq!(
+            environment.variables["BACKUP"], "/host/repo.bak",
+            "a value that merely starts with the root is not the root"
+        );
     }
 
     #[tokio::test]
