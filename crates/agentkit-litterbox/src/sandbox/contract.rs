@@ -81,6 +81,17 @@ pub enum Placement {
     Sandbox,
 }
 
+/// Which store view a devshell step binds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum StoreView {
+    /// The devShell's store closure.
+    #[default]
+    Closure,
+    /// The whole Nix store.
+    Whole,
+}
+
 /// A sort of contribution a host step produces.
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,

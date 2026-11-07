@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::domain::ScmMode;
-use crate::sandbox::contract::ProvisionStep;
+use crate::sandbox::contract::{ProvisionStep, StoreView};
 
 /// A port the project expects to be forwarded.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -57,17 +57,6 @@ pub struct GitConfig {
     /// Whether snapshots go to a branch or a bare clone.
     #[serde(rename = "snapshot-mode", default)]
     pub snapshot_mode: Option<ScmMode>,
-}
-
-/// Which store view a devshell step binds.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum StoreView {
-    /// The devShell's store closure.
-    #[default]
-    Closure,
-    /// The whole Nix store.
-    Whole,
 }
 
 /// The merged configuration.
