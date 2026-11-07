@@ -1,0 +1,14 @@
+flowchart TB
+    cfg["[[provision]]<br/>identity, kind, settings"] --> res["resolver<br/>validates identity, kind and order"]
+    res --> cmd["command step<br/>runs inside the sandbox"]
+    res --> dev["devshell step<br/>runs on the host"]
+    dev --> req["requirements<br/>host: nix, flakes, a store that answers<br/>sandbox: whatever the contributions need"]
+    req --> check["checked before create<br/>an absent requirement refuses, naming it"]
+    dev --> con["contributions<br/>environment variables<br/>read-only mounts"]
+    check --> request["request"]
+    con --> request
+    cmd --> request
+    request --> backend["backend<br/>applies contributions, then runs commands"]
+    backend --> bw["bubblewrap"]
+    backend --> sb["Seatbelt"]
+    backend --> dk["Docker"]

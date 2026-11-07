@@ -40,8 +40,8 @@ flowchart TB
     Q1 --> Q1a["contract enum:<br/>Devshell joins ProvisionKind<br/>every new kind is a contract change"]
     Q1 --> Q1b["registry outside the contract:<br/>step is identity + kind + settings<br/>a new kind is one module"]
 
-    Q2 --> Q2a["kinds:<br/>supporting a kind means applying all its effects"]
-    Q2 --> Q2b["effects:<br/>a backend may refuse one effect and name the remedy"]
+    Q2 --> Q2a["kind support:<br/>a backend that supports a kind applies all its contributions"]
+    Q2 --> Q2b["requirements and contributions:<br/>a backend reports what it can meet and apply, and may refuse one"]
 
     Q1a --> I
     Q1b --> I
@@ -49,8 +49,8 @@ flowchart TB
     Q2b --> I
 
     I --> B["contract and provisioning types change once,<br/>in the shape the findings support"]
-    B --> C["C renders environment, grants and written file"]
-    B --> A["D renders environment, grants and written file"]
+    B --> C["C renders environment and mounts"]
+    B --> A["D renders environment and mounts"]
 
     P -.-> U["until H lands:<br/>no backend applies a devShell;<br/>Docker stays the only backend and rejects the kind;<br/>this specification stays provisional"]
 ```

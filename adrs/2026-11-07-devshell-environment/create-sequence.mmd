@@ -5,13 +5,14 @@ sequenceDiagram
     participant B as Backend
     O->>R: resolve(config, backend)
     R-->>O: ordered steps, kinds validated
-    O->>O: consent check for steps that run project code
-    O->>D: effects(installable, project root)
-    D->>D: path-info validity query, no build
-    D->>D: print-dev-env and the hook under a sanitised baseline
-    D->>D: path-info -r for the store closure
-    D-->>O: environment, grants and written file
+    O->>O: host requirements checked, consent checked
+    O->>D: prepare(installable, project root)
+    D->>D: store query, no build
+    D->>D: enter the devShell under a sanitised caller
+    D->>D: closure query for the mounts
+    D-->>O: environment and read-only mounts
     O->>O: create branch and stage workspace
-    O->>B: create(request with steps and effects)
+    O->>B: create(request with steps and contributions)
+    B->>B: check sandbox requirements
     B-->>O: record
-    O->>O: persist the record and its effects
+    O->>O: persist the record and its contributions
