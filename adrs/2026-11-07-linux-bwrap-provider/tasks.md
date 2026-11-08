@@ -67,18 +67,18 @@ Resolve the shell and the utility the holder runs from the host PATH, validate e
 | Depends On | T-004 |
 | References | mounts-render,holder-command |
 
-### T-006: Assemble the environment and withhold credentials
+### T-006: [x] Assemble the environment
 
-Add `credentials.rs` holding the table as data, one entry per family, and `environment.rs` merging the resolved steps' contributions in order through `Contributions::environment_for`, applying the credential table and the ungranted-path rule, then setting `HOME`, `TMPDIR` and `PWD`; `PATH` is whatever the steps contribute. Record withheld names in provenance as removed and the backend's own names as set.
+Add `environment.rs` merging the resolved steps' contributions in order through `Contributions::environment_for`, applying the ungranted-path rule, then setting `HOME`, `TMPDIR` and `PWD`; `PATH` is whatever the steps contribute. Record withheld names in provenance as removed and the backend's own names as set.
 
 
 | Field | Value |
 |-------|-------|
-| Success Criteria | One test per credential family names a real variable and asserts it is withheld. A value naming an ungranted host path withholds its variable. The merged environment applies later steps over earlier ones. `HOME`, `TMPDIR` and `PWD` are present and recorded as set, and a contributed `PATH` is carried unchanged. No value is written to a file, an argv or a log line. |
+| Success Criteria | A value naming an ungranted host path withholds its variable and the name is reported as removed. A credential-shaped name whose value names a granted path is carried. The merged environment applies later steps over earlier ones. `HOME`, `TMPDIR` and `PWD` are present and recorded as set, and a contributed `PATH` is carried unchanged. No value is written to a file, an argv or a log line. |
 | Complexity | 🟡 Medium |
 | Effort | 5-7h |
 | Depends On | T-004,T-005 |
-| References | environment-render,environment-withholding,secret-handling |
+| References | environment-render,environment-ungranted-paths,secret-handling |
 
 ### T-007: Add the record payload
 

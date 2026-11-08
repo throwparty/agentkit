@@ -1,7 +1,7 @@
 flowchart LR
     subgraph create
         REQ[CreateRequest<br/>steps and contributions] --> CFG[config<br/>typed section]
-        REQ --> ENVV[environment<br/>merge and credential table]
+        REQ --> ENVV[environment<br/>merge and ungranted-path check]
         REQ --> WS[workspace<br/>copy the staged tree]
         REQ --> VIEW[view<br/>validate paths, render argv]
         VIEW --> RUN[holder<br/>spawn bwrap in a scope]
