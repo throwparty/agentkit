@@ -12,6 +12,7 @@ pub mod backend;
 pub mod config;
 pub mod construct;
 pub mod host;
+pub mod view;
 
 /// The backend's own name in records and reports.
 pub const BACKEND: &str = "bubblewrap";

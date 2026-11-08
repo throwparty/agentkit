@@ -11,6 +11,7 @@ use std::fs::File;
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::FileTypeExt;
 use std::path::{Path, PathBuf};
 
 use crate::sandbox::contract::Error;
@@ -127,10 +128,8 @@ impl View {
             } else {
                 check_trusted(path, boundaries)?;
             }
-            let file = pin(path).map_err(|error| {
-                Error::Misconfigured {
-                    message: format!("{} cannot be mounted: {error}", path.display()),
-                }
+            let file = pin(path).map_err(|error| Error::Misconfigured {
+                message: format!("{} cannot be mounted: {error}", path.display()),
             })?;
             let metadata = file.metadata().map_err(|error| Error::Misconfigured {
                 message: format!("{} cannot be inspected: {error}", path.display()),
@@ -212,11 +211,11 @@ fn overlaps(left: &Path, right: &Path) -> bool {
 /// Open a path once, refusing symlinks and magic links.
 fn pin(path: &Path) -> io::Result<File> {
     let path = CString::new(path.as_os_str().as_bytes())?;
-    let how = libc::open_how {
-        flags: libc::O_PATH as u64,
-        mode: 0,
-        resolve: (libc::RESOLVE_NO_SYMLINKS | libc::RESOLVE_NO_MAGICLINKS) as u64,
-    };
+    // SAFETY: open_how is a plain struct of integers, for which all-zero is a
+    // valid value.
+    let mut how: libc::open_how = unsafe { std::mem::zeroed() };
+    how.flags = libc::O_PATH as u64;
+    how.resolve = libc::RESOLVE_NO_SYMLINKS | libc::RESOLVE_NO_MAGICLINKS;
     // SAFETY: the pointers are valid for the duration of the call and the
     // struct matches the kernel's layout for open_how.
     let fd = unsafe {
@@ -361,43 +360,43 @@ mod tests {
             .map(|argument| normalise_descriptors(&argument))
             .collect();
 
-        let expected = vec![
-            "/bin/bwrap",
-            "--unshare-user",
-            "--unshare-pid",
-            "--unshare-ipc",
-            "--unshare-uts",
-            "--unshare-cgroup",
-            "--unshare-net",
-            "--disable-userns",
-            "--hostname",
-            "litterbox",
-            "--proc",
-            "/proc",
-            "--dev",
-            "/dev",
-            "--tmpfs",
-            "/tmp",
-            "--tmpfs",
-            "/home",
-            "--dir",
-            "/home/litterbox",
-            "--ro-bind",
-            "/proc/self/fd/<0>",
-            &grant.join("abc").to_string_lossy(),
-            "--ro-bind",
-            "/proc/self/fd/<1>",
-            &grant.to_string_lossy(),
-            "--bind",
-            &workspace.to_string_lossy(),
-            WORKSPACE,
-            "--chdir",
-            WORKSPACE,
-            "--json-status-fd",
-            "3",
-            "--",
-            "/bin/sleep",
-            "2147483647",
+        let expected: Vec<String> = vec![
+            "/bin/bwrap".to_string(),
+            "--unshare-user".to_string(),
+            "--unshare-pid".to_string(),
+            "--unshare-ipc".to_string(),
+            "--unshare-uts".to_string(),
+            "--unshare-cgroup".to_string(),
+            "--unshare-net".to_string(),
+            "--disable-userns".to_string(),
+            "--hostname".to_string(),
+            "litterbox".to_string(),
+            "--proc".to_string(),
+            "/proc".to_string(),
+            "--dev".to_string(),
+            "/dev".to_string(),
+            "--tmpfs".to_string(),
+            "/tmp".to_string(),
+            "--tmpfs".to_string(),
+            "/home".to_string(),
+            "--dir".to_string(),
+            "/home/litterbox".to_string(),
+            "--ro-bind".to_string(),
+            "/proc/self/fd/<n>".to_string(),
+            grant.join("abc").to_string_lossy().to_string(),
+            "--ro-bind".to_string(),
+            "/proc/self/fd/<n>".to_string(),
+            grant.to_string_lossy().to_string(),
+            "--bind".to_string(),
+            workspace.to_string_lossy().to_string(),
+            WORKSPACE.to_string(),
+            "--chdir".to_string(),
+            WORKSPACE.to_string(),
+            "--json-status-fd".to_string(),
+            "3".to_string(),
+            "--".to_string(),
+            "/bin/sleep".to_string(),
+            "2147483647".to_string(),
         ];
         assert_eq!(argv, expected);
     }
@@ -482,15 +481,17 @@ mod tests {
     fn a_socket_is_refused() {
         let (temporary, grant, workspace) = sandbox_layout();
         let socket = grant.join("socket");
-        let _listener =
-            std::os::unix::net::UnixListener::bind(&socket).expect("listener");
+        let _listener = std::os::unix::net::UnixListener::bind(&socket).expect("listener");
         let requested = vec![Requested {
             path: socket,
             contributed: true,
         }];
         let error = View::build(&requested, &workspace, &boundaries(temporary.path()))
             .expect_err("refused");
-        assert!(error.to_string().contains("not a file or directory"), "{error}");
+        assert!(
+            error.to_string().contains("not a file or directory"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -516,11 +517,72 @@ mod tests {
         assert_eq!(mount.access, Access::ReadWrite);
     }
 
+    #[test]
+    fn the_argv_carries_every_invariant() {
+        let (temporary, grant, workspace) = sandbox_layout();
+        let requested = vec![Requested {
+            path: grant.join("abc"),
+            contributed: true,
+        }];
+        let view = View::build(&requested, &workspace, &boundaries(temporary.path()))
+            .expect("view builds");
+        let options = RenderOptions {
+            bwrap: Path::new("/bin/bwrap"),
+            holder: Path::new("/bin/sleep"),
+            holder_argument: "2147483647",
+            workspace_host: &workspace,
+            status_fd: 3,
+        };
+        let argv = view.render(&options);
+        let contains = |flag: &str| argv.iter().any(|argument| argument == flag);
+
+        for namespace in [
+            "--unshare-user",
+            "--unshare-pid",
+            "--unshare-ipc",
+            "--unshare-uts",
+            "--unshare-cgroup",
+            "--unshare-net",
+        ] {
+            assert!(contains(namespace), "missing {namespace}");
+        }
+        assert!(
+            contains("--disable-userns"),
+            "nested user namespaces are not blocked"
+        );
+        assert!(
+            !contains("--die-with-parent"),
+            "the sandbox is tied to the caller"
+        );
+        assert!(!contains("--as-pid-1"), "the pid-1 process must reap");
+        assert!(
+            !contains("--setenv"),
+            "an environment value reached the argv"
+        );
+        assert!(
+            !contains("--clearenv"),
+            "the spawn carries the environment, not a flag"
+        );
+        assert!(contains("--proc") && contains("--dev") && contains("--tmpfs"));
+        assert_eq!(
+            argv.iter().filter(|argument| *argument == "--bind").count(),
+            1,
+            "the workspace must be the only writable host tree"
+        );
+        assert_eq!(
+            argv.iter()
+                .filter(|argument| *argument == "--ro-bind")
+                .count(),
+            1,
+            "every other host path is read-only"
+        );
+    }
+
     fn normalise_descriptors(argument: &str) -> String {
-        if let Some(rest) = argument.strip_prefix("/proc/self/fd/") {
-            if rest.chars().all(|character| character.is_ascii_digit()) {
-                return "/proc/self/fd/<n>".to_string();
-            }
+        if let Some(rest) = argument.strip_prefix("/proc/self/fd/")
+            && rest.chars().all(|character| character.is_ascii_digit())
+        {
+            return "/proc/self/fd/<n>".to_string();
         }
         argument.to_string()
     }
