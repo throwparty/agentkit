@@ -8,15 +8,21 @@ use std::sync::Arc;
 use super::BACKEND;
 use super::backend::BubblewrapBackend;
 use super::config::BubblewrapConfig;
+use super::host::{SharedHost, SystemHost};
 use crate::sandbox::contract::Error;
 use crate::sandbox::selected::Selected;
 
 /// Build the backend from its configuration section.
 pub fn build(section: &toml::Value) -> Result<Selected, Error> {
+    build_with(section, Arc::new(SystemHost::new()))
+}
+
+/// Build the backend over an explicit host, for tests.
+pub fn build_with(section: &toml::Value, host: SharedHost) -> Result<Selected, Error> {
     let settings = BubblewrapConfig::from_section(section)?.settings()?;
     Ok(Selected::new(
         BACKEND,
-        Arc::new(BubblewrapBackend::new(settings)),
+        Arc::new(BubblewrapBackend::new(settings, host)),
     ))
 }
 
