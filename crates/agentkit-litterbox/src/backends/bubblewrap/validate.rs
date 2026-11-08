@@ -30,11 +30,11 @@ pub enum Verdict {
 
 impl Verdict {
     /// The payload, or the failure a command should report.
-    pub fn require(self) -> Result<BubblewrapData, Error> {
+    pub fn require(self, name: &str) -> Result<BubblewrapData, Error> {
         match self {
             Self::Live(data) => Ok(*data),
             Self::Absent => Err(Error::NotFound {
-                name: String::new(),
+                name: name.to_string(),
             }),
             Self::Forbidden { reason } => Err(Error::Denied {
                 operation: "use the sandbox".to_string(),
@@ -399,7 +399,7 @@ mod tests {
 
     #[test]
     fn require_maps_an_absent_sandbox_to_not_found() {
-        let error = Verdict::Absent.require().expect_err("absent");
+        let error = Verdict::Absent.require("demo").expect_err("absent");
         assert!(matches!(error, Error::NotFound { .. }));
     }
 }

@@ -14,6 +14,7 @@ pub mod construct;
 pub mod environment;
 pub mod holder;
 pub mod host;
+pub mod join;
 pub mod payload;
 pub mod validate;
 pub mod view;
