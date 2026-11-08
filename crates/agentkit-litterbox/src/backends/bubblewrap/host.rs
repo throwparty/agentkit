@@ -380,7 +380,7 @@ impl Host for FakeHost {
     }
 
     fn ownership(&self, path: &Path) -> Option<(u32, u32)> {
-        Some(self.ownership.get(path).copied().unwrap_or((0, 0o755)))
+        self.ownership.get(path).copied()
     }
 
     fn scope_directory(&self, unit: &str) -> Option<PathBuf> {

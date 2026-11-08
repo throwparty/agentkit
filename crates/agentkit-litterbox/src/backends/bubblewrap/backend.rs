@@ -9,14 +9,14 @@ use super::BACKEND;
 use super::host::SharedHost;
 use super::payload::{BubblewrapData, RecordedMount, RecordedRoot};
 use super::view::{Boundaries, RenderOptions, Requested, View, WORKSPACE};
-use super::{environment, holder, join, lifecycle, validate, workspace};
+use super::{environment, holder, join, lifecycle, readiness, validate, workspace};
 use crate::backends::shared::run_steps;
 use crate::sandbox::contract::{
     Backend, ContributionSort, ContributionSupport, CreateRequest, Error, Execution, Inspection,
     ProvisioningClass, ProvisioningFailure, SandboxRecord, Scope,
 };
 use crate::sandbox::facets::{Lifecycle, Limits, ResourceLimits};
-use crate::sandbox::report::{Capability, Check, Readiness, State};
+use crate::sandbox::report::{Capability, Readiness, State};
 
 /// The descriptor bwrap reports its status on.
 const STATUS_FD: i32 = 3;
@@ -120,6 +120,42 @@ impl BubblewrapBackend {
                 }),
         );
         requested
+    }
+
+    /// Apply the configured bounds to the scope the sandbox runs in.
+    fn apply_limits(&self, holder: &holder::Holder) -> Result<(), Error> {
+        let memory = self.settings.memory_mb;
+        let tasks = self.settings.tasks;
+        if memory.is_none() && tasks.is_none() {
+            return Ok(());
+        }
+        let Some(unit) = &holder.unit else {
+            return Err(Error::Unsupported {
+                operation: "bound the sandbox".to_string(),
+                backend: BACKEND.to_string(),
+                primitive: "a cgroup v2 user scope".to_string(),
+                reason: "the sandbox was created without a scope, so the configured bounds \
+                         cannot be applied"
+                    .to_string(),
+                remedy: "remove the bounds, or run on a host with a delegating user manager"
+                    .to_string(),
+            });
+        };
+        if let Some(memory_mb) = memory {
+            self.host
+                .write_scope(unit, "memory.max", &(memory_mb * 1024 * 1024).to_string())
+                .map_err(|error| {
+                    Error::failed(format!("the memory bound was not applied: {error}"))
+                })?;
+        }
+        if let Some(tasks) = tasks {
+            self.host
+                .write_scope(unit, "pids.max", &tasks.to_string())
+                .map_err(|error| {
+                    Error::failed(format!("the task bound was not applied: {error}"))
+                })?;
+        }
+        Ok(())
     }
 
     /// The payload for a sandbox that has started.
@@ -286,22 +322,36 @@ impl Backend for BubblewrapBackend {
         Box::pin(async {
             Ok(Readiness {
                 backend: BACKEND.to_string(),
-                checks: vec![Check {
-                    primitive: "the bubblewrap backend".to_string(),
-                    state: State::Unavailable,
-                    reason: Some("the backend is not wired yet".to_string()),
-                    remedy: Some(
-                        "use a backend that is implemented until the bubblewrap backend lands"
-                            .to_string(),
-                    ),
-                    fallback: None,
-                }],
+                checks: readiness::checks(&*self.host),
             })
         })
     }
 
     fn capabilities(&self) -> BoxFuture<'_, Result<Vec<Capability>, Error>> {
-        Box::pin(async { Ok(Vec::new()) })
+        Box::pin(async {
+            let mut capabilities = Vec::new();
+            let readiness = Readiness {
+                backend: BACKEND.to_string(),
+                checks: readiness::checks(&*self.host),
+            };
+            if let Some(cgroup) = readiness
+                .checks
+                .iter()
+                .find(|check| check.primitive == "a cgroup v2 user scope")
+                && cgroup.state != State::Available
+            {
+                for operation in ["pause and resume", "resource limits"] {
+                    capabilities.push(Capability {
+                        operation: operation.to_string(),
+                        state: cgroup.state,
+                        reason: cgroup.reason.clone(),
+                        remedy: cgroup.remedy.clone(),
+                        fallback: cgroup.fallback.clone(),
+                    });
+                }
+            }
+            Ok(capabilities)
+        })
     }
 
     fn contribution_support(&self) -> Vec<ContributionSupport> {
@@ -374,6 +424,26 @@ impl BubblewrapBackend {
         if directory.exists() {
             return Err(Error::Conflict {
                 name: request.name.clone(),
+            });
+        }
+
+        // Every check has to pass except the cgroup one, which the registry
+        // gates behind the user's acceptance of the degraded mode.
+        for check in readiness::checks(&*self.host) {
+            if check.state == State::Available || check.primitive == "a cgroup v2 user scope" {
+                continue;
+            }
+            return Err(Error::Unavailable {
+                backend: BACKEND.to_string(),
+                reason: format!(
+                    "{} is {:?}: {}",
+                    check.primitive,
+                    check.state,
+                    check.reason.unwrap_or_else(|| "not available".to_string())
+                ),
+                remedy: check
+                    .remedy
+                    .unwrap_or_else(|| "run `litterbox backends`".to_string()),
             });
         }
 
@@ -490,6 +560,8 @@ impl BubblewrapBackend {
             holder::READY_TIMEOUT,
         )
         .await?;
+
+        self.apply_limits(&holder)?;
 
         let data = self.payload(&holder, &view, workspace, environment)?;
         let last_step = Mutex::new(None);

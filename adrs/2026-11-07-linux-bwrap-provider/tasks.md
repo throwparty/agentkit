@@ -171,7 +171,7 @@ Add the lifecycle facet: freeze through the scope and confirm by sampling cumula
 | Depends On | T-010,T-012 |
 | References | lifecycle-facet,lifecycle-works,paused-then-deleted |
 
-### T-014: Implement limits and the degraded mode
+### T-014: [x] Implement limits and the degraded mode
 
 Write `memory.max` and `pids.max` on the scope at create and in `set_limits`, reporting a failed write as a failure. Report the cgroup check as Degraded with a `Fallback` when there is no scope, and replace the facet-derived pause and limits capability entries with that state so the listing cannot offer a bound the host cannot apply.
 
@@ -184,7 +184,7 @@ Write `memory.max` and `pids.max` on the scope at create and in `set_limits`, re
 | Depends On | T-010,T-013 |
 | References | resource-limits,degraded-without-cgroups,degraded-accepted,no-cgroup-delegation |
 
-### T-015: Implement readiness
+### T-015: [x] Implement readiness
 
 Report one check per requirement: the effective uid is not root, bwrap is present, canonical, root-owned, not group or world writable and at least 0.8.0, user namespaces are permitted, a scope is usable or Degraded with the fallback, a holder command resolves, and the shell resolves with its utilities beside it. Refuse create on any check that is not available except the cgroup one, which is gated behind acceptance.
 
