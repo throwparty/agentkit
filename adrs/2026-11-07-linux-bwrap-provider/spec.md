@@ -55,7 +55,7 @@ Litterbox can only sandbox through Docker. Docker reports no contribution suppor
 - Create a holder that runs in seven new namespaces and outlives the command line tool.
 - Run every command as a join into the holder, in the calling process, and make the command a real member of the sandbox pid namespace.
 - Render the contributions as an environment, a set of read-only binds and a writable workspace.
-- Give a sandbox with no provisioning steps a baseline, so a command given to a tool still runs.
+- Keep a sandbox's userland with its provisioning steps: the mechanism supplies only the pause process, not a shell or utilities.
 - Give pause, resume, limits and delete a meaning at the sandbox level, and allow creation without cgroups only when the user accepts the weaker mode.
 - Report readiness for bwrap, user namespaces, cgroup delegation, the holder command and the shell, with a reason and a remedy for each.
 - Record only what a later process needs to join, check it before every use, and never join a process that this backend did not create.
@@ -71,7 +71,7 @@ Litterbox can only sandbox through Docker. Docker reports no contribution suppor
 - Relaxing `--disable-userns` for a workload that creates its own user namespaces.
 - A root daemon, a setuid helper or a system service. The backend runs as the user who invoked it.
 - A survey of where cgroup v2 is available. Readiness reports what this host offers, and the degraded mode covers the rest.
-- A package manager inside the sandbox. The baseline is a shell and the utilities the tools already call.
+- A userland the backend supplies. What a sandbox can run is what its steps contribute; the backend owns only the command that holds the sandbox open.
 - Snapshot, command line and MCP work beyond what the contract already does, and the documentation the roadmap owns. Only this backend's configuration reference is in scope.
 
 
@@ -97,7 +97,7 @@ A command runs inside the sandbox and does not start a second sandbox. Before it
 
 ### FR-004: Environment: Render
 
-A command receives the merged contributions of the resolved steps, in sequence order, rewritten for the sandbox workspace by `Contributions::environment_for`. The backend adds HOME inside the sandbox, TMPDIR on its temporary filesystem, PWD at the workspace, and PATH. PATH is the contributed path followed by the directories of the baseline utilities. The sandbox has exactly that environment. The launcher starts with an otherwise empty environment, and the renderer emits no per-variable environment flag and no clear-environment flag. No value reaches an argv, and nothing from the caller's environment is inherited or readable through `/proc`. Each command's environment is read from `/proc/<sandbox-pid>/environ`, so a later process needs no file and no value is written to disk or to a log. Provenance records the backend's own variables as set, and inspection reports them.
+A command receives the merged contributions of the resolved steps, in sequence order, rewritten for the sandbox workspace by `Contributions::environment_for`. The backend adds HOME inside the sandbox, TMPDIR on its temporary filesystem and PWD at the workspace. PATH is exactly what the steps contribute; the backend does not assemble one, so a command finds what the project provisioned and nothing else. The sandbox has exactly that environment. The launcher starts with an otherwise empty environment, and the renderer emits no per-variable environment flag and no clear-environment flag. No value reaches an argv, and nothing from the caller's environment is inherited or readable through `/proc`. Each command's environment is read from `/proc/<sandbox-pid>/environ`, so a later process needs no file and no value is written to disk or to a log. Provenance records the backend's own variables as set, and inspection reports them.
 
 **Slug:** `environment-render`
 
@@ -115,7 +115,7 @@ Before it renders anything, the backend validates every contributed path. The pa
 
 ### FR-007: Mounts: Render
 
-Each accepted path becomes one read-only bind at its own absolute path, one path at a time, so the view follows the closure and not a hand-maintained list. The workspace is bound read-write at the sandbox workspace path and is the only writable host tree. The private root, the temporary filesystem and the home are writable inside the sandbox and are not host trees. The view also holds what the baseline needs, which is proc, dev, the host system profile where the platform has one, and a shell with the utilities the tools run. Those utilities are cat, grep, timeout and sleep today. The backend resolves them on the host, validates them the way it validates bwrap, and puts them on the sandbox PATH under the names the tools call. A project with no provisioning step therefore has a shell that can evaluate a command. The backend reports both contribution sorts as Available, which is what lets the resolver accept a devshell step for this backend.
+Each accepted path becomes one read-only bind at its own absolute path, one path at a time, so the view follows the closure and not a hand-maintained list. The workspace is bound read-write at the sandbox workspace path and is the only writable host tree. The private root, the temporary filesystem and the home are writable inside the sandbox and are not host trees. The view also holds what the mechanism needs to hold the sandbox open: proc, dev, the shell and the utility that blocks for the life of the sandbox, and the interpreter and libraries the host's loader resolves for them. Nothing else is assumed present: the sandbox's userland is what the steps contribute, so a project with no provisioning step has a sandbox that runs nothing until it declares one. The backend reports both contribution sorts as Available, which is what lets the resolver accept a devshell step for this backend.
 
 **Slug:** `mounts-render`
 
@@ -213,7 +213,7 @@ The backend starts bwrap, the holder command, the scope launcher when a scope is
 
 ### NFR-003: Golden Argv
 
-One renderer builds bwrap's argv from a typed view. Tests assert the exact vector for the baseline view, for a request with an environment, a two-path closure and a workspace, and for the degraded form without a scope. Each test names the invariants the vector carries. Those are the seven namespaces, the block on nested user namespaces, the absence of a parent-death tie, a private root, a read-only store, the workspace as the only writable host tree, no per-variable environment flag, no clear-environment flag, and the descriptor bind. A second test proves that removing any one of them changes the vector, and that the renderer refuses when one cannot be emitted, so deleting a policy flag means editing a test. Detachment is asserted where it can be seen. The spawn sets all three standard streams to null and asks for no new session.
+One renderer builds bwrap's argv from a typed view. Tests assert the exact vector for the empty view, for a request with an environment, a two-path closure and a workspace, and for the degraded form without a scope. Each test names the invariants the vector carries. Those are the seven namespaces, the block on nested user namespaces, the absence of a parent-death tie, a private root, a read-only store, the workspace as the only writable host tree, no per-variable environment flag, no clear-environment flag, and the descriptor bind. A second test proves that removing any one of them changes the vector, and that the renderer refuses when one cannot be emitted, so deleting a policy flag means editing a test. Detachment is asserted where it can be seen. The spawn sets all three standard streams to null and asks for no new session.
 
 **Slug:** `golden-argv`
 
@@ -275,7 +275,7 @@ Inside the sandbox a command sees the devShell's variables pointing at the sandb
 
 ### AC-006: Isolation
 
-A write to a store path fails read-only. A write into the host home, the metadata directory, the state root or any ungranted host path fails, or the path does not exist. A write to the sandbox home and to `/tmp` succeeds, which proves the baseline is not being mistaken for the boundary. A host credential path does not exist in the view. An outbound connection fails with no route. A granted tree that holds a unix socket is refused at create rather than mounted.
+A write to a store path fails read-only. A write into the host home, the metadata directory, the state root or any ungranted host path fails, or the path does not exist. A write to the sandbox home and to `/tmp` succeeds, which proves the mechanism's own binds are not being mistaken for the boundary. A host credential path does not exist in the view. An outbound connection fails with no route. A granted tree that holds a unix socket is refused at create rather than mounted.
 
 **Slug:** `isolation-holds`
 
@@ -321,11 +321,11 @@ The existing suite and `arch-lint check` pass, except the two registry tests tha
 
 **Slug:** `docker-unchanged`
 
-### AC-014: Baseline Userland
+### AC-014: Holder Command
 
-A project with no provisioning step can evaluate a command string through the command line tool and through the MCP read, write, grep and bash tools, because the baseline binds a shell and the utilities those paths call. Each one resolves on the sandbox PATH under the name it is called by.
+The sandbox holds exactly the command that keeps it alive — a shell and one blocking utility — and the interpreter and libraries they load. It assumes no other tool: a command resolves only what the project's steps contributed, so a project with no provisioning step has a shell-less sandbox and its first command fails with the shell's own error. Readiness reports a missing or untrusted holder command as Unavailable with a remedy.
 
-**Slug:** `baseline-userland`
+**Slug:** `holder-command`
 
 ### AC-015: Record Edition Mismatch
 
