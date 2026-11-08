@@ -20,4 +20,5 @@ This directory contains ADRs organized by status. ADRs follow a structured workf
 
 ## Draft
 
+- [`2026-11-07-devshell-environment`](./2026-11-07-devshell-environment/) - Specification: DevShell Environment
 - [`2026-09-26-mcp-toggle`](./2026-09-26-mcp-toggle/) - Toggling of Configured MCP Server Availability

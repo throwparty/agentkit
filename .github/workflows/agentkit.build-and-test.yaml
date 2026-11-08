@@ -63,6 +63,14 @@ jobs:
       - name: Test
         if: "!cancelled()"
         run: cargo test --locked
+      - name: Test the devshell-environment prototype
+        if: "!cancelled()"
+        # The prototype is deliberately outside the workspace, so the workspace
+        # commands above never reach it.
+        run: |
+          cd adrs/2026-11-07-devshell-environment/poc/prepare
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked
       - name: Test (Docker sandbox)
         if: "!cancelled()"
         timeout-minutes: 30
