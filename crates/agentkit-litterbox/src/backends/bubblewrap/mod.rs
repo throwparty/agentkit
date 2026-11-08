@@ -17,6 +17,7 @@ pub mod host;
 pub mod payload;
 pub mod validate;
 pub mod view;
+pub mod workspace;
 
 /// The backend's own name in records and reports.
 pub const BACKEND: &str = "bubblewrap";

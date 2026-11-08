@@ -106,7 +106,7 @@ Add the single validation function that returns Absent, Forbidden, Editions or L
 | Depends On | T-007 |
 | References | record-validation,fail-closed,stale-holder,foreign-holder,foreign-record |
 
-### T-009: Materialise the workspace and transfer into it
+### T-009: [x] Materialise the workspace and transfer into it
 
 Copy the staged temporary tree into `data_dir/litterbox/bubblewrap/<project-slug>/<sandbox-name>/workspace` without following a link. Implement upload and download through an `O_PATH` descriptor with `RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS`, copying a directory recursively, preserving modes and keeping symlinks as symlinks.
 
