@@ -3,6 +3,8 @@
 //! The set is compiled in: `backends/registry.rs` is the only place a
 //! mechanism is selected or constructed.
 
+#[cfg(target_os = "linux")]
+pub(crate) mod bubblewrap;
 pub(crate) mod docker;
 pub mod registry;
 pub(crate) mod shared;
