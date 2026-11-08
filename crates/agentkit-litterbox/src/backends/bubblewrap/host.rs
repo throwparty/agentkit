@@ -114,8 +114,14 @@ pub trait Host: Send + Sync {
     fn scope_directory(&self, unit: &str) -> Option<PathBuf>;
     /// Read a file in a scope's cgroup directory.
     fn read_scope(&self, unit: &str, file: &str) -> Option<String>;
+    /// The uid the caller runs as.
+    fn effective_uid(&self) -> u32;
     /// Write a file in a scope's cgroup directory.
     fn write_scope(&self, unit: &str, file: &str, value: &str) -> std::io::Result<()>;
+    /// Every process in the namespace the given pid belongs to.
+    fn namespace_members(&self, pid: u32) -> Option<Vec<u32>>;
+    /// A process's cumulative CPU time in clock ticks.
+    fn cpu_time(&self, pid: u32) -> Option<u64>;
 }
 
 /// The host this process is running on.
@@ -285,6 +291,41 @@ impl Host for SystemHost {
             .ok_or_else(|| std::io::Error::other(format!("no scope named {unit}")))?;
         std::fs::write(directory.join(file), value)
     }
+
+    fn effective_uid(&self) -> u32 {
+        // SAFETY: geteuid has no preconditions and cannot fail.
+        unsafe { libc::geteuid() }
+    }
+
+    fn namespace_members(&self, pid: u32) -> Option<Vec<u32>> {
+        let namespace = std::fs::read_link(format!("/proc/{pid}/ns/pid")).ok()?;
+        let mut members = Vec::new();
+        for entry in std::fs::read_dir("/proc").ok()? {
+            let entry = entry.ok()?;
+            let name = entry.file_name();
+            let Some(candidate) = name.to_str().and_then(|name| name.parse::<u32>().ok()) else {
+                continue;
+            };
+            let Ok(link) = std::fs::read_link(format!("/proc/{candidate}/ns/pid")) else {
+                continue;
+            };
+            if link == namespace {
+                members.push(candidate);
+            }
+        }
+        members.sort_unstable();
+        Some(members)
+    }
+
+    fn cpu_time(&self, pid: u32) -> Option<u64> {
+        let text = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        let close = text.rfind(')')?;
+        let fields: Vec<&str> = text[close + 1..].split_whitespace().collect();
+        // Field 14 and 15 in the whole line; eleven fields precede utime.
+        let utime: u64 = fields.get(11)?.parse().ok()?;
+        let stime: u64 = fields.get(12)?.parse().ok()?;
+        Some(utime + stime)
+    }
 }
 
 /// The host, shared with a backend.
@@ -361,6 +402,18 @@ impl Host for FakeHost {
         }
         let _ = value;
         Ok(())
+    }
+
+    fn effective_uid(&self) -> u32 {
+        1000
+    }
+
+    fn namespace_members(&self, pid: u32) -> Option<Vec<u32>> {
+        self.processes.get(&pid).map(|_| vec![pid])
+    }
+
+    fn cpu_time(&self, pid: u32) -> Option<u64> {
+        self.processes.get(&pid).map(|_| 0)
     }
 }
 

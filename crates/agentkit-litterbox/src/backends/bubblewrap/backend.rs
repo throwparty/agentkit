@@ -9,12 +9,13 @@ use super::BACKEND;
 use super::host::SharedHost;
 use super::payload::{BubblewrapData, RecordedMount, RecordedRoot};
 use super::view::{Boundaries, RenderOptions, Requested, View, WORKSPACE};
-use super::{environment, holder, join, validate, workspace};
+use super::{environment, holder, join, lifecycle, validate, workspace};
 use crate::backends::shared::run_steps;
 use crate::sandbox::contract::{
     Backend, ContributionSort, ContributionSupport, CreateRequest, Error, Execution, Inspection,
     ProvisioningClass, ProvisioningFailure, SandboxRecord, Scope,
 };
+use crate::sandbox::facets::{Lifecycle, Limits, ResourceLimits};
 use crate::sandbox::report::{Capability, Check, Readiness, State};
 
 /// The descriptor bwrap reports its status on.
@@ -180,6 +181,21 @@ impl BubblewrapBackend {
         })
     }
 
+    /// The payload of a live sandbox, or the failure its operation reports.
+    fn live(&self, sandbox: &SandboxRecord) -> Result<BubblewrapData, Error> {
+        match validate::validate(sandbox, &*self.host) {
+            validate::Verdict::Live(data) => Ok(*data),
+            validate::Verdict::Absent => Err(Error::NotFound {
+                name: sandbox.name.clone(),
+            }),
+            validate::Verdict::Forbidden { reason } => Err(Error::Denied {
+                operation: format!("use '{}'", sandbox.name),
+                reason,
+            }),
+            validate::Verdict::Editions(error) => Err(error),
+        }
+    }
+
     fn cleanup(&self, project: &str, name: &str, holder: Option<&holder::Holder>) {
         if let Some(holder) = holder
             && let Err(error) =
@@ -305,6 +321,37 @@ impl Backend for BubblewrapBackend {
                 fallback: None,
             },
         ]
+    }
+}
+
+impl Lifecycle for BubblewrapBackend {
+    fn pause<'a>(&'a self, sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>> {
+        Box::pin(async move {
+            let data = self.live(sandbox)?;
+            lifecycle::pause(&*self.host, &data).await
+        })
+    }
+
+    fn resume<'a>(&'a self, sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>> {
+        Box::pin(async move {
+            let data = self.live(sandbox)?;
+            lifecycle::resume(&*self.host, &data)
+        })
+    }
+}
+
+impl Limits for BubblewrapBackend {
+    fn set_limits(
+        &self,
+        sandbox: &SandboxRecord,
+        limits: &ResourceLimits,
+    ) -> BoxFuture<'_, Result<(), Error>> {
+        let data = match self.live(sandbox) {
+            Ok(data) => data,
+            Err(error) => return Box::pin(async move { Err(error) }),
+        };
+        let limits = *limits;
+        Box::pin(async move { lifecycle::set_limits(&*self.host, &data, &limits) })
     }
 }
 

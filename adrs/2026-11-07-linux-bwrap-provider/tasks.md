@@ -158,7 +158,7 @@ Add `join.rs`: open the seven namespace descriptors and the root descriptor befo
 | Depends On | T-008,T-010 |
 | References | exec-join,joined-process-identity,shared-context,killed-client,concurrent-commands |
 
-### T-013: Implement pause, resume and the scope
+### T-013: [x] Implement pause, resume and the scope
 
 Add the lifecycle facet: freeze through the scope and confirm by sampling cumulative CPU time until it settles, then thaw and report a failure if it does not. Record the paused state so inspection and a later process can report it. Without a scope, and only after acceptance, pause and resume use the stop-and-rescan loop over the pid namespace.
 
