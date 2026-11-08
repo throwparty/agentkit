@@ -3,7 +3,6 @@
 use std::path::Path;
 use std::process::Command;
 
-use super::BACKEND;
 use super::holder;
 use super::host::Host;
 use crate::sandbox::report::{Check, Fallback, State};
@@ -195,11 +194,6 @@ fn cgroup_check(host: &dyn Host) -> Check {
                 .to_string(),
         }),
     }
-}
-
-/// The backend's name in a report.
-pub fn backend() -> String {
-    BACKEND.to_string()
 }
 
 #[cfg(test)]

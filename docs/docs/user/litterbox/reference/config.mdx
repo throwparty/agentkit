@@ -64,6 +64,15 @@ pids-limit = 512
 # Extra Linux capabilities to grant, such as CHOWN or SETUID. Empty by default;
 # every other capability is dropped.
 cap-add = []
+
+# Bubblewrap's own section. It needs no image: the sandbox is a holder process
+# in unprivileged user namespaces.
+[backends.bubblewrap]
+# Memory ceiling per sandbox, in MiB. At least 6. Unset means no bound, and a
+# bound needs a cgroup v2 user scope.
+memory-mb = 4096
+# Maximum tasks or processes per sandbox. At least 1. Unset means no bound.
+tasks = 512
 ```
 
 Prefer pinning the image by digest (`image = "ubuntu@sha256:..."`): a tag can

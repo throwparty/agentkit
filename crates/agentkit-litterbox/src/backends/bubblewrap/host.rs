@@ -466,13 +466,4 @@ mod tests {
         assert!(host.namespaces(u32::MAX).is_none());
         assert!(host.environment(u32::MAX).is_none());
     }
-
-    fn libc_geteuid() -> u32 {
-        // SAFETY: geteuid has no preconditions and cannot fail.
-        unsafe { geteuid() }
-    }
-
-    unsafe extern "C" {
-        fn geteuid() -> u32;
-    }
 }
