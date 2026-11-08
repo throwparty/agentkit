@@ -132,7 +132,7 @@ Add `holder.rs` building the spawn: the rendered argv, all three standard stream
 | Depends On | T-004,T-006,T-007 |
 | References | holder-create,setup-diagnostics,cost,large-closure-create,large-closure |
 
-### T-011: Implement create in the backend
+### T-011: [x] Implement create in the backend
 
 Assemble create: refuse ports with Unsupported naming forwarding, refuse a duplicate name with Conflict before any process starts, run the sandbox steps through the shared runner under the shared budget, and write the payload once the view is ready. Record no sandbox on any refusal.
 
@@ -145,7 +145,7 @@ Assemble create: refuse ports with Unsupported naming forwarding, refuse a dupli
 | Depends On | T-008,T-009,T-010 |
 | References | holder-create,ports-refused,fail-closed,missing-contributed-path,ports-refused-create |
 
-### T-012: Implement the join
+### T-012: [x] Implement the join
 
 Add `join.rs`: open the seven namespace descriptors and the root descriptor before joining, join the user namespace that owns the others through `NS_GET_USERNS`, then ipc, net, pid, mnt, uts and cgroup, then the sandbox's own user namespace, fork again, close descriptors above 2, chroot through the pinned root, chdir, set no-new-privileges, set uid and gid, clear capabilities, verify `/proc/self/ns` against the record, and exec with the environment read from the sandbox. Never call setgroups. Map the reserved statuses to named errors.
 

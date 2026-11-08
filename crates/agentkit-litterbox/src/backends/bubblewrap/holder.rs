@@ -214,6 +214,9 @@ pub struct Holder {
 
 /// Parse bwrap's status document.
 pub fn parse_status(text: &str) -> Option<Status> {
+    let text = text.trim();
+    let text = text.strip_prefix('{').unwrap_or(text);
+    let text = text.strip_suffix('}').unwrap_or(text);
     let mut sandbox_pid = None;
     let mut inodes = [0u64; 7];
     let names = [
@@ -225,10 +228,7 @@ pub fn parse_status(text: &str) -> Option<Status> {
         "uts-namespace",
         "cgroup-namespace",
     ];
-    for field in text
-        .trim_matches(|character| character == '{' || character == '}')
-        .split(',')
-    {
+    for field in text.split(',') {
         let (name, value) = field.split_once(':')?;
         let name = name.trim().trim_matches('"');
         let value = value.trim().parse::<u64>().ok()?;
@@ -241,7 +241,7 @@ pub fn parse_status(text: &str) -> Option<Status> {
         }
     }
     let sandbox_pid = sandbox_pid?;
-    if inodes.contains(&0) {
+    if inodes[1..].contains(&0) {
         return None;
     }
     Some(Status {
@@ -264,9 +264,10 @@ pub struct Start<'a> {
     pub argv: &'a [String],
     /// The environment the sandbox receives.
     pub environment: &'a Environment,
-    /// The scope unit to start it in, when one is used.
-    pub unit: Option<&'a str>,
+    /// The scope launcher and its unit, when a scope is used.
+    pub scope: Option<(&'a Path, &'a str)>,
     /// Where bwrap writes its status document.
+    pub host: &'a dyn Host,
     pub status_path: &'a Path,
     /// Where bwrap's diagnostics go.
     pub stderr_path: &'a Path,
@@ -292,18 +293,8 @@ pub fn start(start: &Start<'_>) -> Result<Holder, Error> {
         })?;
 
     let mut argv = start.argv.to_vec();
-    let mut command = if let Some(unit) = start.unit {
-        let mut scoped = vec![
-            "systemd-run".to_string(),
-            "--user".to_string(),
-            "--scope".to_string(),
-            "--quiet".to_string(),
-            "--unit".to_string(),
-            format!("{unit}.scope"),
-            "--".to_string(),
-        ];
-        scoped.append(&mut argv);
-        argv = scoped;
+    let mut command = if let Some((launcher, unit)) = start.scope {
+        argv = scoped_argv(launcher, unit, &argv);
         let mut command = std::process::Command::new(&argv[0]);
         command.args(&argv[1..]);
         command
@@ -319,6 +310,16 @@ pub fn start(start: &Start<'_>) -> Result<Holder, Error> {
         .stderr(std::process::Stdio::from(stderr));
     command.env_clear();
     command.envs(&start.environment.variables);
+    if start.scope.is_some() {
+        // The scope launcher reaches the user manager over the caller's bus,
+        // and bwrap unsets these before the command runs, so the sandbox never
+        // sees them.
+        for name in ["XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"] {
+            if let Ok(value) = std::env::var(name) {
+                command.env(name, value);
+            }
+        }
+    }
     let status_fd = status.as_raw_fd();
     // SAFETY: dup2 is async-signal-safe and the descriptor is open for the
     // lifetime of the spawn.
@@ -328,11 +329,17 @@ pub fn start(start: &Start<'_>) -> Result<Holder, Error> {
             if libc::dup2(status_fd, 3) < 0 {
                 return Err(io::Error::last_os_error());
             }
+            // `dup2` with the same descriptor does nothing, so the close-on-exec
+            // flag has to be cleared explicitly or the status file never
+            // reaches bwrap.
+            if libc::fcntl(3, libc::F_SETFD, 0) < 0 {
+                return Err(io::Error::last_os_error());
+            }
             Ok(())
         });
     }
 
-    let child = command.spawn().map_err(|error| Error::Unavailable {
+    let mut child = command.spawn().map_err(|error| Error::Unavailable {
         backend: BACKEND.to_string(),
         reason: format!("{} could not be started: {error}", argv[0]),
         remedy: "install bubblewrap or correct the backend's binary path".to_string(),
@@ -343,15 +350,22 @@ pub fn start(start: &Start<'_>) -> Result<Holder, Error> {
     loop {
         let text = std::fs::read_to_string(start.status_path).unwrap_or_default();
         if let Some(status) = parse_status(&text) {
+            // bwrap's document names six namespaces: the sandbox's own user
+            // namespace is not one of them, so it is read from the process.
+            let namespaces = start
+                .host
+                .namespaces(status.sandbox_pid)
+                .unwrap_or(status.namespaces);
             return Ok(Holder {
                 launcher_pid,
                 sandbox_pid: status.sandbox_pid,
-                namespaces: status.namespaces,
-                unit: start.unit.map(str::to_string),
+                namespaces,
+                unit: start.scope.map(|(_, unit)| unit.to_string()),
             });
         }
         if Instant::now() >= deadline {
             let diagnostic = diagnostic(start.stderr_path);
+            let _ = child.kill();
             return Err(Error::failed(format!(
                 "the sandbox did not report itself within {}s{diagnostic}",
                 STATUS_TIMEOUT.as_secs()
@@ -359,6 +373,34 @@ pub fn start(start: &Start<'_>) -> Result<Holder, Error> {
         }
         std::thread::sleep(Duration::from_millis(10));
     }
+}
+
+/// Wrap bwrap's argv in a user scope, and keep the bus variables out of the
+/// sandbox.
+fn scoped_argv(launcher: &Path, unit: &str, argv: &[String]) -> Vec<String> {
+    let mut inner = argv.to_vec();
+    if let Some(separator) = inner.iter().position(|argument| argument == "--") {
+        inner.splice(
+            separator..separator,
+            [
+                "--unsetenv".to_string(),
+                "XDG_RUNTIME_DIR".to_string(),
+                "--unsetenv".to_string(),
+                "DBUS_SESSION_BUS_ADDRESS".to_string(),
+            ],
+        );
+    }
+    let mut scoped = vec![
+        launcher.to_string_lossy().to_string(),
+        "--user".to_string(),
+        "--scope".to_string(),
+        "--quiet".to_string(),
+        "--unit".to_string(),
+        format!("{unit}.scope"),
+        "--".to_string(),
+    ];
+    scoped.extend(inner);
+    scoped
 }
 
 /// Wait until every expected mount is present with its recorded access.
@@ -456,7 +498,7 @@ mod tests {
     };
     use crate::backends::bubblewrap::view::{Access, Mount};
 
-    const STATUS: &str = r#"{ "child-pid": 4242, "cgroup-namespace": 7, "ipc-namespace": 2, "mnt-namespace": 5, "net-namespace": 3, "pid-namespace": 4, "user-namespace": 1, "uts-namespace": 6 }"#;
+    const STATUS: &str = "{\"child-pid\": 4242, \"cgroup-namespace\": 7, \"ipc-namespace\": 2, \"mnt-namespace\": 5, \"net-namespace\": 3, \"pid-namespace\": 4, \"uts-namespace\": 6}\n";
 
     #[test]
     fn a_loader_trace_names_the_libraries_and_the_interpreter() {
@@ -523,7 +565,7 @@ mod tests {
         assert_eq!(
             status.namespaces.entries(),
             [
-                ("user", 1),
+                ("user", 0),
                 ("ipc", 2),
                 ("net", 3),
                 ("pid", 4),

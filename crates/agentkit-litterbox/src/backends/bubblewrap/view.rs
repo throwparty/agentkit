@@ -119,20 +119,28 @@ impl View {
         let mut pinned = Vec::with_capacity(requested.len());
         let mut seen = std::collections::BTreeSet::new();
         for request in requested {
-            let path = request.path.as_path();
-            if !seen.insert(path.to_path_buf()) {
+            // A trusted path may be a symlink the host owns, such as a library
+            // alias or a store path. Resolve it to the file to open, but mount
+            // it under the name the sandbox looks it up by; replacing the name
+            // with the target would leave the name missing from the view.
+            let target = if request.contributed {
+                request.path.clone()
+            } else {
+                std::fs::canonicalize(&request.path).unwrap_or_else(|_| request.path.clone())
+            };
+            if !seen.insert(request.path.clone()) {
                 continue;
             }
             if request.contributed {
-                check_contributed(path, workspace, boundaries)?;
+                check_contributed(&request.path, workspace, boundaries)?;
             } else {
-                check_trusted(path, boundaries)?;
+                check_trusted(&target, boundaries)?;
             }
-            let file = pin(path).map_err(|error| Error::Misconfigured {
-                message: format!("{} cannot be mounted: {error}", path.display()),
+            let file = pin(&target).map_err(|error| Error::Misconfigured {
+                message: format!("{} cannot be mounted: {error}", request.path.display()),
             })?;
             let metadata = file.metadata().map_err(|error| Error::Misconfigured {
-                message: format!("{} cannot be inspected: {error}", path.display()),
+                message: format!("{} cannot be inspected: {error}", request.path.display()),
             })?;
             if metadata.file_type().is_socket()
                 || metadata.file_type().is_fifo()
@@ -142,13 +150,13 @@ impl View {
                 return Err(Error::Misconfigured {
                     message: format!(
                         "{} is not a file or directory; a sandbox mount binds neither",
-                        path.display()
+                        request.path.display()
                     ),
                 });
             }
             pinned.push(Pinned {
                 mount: Mount {
-                    path: path.to_path_buf(),
+                    path: request.path.clone(),
                     access: Access::ReadOnly,
                 },
                 file,
@@ -242,7 +250,7 @@ pub struct RenderOptions<'a> {
     /// The holder command, bound into the view.
     pub holder: &'a Path,
     /// The argument the holder runs with.
-    pub holder_argument: &'a str,
+    pub holder_arguments: &'a [String],
     /// The host directory bound at the workspace path.
     pub workspace_host: &'a Path,
     /// The descriptor bwrap reports its status on.
@@ -250,6 +258,14 @@ pub struct RenderOptions<'a> {
 }
 
 impl View {
+    /// The mounts this view holds, in render order.
+    pub fn mounts(&self) -> Vec<Mount> {
+        self.pinned
+            .iter()
+            .map(|pinned| pinned.mount.clone())
+            .collect()
+    }
+
     /// Render bwrap's argv for this view.
     pub fn render(&self, options: &RenderOptions<'_>) -> Vec<String> {
         let mut argv: Vec<String> = Vec::new();
@@ -288,7 +304,9 @@ impl View {
         push(options.status_fd.to_string());
         push("--".to_string());
         push(options.holder.to_string_lossy().to_string());
-        push(options.holder_argument.to_string());
+        for argument in options.holder_arguments {
+            push(argument.clone());
+        }
         argv
     }
 }
@@ -350,7 +368,7 @@ mod tests {
         let options = RenderOptions {
             bwrap: Path::new("/bin/bwrap"),
             holder: Path::new("/bin/sleep"),
-            holder_argument: "2147483647",
+            holder_arguments: &[String::from("2147483647")],
             workspace_host: &workspace,
             status_fd: 3,
         };
@@ -495,6 +513,23 @@ mod tests {
     }
 
     #[test]
+    fn a_trusted_symlink_is_mounted_at_the_name_it_was_given() {
+        let (temporary, grant, workspace) = sandbox_layout();
+        let alias = grant.join("libfoo.so.1");
+        std::os::unix::fs::symlink(grant.join("abc"), &alias).expect("symlink");
+        let requested = vec![Requested {
+            path: alias.clone(),
+            contributed: false,
+        }];
+        let view = View::build(&requested, &workspace, &boundaries(temporary.path()))
+            .expect("view builds");
+        assert_eq!(
+            view.pinned[0].mount.path, alias,
+            "the sandbox must find the name the loader asks for"
+        );
+    }
+
+    #[test]
     fn a_trusted_path_outside_the_grants_is_allowed() {
         let (temporary, _grant, workspace) = sandbox_layout();
         let shell = temporary.path().join("shell");
@@ -529,7 +564,7 @@ mod tests {
         let options = RenderOptions {
             bwrap: Path::new("/bin/bwrap"),
             holder: Path::new("/bin/sleep"),
-            holder_argument: "2147483647",
+            holder_arguments: &[String::from("2147483647")],
             workspace_host: &workspace,
             status_fd: 3,
         };
