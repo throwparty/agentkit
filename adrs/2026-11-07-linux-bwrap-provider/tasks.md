@@ -41,7 +41,7 @@ Define the `Host` trait covering the reads and writes the backend needs: a pid's
 | Depends On | T-002 |
 | References | test-coverage |
 
-### T-004: Render the view and its argv
+### T-004: [x] Render the view and its argv
 
 Add `view.rs` with `Mount { sandbox_path, access }`, the ordered view, and the validation rules: beneath the store root, not a protected root, the home, the metadata directory or the state directory, not a socket, device or FIFO, and no overlap with the workspace. Open each accepted path with `openat2` and `RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS`, and emit the descriptor as `/proc/self/fd/N`. Render the whole argv: seven namespaces, the nested-userns block, private root, proc, dev, tmpfs, home, and the mounts.
 
