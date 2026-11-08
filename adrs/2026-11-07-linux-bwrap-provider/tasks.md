@@ -119,7 +119,7 @@ Copy the staged temporary tree into `data_dir/litterbox/bubblewrap/<project-slug
 | Depends On | T-007 |
 | References | workspace-materialisation,awkward-source-path |
 
-### T-010: Start the holder and wait for the view
+### T-010: [x] Start the holder and wait for the view
 
 Add `holder.rs` building the spawn: the rendered argv, all three standard streams null, a cleared environment carrying only the assembled sandbox environment, and `systemd-run --user --scope --unit` when a scope is available. Read the status document with a timeout, then poll the mount table until every recorded host path is present with its recorded access. Tear down by killing the sandbox pid, writing `cgroup.kill` when a scope exists, waiting for the namespace to empty and removing the state directory.
 
