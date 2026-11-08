@@ -256,8 +256,61 @@ impl Backend for BubblewrapBackend {
         Box::pin(async move { self.create_sandbox(request).await })
     }
 
-    fn list<'a>(&'a self, _scope: &'a Scope) -> BoxFuture<'a, Result<Vec<SandboxRecord>, Error>> {
-        Box::pin(async { Ok(Vec::new()) })
+    fn list<'a>(&'a self, scope: &'a Scope) -> BoxFuture<'a, Result<Vec<SandboxRecord>, Error>> {
+        Box::pin(async move {
+            let base = agentkit_common::data_dir("litterbox").join("bubblewrap");
+            let projects: Vec<PathBuf> = match scope {
+                Scope::Repository { project_slug } => vec![base.join(project_slug)],
+                Scope::Machine => std::fs::read_dir(&base)
+                    .map(|entries| {
+                        entries
+                            .filter_map(Result::ok)
+                            .map(|entry| entry.path())
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            };
+            let mut records = Vec::new();
+            for project in projects {
+                let Ok(entries) = std::fs::read_dir(&project) else {
+                    continue;
+                };
+                for entry in entries.filter_map(Result::ok) {
+                    let payload_path = entry.path().join("payload.toml");
+                    let Ok(text) = std::fs::read_to_string(&payload_path) else {
+                        tracing::warn!(
+                            path = %payload_path.display(),
+                            "a sandbox state directory has no readable payload"
+                        );
+                        continue;
+                    };
+                    let data: BubblewrapData = match toml::from_str(&text) {
+                        Ok(data) => data,
+                        Err(error) => {
+                            tracing::warn!(
+                                path = %payload_path.display(),
+                                %error,
+                                "a sandbox payload is corrupt"
+                            );
+                            continue;
+                        }
+                    };
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    let project_slug = project
+                        .file_name()
+                        .map(|value| value.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    records.push(SandboxRecord {
+                        name,
+                        backend: BACKEND.to_string(),
+                        project_slug,
+                        data: toml::Value::try_from(data)
+                            .unwrap_or(toml::Value::Table(Default::default())),
+                    });
+                }
+            }
+            Ok(records)
+        })
     }
 
     fn exec<'a>(
@@ -291,31 +344,103 @@ impl Backend for BubblewrapBackend {
 
     fn upload<'a>(
         &'a self,
-        _sandbox: &'a SandboxRecord,
-        _source: &'a Path,
-        _destination: &'a str,
+        sandbox: &'a SandboxRecord,
+        source: &'a Path,
+        destination: &'a str,
     ) -> BoxFuture<'a, Result<(), Error>> {
-        Box::pin(async move { Err(Error::failed("upload is not implemented yet")) })
+        Box::pin(async move {
+            let data = self.live(sandbox)?;
+            workspace::transfer_in(Path::new(&data.workspace_host), source, destination)
+        })
     }
 
     fn download<'a>(
         &'a self,
-        _sandbox: &'a SandboxRecord,
-        _source: &'a str,
-        _destination: &'a Path,
+        sandbox: &'a SandboxRecord,
+        source: &'a str,
+        destination: &'a Path,
     ) -> BoxFuture<'a, Result<(), Error>> {
-        Box::pin(async move { Err(Error::failed("download is not implemented yet")) })
+        Box::pin(async move {
+            let data = self.live(sandbox)?;
+            workspace::transfer_out(Path::new(&data.workspace_host), source, destination)
+        })
     }
 
     fn inspect<'a>(
         &'a self,
-        _sandbox: &'a SandboxRecord,
+        sandbox: &'a SandboxRecord,
     ) -> BoxFuture<'a, Result<Inspection, Error>> {
-        Box::pin(async move { Err(Error::failed("inspection is not implemented yet")) })
+        Box::pin(async move {
+            match validate::validate(sandbox, &*self.host) {
+                validate::Verdict::Live(data) => Ok(Inspection {
+                    name: sandbox.name.clone(),
+                    backend: BACKEND.to_string(),
+                    status: if lifecycle::is_paused(&*self.host, &data) {
+                        crate::sandbox::contract::SandboxStatus::Paused
+                    } else {
+                        crate::sandbox::contract::SandboxStatus::Active
+                    },
+                    egress: crate::sandbox::report::EgressPosture::Denied,
+                    workspace: data.workspace.clone(),
+                    environment: data.environment.clone(),
+                    forwards: Vec::new(),
+                }),
+                validate::Verdict::Absent => Ok(Inspection {
+                    name: sandbox.name.clone(),
+                    backend: BACKEND.to_string(),
+                    status: crate::sandbox::contract::SandboxStatus::Missing,
+                    egress: crate::sandbox::report::EgressPosture::Denied,
+                    workspace: WORKSPACE.to_string(),
+                    environment: crate::sandbox::environment::Provenance {
+                        origin: crate::sandbox::environment::Origin::Default,
+                        variables: Vec::new(),
+                        host_paths: Vec::new(),
+                        steps: Vec::new(),
+                    },
+                    forwards: Vec::new(),
+                }),
+                validate::Verdict::Forbidden { reason } => Err(Error::Denied {
+                    operation: format!("inspect '{}'", sandbox.name),
+                    reason,
+                }),
+                validate::Verdict::Editions(error) => Err(error),
+            }
+        })
     }
 
-    fn delete<'a>(&'a self, _sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>> {
-        Box::pin(async { Ok(()) })
+    fn delete<'a>(&'a self, sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>> {
+        Box::pin(async move {
+            // A record that cannot be read is still removable, so the payload
+            // failure is not fatal here.
+            if let Ok(data) = BubblewrapData::from_record(sandbox) {
+                let holder = holder::Holder {
+                    launcher_pid: data.launcher_pid,
+                    sandbox_pid: data.sandbox_pid,
+                    namespaces: super::host::NamespaceInodes {
+                        user: data.namespaces[0],
+                        ipc: data.namespaces[1],
+                        net: data.namespaces[2],
+                        pid: data.namespaces[3],
+                        mnt: data.namespaces[4],
+                        uts: data.namespaces[5],
+                        cgroup: data.namespaces[6],
+                    },
+                    unit: data.scope.clone(),
+                };
+                if self.host.process(data.sandbox_pid).is_some() {
+                    holder::teardown(&*self.host, &holder, std::time::Duration::from_secs(30))?;
+                }
+            }
+            let directory = workspace::sandbox_directory(&sandbox.project_slug, &sandbox.name);
+            match std::fs::remove_dir_all(&directory) {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(Error::failed(format!(
+                    "{} could not be removed: {error}",
+                    directory.display()
+                ))),
+            }
+        })
     }
 
     fn readiness<'a>(&'a self) -> BoxFuture<'a, Result<Readiness, Error>> {
@@ -605,6 +730,20 @@ impl BubblewrapBackend {
 
         let mut data = data;
         data.environment.steps = steps;
+        // The orchestrator keeps the record; the backend keeps a copy beside
+        // the workspace so enumeration can rebuild it without one.
+        let payload_path = workspace
+            .parent()
+            .map(|parent| parent.join("payload.toml"))
+            .ok_or_else(|| Error::failed("the state directory has no parent"))?;
+        let text = toml::to_string_pretty(&data)
+            .map_err(|error| Error::failed(format!("the payload could not be written: {error}")))?;
+        std::fs::write(&payload_path, text).map_err(|error| {
+            Error::failed(format!(
+                "{} could not be written: {error}",
+                payload_path.display()
+            ))
+        })?;
         Ok(SandboxRecord {
             name: request.name.clone(),
             backend: BACKEND.to_string(),
@@ -817,6 +956,32 @@ mod tests {
             forward_bind: "127.0.0.1".to_string(),
             ports: Vec::new(),
         }
+    }
+
+    #[tokio::test]
+    async fn deleting_an_absent_sandbox_succeeds() {
+        use crate::sandbox::contract::{SandboxRecord, Scope};
+
+        let backend = backend();
+        let record = SandboxRecord {
+            name: "never-created-carrier-probe".to_string(),
+            backend: "bubblewrap".to_string(),
+            project_slug: "probe".to_string(),
+            data: toml::Value::Table(Default::default()),
+        };
+        backend.delete(&record).await.expect("idempotent delete");
+        let listed = backend
+            .list(&Scope::Repository {
+                project_slug: "probe".to_string(),
+            })
+            .await
+            .expect("listed");
+        assert!(
+            !listed
+                .iter()
+                .any(|sandbox| sandbox.name == "never-created-carrier-probe"),
+            "an absent sandbox is not listed"
+        );
     }
 
     #[tokio::test]
