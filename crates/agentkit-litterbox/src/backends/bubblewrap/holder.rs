@@ -187,9 +187,6 @@ fn parse_trace(text: &str) -> Vec<PathBuf> {
     paths
 }
 
-/// How long a killed sandbox has to disappear.
-const TEARDOWN_TIMEOUT: Duration = Duration::from_secs(30);
-
 /// What bwrap reports about the sandbox it made.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Status {

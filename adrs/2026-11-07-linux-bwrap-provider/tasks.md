@@ -210,7 +210,7 @@ Rebuild each payload from the state directory for both scopes, report a corrupt 
 | Depends On | T-008,T-010,T-012 |
 | References | machine-list,egress-denied,delete-teardown,holder-crash |
 
-### T-017: Cover the suite: unit, host and conformance
+### T-017: [x] Cover the suite: unit, host and conformance
 
 Write the unit tests over `FakeHost` and the renderer, the ignored host suite and the crate's conformance run. The host suite creates a sandbox, runs two commands, proves the shared pid and loopback context, kills a client and finds no defunct process, deletes the sandbox, and keeps the probes from T-033 to T-041 as regression checks. It also covers a recycled pid, a foreign holder with a writable root, a symlink planted in the workspace, and the isolation cases: a store write fails read-only, an ungranted host path is absent, an outbound connection has no route, and a granted tree holding a unix socket is refused at create.
 
@@ -223,7 +223,7 @@ Write the unit tests over `FakeHost` and the renderer, the ignored host suite an
 | Depends On | T-011,T-012,T-013,T-014,T-015,T-016 |
 | References | test-coverage,host-join,isolation-holds,prepared-environment,no-values-on-disk,create-and-shell |
 
-### T-018: Declare the architecture rules and document the backend
+### T-018: [x] Declare the architecture rules and document the backend
 
 Add an arch-lint scope for `src/backends/bubblewrap/**` with deny edges to the orchestrator, the command line and MCP code, persistence, SCM and provision preparation, and a negative fixture for each edge. Document bubblewrap on the backends page and in the user configuration reference: its keys and units, its readiness output, what the degraded mode does not bound, and the ports refusal.
 

@@ -26,6 +26,7 @@ message = "The transport must not depend on a protocol version; reach shared sta
 from = "litterbox-contract"
 to = [
   "litterbox-backend-docker",
+  "litterbox-backend-bubblewrap",
   "litterbox-registry",
   "litterbox-orchestrator",
   "litterbox-persistence",
@@ -58,6 +59,23 @@ to = [
   "litterbox-prepare"
 ]
 message = "a backend depends on the contract only; branches, records, commands and the shared kernel are not its business."
+
+[[deny-scope-dep]]
+from = "litterbox-backend-bubblewrap"
+to = [
+  "litterbox-registry",
+  "litterbox-orchestrator",
+  "litterbox-persistence",
+  "litterbox-cli",
+  "litterbox-mcp",
+  "litterbox-config",
+  "litterbox-scm",
+  "litterbox-vcs-store",
+  "litterbox-provision",
+  "litterbox-kinds",
+  "litterbox-prepare"
+]
+message = "a backend depends on the contract only; branches, records, commands and the kernel are not its business."
 
 [[deny-scope-dep]]
 from = "litterbox-registry"
@@ -213,6 +231,10 @@ paths = ["crates/agentkit-litterbox/src/sandbox/**"]
 [[scopes]]
 name = "litterbox-backend-docker"
 paths = ["crates/agentkit-litterbox/src/backends/docker/**"]
+
+[[scopes]]
+name = "litterbox-backend-bubblewrap"
+paths = ["crates/agentkit-litterbox/src/backends/bubblewrap/**"]
 
 [[scopes]]
 name = "litterbox-registry"

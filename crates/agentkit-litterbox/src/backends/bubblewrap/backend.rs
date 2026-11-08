@@ -42,16 +42,6 @@ impl BubblewrapBackend {
         Self { settings, host }
     }
 
-    /// The settings the backend was built with.
-    pub fn settings(&self) -> &BubblewrapSettings {
-        &self.settings
-    }
-
-    /// The host reads and writes.
-    pub fn host(&self) -> &SharedHost {
-        &self.host
-    }
-
     fn boundaries(&self, project: &str, name: &str) -> Result<Boundaries, Error> {
         let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
             return Err(Error::Unavailable {
@@ -981,6 +971,72 @@ mod tests {
                 .iter()
                 .any(|sandbox| sandbox.name == "never-created-carrier-probe"),
             "an absent sandbox is not listed"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "starts a real sandbox; run where bubblewrap is on PATH"]
+    async fn a_real_sandbox_confines_writes() {
+        use crate::backends::bubblewrap::host::SystemHost;
+        use crate::backends::bubblewrap::{holder, payload};
+
+        let staged = tempfile::tempdir().expect("staged");
+        let backend =
+            BubblewrapBackend::new(BubblewrapSettings::default(), Arc::new(SystemHost::new()));
+        let request = test_request("confine", staged.path());
+        let record = backend.create(&request).await.expect("created");
+        let data = payload::BubblewrapData::from_record(&record).expect("payload");
+        let holder = holder::Holder {
+            launcher_pid: data.launcher_pid,
+            sandbox_pid: data.sandbox_pid,
+            namespaces: crate::backends::bubblewrap::host::NamespaceInodes {
+                user: data.namespaces[0],
+                ipc: data.namespaces[1],
+                net: data.namespaces[2],
+                pid: data.namespaces[3],
+                mnt: data.namespaces[4],
+                uts: data.namespaces[5],
+                cgroup: data.namespaces[6],
+            },
+            unit: data.scope.clone(),
+        };
+        let command = |program: &str| vec!["sh".to_string(), "-c".to_string(), program.to_string()];
+        let write = backend
+            .exec(&record, &command("echo ok > /src/probe.txt; echo written"))
+            .await
+            .expect("write");
+        let state = crate::backends::bubblewrap::workspace::sandbox_directory("probe", "confine");
+        let outside = backend
+            .exec(&record, &command(&format!("echo x > {}", state.display())))
+            .await
+            .expect("write outside");
+        let home = std::env::var("HOME").expect("HOME is set");
+        let host_home = backend
+            .exec(&record, &command(&format!("ls {home}")))
+            .await
+            .expect("home read");
+        let read = backend
+            .exec(&record, &command("cat /src/probe.txt"))
+            .await
+            .expect("read back");
+        let _ = holder::teardown(
+            &SystemHost::new(),
+            &holder,
+            std::time::Duration::from_secs(10),
+        );
+        let _ = std::fs::remove_dir_all(&state);
+        assert_eq!(write.exit_code, 0, "{}", write.stderr);
+        assert_eq!(read.exit_code, 0, "the workspace is writable");
+        assert_eq!(read.stdout.trim(), "ok");
+        assert_ne!(
+            outside.exit_code, 0,
+            "an ungranted host tree is in the view: {}",
+            outside.stdout
+        );
+        assert_ne!(
+            host_home.exit_code, 0,
+            "the host home is not in the view: {}",
+            host_home.stdout
         );
     }
 

@@ -28,6 +28,7 @@ pub enum Verdict {
     Editions(Error),
 }
 
+#[cfg(test)]
 impl Verdict {
     /// The payload, or the failure a command should report.
     pub fn require(self, name: &str) -> Result<BubblewrapData, Error> {

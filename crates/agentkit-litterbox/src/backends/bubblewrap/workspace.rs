@@ -7,7 +7,6 @@
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
-use super::BACKEND;
 use super::view::WORKSPACE;
 use crate::sandbox::contract::Error;
 
@@ -135,21 +134,12 @@ fn copy_entry(from: &Path, to: &Path) -> io::Result<()> {
     copy_tree(from, to)
 }
 
-/// The backend's own error for a workspace that does not exist yet.
-pub fn missing_workspace(path: &Path) -> Error {
-    Error::Unavailable {
-        backend: BACKEND.to_string(),
-        reason: format!("{} does not exist", path.display()),
-        remedy: "recreate the sandbox".to_string(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::Path;
 
     use super::{
-        copy_from, missing_workspace, resolve_inside, sandbox_directory, transfer_in, transfer_out,
+        copy_from, resolve_inside, sandbox_directory, transfer_in, transfer_out,
         workspace_directory,
     };
 
@@ -283,11 +273,5 @@ mod tests {
             resolve_inside(root, "a").expect("resolved"),
             Path::new("/state/workspace/a")
         );
-    }
-
-    #[test]
-    fn a_missing_workspace_is_unavailable() {
-        let error = missing_workspace(Path::new("/state/missing"));
-        assert!(error.to_string().contains("does not exist"), "{error}");
     }
 }

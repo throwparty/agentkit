@@ -1,9 +1,9 @@
 # 🧰 Backends
 
-A backend is a sandboxing mechanism: Docker today, with bubblewrap and the macOS
-Seatbelt sandbox designed for. A backend is not tied to a platform. It states the
-primitives it needs, and those primitives decide whether it can run on this
-machine.
+A backend is a sandboxing mechanism: Docker, and bubblewrap on Linux. The macOS
+Seatbelt sandbox is designed for and not yet built. A backend is not tied to a
+platform. It states the primitives it needs, and those primitives decide whether
+it can run on this machine.
 
 ## Choosing one
 
@@ -21,6 +21,38 @@ image = "ubuntu:latest"
 ```bash
 litterbox --backend docker list
 ```
+
+### Bubblewrap
+
+`bubblewrap` runs the sandbox as a holder process in unprivileged user
+namespaces. It needs no daemon, no root and no image. It is the backend that
+applies a devshell step's environment and store closure.
+
+```toml
+backend = "bubblewrap"
+
+[backends.bubblewrap]
+# Optional bounds, applied to the sandbox's cgroup scope.
+memory-mb = 4096
+tasks = 512
+```
+
+A project must list the backend to use its provisioning steps:
+
+```toml
+# .agentkit/litterbox/config.toml
+[project]
+backends = ["bubblewrap"]
+```
+
+Bubblewrap gives the sandbox its own network namespace, so the only thing it can
+reach is its own loopback. A project that declares `[[ports]]` is refused rather
+than quietly running without them.
+
+The holder starts in a systemd user scope when the host has one. Without a
+usable scope, creation needs `accept-degraded = true`: pause then uses a
+stop-and-rescan loop instead of an atomic freeze, and nothing bounds memory or
+task count.
 
 A project's `.agentkit/litterbox/config.toml` cannot select or configure a
 backend, with one exception: `[backends.<name>].provision` is the project-owned
