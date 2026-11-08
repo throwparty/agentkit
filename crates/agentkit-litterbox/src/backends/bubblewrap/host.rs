@@ -106,8 +106,10 @@ pub trait Host: Send + Sync {
     fn mounts(&self, pid: u32) -> Option<Vec<MountEntry>>;
     /// A process's environment, split into name and value.
     fn environment(&self, pid: u32) -> Option<Vec<(String, String)>>;
-    /// Resolve a binary name on the host PATH.
+    /// Resolve a binary name on the host PATH, following links to the file.
     fn resolve(&self, name: &str) -> Option<PathBuf>;
+    /// The owner and mode bits of a path.
+    fn ownership(&self, path: &Path) -> Option<(u32, u32)>;
     /// The cgroup directory for a user scope unit.
     fn scope_directory(&self, unit: &str) -> Option<PathBuf>;
     /// Read a file in a scope's cgroup directory.
@@ -229,14 +231,25 @@ impl Host for SystemHost {
     }
 
     fn resolve(&self, name: &str) -> Option<PathBuf> {
-        if name.contains('/') {
-            let path = PathBuf::from(name);
-            return path.is_file().then_some(path);
-        }
-        let path = std::env::var_os("PATH")?;
-        std::env::split_paths(&path)
-            .map(|directory| directory.join(name))
-            .find(|candidate| candidate.is_file())
+        let candidate = if name.contains('/') {
+            PathBuf::from(name)
+        } else {
+            let path = std::env::var_os("PATH")?;
+            std::env::split_paths(&path)
+                .map(|directory| directory.join(name))
+                .find(|candidate| candidate.is_file())?
+        };
+        // Resolving to the target lets the view pin it without following a
+        // link, and lets the ownership check look at the file that runs.
+        std::fs::canonicalize(candidate)
+            .ok()
+            .filter(|path| path.is_file())
+    }
+
+    fn ownership(&self, path: &Path) -> Option<(u32, u32)> {
+        use std::os::unix::fs::MetadataExt;
+        let metadata = std::fs::metadata(path).ok()?;
+        Some((metadata.uid(), metadata.mode()))
     }
 
     fn scope_directory(&self, unit: &str) -> Option<PathBuf> {
@@ -293,6 +306,8 @@ pub struct FakeHost {
     pub environments: std::collections::HashMap<u32, Vec<(String, String)>>,
     /// Binaries the host can resolve.
     pub binaries: std::collections::HashMap<String, PathBuf>,
+    /// Owner and mode of each path, defaulting to a root-owned, unshared file.
+    pub ownership: std::collections::HashMap<PathBuf, (u32, u32)>,
     /// Scope files, keyed by unit and file name.
     pub scopes: std::collections::HashMap<(String, String), String>,
 }
@@ -321,6 +336,10 @@ impl Host for FakeHost {
 
     fn resolve(&self, name: &str) -> Option<PathBuf> {
         self.binaries.get(name).cloned()
+    }
+
+    fn ownership(&self, path: &Path) -> Option<(u32, u32)> {
+        Some(self.ownership.get(path).copied().unwrap_or((0, 0o755)))
     }
 
     fn scope_directory(&self, unit: &str) -> Option<PathBuf> {

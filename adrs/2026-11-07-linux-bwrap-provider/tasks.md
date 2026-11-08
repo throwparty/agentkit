@@ -43,38 +43,38 @@ Define the `Host` trait covering the reads and writes the backend needs: a pid's
 
 ### T-004: [x] Render the view and its argv
 
-Add `view.rs` with `Mount { sandbox_path, access }`, the ordered view, and the validation rules: beneath the store root, not a protected root, the home, the metadata directory or the state directory, not a socket, device or FIFO, and no overlap with the workspace. Open each accepted path with `openat2` and `RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS`, and emit the descriptor as `/proc/self/fd/N`. Render the whole argv: seven namespaces, the nested-userns block, private root, proc, dev, tmpfs, home, and the mounts.
+Add `view.rs` with `Mount { sandbox_path, access }`, the ordered view, and the validation rules: absolute, not a protected root, the home, the metadata directory or the state directory, not a socket, device or FIFO, and no overlap with the workspace. Open each accepted path with `openat2` and `RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS`, and emit the descriptor as `/proc/self/fd/N`. Render the whole argv: seven namespaces, the nested-userns block, private root, proc, dev, tmpfs, home, and the mounts.
 
 
 | Field | Value |
 |-------|-------|
-| Success Criteria | The golden test asserts the exact vector for the baseline view, for an environment with a two-path closure and a workspace, and for the degraded form without a scope. A test proves that removing any invariant changes the vector. A refused path names the rule it broke. The argv emits no `--setenv`, no `--clearenv`, and no parent-death flag. |
+| Success Criteria | The golden test asserts the exact vector for the empty view, for an environment with a two-path closure and a workspace, and for the degraded form without a scope. A test proves that removing any invariant changes the vector. A refused path names the rule it broke. The argv emits no `--setenv`, no `--clearenv`, and no parent-death flag. |
 | Complexity | 🔴 High |
 | Effort | 8-12h |
 | Depends On | T-003 |
 | References | mounts-validation,mounts-render,golden-argv |
 
-### T-005: Bind the baseline userland
+### T-005: [x] Resolve the holder command
 
-Resolve `sh`, `cat`, `grep`, `timeout` and `sleep` from the host PATH, validate each the way bwrap is validated, and bind them read-only. Assemble the backend-owned PATH as the contributed PATH followed by the directories of those binaries.
+Resolve the shell and the utility the holder runs from the host PATH, validate each the way bwrap is validated, and record the interpreter and libraries the host's loader reports for both. The sandbox's own userland is not the backend's to assume: a workload runs what its provisioning steps contribute.
 
 
 | Field | Value |
 |-------|-------|
-| Success Criteria | A view built with no contributions contains a shell and the four utilities. The backend-owned PATH leads with the contributed path when there is one. Readiness reports a missing shell as Unavailable. A unit test covers the PATH assembly for the contributed and uncontribributed cases. |
+| Success Criteria | The holder command names its shell, its utility and the paths they need bound. A missing or untrusted binary is reported as Unavailable with a remedy. A unit test covers the loader trace and the command's arguments. |
 | Complexity | 🟡 Medium |
 | Effort | 3-5h |
 | Depends On | T-004 |
-| References | mounts-render,baseline-userland |
+| References | mounts-render,holder-command |
 
 ### T-006: Assemble the environment and withhold credentials
 
-Add `credentials.rs` holding the table as data, one entry per family, and `environment.rs` merging the resolved steps' contributions in order through `Contributions::environment_for`, applying the credential table and the ungranted-path rule, then setting `HOME`, `TMPDIR`, `PWD` and `PATH`. Record withheld names in provenance as removed and the backend's own names as set.
+Add `credentials.rs` holding the table as data, one entry per family, and `environment.rs` merging the resolved steps' contributions in order through `Contributions::environment_for`, applying the credential table and the ungranted-path rule, then setting `HOME`, `TMPDIR` and `PWD`; `PATH` is whatever the steps contribute. Record withheld names in provenance as removed and the backend's own names as set.
 
 
 | Field | Value |
 |-------|-------|
-| Success Criteria | One test per credential family names a real variable and asserts it is withheld. A value naming an ungranted host path withholds its variable. The merged environment applies later steps over earlier ones. `HOME`, `TMPDIR`, `PWD` and `PATH` are present and recorded as set. No value is written to a file, an argv or a log line. |
+| Success Criteria | One test per credential family names a real variable and asserts it is withheld. A value naming an ungranted host path withholds its variable. The merged environment applies later steps over earlier ones. `HOME`, `TMPDIR` and `PWD` are present and recorded as set, and a contributed `PATH` is carried unchanged. No value is written to a file, an argv or a log line. |
 | Complexity | 🟡 Medium |
 | Effort | 5-7h |
 | Depends On | T-004,T-005 |
@@ -217,7 +217,7 @@ Write the unit tests over `FakeHost` and the renderer, the ignored host suite an
 
 | Field | Value |
 |-------|-------|
-| Success Criteria | Unit tests cover the golden argv, the payload round trip and both version directions, every validation outcome, each credential family, the ungranted-path rule, the PATH assembly, the readiness states and the reserved-status mapping. The host suite skips with the missing requirement named where bwrap is absent. The conformance run covers duplicate create, transfers, delete idempotency, inspection after delete, step order and lifecycle visibility. No contributed value appears in the record, the state directory or the log. |
+| Success Criteria | Unit tests cover the golden argv, the payload round trip and both version directions, every validation outcome, each credential family, the ungranted-path rule, the holder command, the readiness states and the reserved-status mapping. The host suite skips with the missing requirement named where bwrap is absent. The conformance run covers duplicate create, transfers, delete idempotency, inspection after delete, step order and lifecycle visibility. No contributed value appears in the record, the state directory or the log. |
 | Complexity | 🔴 High |
 | Effort | 10-14h |
 | Depends On | T-011,T-012,T-013,T-014,T-015,T-016 |
