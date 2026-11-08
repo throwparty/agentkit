@@ -80,7 +80,7 @@ Add `environment.rs` merging the resolved steps' contributions in order through 
 | Depends On | T-004,T-005 |
 | References | environment-render,environment-ungranted-paths,secret-handling |
 
-### T-007: Add the record payload
+### T-007: [x] Add the record payload
 
 Add `payload.rs` with `BubblewrapData` version 1: the payload version, both pids with start times, the seven inode numbers, the uid, the root device and inode, the mounts from host paths with their access, the host and sandbox workspace paths, the scope unit, the paused flag and the provenance. Fail on a higher version as unreadable and on a lower version or missing field as Unavailable.
 
