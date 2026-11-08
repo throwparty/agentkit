@@ -93,7 +93,7 @@ Add `payload.rs` with `BubblewrapData` version 1: the payload version, both pids
 | Depends On | T-003 |
 | References | record-payload,record-edition-mismatch |
 
-### T-008: Validate the record per operation
+### T-008: [x] Validate the record per operation
 
 Add the single validation function that returns Absent, Forbidden, Editions or Live. Check the pid exists, is not a zombie, its uid and start time match, all seven inodes match through the descriptors that setns will receive, the root device and inode match, and every recorded host path appears with its recorded access while no host path outside the record is reachable. Map the outcome per operation: NotFound for a command, Missing for inspection and listing, already torn down for delete, Denied for a live mismatch, Unavailable for an edition mismatch.
 
