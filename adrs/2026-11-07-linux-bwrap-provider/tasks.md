@@ -28,7 +28,7 @@ Create `src/backends/bubblewrap/` with `mod.rs` holding the `BACKEND` constant a
 | Depends On |  |
 | References | backend-registration,platform-requirements,docker-unchanged,backends-listing |
 
-### T-003: Add the host seam
+### T-003: [x] Add the host seam
 
 Define the `Host` trait covering the reads and writes the backend needs: a pid's existence, state, start time, uid, namespace inodes, environment and mount table; the scope's freeze, thaw, kill and limit files; binary resolution; and a clock. Implement `SystemHost` over `/proc`, cgroupfs and the file system, and `FakeHost` over a table for tests.
 

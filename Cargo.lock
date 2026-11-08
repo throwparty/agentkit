@@ -127,6 +127,7 @@ dependencies = [
  "futures-util",
  "git2",
  "glob",
+ "libc",
  "regex",
  "rmcp",
  "schemars 1.2.3",

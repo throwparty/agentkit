@@ -8,6 +8,7 @@ use std::path::Path;
 use futures_util::future::BoxFuture;
 
 use super::BACKEND;
+use super::host::SharedHost;
 use crate::sandbox::contract::{
     Backend, ContributionSupport, CreateRequest, Error, Execution, Inspection, SandboxRecord, Scope,
 };
@@ -23,12 +24,25 @@ pub struct BubblewrapSettings {
 }
 
 /// Bubblewrap's implementation of the contract.
-pub struct BubblewrapBackend;
+pub struct BubblewrapBackend {
+    settings: BubblewrapSettings,
+    host: SharedHost,
+}
 
 impl BubblewrapBackend {
-    /// Build a backend from its validated settings.
-    pub fn new(_settings: BubblewrapSettings) -> Self {
-        Self
+    /// Build a backend from its validated settings and the host it reads.
+    pub fn new(settings: BubblewrapSettings, host: SharedHost) -> Self {
+        Self { settings, host }
+    }
+
+    /// The settings the backend was built with.
+    pub fn settings(&self) -> &BubblewrapSettings {
+        &self.settings
+    }
+
+    /// The host reads and writes.
+    pub fn host(&self) -> &SharedHost {
+        &self.host
     }
 
     fn not_wired(&self, operation: &str) -> Error {
