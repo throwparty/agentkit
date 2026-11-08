@@ -11,6 +11,7 @@
 pub mod backend;
 pub mod config;
 pub mod construct;
+pub mod environment;
 pub mod holder;
 pub mod host;
 pub mod view;

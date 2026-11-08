@@ -101,11 +101,11 @@ A command receives the merged contributions of the resolved steps, in sequence o
 
 **Slug:** `environment-render`
 
-### FR-005: Environment: Withhold Credentials
+### FR-005: Environment: Withhold Ungranted Paths
 
-The backend withholds a variable whose name matches the credential table before it creates the sandbox. A withheld variable is never carried, so it is never written anywhere. The launcher's environment, the record and every command hold no value for it. The table is data in the backend module and is reviewed with it. It matches lower-case name fragments, and it covers token, secret, password, key and signing names, plus the documented credential variables of Nix, Cargo, npm, GitHub, AWS, GCP, Azure, SSH and GPG. It is not configuration. A project cannot weaken it and a machine cannot extend it in this ADR, because the only use of such an override would be to carry a credential. Adding a family takes one entry and one test. Provenance records a withheld variable as removed and names it, so a build that fails for want of a variable says which variable. The same rule withholds a variable whose value names a host path that the sandbox is not granted. The backend splits the value on the path separator and withholds the variable when an absolute element is neither equal to nor beneath a granted mount. The documentation states the case the table cannot catch. A value the devShell exports under an ordinary name is passed, because the backend recognises the shape of a credential and not the intent of a shell hook.
+The backend withholds a variable whose value names a host path the sandbox is not granted. The backend splits the value on the path separator and withholds the variable when an absolute element is neither equal to nor beneath a granted mount. A withheld variable is never carried, so it is never written anywhere, and provenance records it as removed and names it, so a build that fails for want of a variable says which variable. The backend does not guess from a variable's name what it is for: a credential-shaped name is carried exactly like any other when its value names a granted path, and withholding one is the project's decision about what to contribute.
 
-**Slug:** `environment-withholding`
+**Slug:** `environment-ungranted-paths`
 
 ### FR-006: Mounts: Validate
 

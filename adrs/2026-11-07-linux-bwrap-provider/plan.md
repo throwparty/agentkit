@@ -2,7 +2,7 @@
 
 ## Approach
 
-The questions the spec would otherwise have carried as assumptions were probed before planning, and the answers are T-033 to T-041 on the map. The host `sleep` holds pid 1 with a large integer duration. A client killed while its command runs leaves no zombie. 1779 individual binds reach a usable view in 4.2s and run a command, and the mount table holds one entry for each path. The seven namespace inodes stay identical across commands. This host has cgroup v2, a user manager and a scope that starts. The cgroup namespace can be joined unprivileged. The status document arrives long before the view is built. Four answers changed the design. The join enters seven namespaces because T-038 allows it, and it enters the namespace that owns the others first because T-041 shows the obvious order fails. create waits for the recorded mounts rather than for the status document, because T-039 measures a 4.2s gap on a large view and T-040 shows the last mount is the moment the view becomes usable. The payload validation expects one mount for each recorded path, because T-035 shows bwrap does not merge them. The backend is a new module beside Docker, at `src/backends/bubblewrap/`, reached through one new entry in the registry table. The Docker module is the shape to copy. It has a typed configuration section that only it parses, a payload type for its own record, the trait implementation, and unit tests beside each part. The work is staged so the tree compiles at every step and each stage is testable without a sandbox. First the pure core, which is the view, the path validation and the argv with its golden tests. Second the host seam, the payload and its validation, which are unit-testable against a fake. Third create, which covers the workspace copy, the environment and the holder with its status report. Fourth the join. Fifth lifecycle, limits and the degraded mode. Sixth enumeration, teardown, transfers and the crate's conformance suite. Seventh the registry entry, the documentation and the architecture rules. Two helpers move out of the Docker module instead of being copied. They are the provisioning step runner, and the create budget, transfer deadline and output cap, so the two backends cannot drift. Two registry tests use bubblewrap as the name of a backend that is not compiled in, and they move to a name no backend will take. The credential table is data in the backend module and is deliberately not configuration.
+The questions the spec would otherwise have carried as assumptions were probed before planning, and the answers are T-033 to T-041 on the map. The host `sleep` holds pid 1 with a large integer duration. A client killed while its command runs leaves no zombie. 1779 individual binds reach a usable view in 4.2s and run a command, and the mount table holds one entry for each path. The seven namespace inodes stay identical across commands. This host has cgroup v2, a user manager and a scope that starts. The cgroup namespace can be joined unprivileged. The status document arrives long before the view is built. Four answers changed the design. The join enters seven namespaces because T-038 allows it, and it enters the namespace that owns the others first because T-041 shows the obvious order fails. create waits for the recorded mounts rather than for the status document, because T-039 measures a 4.2s gap on a large view and T-040 shows the last mount is the moment the view becomes usable. The payload validation expects one mount for each recorded path, because T-035 shows bwrap does not merge them. The backend is a new module beside Docker, at `src/backends/bubblewrap/`, reached through one new entry in the registry table. The Docker module is the shape to copy. It has a typed configuration section that only it parses, a payload type for its own record, the trait implementation, and unit tests beside each part. The work is staged so the tree compiles at every step and each stage is testable without a sandbox. First the pure core, which is the view, the path validation and the argv with its golden tests. Second the host seam, the payload and its validation, which are unit-testable against a fake. Third create, which covers the workspace copy, the environment and the holder with its status report. Fourth the join. Fifth lifecycle, limits and the degraded mode. Sixth enumeration, teardown, transfers and the crate's conformance suite. Seventh the registry entry, the documentation and the architecture rules. Two helpers move out of the Docker module instead of being copied. They are the provisioning step runner, and the create budget, transfer deadline and output cap, so the two backends cannot drift. Two registry tests use bubblewrap as the name of a backend that is not compiled in, and they move to a name no backend will take.
 
 ## Architecture
 
@@ -18,11 +18,10 @@ src/
 │   └── bubblewrap/
 │       ├── mod.rs             BACKEND const, construct::build
 │       ├── config.rs          memory-mb, tasks; unknown key is Misconfigured
-│       ├── credentials.rs     the table as data, one test per family
 │       ├── host.rs            Host trait, SystemHost, FakeHost for tests
 │       ├── view.rs            Mount, path validation, argv
 │       ├── holder.rs          the holder command, scope, spawn, status, teardown
-│       ├── environment.rs     merge, withhold, read back from /proc
+│       ├── environment.rs     merge, withhold ungranted paths, read back from /proc
 │       ├── workspace.rs       copy the staged tree, upload, download
 │       ├── join.rs            descriptors, setns, second fork, statuses
 │       ├── payload.rs         BubblewrapData v1 and its validation
@@ -36,7 +35,7 @@ src/
 flowchart LR
     subgraph create
         REQ[CreateRequest<br/>steps and contributions] --> CFG[config<br/>typed section]
-        REQ --> ENVV[environment<br/>merge and credential table]
+        REQ --> ENVV[environment<br/>merge and ungranted-path check]
         REQ --> WS[workspace<br/>copy the staged tree]
         REQ --> VIEW[view<br/>validate paths, render argv]
         VIEW --> RUN[holder<br/>spawn bwrap in a scope]
@@ -91,13 +90,6 @@ Declare the section's keys in one place
 `BubblewrapConfig` holds `memory-mb` and `tasks`, both optional, and both refused when zero. The type denies unknown fields, so a typo fails as Misconfigured and names the key. A project file that sets either key is reported and ignored, through the loader's existing rule. `settings()` returns `BubblewrapSettings` and mirrors `DockerConfig`.
 
 
-### credentials
-
-Withhold a credential before it is ever carried
-
-The table is a const slice of lower-case name fragments in this module, grouped by family. The families are token, secret, password, key, signing, the source hosts and the cloud providers. One function takes a variable name and returns whether to withhold it, by substring match after lower-casing. No configuration key, no environment variable and no project input can change it. One unit test for each family names a real variable of that family.
-
-
 ### host-seam
 
 Make every host read injectable
@@ -123,7 +115,7 @@ Resolve `sh` and `sleep` from the host PATH, validate each one the way bwrap is 
 
 Assemble the sandbox environment and read it back
 
-`merge()` folds the contributions in order through `Contributions::environment_for` with the sandbox workspace path. It then applies the credential table and the ungranted-path rule, which splits a value on ':' and withholds the variable when an absolute element is neither equal to nor beneath a granted mount. Finally it sets HOME, TMPDIR, PWD and PATH. The result goes to the launcher spawn with a cleared environment, and the renderer emits neither `--setenv` nor `--clearenv`, so no value reaches an argv. `read_back()` parses `/proc/<sandbox pid>/environ`, which is NUL separated, for a command. Provenance records withheld names as Removed and the backend's own names as Set.
+`merge()` folds the contributions in order through `Contributions::environment_for` with the sandbox workspace path. It then applies the ungranted-path rule, which splits a value on ':' and withholds the variable when an absolute element is neither equal to nor beneath a granted mount. Finally it sets HOME, TMPDIR and PWD; `PATH` is left to the steps. The result goes to the launcher spawn with a cleared environment, and the renderer emits neither `--setenv` nor `--clearenv`, so no value reaches an argv. `read_back()` parses `/proc/<sandbox pid>/environ`, which is NUL separated, for a command. Provenance records withheld names as Removed and the backend's own names as Set.
 
 
 ### workspace
@@ -186,7 +178,7 @@ Move `run_steps`, the create budget, the upload deadline and the output cap out 
 
 Cover the refusals as well as the happy path
 
-Unit tests use `FakeHost` and the renderer. They cover the golden argv and its invariants, the payload round trip and both version directions, each validation outcome, the credential families, the ungranted-path rule, the holder command, the readiness states and remedies, and the mapping from reserved status to error. The host suite is ignored by default and skips with the missing requirement named. It covers create, two commands, the shared pid and loopback, and delete. It keeps the probes from T-033 to T-041 as regression checks, including that create does not return before the view is built. It covers a recycled pid, a foreign holder with a writable root, a symlink planted in the workspace, and the crate's conformance suite for duplicate create, transfers, delete idempotency and inspection after delete.
+Unit tests use `FakeHost` and the renderer. They cover the golden argv and its invariants, the payload round trip and both version directions, each validation outcome, the ungranted-path rule, the holder command, the readiness states and remedies, and the mapping from reserved status to error. The host suite is ignored by default and skips with the missing requirement named. It covers create, two commands, the shared pid and loopback, and delete. It keeps the probes from T-033 to T-041 as regression checks, including that create does not return before the view is built. It covers a recycled pid, a foreign holder with a writable root, a symlink planted in the workspace, and the crate's conformance suite for duplicate create, transfers, delete idempotency and inspection after delete.
 
 
 ### registration-and-docs
@@ -198,7 +190,7 @@ Add the registry entry and its platform test. Extend the backends page with the 
 
 ## Data Flow
 
-Create resolves the sequence and prepares the host steps before the branch exists, exactly as it does for Docker, so the request arrives with the contributions already captured. The backend merges those contributions in order, withholds whatever the credential table or the ungranted-path rule rejects, and adds HOME, TMPDIR and PWD. It copies the staged workspace into its state directory. It builds the view from the holder command plus the contributed mounts, validates every path and keeps the descriptors it opened. Then it renders one argv and starts bwrap inside a user scope with a cleared environment. It waits for the status report, waits for every recorded host path to appear in the mount table, and on success writes the payload, which holds both pids with their start times, the seven inodes, the uid, the root identity, the mounts with their access, the workspace paths, the scope unit and the provenance. The orchestrator stores that record together with the branch. A later command comes from a different process. That process reads the record, asks the host seam whether the record still describes a live sandbox, and only then opens the seven descriptors, forks, calls setns, forks again, drops what it inherited and execs with the environment read from the sandbox. Inspection, pause, resume and delete run the same check first. delete treats an absent sandbox as already torn down, so a crashed sandbox stays removable. Machine-wide pause reads the state directory, rebuilds each payload and drives the lifecycle facet, which is the same path a project-scoped listing takes.
+Create resolves the sequence and prepares the host steps before the branch exists, exactly as it does for Docker, so the request arrives with the contributions already captured. The backend merges those contributions in order, withholds whatever names an ungranted host path, and adds HOME, TMPDIR and PWD. It copies the staged workspace into its state directory. It builds the view from the holder command plus the contributed mounts, validates every path and keeps the descriptors it opened. Then it renders one argv and starts bwrap inside a user scope with a cleared environment. It waits for the status report, waits for every recorded host path to appear in the mount table, and on success writes the payload, which holds both pids with their start times, the seven inodes, the uid, the root identity, the mounts with their access, the workspace paths, the scope unit and the provenance. The orchestrator stores that record together with the branch. A later command comes from a different process. That process reads the record, asks the host seam whether the record still describes a live sandbox, and only then opens the seven descriptors, forks, calls setns, forks again, drops what it inherited and execs with the environment read from the sandbox. Inspection, pause, resume and delete run the same check first. delete treats an absent sandbox as already torn down, so a crashed sandbox stays removable. Machine-wide pause reads the state directory, rebuilds each payload and drives the lifecycle facet, which is the same path a project-scoped listing takes.
 
 
 ## Deployment
