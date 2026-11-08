@@ -2,7 +2,7 @@
 
 ## Tasks
 
-### T-001: Move the shared provisioning helpers
+### T-001: [x] Move the shared provisioning helpers
 
 Move `run_steps`, the create budget, the transfer deadline and the output cap out of `backends/docker/backend.rs` into `backends/shared.rs` with `pub(crate)` visibility. Docker imports them and changes no behaviour. The provenance and failure types stay where they are.
 

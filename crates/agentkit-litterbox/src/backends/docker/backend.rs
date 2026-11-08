@@ -8,7 +8,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
@@ -17,13 +17,12 @@ use super::compute;
 use super::compute::{ContainerSpec, SandboxState};
 use super::error::ComputeError;
 use super::naming::container_name_for_slug;
+use crate::backends::shared::{CREATE_BUDGET, PROVISION_OUTPUT_CAP, UPLOAD_TIMEOUT, run_steps};
 use crate::sandbox::contract::{
     Backend, ContributionSupport, CreateRequest, Error, Execution, Forward, Inspection,
     ProvisioningClass, ProvisioningFailure, ResolvedStep, SandboxRecord, SandboxStatus, Scope,
 };
-use crate::sandbox::environment::{
-    Change, Environment, Origin, Provenance, StepProvenance, Variable,
-};
+use crate::sandbox::environment::{Change, Environment, Origin, Provenance, Variable};
 use crate::sandbox::facets::{Forwarding, Lifecycle, Limits, ResourceLimits};
 use crate::sandbox::report::{Capability, Check, EgressPosture, Readiness, State};
 
@@ -236,22 +235,6 @@ fn step_failure(step: &ResolvedStep, error: ComputeError) -> Error {
 }
 
 /// A step that ran and exited non-zero.
-fn command_failure(step: &ResolvedStep, exit_code: i32, output: &str) -> Error {
-    let identity = step.identity();
-    Error::Provisioning {
-        failure: Box::new(ProvisioningFailure {
-            class: ProvisioningClass::Failed,
-            backend: Some(BACKEND.to_string()),
-            step: Some(identity.to_string()),
-            kind: Some(step.kind().to_string()),
-            reason: format!("provisioning step '{identity}' failed with exit code {exit_code}"),
-            remedy: "inspect the step output, fix the command, and create again".to_string(),
-            exit_code: Some(exit_code),
-            output: Some(bounded_output(output)),
-        }),
-    }
-}
-
 /// A create that outlived its fixed budget.
 fn timeout_failure(sandbox: &str, step: Option<&ResolvedStep>, budget: Duration) -> Error {
     let (identity, kind, reason) = match step {
@@ -301,70 +284,6 @@ fn upload_failure(budget: Duration) -> Error {
         reason: format!("uploading the workspace exceeded the {budget:?} transfer deadline"),
         remedy: "reduce the workspace or check the connection to the Docker daemon".to_string(),
     }
-}
-
-/// The fixed ceiling for one create's provisioning, independent of step count.
-const CREATE_BUDGET: Duration = Duration::from_secs(2 * 60 * 60);
-
-/// Apply an ordered sequence, keeping only the steps that completed.
-fn run_steps<'a, F>(
-    sandbox: &'a str,
-    provision: &'a [ResolvedStep],
-    last_step: &'a Mutex<Option<ResolvedStep>>,
-    mut exec: F,
-) -> BoxFuture<'a, Result<Vec<StepProvenance>, Error>>
-where
-    F: FnMut(&'a str, &'a str) -> BoxFuture<'a, Result<Execution, ComputeError>> + Send + 'a,
-{
-    Box::pin(async move {
-        let mut steps = Vec::with_capacity(provision.len());
-        for step in provision {
-            let Some(action) = &step.sandbox else {
-                continue;
-            };
-            let identity = &step.identity;
-            *last_step
-                .lock()
-                .unwrap_or_else(|poison| poison.into_inner()) = Some(step.clone());
-            let started = Instant::now();
-            tracing::info!(
-                sandbox = %sandbox,
-                step = %identity,
-                kind = step.kind(),
-                "starting provisioning step"
-            );
-            let result = exec(identity.as_str(), action.run.as_str())
-                .await
-                .map_err(|error| step_failure(step, error))?;
-            let elapsed_ms = started.elapsed().as_millis() as u64;
-            if result.exit_code != 0 {
-                let output = combined_output(&result.stdout, &result.stderr);
-                tracing::warn!(
-                    sandbox = %sandbox,
-                    step = %identity,
-                    kind = step.kind(),
-                    exit_code = result.exit_code,
-                    output_len = output.len(),
-                    "the provisioning step failed"
-                );
-                return Err(command_failure(step, result.exit_code, &output));
-            }
-            steps.push(StepProvenance {
-                identity: identity.clone(),
-                kind: step.kind().to_string(),
-                variables: Vec::new(),
-            });
-            tracing::info!(
-                sandbox = %sandbox,
-                step = %identity,
-                kind = step.kind(),
-                exit_code = result.exit_code,
-                elapsed_ms,
-                "provisioning step finished"
-            );
-        }
-        Ok(steps)
-    })
 }
 
 /// Rolls a container back if `create` is dropped before it finishes.
@@ -448,6 +367,7 @@ impl Backend for DockerBackend {
             let last_step = Mutex::new(None);
             let budget = CREATE_BUDGET;
             let provision = run_steps(
+                BACKEND,
                 &request.name,
                 &request.provision,
                 &last_step,
@@ -461,6 +381,7 @@ impl Backend for DockerBackend {
                             .await
                     })
                 },
+                step_failure,
             );
 
             let steps = match tokio::time::timeout(budget, provision).await {
@@ -835,43 +756,6 @@ fn environment(forwards: &[Forward]) -> Environment {
     }
 }
 
-/// How long a workspace upload may take before create is rolled back.
-const UPLOAD_TIMEOUT: Duration = Duration::from_secs(10 * 60);
-
-/// How much output one provisioning step may buffer in the daemon client.
-const PROVISION_OUTPUT_CAP: usize = 16 * 1024;
-
-/// How much of a failing command's output travels in an error message.
-const ERROR_OUTPUT: usize = 4096;
-
-/// Both streams, labelled, so a diagnostic on stdout is not lost behind a
-/// warning on stderr.
-fn combined_output(stdout: &str, stderr: &str) -> String {
-    let mut output = String::new();
-    if !stdout.is_empty() {
-        output.push_str("stdout:\n");
-        output.push_str(stdout);
-    }
-    if !stderr.is_empty() {
-        if !output.is_empty() {
-            output.push('\n');
-        }
-        output.push_str("stderr:\n");
-        output.push_str(stderr);
-    }
-    output
-}
-
-fn bounded_output(text: &str) -> String {
-    if text.chars().count() <= ERROR_OUTPUT {
-        return text.to_string();
-    }
-    let mut bounded: String = text.chars().take(ERROR_OUTPUT).collect();
-    bounded.push_str("\n[truncated]");
-    bounded
-}
-
-/// The labels that let enumeration report identity without guessing.
 const LABEL_NAME: &str = "litterbox.name";
 const LABEL_PROJECT: &str = "litterbox.project";
 const LABEL_FORWARDS: &str = "litterbox.forwards";
@@ -991,13 +875,13 @@ fn confined(path: &str, sandbox: &SandboxRecord) -> Result<String, Error> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BACKEND, Backend, CREATE_BUDGET, DockerBackend, DockerSettings, PORT_RETRIES,
-        bounded_output, combined_output, command_failure, confined, is_name_conflict,
-        is_port_conflict, labels_for, missing_image_check, record_from_labels,
+        BACKEND, Backend, CREATE_BUDGET, DockerBackend, DockerSettings, PORT_RETRIES, confined,
+        is_name_conflict, is_port_conflict, labels_for, missing_image_check, record_from_labels,
         retry_after_port_conflict, run_steps, step_failure, timeout_failure, upload_failure,
     };
     use crate::backends::docker::compute;
     use crate::backends::docker::error::{BackendError, ComputeError, FailureKind};
+    use crate::backends::shared::{bounded_output, combined_output, command_failure};
     use crate::sandbox::contract::{
         Contributions, CreateRequest, Error, Execution, Forward, Placement, ProvisioningClass,
         RequestedPort, ResolvedStep, SandboxAction, SandboxRecord, Scope, Workspace,
@@ -1199,13 +1083,13 @@ mod tests {
 
     #[test]
     fn output_is_bounded_at_the_boundary() {
-        let exact = "a".repeat(super::ERROR_OUTPUT);
+        let exact = "a".repeat(crate::backends::shared::ERROR_OUTPUT);
         assert_eq!(bounded_output(&exact), exact);
-        let over = "a".repeat(super::ERROR_OUTPUT + 1);
+        let over = "a".repeat(crate::backends::shared::ERROR_OUTPUT + 1);
         let bounded = bounded_output(&over);
         assert!(bounded.ends_with("[truncated]"), "{bounded}");
         let kept = bounded.trim_end_matches("\n[truncated]");
-        assert_eq!(kept.chars().count(), super::ERROR_OUTPUT);
+        assert_eq!(kept.chars().count(), crate::backends::shared::ERROR_OUTPUT);
     }
 
     fn step(identity: &str) -> ResolvedStep {
@@ -1279,8 +1163,8 @@ mod tests {
     #[test]
     fn a_command_failure_carries_the_step_exit_and_bounded_output() {
         let step = step("fetch");
-        let output = "x".repeat(super::ERROR_OUTPUT + 1);
-        match command_failure(&step, 7, &output) {
+        let output = "x".repeat(crate::backends::shared::ERROR_OUTPUT + 1);
+        match command_failure(BACKEND, &step, 7, &output) {
             Error::Provisioning { failure } => {
                 assert_eq!(failure.step.as_deref(), Some("fetch"));
                 assert_eq!(failure.kind.as_deref(), Some("command"));
@@ -1314,19 +1198,26 @@ mod tests {
         let last = std::sync::Mutex::new(None);
         let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let recorded = seen.clone();
-        let completed = run_steps("demo", &steps, &last, move |identity, run| {
-            recorded
-                .lock()
-                .unwrap_or_else(|poison| poison.into_inner())
-                .push((identity.to_string(), run.to_string()));
-            Box::pin(async {
-                Ok(Execution {
-                    exit_code: 0,
-                    stdout: String::new(),
-                    stderr: String::new(),
+        let completed = run_steps(
+            BACKEND,
+            "demo",
+            &steps,
+            &last,
+            move |identity, run| {
+                recorded
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner())
+                    .push((identity.to_string(), run.to_string()));
+                Box::pin(async {
+                    Ok(Execution {
+                        exit_code: 0,
+                        stdout: String::new(),
+                        stderr: String::new(),
+                    })
                 })
-            })
-        })
+            },
+            step_failure,
+        )
         .await
         .expect("steps complete");
         let identities: Vec<&str> = completed
@@ -1357,24 +1248,31 @@ mod tests {
         let last = std::sync::Mutex::new(None);
         let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let recorded = seen.clone();
-        let error = run_steps("demo", &steps, &last, move |identity, run| {
-            recorded
-                .lock()
-                .unwrap_or_else(|poison| poison.into_inner())
-                .push((identity.to_string(), run.to_string()));
-            let failed = identity == "second";
-            Box::pin(async move {
-                Ok(Execution {
-                    exit_code: if failed { 7 } else { 0 },
-                    stdout: String::new(),
-                    stderr: if failed {
-                        "boom".to_string()
-                    } else {
-                        String::new()
-                    },
+        let error = run_steps(
+            BACKEND,
+            "demo",
+            &steps,
+            &last,
+            move |identity, run| {
+                recorded
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner())
+                    .push((identity.to_string(), run.to_string()));
+                let failed = identity == "second";
+                Box::pin(async move {
+                    Ok(Execution {
+                        exit_code: if failed { 7 } else { 0 },
+                        stdout: String::new(),
+                        stderr: if failed {
+                            "boom".to_string()
+                        } else {
+                            String::new()
+                        },
+                    })
                 })
-            })
-        })
+            },
+            step_failure,
+        )
         .await
         .expect_err("second fails");
         match error {
