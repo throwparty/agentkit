@@ -15,6 +15,7 @@ pub mod environment;
 pub mod holder;
 pub mod host;
 pub mod payload;
+pub mod validate;
 pub mod view;
 
 /// The backend's own name in records and reports.
