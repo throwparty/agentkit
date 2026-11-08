@@ -658,6 +658,15 @@ mod tests {
         fn write_scope(&self, unit: &str, file: &str, value: &str) -> std::io::Result<()> {
             self.inner.write_scope(unit, file, value)
         }
+        fn effective_uid(&self) -> u32 {
+            self.inner.effective_uid()
+        }
+        fn namespace_members(&self, pid: u32) -> Option<Vec<u32>> {
+            self.inner.namespace_members(pid)
+        }
+        fn cpu_time(&self, pid: u32) -> Option<u64> {
+            self.inner.cpu_time(pid)
+        }
     }
 
     #[tokio::test]

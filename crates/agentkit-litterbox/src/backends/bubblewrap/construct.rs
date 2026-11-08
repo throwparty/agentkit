@@ -20,10 +20,10 @@ pub fn build(section: &toml::Value) -> Result<Selected, Error> {
 /// Build the backend over an explicit host, for tests.
 pub fn build_with(section: &toml::Value, host: SharedHost) -> Result<Selected, Error> {
     let settings = BubblewrapConfig::from_section(section)?.settings()?;
-    Ok(Selected::new(
-        BACKEND,
-        Arc::new(BubblewrapBackend::new(settings, host)),
-    ))
+    let backend = Arc::new(BubblewrapBackend::new(settings, host));
+    Ok(Selected::new(BACKEND, backend.clone())
+        .with_lifecycle(backend.clone())
+        .with_limits(backend))
 }
 
 #[cfg(test)]
