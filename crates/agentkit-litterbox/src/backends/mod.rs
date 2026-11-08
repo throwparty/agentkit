@@ -5,6 +5,7 @@
 
 pub(crate) mod docker;
 pub mod registry;
+pub(crate) mod shared;
 
 pub use registry::{
     BackendReport, DEFAULT, available_names, build, describe, introspect, readiness_is_usable,
