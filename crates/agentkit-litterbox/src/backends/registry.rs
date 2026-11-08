@@ -11,12 +11,22 @@ use crate::sandbox::contract::{ContributionSupport, Error};
 use crate::sandbox::report::{Capability, Readiness, State};
 use crate::sandbox::selected::Selected;
 
+#[cfg(target_os = "linux")]
+use crate::backends::bubblewrap;
 use crate::backends::docker;
 
 /// A backend builds itself from its own section.
 type Constructor = fn(&toml::Value) -> Result<Selected, Error>;
 
 /// Every mechanism compiled into this binary, with its constructor.
+#[cfg(target_os = "linux")]
+const BACKENDS: &[(&str, Constructor)] = &[
+    (docker::BACKEND, docker::construct::build),
+    (bubblewrap::BACKEND, bubblewrap::construct::build),
+];
+
+/// Every mechanism compiled into this binary, with its constructor.
+#[cfg(not(target_os = "linux"))]
 const BACKENDS: &[(&str, Constructor)] = &[(docker::BACKEND, docker::construct::build)];
 
 /// The backend used when the user has not selected one.
@@ -272,14 +282,14 @@ mod tests {
     #[test]
     fn an_unbuilt_backend_is_unavailable_not_unsupported() {
         let config = Config {
-            backend: Some("bubblewrap".to_string()),
+            backend: Some("qemu".to_string()),
             ..Config::default()
         };
         match build(&config) {
             Err(Error::Unavailable {
                 backend, reason, ..
             }) => {
-                assert_eq!(backend, "bubblewrap");
+                assert_eq!(backend, "qemu");
                 assert!(reason.contains("docker"), "{reason}");
             }
             Err(other) => panic!("expected Unavailable, got {other:?}"),
@@ -381,6 +391,19 @@ mod tests {
         assert_eq!(selected_name(&Config::default()), "docker");
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn bubblewrap_is_compiled_in_on_linux() {
+        assert!(available_names().contains(&"bubblewrap"));
+        assert_eq!(DEFAULT, "docker");
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn bubblewrap_is_absent_off_linux() {
+        assert!(!available_names().contains(&"bubblewrap"));
+    }
+
     #[test]
     fn the_user_can_name_a_backend() {
         let config = Config {
@@ -393,7 +416,7 @@ mod tests {
     #[test]
     fn an_unknown_backend_lists_what_exists() {
         let config = Config {
-            backend: Some("bubblewrap".to_string()),
+            backend: Some("qemu".to_string()),
             ..Config::default()
         };
         let error = match build(&config) {
@@ -401,7 +424,7 @@ mod tests {
             Err(error) => error,
         };
         let message = error.to_string();
-        assert!(message.contains("bubblewrap"), "{message}");
+        assert!(message.contains("qemu"), "{message}");
         assert!(message.contains("docker"), "{message}");
     }
 

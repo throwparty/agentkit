@@ -15,7 +15,7 @@ Move `run_steps`, the create budget, the transfer deadline and the output cap ou
 | Depends On |  |
 | References | spawned-processes,docker-unchanged |
 
-### T-002: Add the backend module, its configuration and the registry entry
+### T-002: [x] Add the backend module, its configuration and the registry entry
 
 Create `src/backends/bubblewrap/` with `mod.rs` holding the `BACKEND` constant and `construct::build`, and `config.rs` typing `memory-mb` and `tasks` with `deny_unknown_fields`. Add the registry entry behind `cfg(target_os = 'linux')` and keep `DEFAULT` as docker. Rename the two registry tests that use bubblewrap as the name of an absent backend.
 
