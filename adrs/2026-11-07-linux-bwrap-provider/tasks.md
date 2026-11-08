@@ -197,7 +197,7 @@ Report one check per requirement: the effective uid is not root, bwrap is presen
 | Depends On | T-005,T-010,T-014 |
 | References | readiness-checks,user-namespaces-blocked,running-as-root,untrusted-bwrap,version-floor |
 
-### T-016: Implement listing, inspection and delete
+### T-016: [x] Implement listing, inspection and delete
 
 Rebuild each payload from the state directory for both scopes, report a corrupt entry rather than dropping it, and report another backend's records without failing. Inspect reports egress Denied, the workspace path, the recorded provenance and no forwards. Delete kills the sandbox pid, waits for the namespace to empty, removes the state directory, and succeeds when the sandbox is already gone or the record cannot be read.
 
