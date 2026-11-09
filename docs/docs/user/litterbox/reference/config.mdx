@@ -73,6 +73,11 @@ cap-add = []
 memory-mb = 4096
 # Maximum tasks or processes per sandbox. At least 1. Unset means no bound.
 tasks = 512
+# Whether the sandbox gets its own network namespace. "denied" (the default)
+# confines it to its own loopback; "host" shares the host's network, so the
+# sandbox reaches whatever the host reaches and a listener it starts is
+# reachable from the host. A project that declares a port needs "host".
+network = "denied"
 ```
 
 Prefer pinning the image by digest (`image = "ubuntu@sha256:..."`): a tag can

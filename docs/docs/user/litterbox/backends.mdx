@@ -45,9 +45,20 @@ A project must list the backend to use its provisioning steps:
 backends = ["bubblewrap"]
 ```
 
-Bubblewrap gives the sandbox its own network namespace, so the only thing it can
-reach is its own loopback. A project that declares `[[ports]]` is refused rather
-than quietly running without them.
+Bubblewrap gives the sandbox its own network namespace by default, so the only
+thing it can reach is its own loopback. That is right for a workload with every
+dependency in its closure, and wrong for one that has to fetch them.
+
+```toml
+[backends.bubblewrap]
+# "denied" (the default) isolates egress; "host" shares the host's network.
+network = "denied"
+```
+
+With `network = "host"` the sandbox reaches whatever the host reaches, and a
+listener it starts is reachable from the host. A project that declares
+`[[ports]]` needs that: with the isolated default, create refuses rather than
+quietly running without the ports.
 
 The holder starts in a systemd user scope when the host has one. Without a
 usable scope, creation needs `accept-degraded = true`: pause then uses a

@@ -1,6 +1,7 @@
 //! Bubblewrap's implementation of the contract.
 
 use std::path::{Path, PathBuf};
+
 use std::sync::Mutex;
 
 use futures_util::future::BoxFuture;
@@ -21,6 +22,21 @@ use crate::sandbox::report::{Capability, Readiness, State};
 /// The descriptor bwrap reports its status on.
 const STATUS_FD: i32 = 3;
 
+/// Whether the sandbox gets its own network namespace.
+#[derive(Clone, Copy, Debug, Default, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum Network {
+    /// The sandbox has its own network namespace, so it reaches nothing beyond
+    /// its own loopback.
+    #[default]
+    Denied,
+    /// The sandbox shares the host's network namespace, so it reaches whatever
+    /// the host reaches and a listener it starts is reachable from the host.
+    Host,
+}
+
+impl Network {}
+
 /// Bubblewrap's settings, typed here and nowhere else.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BubblewrapSettings {
@@ -28,6 +44,8 @@ pub struct BubblewrapSettings {
     pub memory_mb: Option<u64>,
     /// Maximum tasks or processes each sandbox may create.
     pub tasks: Option<u32>,
+    /// Whether the sandbox gets its own network namespace.
+    pub network: Network,
 }
 
 /// Bubblewrap's implementation of the contract.
@@ -84,14 +102,18 @@ impl BubblewrapBackend {
         workspace: &Path,
     ) -> Result<View, Error> {
         View::build(
-            &Self::requested_paths(request, holder_command),
+            &Self::requested_paths(request, holder_command, self.settings.network),
             workspace,
             &self.boundaries(&request.project_slug, &request.name)?,
         )
     }
 
     /// The paths a sandbox is given, before they are opened and pinned.
-    fn requested_paths(request: &CreateRequest, holder_command: &holder::Command) -> Vec<Requested> {
+    fn requested_paths(
+        request: &CreateRequest,
+        holder_command: &holder::Command,
+        network: Network,
+    ) -> Vec<Requested> {
         let mut requested: Vec<Requested> = Vec::new();
         // The mechanism's own command: the pid-1 shell and the utility that
         // blocks in it. Everything else the sandbox can run is contributed.
@@ -100,6 +122,24 @@ impl BubblewrapBackend {
                 path: path.clone(),
                 contributed: false,
             });
+        }
+        // A sandbox that shares the host's network still needs the host's name
+        // resolution and certificate roots to use it.
+        if network == Network::Host {
+            for path in [
+                "/etc/resolv.conf",
+                "/etc/hosts",
+                "/etc/nsswitch.conf",
+                "/etc/ssl",
+            ] {
+                let path = PathBuf::from(path);
+                if path.exists() {
+                    requested.push(Requested {
+                        path,
+                        contributed: false,
+                    });
+                }
+            }
         }
         requested.extend(
             Self::contributed_mounts(request)
@@ -156,6 +196,7 @@ impl BubblewrapBackend {
         view: &View,
         workspace: &Path,
         environment: &crate::sandbox::environment::Environment,
+        forwards: &[crate::sandbox::contract::Forward],
     ) -> Result<BubblewrapData, Error> {
         let launcher = self
             .host
@@ -204,6 +245,8 @@ impl BubblewrapBackend {
             scope: holder.unit.clone(),
             paused: false,
             environment: environment.provenance.clone(),
+            network: self.settings.network,
+            forwards: forwards.to_vec(),
         })
     }
 
@@ -370,10 +413,13 @@ impl Backend for BubblewrapBackend {
                     } else {
                         crate::sandbox::contract::SandboxStatus::Active
                     },
-                    egress: crate::sandbox::report::EgressPosture::Denied,
+                    egress: match data.network {
+                        Network::Host => crate::sandbox::report::EgressPosture::Direct,
+                        Network::Denied => crate::sandbox::report::EgressPosture::Denied,
+                    },
                     workspace: data.workspace.clone(),
                     environment: data.environment.clone(),
-                    forwards: Vec::new(),
+                    forwards: data.forwards.clone(),
                 }),
                 validate::Verdict::Absent => Ok(Inspection {
                     name: sandbox.name.clone(),
@@ -465,6 +511,36 @@ impl Backend for BubblewrapBackend {
                     });
                 }
             }
+            capabilities.push(Capability {
+                operation: "shared host network".to_string(),
+                state: match self.settings.network {
+                    Network::Host => State::Available,
+                    Network::Denied => State::Unavailable,
+                },
+                reason: Some(match self.settings.network {
+                    Network::Host => {
+                        "the sandbox shares the host's network namespace, so it reaches whatever \
+                         the host reaches"
+                            .to_string()
+                    }
+                    Network::Denied => {
+                        "the sandbox has its own network namespace and reaches only its own \
+                         loopback"
+                            .to_string()
+                    }
+                }),
+                remedy: Some(match self.settings.network {
+                    Network::Host => {
+                        "set network = \"denied\" in the user configuration to isolate egress"
+                            .to_string()
+                    }
+                    Network::Denied => {
+                        "set network = \"host\" in the user configuration to allow egress"
+                            .to_string()
+                    }
+                }),
+                fallback: None,
+            });
             Ok(capabilities)
         })
     }
@@ -522,18 +598,42 @@ impl Limits for BubblewrapBackend {
 
 impl BubblewrapBackend {
     async fn create_sandbox(&self, request: &CreateRequest) -> Result<SandboxRecord, Error> {
-        if !request.ports.is_empty() {
+        if !request.ports.is_empty() && self.settings.network != Network::Host {
             return Err(Error::Unsupported {
                 operation: format!("create the sandbox '{}'", request.name),
                 backend: BACKEND.to_string(),
-                primitive: "a host port namespace".to_string(),
-                reason: "the bubblewrap sandbox has its own network namespace, so nothing can \
-                         reach a listener inside it"
+                primitive: "a shared host network".to_string(),
+                reason: "the sandbox has its own network namespace, so nothing can reach a \
+                         listener inside it; set backends.bubblewrap.network = \"host\" to share \
+                         the host's"
                     .to_string(),
-                remedy: "remove the project's ports or use a backend that forwards them"
+                remedy: "set network = \"host\" in the user configuration or remove the ports"
                     .to_string(),
             });
         }
+
+        let forwards: Vec<crate::sandbox::contract::Forward> =
+            if self.settings.network == Network::Host {
+                request
+                    .ports
+                    .iter()
+                    .filter_map(|port| {
+                        let env_var =
+                            crate::sandbox::contract::forwarded_port_env_var(&port.name).ok()?;
+                        Some(crate::sandbox::contract::Forward {
+                            name: port.name.clone(),
+                            target: port.target,
+                            // A shared network means the sandbox listens on the host
+                            // port directly, so the two are the same.
+                            host_port: port.target,
+                            bind: request.forward_bind.clone(),
+                            env_var,
+                        })
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
 
         let directory = workspace::sandbox_directory(&request.project_slug, &request.name);
         if directory.exists() {
@@ -571,7 +671,46 @@ impl BubblewrapBackend {
                 remedy: "install bubblewrap or add it to PATH".to_string(),
             })?;
         let command = holder::command(&*self.host)?;
-        let environment = environment::merge(&request.provision)?;
+        let mut environment = environment::merge(&request.provision)?;
+        // A shared network means the sandbox listens on the host, so the
+        // project's ports are reachable without a forwarder. Report them the
+        // way every other backend does, and tell the workload where they are.
+        for forward in &forwards {
+            environment
+                .variables
+                .insert(forward.env_var.clone(), forward.target.to_string());
+            environment
+                .provenance
+                .variables
+                .push(crate::sandbox::environment::Variable {
+                    name: forward.env_var.clone(),
+                    change: crate::sandbox::environment::Change::Set,
+                });
+        }
+        // A shared network needs a trust store, and OpenSSL's compiled default
+        // does not point into the closure. Point it at the host's bundle,
+        // which the view binds.
+        if self.settings.network == Network::Host {
+            for candidate in [
+                "/etc/ssl/certs/ca-bundle.crt",
+                "/etc/ssl/certs/ca-certificates.crt",
+            ] {
+                if let Ok(path) = std::fs::canonicalize(candidate) {
+                    environment.variables.insert(
+                        "SSL_CERT_FILE".to_string(),
+                        path.to_string_lossy().to_string(),
+                    );
+                    environment
+                        .provenance
+                        .variables
+                        .push(crate::sandbox::environment::Variable {
+                            name: "SSL_CERT_FILE".to_string(),
+                            change: crate::sandbox::environment::Change::Set,
+                        });
+                    break;
+                }
+            }
+        }
         let workspace = workspace::workspace_directory(&request.project_slug, &request.name);
         std::fs::create_dir_all(&workspace).map_err(|error| {
             Error::failed(format!("the state directory could not be created: {error}"))
@@ -585,6 +724,7 @@ impl BubblewrapBackend {
                 &command,
                 &environment,
                 &workspace,
+                &forwards,
                 &mut started,
             )
             .await;
@@ -597,6 +737,7 @@ impl BubblewrapBackend {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn create_holder(
         &self,
         request: &CreateRequest,
@@ -604,6 +745,7 @@ impl BubblewrapBackend {
         holder_command: &holder::Command,
         environment: &crate::sandbox::environment::Environment,
         workspace: &Path,
+        forwards: &[crate::sandbox::contract::Forward],
         started: &mut Option<holder::Holder>,
     ) -> Result<SandboxRecord, Error> {
         workspace::copy_from(&request.workspace.source, workspace)?;
@@ -636,6 +778,7 @@ impl BubblewrapBackend {
             holder_arguments: &holder_arguments,
             workspace_host: workspace,
             status_fd: STATUS_FD,
+            network: self.settings.network,
         });
         let status_path = workspace
             .parent()
@@ -678,7 +821,7 @@ impl BubblewrapBackend {
 
         self.apply_limits(&holder)?;
 
-        let data = self.payload(&holder, &view, workspace, environment)?;
+        let data = self.payload(&holder, &view, workspace, environment, forwards)?;
         let last_step = Mutex::new(None);
         let host = self.host.clone();
         let sandbox_name = request.name.clone();
@@ -747,7 +890,7 @@ impl BubblewrapBackend {
 mod tests {
     use std::sync::Arc;
 
-    use super::{BubblewrapBackend, BubblewrapSettings};
+    use super::{BubblewrapBackend, BubblewrapSettings, Network};
     use crate::backends::bubblewrap::host::FakeHost;
     use crate::sandbox::contract::{
         Backend, ContributionSort, CreateRequest, Error, RequestedPort, SandboxAction, Workspace,
@@ -800,7 +943,7 @@ mod tests {
         let request = request(Vec::new());
         let command = holder_command();
         let requested: Vec<std::path::PathBuf> =
-            BubblewrapBackend::requested_paths(&request, &command)
+            BubblewrapBackend::requested_paths(&request, &command, Network::Denied)
                 .into_iter()
                 .map(|entry| entry.path)
                 .collect();
@@ -831,7 +974,7 @@ mod tests {
             binds: Vec::new(),
             path: String::new(),
         };
-        let requested = BubblewrapBackend::requested_paths(&request, &command);
+        let requested = BubblewrapBackend::requested_paths(&request, &command, Network::Denied);
         assert_eq!(requested.len(), 1);
         assert_eq!(
             requested[0].path,
@@ -849,7 +992,7 @@ mod tests {
         }]);
         match backend.create(&request).await {
             Err(Error::Unsupported { primitive, .. }) => {
-                assert_eq!(primitive, "a host port namespace");
+                assert_eq!(primitive, "a shared host network");
             }
             other => panic!("expected unsupported, got {other:?}"),
         }

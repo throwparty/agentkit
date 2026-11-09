@@ -164,7 +164,7 @@ Lifecycle writes `cgroup.freeze` and confirms the pause by sampling cumulative C
 
 Implement the contract and the facets
 
-`Backend` has create, list, exec, upload, download, inspect, delete, readiness, capabilities and `contribution_support` with both sorts Available. `Lifecycle` and `Limits` are described above. create refuses ports with Unsupported and names forwarding, refuses on any readiness check that is not available except the cgroup one, and refuses a duplicate name with Conflict before it starts a process. inspect reports egress Denied, the workspace path, the recorded provenance and no forwards. list rebuilds the payload from the state directory for both scopes and reports a corrupt entry instead of dropping it. create runs the sandbox steps through the shared runner and the shared budget.
+`Backend` has create, list, exec, upload, download, inspect, delete, readiness, capabilities and `contribution_support` with both sorts Available. `Lifecycle` and `Limits` are described above. create refuses ports with Unsupported and names forwarding, refuses on any readiness check that is not available except the cgroup one, and refuses a duplicate name with Conflict before it starts a process. inspect reports the configured egress posture (Denied with the sandbox network, Direct with the host network), the workspace path, the recorded provenance and the forwards the record holds. list rebuilds the payload from the state directory for both scopes and reports a corrupt entry instead of dropping it. create runs the sandbox steps through the shared runner and the shared budget.
 
 
 ### shared-provisioning

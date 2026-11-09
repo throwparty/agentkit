@@ -238,7 +238,10 @@ pub fn parse_status(text: &str) -> Option<Status> {
         }
     }
     let sandbox_pid = sandbox_pid?;
-    if inodes[1..].contains(&0) {
+    // bwrap reports only the namespaces it unshared. The user namespace is
+    // never in the document, and a host-network sandbox has no net namespace
+    // to report; both are read from the process afterwards.
+    if [1, 3, 4, 5, 6].iter().any(|index| inodes[*index] == 0) {
         return None;
     }
     Some(Status {
@@ -571,6 +574,17 @@ mod tests {
                 ("cgroup", 7),
             ]
         );
+    }
+
+    #[test]
+    fn a_document_without_a_network_namespace_is_parsed() {
+        let status = parse_status(
+            "{\"child-pid\": 4242, \"cgroup-namespace\": 7, \"ipc-namespace\": 2, \
+             \"mnt-namespace\": 5, \"pid-namespace\": 4, \"uts-namespace\": 6}\n",
+        )
+        .expect("parsed");
+        assert_eq!(status.sandbox_pid, 4242);
+        assert_eq!(status.namespaces.net, 0);
     }
 
     #[test]

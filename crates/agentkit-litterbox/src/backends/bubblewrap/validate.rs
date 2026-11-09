@@ -210,6 +210,8 @@ mod tests {
                 host_paths: Vec::new(),
                 steps: Vec::new(),
             },
+            forwards: Vec::new(),
+            network: crate::backends::bubblewrap::backend::Network::Denied,
         }
     }
 

@@ -6,7 +6,7 @@
 
 use serde::Deserialize;
 
-use super::backend::BubblewrapSettings;
+use super::backend::{BubblewrapSettings, Network};
 use crate::sandbox::contract::Error;
 
 /// Bubblewrap's keys.
@@ -18,6 +18,8 @@ pub struct BubblewrapConfig {
     pub memory_mb: Option<u64>,
     /// Maximum tasks or processes per sandbox.
     pub tasks: Option<u32>,
+    /// Whether the sandbox gets its own network namespace.
+    pub network: Option<Network>,
 }
 
 impl BubblewrapConfig {
@@ -63,6 +65,7 @@ impl BubblewrapConfig {
         Ok(BubblewrapSettings {
             memory_mb: self.memory_mb,
             tasks: self.tasks,
+            network: self.network.unwrap_or_default(),
         })
     }
 }
@@ -70,6 +73,39 @@ impl BubblewrapConfig {
 #[cfg(test)]
 mod tests {
     use super::BubblewrapConfig;
+
+    #[test]
+    fn the_network_setting_is_parsed() {
+        use super::Network;
+
+        let host =
+            BubblewrapConfig::from_section(&toml::from_str("network = 'host'").expect("section"))
+                .expect("config");
+        assert_eq!(host.settings().expect("settings").network, Network::Host);
+        let denied =
+            BubblewrapConfig::from_section(&toml::from_str("network = 'denied'").expect("section"))
+                .expect("config");
+        assert_eq!(
+            denied.settings().expect("settings").network,
+            Network::Denied
+        );
+        assert_eq!(
+            BubblewrapConfig::default()
+                .settings()
+                .expect("settings")
+                .network,
+            Network::Denied
+        );
+    }
+
+    #[test]
+    fn an_unknown_network_is_refused() {
+        let error = BubblewrapConfig::from_section(
+            &toml::from_str("network = 'sometimes'").expect("section"),
+        )
+        .expect_err("refused");
+        assert!(error.to_string().contains("network"), "{error}");
+    }
 
     #[test]
     fn the_section_carries_its_bounds() {
