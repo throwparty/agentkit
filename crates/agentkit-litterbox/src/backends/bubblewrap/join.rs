@@ -129,6 +129,21 @@ pub fn run(host: &dyn Host, data: &BubblewrapData, command: &[String]) -> Result
         .map(|(_, value)| value.clone());
     let candidates = candidates(&arguments[0], search_path.as_deref())?;
     let expected = data.namespaces;
+    // A namespace the sandbox shares with the caller cannot be entered: it is
+    // owned by a user namespace the caller has no capability in, and there is
+    // nothing to enter anyway. Host networking is the case that matters.
+    let mut skip = [false; 7];
+    for (index, name) in ["user", "ipc", "net", "pid", "mnt", "uts", "cgroup"]
+        .iter()
+        .enumerate()
+    {
+        if let (Ok(sandbox), Ok(current)) = (
+            std::fs::read_link(format!("/proc/{}/ns/{name}", data.sandbox_pid)),
+            std::fs::read_link(format!("/proc/self/ns/{name}")),
+        ) {
+            skip[index] = sandbox == current;
+        }
+    }
 
     // SAFETY: the child only performs async-signal-safe calls between fork and
     // exec, and exits rather than unwinding on a failure.
@@ -151,6 +166,7 @@ pub fn run(host: &dyn Host, data: &BubblewrapData, command: &[String]) -> Result
             candidates: &candidates,
             environment: &environment,
             expected,
+            skip,
         };
         context.run();
     }
@@ -241,6 +257,7 @@ struct Child<'a> {
     candidates: &'a [CString],
     environment: &'a [CString],
     expected: [u64; 7],
+    skip: [bool; 7],
 }
 
 impl Child<'_> {
@@ -260,11 +277,14 @@ impl Child<'_> {
             exit(Step::OwnUser.status());
         }
         for (step, index, flag) in order {
+            if self.skip[index] {
+                continue;
+            }
             if setns(self.descriptors[index], flag).is_err() {
                 exit(step.status());
             }
         }
-        if setns(self.descriptors[0], libc::CLONE_NEWUSER).is_err() {
+        if !self.skip[0] && setns(self.descriptors[0], libc::CLONE_NEWUSER).is_err() {
             exit(Step::SandboxUser.status());
         }
 

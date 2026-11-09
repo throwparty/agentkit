@@ -255,6 +255,8 @@ pub struct RenderOptions<'a> {
     pub workspace_host: &'a Path,
     /// The descriptor bwrap reports its status on.
     pub status_fd: i32,
+    /// Whether the sandbox gets its own network namespace.
+    pub network: crate::backends::bubblewrap::backend::Network,
 }
 
 impl View {
@@ -277,11 +279,13 @@ impl View {
             "--unshare-ipc",
             "--unshare-uts",
             "--unshare-cgroup",
-            "--unshare-net",
-            "--disable-userns",
-            "--hostname",
-            "litterbox",
         ] {
+            push(flag.to_string());
+        }
+        if options.network == crate::backends::bubblewrap::backend::Network::Denied {
+            push("--unshare-net".to_string());
+        }
+        for flag in ["--disable-userns", "--hostname", "litterbox"] {
             push(flag.to_string());
         }
         for flag in ["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp"] {
@@ -371,6 +375,7 @@ mod tests {
             holder_arguments: &[String::from("2147483647")],
             workspace_host: &workspace,
             status_fd: 3,
+            network: crate::backends::bubblewrap::backend::Network::Denied,
         };
         let argv: Vec<String> = view
             .render(&options)
@@ -567,6 +572,7 @@ mod tests {
             holder_arguments: &[String::from("2147483647")],
             workspace_host: &workspace,
             status_fd: 3,
+            network: crate::backends::bubblewrap::backend::Network::Denied,
         };
         let argv = view.render(&options);
         let contains = |flag: &str| argv.iter().any(|argument| argument == flag);
@@ -581,6 +587,23 @@ mod tests {
         ] {
             assert!(contains(namespace), "missing {namespace}");
         }
+        assert!(contains("--unshare-net"), "the default denies the network");
+
+        let mut shared = options.clone();
+        shared.network = crate::backends::bubblewrap::backend::Network::Host;
+        let shared_argv = view.render(&shared);
+        assert!(
+            !shared_argv
+                .iter()
+                .any(|argument| argument == "--unshare-net"),
+            "host networking keeps the host namespace"
+        );
+        assert!(
+            shared_argv
+                .iter()
+                .any(|argument| argument == "--unshare-user"),
+            "the other namespaces are still unshared"
+        );
         assert!(
             contains("--disable-userns"),
             "nested user namespaces are not blocked"

@@ -9,12 +9,13 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use super::BACKEND;
+use super::backend::Network;
 use super::view::{Access, Mount};
 use crate::sandbox::contract::{Error, SandboxRecord};
 use crate::sandbox::environment::Provenance;
 
 /// The payload version this release writes.
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 
 /// One mount as the record holds it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,6 +89,10 @@ pub struct BubblewrapData {
     pub paused: bool,
     /// Where the environment came from and what was withheld.
     pub environment: Provenance,
+    /// Whether the sandbox shares the host network.
+    pub network: Network,
+    /// Ports the sandbox reaches on the host, when it shares the host network.
+    pub forwards: Vec<crate::sandbox::contract::Forward>,
 }
 
 impl BubblewrapData {
@@ -228,6 +233,8 @@ mod tests {
                 host_paths: Vec::new(),
                 steps: Vec::new(),
             },
+            forwards: Vec::new(),
+            network: crate::backends::bubblewrap::backend::Network::Denied,
         }
     }
 

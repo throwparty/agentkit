@@ -373,8 +373,10 @@ async fn handle_delete(
                 reason: "it is active; pass --force to delete it".to_string(),
             });
         }
-        Ok(_) | Err(Error::NotFound { .. }) => {}
-        Err(error) => return report(error),
+        // Any other state, including a record this release cannot read, is
+        // deletable: deleting is how a sandbox whose record went bad is
+        // cleaned up.
+        Ok(_) | Err(_) => {}
     }
 
     match sandboxes.delete(&name).await {
@@ -933,7 +935,10 @@ const EXIT_CODES: &[(u8, &str)] = &[
 fn handle_docgen(kind: DocgenCommand) -> ExitCode {
     let content = match kind {
         DocgenCommand::Cli => {
-            agentkit_docgen::generate_cli_docs_with_exit_codes(&Cli::command(), EXIT_CODES)
+            let mut content =
+                agentkit_docgen::generate_cli_docs_with_exit_codes(&Cli::command(), EXIT_CODES);
+            content.push_str(&crate::docgen::cli_section());
+            content
         }
         DocgenCommand::Mcp => mcp::generate_mcp_docs(),
     };

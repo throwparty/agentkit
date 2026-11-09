@@ -121,7 +121,7 @@ Each accepted path becomes one read-only bind at its own absolute path, one path
 
 ### FR-008: Record: Payload
 
-The backend writes its own `SandboxRecord.data` payload, and every later operation reads it. The payload holds the launcher pid and the sandbox pid with their start times, the seven namespace inodes, the uid the sandbox was created under, the root's device and inode, the mounts from host paths with an access for each, the host workspace directory, the sandbox workspace path, the scope unit when there is one, whether the sandbox is paused, and the environment provenance. The payload carries a version. A higher version is refused as unreadable. A lower version, or a payload missing a required field, is refused with a remedy of deleting and recreating the sandbox. The record keeps the metadata store's 0600 file and 0700 directory, and this ADR requires that rather than relying on another module's default. Backend state lives at `data_dir/litterbox/bubblewrap/<project-slug>/<sandbox-name>/`, with the workspace copy inside it. The sandbox workspace path is a backend constant and is recorded in the payload.
+The backend writes its own `SandboxRecord.data` payload, and every later operation reads it. The payload holds the launcher pid and the sandbox pid with their start times, the seven namespace inodes, the uid the sandbox was created under, the root's device and inode, the mounts from host paths with an access for each, the host workspace directory, the sandbox workspace path, the scope unit when there is one, whether the sandbox is paused, whether it shares the host network, the forwards it holds, and the environment provenance. The payload carries a version. A higher version is refused as unreadable. A lower version, or a payload missing a required field, is refused with a remedy of deleting and recreating the sandbox. The record keeps the metadata store's 0600 file and 0700 directory, and this ADR requires that rather than relying on another module's default. Backend state lives at `data_dir/litterbox/bubblewrap/<project-slug>/<sandbox-name>/`, with the workspace copy inside it. The sandbox workspace path is a backend constant and is recorded in the payload.
 
 **Slug:** `record-payload`
 
@@ -155,15 +155,15 @@ readiness reports one check for each requirement it needs. Each check has a stat
 
 **Slug:** `readiness-checks`
 
-### FR-014: Egress: Denied
+### FR-014: Egress: Configurable
 
-Inspection reports egress as Denied. The sandbox has no route beyond its own loopback. The host cannot reach a listener inside it. Two commands in the same sandbox can reach each other over loopback, because they share the network namespace. The backend creates no proxy, socket, forwarded port or host route. The report describes the current posture and promises nothing about a proxy that does not exist yet.
+The backend's section selects one of two network postures. With `network = 'denied'`, which is the default, the sandbox gets its own network namespace: it has no route beyond its own loopback, the host cannot reach a listener inside it, and two commands in the same sandbox reach each other over loopback. With `network = 'host'`, the sandbox shares the host's network namespace: it reaches whatever the host reaches, and a listener it starts is reachable from the host. Inspection reports the posture it actually has, Denied or Direct, and creates no proxy, socket or host route in either case. Sharing the host network is the caller's decision to widen egress; the readiness output and the capability report say which posture is configured.
 
 **Slug:** `egress-denied`
 
-### FR-015: Ports: Refused
+### FR-015: Ports: Reported or Refused
 
-A project that declares ports is refused at create. The error is Unsupported, and it names the missing requirement, a host port namespace, the backend that lacks it, and the remedy. The backend creates no forwarding, and a sandbox that silently lost its ports would look like a service that failed to start. The MCP port tool returns the same refusal for this backend, not an empty list that reads as success. inspect reports no forwards. The backend does not implement the forwarding facet.
+A project that declares ports is refused at create when the sandbox has its own network namespace. The error is Unsupported, and it names the missing requirement, a shared host network, the setting that provides it, and the remedy. With `network = 'host'` the ports are accepted: each is reported as a forward whose host port equals its target, the project's forward bind, and an environment variable carrying the port, so the workload and the port tool agree with what the host can reach. A port is never silently dropped: either it is reachable and reported, or create refuses and names the setting that would allow it. Inspection reports the forwards the record holds.
 
 **Slug:** `ports-refused`
 
@@ -273,7 +273,7 @@ Inside the sandbox a command sees the devShell's variables pointing at the sandb
 
 **Slug:** `prepared-environment`
 
-### AC-006: Isolation
+### AC-006: Isolation Holds
 
 A write to a store path fails read-only. A write into the host home, the metadata directory, the state root or any ungranted host path fails, or the path does not exist. A write to the sandbox home and to `/tmp` succeeds, which proves the mechanism's own binds are not being mistaken for the boundary. A host credential path does not exist in the view. An outbound connection fails with no route. A granted tree that holds a unix socket is refused at create rather than mounted.
 
@@ -297,9 +297,9 @@ A record whose payload is changed one field at a time is refused with Denied or 
 
 **Slug:** `foreign-holder`
 
-### AC-010: Ports Refused
+### AC-010: Ports Refused or Reported
 
-A project that declares a port is refused at create with Unsupported naming forwarding, leaves no branch and no state directory behind, and the MCP port tool returns the same refusal rather than an empty list.
+With the default network posture, a project that declares a port is refused at create with Unsupported naming the setting that would allow it, and leaves no branch and no state directory behind. With `network = 'host'`, the same project creates, inspection reports the forward with its host port equal to its target, and the sandbox environment carries the variable that names it.
 
 **Slug:** `ports-refused-create`
 
