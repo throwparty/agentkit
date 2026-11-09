@@ -30,7 +30,7 @@ Parameters:
 - `sandbox` (string, required) Sandbox name.
 - `pattern` (string, required) Pattern to search for.
 - `path` (string, required) Path inside the sandbox.
-- `include` (string, optional) Glob include filter (e.g., \*.rs).
+- `include` (string, optional) Glob include filter (e.g., *.rs).
 
 ## `ls`
 
@@ -88,3 +88,35 @@ Parameters:
 - `sandbox` (string, required) Sandbox name.
 - `path` (string, required) Path inside the sandbox.
 - `content` (string, required) Full file contents to write.
+
+
+## Sandbox lifecycle
+
+A sandbox is `active`, `paused` or `missing`. `active` and `paused` are derived from the
+sandbox's compute; `missing` means the record and the branch exist but the compute has
+exited. Every command that takes a sandbox expects `active`.
+
+### Tools
+
+| Tool | `active` | `paused` | `missing` |
+| --- | --- | --- | --- |
+| `bash`, `read`, `write`, `patch`, `ls`, `glob`, `grep` | runs | blocks until the sandbox is resumed | `not found` |
+| `sandbox-ports` | the recorded ports | the recorded ports | the recorded ports |
+
+`sandbox-create` is not an operation on an existing sandbox: it takes a new name, and any
+name already in use — `active`, `paused` or `missing` — is a conflict. `sandbox-ports`
+answers from the record, so the same ports come back whether or not the compute is alive;
+a backend that does not forward ports reports the operation as unsupported.
+
+:::warning Paused sandboxes accept no work
+
+A command sent to a paused sandbox joins its frozen cgroup, so it does not run and does
+not return until the sandbox is resumed. A `timeout` does not help, because the timer is
+frozen along with the command. Resume the sandbox first.
+
+:::
+
+No MCP tool lists, inspects, pauses, resumes or deletes a sandbox. An agent that finds a
+missing sandbox can report it, but cannot recover from it.
+
+See [Sandbox lifecycle](../lifecycle) for the state diagram, the failure classes and how to recover a missing sandbox.

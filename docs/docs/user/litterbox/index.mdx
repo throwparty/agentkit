@@ -12,6 +12,36 @@ Each sandbox runs inside the sandboxing mechanism you choose, with its own worki
 
 To allow you to interact with sandboxes, Litterbox can forward ports from servers running inside the sandbox to your local machine. It'll pick unused ports for each sandbox automatically.
 
+## Sandbox lifecycle
+
+A sandbox is a name, a Git branch and a unit of compute. The branch is the durable
+half; the compute is the half that can disappear. Litterbox derives the state on
+every operation rather than storing it.
+
+```mermaid
+stateDiagram-v2
+    [*] --> active: create
+    active --> paused: pause
+    paused --> active: resume
+    active --> missing: the compute exits
+    paused --> missing: the compute exits
+    active --> deleted: delete
+    paused --> deleted: delete
+    missing --> deleted: delete
+    deleted --> [*]
+
+    note right of missing
+        The record and the branch remain.
+        Only delete removes them.
+    end note
+```
+
+Every command expects an `active` sandbox. A `paused` sandbox accepts no work, and
+a `missing` sandbox is a record whose compute has exited: the branch and its work
+survive, but nothing can run until the sandbox is recovered or deleted. See
+[Sandbox lifecycle](./lifecycle) for the operations valid in each state, the
+failure classes, and how to recover a missing sandbox.
+
 ## Workflow
 
 To better visualise how Litterbox works, let's walk through a simple example of an agent spinning up a sandbox and writing a single file.

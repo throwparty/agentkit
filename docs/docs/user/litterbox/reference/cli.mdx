@@ -73,13 +73,41 @@ Run the MCP (Model Control Protocol) server over stdio
 
 ## Exit codes
 
-| Code | Meaning     |
-| ---- | ----------- |
-| 0    | success     |
-| 1    | failed      |
-| 2    | usage       |
-| 3    | not found   |
-| 4    | conflict    |
-| 5    | unsupported |
-| 6    | denied      |
-| 7    | unavailable |
+| Code | Meaning |
+| --- | --- |
+| 0 | success |
+| 1 | failed |
+| 2 | usage |
+| 3 | not found |
+| 4 | conflict |
+| 5 | unsupported |
+| 6 | denied |
+| 7 | unavailable |
+
+
+## Sandbox lifecycle
+
+A sandbox is `active`, `paused` or `missing`. `active` and `paused` are derived from the
+sandbox's compute; `missing` means the record and the branch exist but the compute has
+exited. Every command that takes a sandbox expects `active`.
+
+### Commands
+
+| Command | `active` | `paused` | `missing` |
+| --- | --- | --- | --- |
+| `list` | reported as `active` | reported as `paused` | reported as `missing`; the listing exits 0 |
+| `shell` | runs the command | blocks until the sandbox is resumed | exits 3, not found |
+| `pause` | freezes the sandbox | succeeds, changing nothing | exits 3, not found |
+| `resume` | succeeds, changing nothing | thaws the sandbox | exits 3, not found |
+| `delete` | refused without `--force` | removes the record and the branch | removes the record and the branch |
+
+Creating a sandbox is only available over MCP. There is no `create` command.
+
+:::warning Paused sandboxes accept no work
+
+A command sent to a paused sandbox joins its frozen cgroup, so it does not run and does
+not return until the sandbox is resumed. Resume the sandbox first.
+
+:::
+
+See [Sandbox lifecycle](../lifecycle) for the state diagram, the failure classes and how to recover a missing sandbox.

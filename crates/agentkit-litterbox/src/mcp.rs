@@ -335,6 +335,7 @@ pub fn generate_mcp_docs() -> String {
         output.push('\n');
     }
 
+    output.push_str(&crate::docgen::mcp_section());
     output
 }
 

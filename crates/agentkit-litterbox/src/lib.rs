@@ -2,6 +2,7 @@ pub mod backends;
 pub mod cli;
 pub mod config;
 pub mod config_loader;
+pub mod docgen;
 pub mod domain;
 pub mod mcp;
 pub mod metadata_store;
