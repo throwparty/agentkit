@@ -621,6 +621,41 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
+    fn a_project_setting_the_network_is_reported_and_ignored() {
+        use crate::backends::bubblewrap::backend::Network;
+        use crate::backends::bubblewrap::config::BubblewrapConfig;
+
+        let project: ProjectFile =
+            toml::from_str("[backends.bubblewrap]\nnetwork = 'host'\n").expect("project");
+        let config = merge(ProjectFile::default(), project).expect("merge");
+
+        assert!(
+            config.backend_settings.get("bubblewrap").is_none(),
+            "a project table contributes no machine settings"
+        );
+        assert!(
+            config
+                .notices
+                .iter()
+                .any(|notice| notice.contains("bubblewrap") && notice.contains("ignored")),
+            "{:?}",
+            config.notices
+        );
+
+        let section = config
+            .backend_settings
+            .get("bubblewrap")
+            .cloned()
+            .unwrap_or(toml::Value::Table(Default::default()));
+        let settings = BubblewrapConfig::from_section(&section)
+            .expect("config")
+            .settings()
+            .expect("settings");
+        assert_eq!(settings.network, Network::Denied);
+    }
+
+    #[test]
     fn a_project_setting_the_bind_address_is_reported_and_ignored() {
         let mut project = project();
         project.forwarding = Some(ForwardingConfig {

@@ -649,8 +649,9 @@ fn validate_provisioning(config: &mut Config) -> Result<(), ConfigError> {
 mod tests {
 
     use super::{
-        MAX_CONFIG_BYTES, combine_backends, parse_project, read_config_file, reject_moved_sections,
-        validate_forwarding, validate_local_file, validate_ports, validate_provisioning,
+        MAX_CONFIG_BYTES, combine_backends, parse_project, read_config_file,
+        reject_machine_keys_in_local, reject_moved_sections, validate_forwarding,
+        validate_local_file, validate_ports, validate_provisioning,
     };
     use crate::config::{Config, ConfigError, PortRequest, ProjectFile, merge};
     use crate::sandbox::contract::{ProvisionStep, StoreView};
@@ -870,6 +871,18 @@ bind = "0.0.0.0"
         let path = dir.path().join("config.local.toml");
         std::fs::write(&path, "backend = \"docker\"\n").expect("write");
         validate_local_file(&path).expect("untracked file accepted");
+    }
+
+    #[test]
+    fn a_local_override_setting_the_network_is_refused() {
+        let local: ProjectFile =
+            toml::from_str("[backends.bubblewrap]\nnetwork = 'host'\n").expect("local override");
+        let error = reject_machine_keys_in_local(&local).expect_err("network refused");
+        assert!(
+            error.to_string().contains("backends.bubblewrap.network"),
+            "{error}"
+        );
+        assert!(error.to_string().contains("user configuration"), "{error}");
     }
 
     #[test]

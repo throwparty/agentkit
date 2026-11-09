@@ -2,7 +2,7 @@
 
 ## Tasks
 
-### T-001: Test the setting and its ownership
+### T-001: [x] Test the setting and its ownership
 
 Add tests in `config.rs` and `config_loader.rs` for both values and the ownership rule. `network = 'denied'` and `network = 'host'` parse. A missing value is `denied`. An unknown value and an unknown key are configuration errors. A project file that sets `network` is ignored with a notice and the user value or default decides. A local override that sets `network` is rejected and the error names the key. A user configuration with `host` reaches `BubblewrapSettings { network: Host }`.
 
