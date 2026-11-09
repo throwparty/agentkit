@@ -1,0 +1,356 @@
+# Sandbox Lifecycle Consistency and Recovery
+
+**Status:** draft  **Created:** 2026-11-09  **Author:** adrian
+
+Litterbox pairs a name, a Git branch and a unit of compute. The branch is durable, the compute is not, and today nothing reconciles the two. The contract already declares `SandboxStatus::Unknown` but never constructs it (`crates/agentkit-litterbox/src/sandbox/contract.rs`), and the provider contract's FR-014 requires enumeration to report a sandbox as unknown when the backend cannot be asked (`adrs/2026-11-03-sandbox-provider-contract/spec.md`). The lifecycle page documents a `missing` state that only `delete` can leave (`docs/docs/user/litterbox/lifecycle.mdx`), and the generated reference repeats that prose from `crates/agentkit-litterbox/src/docgen.rs`. The orchestrator's `create` creates the branch before asking the backend (`src/orchestrator/service.rs`), so an existing branch returns `SandboxExists`, mapped to `Conflict`, and the backend is never reached; a missing name therefore cannot be recreated through either surface. `exec` performs no paused check before the join, so a command addressed to a paused sandbox can block until resume; a timeout inside the sandbox cannot fire while it is frozen. `list` enumerates branches rather than records, so a record whose branch is gone is invisible and a branch with no record is reported as an orphan. `stored()` returns a failure for a corrupt record and `delete` tolerates only `NotFound`, so a corrupt record cannot be removed by any command. The incident that motivates this specification is the `workspace-tests` sandbox under `data_dir/litterbox/bubblewrap/agentkit-02853408/`: the record, branch and workspace exist, both recorded pids are gone, and the payload is version 1 while the current release writes version 2. A repair that depends on reading that payload therefore cannot recover it. The existing ADR `2026-10-31-linux-bwrap-lifecycle` covers cgroup pause and resume, not lifecycle reconciliation; `2026-11-03-sandbox-provider-contract` covers status vocabulary, not recovery; `2026-11-07-linux-bwrap-provider` covers validation outcomes, not reconciliation. No existing ADR covers this topic.
+
+
+## Problem
+
+A sandbox whose compute has exited is unrecoverable. Every command returns not found, inspect reports missing, delete succeeds, and no surface can bring the compute back. Creating the same name fails as a conflict because the branch exists. A paused sandbox blocks commands instead of refusing them. `Unknown` is declared but unreachable. `list` hides records whose branch is gone and reports unpaired branches as orphans. A corrupt record cannot be deleted. The system has no single rule for what happens when a record and its compute disagree.
+
+## Goals
+
+- Make every operation that needs live compute reconcile a record whose compute is missing, using the same name, branch and workspace.
+- Preserve the workspace directory across a repair; use the branch only when the workspace is gone.
+- Refuse a paused sandbox before any join, with one neutral failure class on CLI and MCP.
+- Make `SandboxStatus::Unknown` reachable when the backend cannot be asked, and stop reporting per-record refusals as unknown.
+- Report records and branches in one listing so a record without a branch is visible and addressable.
+- Require explicit confirmation before deleting a missing sandbox, and state exactly what will be removed.
+- Give a corrupt record a removal path that needs no parseable payload and report any compute it could not stop.
+- Never repair silently: the CLI warns on stderr and MCP carries a structured recovery field.
+- Enforce every cell of the lifecycle operation matrix with a test.
+
+## Non-goals
+
+- A new user-facing recovery verb, command or MCP tool.
+- An MCP delete, pause, resume, list or inspect tool.
+- Deleting, rewriting or creating a branch anywhere except the existing create and delete paths.
+- Repairing a record whose branch is gone, or adopting an orphan branch that has no record.
+- A standalone payload migration, a payload-version compatibility layer, or reading payload version 1; repair writes a current payload only when it recreates compute.
+- Re-running sandbox provisioning steps when the workspace is reused; they are re-run only when the workspace had to be materialised from the branch.
+- Replacing the branch as the durable half or making compute durable.
+- Changing Docker's behaviour or adding a new backend.
+- Egress posture, host networking or port-forwarding semantics; this ADR only fixes whether forwards and sandbox-ports repair or block.
+
+
+## Functional Requirements
+
+### FR-001: Ensure Live Or Repair
+
+Every orchestrator operation that needs live compute first establishes whether the sandbox is live. The covered operations are exec, upload, download and snapshot. `forwards` and `sandbox-ports` answer from the record and never trigger repair. Active proceeds. Paused follows FR-008. Missing triggers repair through FR-002 to FR-006. A backend that cannot be asked or a record that cannot be read returns a neutral failure with a remedy, without attempting to repair. The step is idempotent: a second call on an active sandbox does not repair, and a second call after a successful repair sees active and proceeds.
+
+**Slug:** `ensure-live-or-repair`
+
+### FR-002: Repair Is Create
+
+Repair uses the existing create path for the same name, project, branch and workspace. It is not a new lifecycle verb, command or MCP tool. It does not call `scm.create_branch` and does not delete or rewrite the branch. The orchestrator resolves the provisioning sequence from current project configuration, runs host preparation, and hands the backend a create request. The backend creates compute against the surviving state rather than copying over it. `sandbox-create` on a missing name follows this path. `sandbox-create` on an active or paused name remains Conflict. `sandbox-create` on a branch with no record remains Conflict and does not adopt the branch.
+
+**Slug:** `repair-is-create`
+
+### FR-003: Repair Preserves Workspace
+
+The backend locates its state directory by project and sandbox name, which is deterministic. If the workspace directory exists it is reused in place. If it does not exist the workspace is materialised from the sandbox branch archive, not from HEAD. The repair does not require the full payload to decide whether it can proceed; it reads only the recorded pids to prove compute is absent, so a version 1 payload does not block it. A payload with no readable pid cannot be proven absent and is refused with the delete remedy. If the repair fails it leaves the workspace, the record and the previous payload in their pre-repair state and removes only resources it created during the attempt. Stale state from the dead compute is not reused. A failed repair must not leave a half-repaired state directory.
+
+**Slug:** `repair-preserves-workspace`
+
+### FR-004: Repair Rebuilds Environment
+
+Host preparation is re-run so environment values that are not persisted can be reconstructed. The resolved steps are passed to the backend, which rebuilds the sandbox's mounts and environment and writes a fresh payload in the current version. Stale status, diagnostic and payload files from the dead compute are replaced; the new payload is written only after the sandbox process is ready, so a failed attempt leaves the previous payload in place. Sandbox provisioning steps are re-run only when the workspace had to be materialised from the branch, because the branch does not contain setup effects that were never snapshotted; they are not re-run when the workspace is reused. A preparation refusal such as missing setup consent or an unbuildable devShell is reported as the structured provisioning failure it is, and no sandbox process starts.
+
+**Slug:** `repair-rebuilds-environment`
+
+### FR-005: Repair Is Serialised
+
+The check-repair-write sequence is serialised per project and sandbox name across processes. The lock is a cross-process advisory lock on a file beneath the project records directory, taken before the status check and released after the record is written. An in-process guard covers the same name. A second caller blocks until the first finishes, then observes the repaired sandbox as active and proceeds without spawning a second sandbox process.
+
+**Slug:** `repair-serialised`
+
+### FR-006: Repair Failure
+
+Repair is refused when the branch is gone, the state directory cannot be used, the record cannot be read, the selected backend is unavailable, or host preparation refuses. The failure uses a neutral class and a remedy that names the exact next command or tool call. A branch that is gone is not recreated. A corrupt record is not guessed at. The remedy for a branch that is gone is `litterbox delete --force <name>` followed by create. A failed spawn is `unavailable` or `failed` according to the backend's answer, and it leaves no half-repaired directory.
+
+**Slug:** `repair-failure`
+
+### FR-007: Create On Missing
+
+`sandbox-create` on a missing name reconciles and reports that it did. It returns the same inspection it returns for a fresh create, and the MCP result carries the recovery field from FR-014. It does not silently create a second branch or a second record. The result names the branch and the state it repaired from.
+
+**Slug:** `create-on-missing`
+
+### FR-008: Paused Refusal
+
+A command addressed to a paused sandbox is refused before any namespace is opened or joined. The covered paths are `shell` on the CLI and `bash`, `read`, `write`, `patch`, `ls`, `glob` and `grep` over MCP. No command is written into the sandbox and no caller blocks. The CLI exits 4 and prints `sandbox '<name>' is paused; run `litterbox resume <name>` first`. MCP returns invalid params with class `conflict`, the same reason and the same remedy. Operations that do not join continue: `list`, `sandbox-ports`, `pause`, `resume`, `delete`, upload, download and snapshot. Pausing an already paused sandbox and resuming an already active one remain no-ops.
+
+**Slug:** `paused-refusal`
+
+### FR-009: Paused Class Is Shared
+
+The paused refusal is one contract error variant mapped once to a failure class. The CLI exit code and the MCP class are derived from that mapping, not written per surface. The chosen class is `conflict`, because the sandbox exists and the request conflicts with its current state; retrying after resume succeeds. `conflict` continues to mean a name already in use and gains the state-conflict meaning in the documentation. No surface reports a paused refusal as `failed` or `not-found`.
+
+**Slug:** `paused-class-parity`
+
+### FR-010: Unknown Is Reachable
+
+`SandboxStatus::Unknown` is produced when enumeration cannot ask the backend: the backend cannot be selected, its readiness check fails, or it cannot be reached. The listing uses a status-only report and does not fabricate an `Inspection` with values it does not have. A per-record refusal from a backend that was asked is reported as `error` with the reason, not as `unknown`. `list` prints `unknown` only for the first case. `list` exits 1 when any record is unknown or in error, and exits 0 when the only non-live records are missing. A single-sandbox command that cannot ask the backend still returns the backend's failure rather than `Unknown`, because the command did not receive an answer.
+
+**Slug:** `unknown-status`
+
+### FR-011: List Records And Branches
+
+`list` enumerates metadata records first and branches second. Every record is reported, including a record whose branch is gone; such a record remains addressable and its repair refuses with the remedy from FR-006. Every branch not represented by a current, legacy or corrupt record is still reported as an orphan. A record paired with an orphan branch is reported once. Output is sorted by name for stable tests. Legacy and corrupt records keep their existing sections. A record whose compute is active is reported even if its branch is gone.
+
+**Slug:** `list-records-and-branches`
+
+### FR-012: Delete Missing Needs Force
+
+`delete` on a missing sandbox requires `--force`, the same explicit confirmation an active sandbox requires. Without it the command exits 6 and states that the sandbox is missing, names the record, workspace and branch it would remove, and says the branch may hold unmerged work. A current record whose status cannot be determined, because the payload is unreadable or the backend cannot be asked, also requires `--force` and says compute may not have been stopped. With `--force` it removes the record, the backend state directory and the branch, and prints each path or name it removed. `delete` on a paused sandbox keeps its current behaviour. A retried delete still succeeds when both halves are already gone.
+
+**Slug:** `delete-missing-force`
+
+### FR-013: Delete Corrupt Record
+
+`delete --force` removes a corrupt current record without parsing its payload. It removes the record file, the branch derived from the sandbox name, and the backend state directory for that project and name. If the backend cannot identify compute because the payload is unreadable, the output says compute could not be stopped and names the sandbox. `--discard-legacy` remains the legacy-only path and is not broadened. A corrupt record is never repaired or adopted.
+
+**Slug:** `delete-corrupt-record`
+
+### FR-014: Recovery Is Never Silent
+
+Every repair names the sandbox and says it was recreated. The CLI writes a warning to stderr before the command's normal output. MCP appends a structured JSON content block to the tool result with the sandbox name, the state it came from, the action taken and the branch, and writes a log line. The existing content of the tool result is unchanged. `sandbox-create` on a missing name carries the same field. A repair that fails carries the failure, not a recovery field.
+
+**Slug:** `recovery-warning`
+
+### FR-015: No New Surface
+
+There is no new MCP tool, command or argument for recovery, deletion, pause, resume, list or inspect. The existing MCP tool names and arguments are unchanged, and the existing CLI commands keep their names. The recovery warning is additive. The only intentional CLI behaviour change is that `delete` on a missing sandbox now requires `--force`.
+
+**Slug:** `no-new-surface`
+
+### FR-016: Documentation And Matrix
+
+`docs/docs/user/litterbox/lifecycle.mdx`, `src/docgen.rs` and both generated reference pages are updated together. The state table, lifecycle diagram and operation matrices state that a missing sandbox repairs on the next operation, that a paused command is refused with class `conflict`, that `delete` on missing or an undetermined status needs `--force`, that a corrupt record is removed with `--force`, that `list` reports records and branches including unpaired entries, and that `forwards` and `sandbox-ports` are record-only. The generated pages are produced by `cargo run -p agentkit-litterbox -- docgen cli` and `cargo run -p agentkit-litterbox -- docgen mcp`, never by hand.
+
+**Slug:** `lifecycle-documentation`
+
+## Non-functional Requirements
+
+### NFR-001: Neutral Failure Classes
+
+Failure classes remain not-found, conflict, unsupported, denied, unavailable, misconfigured and failed. A temporary condition is not `failed`. A paused refusal is `conflict`. `Unknown` is a status, not a failure class. An impossible repair is `unavailable` when the mechanism or durable state is missing, or the structured provisioning class when preparation refuses. Every refusal names a remedy the user can run.
+
+**Slug:** `neutral-failure-classes`
+
+### NFR-002: No Payload Dependence
+
+Repair must not require a fully readable payload. The state directory and workspace are located by project and sandbox name, and the branch is named by the record; only the recorded pids are read, to prove compute is absent. This is required because the motivating incident carries payload version 1, which the full reader refuses, and because a payload may be corrupt while the workspace and branch are sound. A payload with no readable pid is not repaired.
+
+**Slug:** `no-payload-dependence`
+
+### NFR-003: Atomic Repair
+
+A repair either ends with a live sandbox and a new record, or leaves the record and workspace as they were. Resources created during a failed attempt are removed. A concurrently addressed sandbox is never half-repaired. The lock is released on every path, including panic-free early returns and process exit.
+
+**Slug:** `atomic-repair`
+
+### NFR-004: No New Dependency
+
+The advisory lock uses the platform's existing file-locking primitive through `libc`, which is already a dependency. No new crate, daemon, service or runtime is added.
+
+**Slug:** `no-new-dependency`
+
+### NFR-005: Backward Compatibility
+
+MCP tool names, arguments and existing result shapes are unchanged. Existing CLI commands and exit classes are unchanged except the documented `delete` confirmation. Records written by this release remain readable. Payload version 1 records are not read in place; they remain addressable, removable and repairable from the branch and workspace, and repair replaces the payload only after a new sandbox process is ready.
+
+**Slug:** `backward-compatibility`
+
+### NFR-006: Test Matrix
+
+Every cell of the operation matrix in `lifecycle.mdx` has a test at the orchestrator or CLI/MCP seam. The matrix covers `list`, `shell`, `pause`, `resume`, `delete`, the MCP command tools, `sandbox-ports` and `sandbox-create` against active, paused, missing and corrupt records. A regression test recreates the motivating incident: a current record, a live branch, dead recorded pids and an unreadable payload.
+
+**Slug:** `test-matrix`
+
+### NFR-007: Generated Documentation
+
+`reference/cli.mdx` and `reference/mcp.mdx` are generated from `src/docgen.rs`, and both pages are regenerated in the change. A test asserts the lifecycle section names every operation and every state it claims to cover.
+
+**Slug:** `generated-documentation`
+
+### NFR-008: Verification
+
+`cargo test -p agentkit-litterbox` and `cargo clippy -p agentkit-litterbox --all-targets -- -D warnings` pass. The ignored host suite is not required to prove the orchestration behaviour, but a test seam drives a fake backend through repair, paused refusal, unknown enumeration and corrupt removal.
+
+**Slug:** `verification`
+
+## Acceptance Criteria
+
+### AC-001: Incident Recovers
+
+Given a current record for `workspace-tests`, the live branch `litterbox/workspace-tests`, dead recorded pids and payload version 1, the next command tool call either repairs the sandbox and reports the recovery, or fails with a remedy that names a command that actually works. If it repairs, the workspace is preserved and the command runs. The test uses the same shape as the recorded incident, with a controlled state directory and branch.
+
+**Slug:** `workspace-tests-recovers`
+
+### AC-002: Paused Returns Immediately
+
+`shell` and every MCP command tool addressed to a paused sandbox return without blocking and without writing a command into the sandbox. The CLI prints the resume command and exits 4. MCP returns class `conflict` with the same reason and remedy. `list` and `sandbox-ports` still answer for the paused sandbox.
+
+**Slug:** `paused-returns-immediately`
+
+### AC-003: List Shows Unpaired Entries
+
+A record without a branch appears in `list` and can be addressed. A branch without a record still appears as an orphan. A record whose compute is missing appears as missing. A listing where the backend cannot be asked prints `unknown` with the reason and exits 1.
+
+**Slug:** `list-shows-unpaired`
+
+### AC-004: Matrix Is Enforced
+
+Every cell of the CLI and MCP operation matrices has a test. A change to a cell without a matching test fails the suite.
+
+**Slug:** `matrix-tests`
+
+### AC-005: Class Parity
+
+For every refusal that appears on both surfaces, the CLI exit code and the MCP class derive from the same contract error and agree. Paused is `conflict`, missing is `not-found` for commands that do not repair and a successful repair for those that do, corrupt delete is not a parse failure, and an unavailable backend is `unavailable`.
+
+**Slug:** `cli-mcp-class-parity`
+
+### AC-006: Corrupt Record Is Removable
+
+A current record whose payload cannot be parsed is removed by `delete --force` without a parse error. The record file, branch and state directory are gone, and the output says compute could not be stopped when it could not be identified.
+
+**Slug:** `corrupt-record-removable`
+
+### AC-007: Delete Missing Confirmation
+
+`delete` on a missing sandbox without `--force` exits 6 and names the record, workspace and branch. With `--force` it removes them and prints what it removed. A second delete succeeds.
+
+**Slug:** `delete-missing-needs-force`
+
+### AC-008: Create Reports Recovery
+
+`sandbox-create` on a missing name returns a live inspection and a structured recovery field naming the branch and the prior state. `sandbox-create` on an active or paused name returns conflict. `sandbox-create` on a branch with no record returns conflict and does not adopt the branch.
+
+**Slug:** `create-reports-recovery`
+
+### AC-009: Concurrent Repair Spawns Once
+
+Two concurrent operations on the same missing sandbox produce one repair. The second observes the first's result and does not start a second sandbox process or write a second payload. The test exercises the lock at the seam, not only the happy path.
+
+**Slug:** `concurrent-repair-single-holder`
+
+### AC-010: No New Surface
+
+The MCP tool list is unchanged. No new command is added. `delete` is the only command whose confirmation semantics change. A search of the lifecycle documentation finds no removed state or operation.
+
+**Slug:** `no-new-tool-or-verb`
+
+### AC-011: Build Is Clean
+
+`cargo test -p agentkit-litterbox` passes and `cargo clippy -p agentkit-litterbox --all-targets -- -D warnings` is clean after the change.
+
+**Slug:** `tests-and-clippy`
+
+### AC-012: Docs Are Regenerated
+
+`reference/cli.mdx` and `reference/mcp.mdx` contain the updated lifecycle matrices, and a test asserts the generated sections name the paused refusal, missing repair, delete confirmation, corrupt removal, and records-without-branches.
+
+**Slug:** `reference-regenerated`
+
+## Edge Cases
+
+### EC-001: Unreadable Payload With Workspace
+
+The payload is version 1 or otherwise unreadable, but the state directory, workspace and recorded pids exist. The status check reads only the pids and reports missing when they are gone. Repair does not require the full payload, reuses the workspace, rebuilds the mounts and environment from resolved provision, starts the sandbox process and writes a current payload. The incident is this case.
+
+**Slug:** `unreadable-payload-with-workspace`
+### EC-002: Workspace Missing
+
+The state directory exists but the workspace directory does not. Repair materialises the workspace from the sandbox branch archive, then starts the sandbox process. It does not use HEAD.
+
+**Slug:** `workspace-missing`
+### EC-003: Branch Missing
+
+The record exists but the branch does not. Repair refuses as unavailable and names `litterbox delete --force <name>` and a create as the remedy. The record remains listed and deletable.
+
+**Slug:** `branch-missing`
+### EC-004: State Directory Corrupt
+
+The state directory exists but cannot be used as a state root, or the payload has no readable pid so absence cannot be proven. Repair refuses with a remedy that deletes the record and recreates it. It does not remove the directory and then fail, and it does not leave a partly written payload.
+
+**Slug:** `state-directory-corrupt`
+### EC-005: Backend Unavailable
+
+The selected backend is not ready. Repair is not attempted. The operation returns `unavailable` with the readiness reason and remedy. Enumeration reports every record as `unknown` with that reason and exits 1.
+
+**Slug:** `backend-unavailable`
+### EC-006: Concurrent Calls
+
+Two operations address the same missing sandbox at once. One takes the lock and repairs; the other waits, then observes active. A third call after both sees active and does not repair.
+
+**Slug:** `concurrent-calls`
+### EC-007: Repair Spawn Fails
+
+The sandbox process starts but does not become ready, or the backend fails after spawning. The backend tears down what it started, leaves the workspace and record as they were, and returns a neutral failure. A retry can repair again.
+
+**Slug:** `repair-spawn-fails`
+### EC-008: Orphan Branch
+
+A branch exists with no record. `list` reports it as an orphan. `sandbox-create` on that name returns conflict and does not adopt it. `delete` removes the branch as it does today.
+
+**Slug:** `orphan-branch`
+### EC-009: Record Without Branch
+
+The record exists and the compute may even be active, but the branch is gone. `list` reports the record. Commands that need the branch to repair refuse. `delete --force` removes the record and compute.
+
+**Slug:** `record-without-branch`
+### EC-010: Paused Host-Side Operations
+
+`list`, `sandbox-ports`, `pause`, `resume` and `delete` continue to work on a paused sandbox. Upload, download and snapshot do not join and continue. None of them blocks.
+
+**Slug:** `paused-host-side-operations`
+### EC-011: Paused Delete
+
+Deleting a paused sandbox keeps its current confirmation and teardown behaviour. It does not require `--force` for being paused, because the branch is removed only after the compute is stopped and the existing contract already removes both.
+
+**Slug:** `paused-delete`
+### EC-012: Create Active Or Paused
+
+`sandbox-create` on an active or paused name returns conflict. It does not repair, pause, resume or delete. The existing sandbox is untouched.
+
+**Slug:** `create-active-or-paused`
+### EC-013: Corrupt Delete Without Force
+
+`delete` on a corrupt record without `--force` refuses with the missing-style confirmation and names what would be removed. With `--force` it proceeds without parsing the payload.
+
+**Slug:** `corrupt-delete-without-force`
+### EC-014: Preparation Refuses During Repair
+
+Host preparation refuses during repair because setup consent is missing or a devShell cannot be built. The structured provisioning failure is returned, no sandbox process starts and the workspace is untouched.
+
+**Slug:** `preparation-refuses-during-repair`
+### EC-015: List Without A Backend
+
+`list` cannot construct the backend. It still prints every record from the metadata directory, each as `unknown` with the reason, and exits 1. It does not omit records or print a fabricated inspection.
+
+**Slug:** `list-without-backend`
+### EC-016: Repair While Paused
+
+A paused sandbox is not missing. No repair is attempted. A command is refused per FR-008; pause, resume and delete behave as before.
+
+**Slug:** `repair-while-paused`
+### EC-017: Stale State Files
+
+The state directory holds a status file, a diagnostic file and a payload from the dead compute. Repair replaces the status and diagnostic files when it starts and writes the new payload only after the sandbox process is ready. A failed attempt leaves the previous payload in place. No recorded pid, namespace inode or scope from the dead compute is reused.
+
+**Slug:** `stale-state-files`
+### EC-018: Setup After Workspace Rebuild
+
+The workspace had to be materialised from the branch. The branch does not contain setup effects that were never snapshotted, so the sandbox provisioning steps run again after the new sandbox process is ready. If a step fails, the repair fails and the newly materialised workspace is removed, leaving the record in its pre-repair state.
+
+**Slug:** `setup-after-workspace-rebuild`
+### EC-019: Unreadable Payload Delete Needs Force
+
+A current record whose payload is unreadable or from an unsupported version has an undetermined status. `delete` without `--force` refuses and says compute may still be running. With `--force` it removes the record, branch and state directory and reports compute it could not stop.
+
+**Slug:** `unreadable-payload-delete-force`
+
