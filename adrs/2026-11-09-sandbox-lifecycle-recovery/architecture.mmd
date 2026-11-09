@@ -1,0 +1,35 @@
+flowchart TD
+    CLI[CLI command] --> ORCH[Sandboxes orchestrator]
+    MCP[MCP tool] --> ORCH
+
+    ORCH --> LOAD[Load stored record]
+    LOAD -->|no record| NOTFOUND[not-found]
+    LOAD -->|corrupt record| CORRUPT[unavailable; remedy delete --force]
+    LOAD -->|current record| STATUS[Inspect status]
+
+    STATUS -->|active| RUN[Perform operation]
+    STATUS -->|paused and joins| PAUSED[conflict; remedy resume]
+    STATUS -->|missing| REPAIR[Repair]
+
+    REPAIR --> LOCK[Per-sandbox advisory lock]
+    LOCK --> BRANCH{Branch exists?}
+    BRANCH -->|no| NOBRANCH[unavailable; remedy delete --force then create]
+    BRANCH -->|yes| PROVISION[Resolve provision and run host preparation]
+    PROVISION -->|refuses| PREPFAIL[structured provisioning failure]
+    PROVISION --> WORKSPACE{Workspace exists?}
+    WORKSPACE -->|yes| REUSE[Reuse workspace]
+    WORKSPACE -->|no| MATERIALISE[Materialise from branch; run sandbox steps]
+    REUSE --> CREATE[Backend create in reuse mode]
+    MATERIALISE --> CREATE
+    CREATE --> READY[Start compute and write current payload]
+    READY --> STORE[Write record and release lock]
+    STORE --> RECOVERY[Recovery outcome]
+    RECOVERY --> RUN
+
+    RUN --> RESULT[Result plus optional recovery]
+    RESULT --> CLI
+    RESULT --> MCP
+
+    ORCH --> LIST[List records first, then branches]
+    LIST --> REPORT[Inspection report: inspected, unknown, failed]
+    REPORT --> CLI
