@@ -1,0 +1,11 @@
+flowchart LR
+    U[User configuration] --> C[BubblewrapConfig]
+    P[Project file] -. ignored with notice .-> C
+    L[Local override] -. rejected .-> C
+    C --> B[BubblewrapBackend]
+    B --> V[View and bwrap arguments]
+    B --> F[Forwards]
+    B --> R[payload.toml]
+    R --> S[litterbox shell]
+    S --> J[Enter namespaces: skip net only for host]
+    R --> I[Inspect: egress and forwards]
