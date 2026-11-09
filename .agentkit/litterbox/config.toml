@@ -4,5 +4,18 @@
 # in ~/.config/agentkit/litterbox/config.toml, not here. A project file may not
 # select or configure a backend.
 #
-# This repository declares no provisioning steps, so it also names no supported
-# backend set: [project] backends is only required once [[provision]] does.
+# The project declares what it needs: the backends whose provisioning it
+# supports, the steps themselves, and each backend's ordered step list.
+
+[project]
+backends = ["bubblewrap"]
+
+# Enter this repository's development shell on the host and carry what it
+# exports into the sandbox: the environment and the store closure.
+[[provision]]
+identity = "dev"
+kind = "devshell"
+installable = "./nix"
+
+[backends.bubblewrap]
+provision = ["dev"]

@@ -207,7 +207,8 @@
                 toml-sort
                 yq-go
                 zig
-              ];
+              ]
+              ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.bubblewrap ];
               buildInputs = [
                 dbus
                 openssl
