@@ -80,7 +80,7 @@ Add a test in `payload.rs` that a `BubblewrapData` with `Network::Host` and a `F
 | Depends On |  |
 | References | inspection-egress,host-port-forwarding |
 
-### T-007: Prove host and denied on real sandboxes
+### T-007: [x] Prove host and denied on real sandboxes
 
 Add two `#[ignore]` tests in `backend.rs`. The host test constructs `BubblewrapSettings { network: Network::Host, .. }` and creates a sandbox with a `RequestedPort`. It checks that `/proc/<sandbox-pid>/ns/net` equals `/proc/self/ns/net`; that `readlink /proc/self/ns/net` inside the sandbox equals both; that the other six saved numbers differ from the host's; that `nc -l 127.0.0.1 <port>` inside is reachable from the host; and that `inspect` says `Direct` and returns the forward. The denied test checks that the network number differs from the host's and that a host connection is refused. Run both with `cargo test -p agentkit-litterbox -- --ignored` and write the commands, namespace numbers and listener output to `adrs/2026-11-09-bwrap-network-completion/evidence.md`.
 
