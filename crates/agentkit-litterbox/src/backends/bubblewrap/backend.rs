@@ -1283,8 +1283,10 @@ mod tests {
         let host = SystemHost::new();
         let mut mounts = Vec::new();
         let mut path = Vec::new();
-        for name in ["sh", "cat", "ls", "readlink"] {
-            let binary = host.resolve(name).expect("the host supplies the utility");
+        for name in ["sh", "cat", "ls", "readlink", "nc"] {
+            let Some(binary) = host.resolve(name) else {
+                continue;
+            };
             let mode = host.ownership(&binary).map_or(0, |(_, mode)| mode);
             for path in crate::backends::bubblewrap::holder::runtime(&binary, mode) {
                 if !mounts.contains(&path) {
@@ -1506,5 +1508,247 @@ mod tests {
                 .stdout
                 .contains(&format!("pid:[{}]", data.namespaces[3]))
         );
+    }
+
+    fn free_port() -> u16 {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind a free port");
+        listener.local_addr().expect("address").port()
+    }
+
+    fn real_holder(data: &BubblewrapData) -> crate::backends::bubblewrap::holder::Holder {
+        crate::backends::bubblewrap::holder::Holder {
+            launcher_pid: data.launcher_pid,
+            sandbox_pid: data.sandbox_pid,
+            namespaces: NamespaceInodes {
+                user: data.namespaces[0],
+                ipc: data.namespaces[1],
+                net: data.namespaces[2],
+                pid: data.namespaces[3],
+                mnt: data.namespaces[4],
+                uts: data.namespaces[5],
+                cgroup: data.namespaces[6],
+            },
+            unit: data.scope.clone(),
+        }
+    }
+
+    fn real_request(name: &str, staged: &Path, ports: Vec<RequestedPort>) -> CreateRequest {
+        let mut request = test_request(name, staged);
+        request.ports = ports;
+        request
+    }
+
+    #[tokio::test]
+    #[ignore = "starts a real sandbox; run where bubblewrap is on PATH"]
+    async fn a_real_host_sandbox_shares_the_network() {
+        use crate::backends::bubblewrap::host::SystemHost;
+        use crate::backends::bubblewrap::{holder, payload};
+        use std::io::Read;
+
+        if crate::backends::bubblewrap::host::Host::resolve(&SystemHost::new(), "nc").is_none() {
+            eprintln!("skipping: nc does not resolve on the host");
+            return;
+        }
+
+        let staged = tempfile::tempdir().expect("staged");
+        let port = free_port();
+        let backend = BubblewrapBackend::new(
+            BubblewrapSettings {
+                network: Network::Host,
+                ..Default::default()
+            },
+            Arc::new(SystemHost::new()),
+        );
+        let request = real_request(
+            "host-net-proof",
+            staged.path(),
+            vec![RequestedPort {
+                name: "web".to_string(),
+                target: port,
+            }],
+        );
+        let record = backend.create(&request).await.expect("created");
+        let data = payload::BubblewrapData::from_record(&record).expect("payload");
+
+        let host_net = std::fs::read_link("/proc/self/ns/net").expect("host net namespace");
+        let sandbox_net = std::fs::read_link(format!("/proc/{}/ns/net", data.sandbox_pid))
+            .expect("sandbox net namespace");
+        assert_eq!(
+            host_net, sandbox_net,
+            "the sandbox does not share the host network namespace"
+        );
+        println!("host net namespace: {host_net:?}");
+        println!("sandbox net namespace: {sandbox_net:?}");
+        for name in ["user", "ipc", "pid", "mnt", "uts", "cgroup"] {
+            let host_link = std::fs::read_link(format!("/proc/self/ns/{name}")).expect("host");
+            let sandbox_link = std::fs::read_link(format!("/proc/{}/ns/{name}", data.sandbox_pid))
+                .expect("sandbox");
+            assert_ne!(host_link, sandbox_link, "the {name} namespace is shared");
+            println!("{name} namespace: host {host_link:?} sandbox {sandbox_link:?}");
+        }
+
+        let inside = backend
+            .exec(
+                &record,
+                &[
+                    "sh".to_string(),
+                    "-c".to_string(),
+                    "readlink /proc/self/ns/net".to_string(),
+                ],
+            )
+            .await
+            .expect("executed");
+        assert_eq!(inside.exit_code, 0, "{}", inside.stderr);
+        println!("command net namespace: {}", inside.stdout.trim());
+        assert_eq!(
+            inside.stdout.trim(),
+            host_net.to_string_lossy(),
+            "the command did not join the host network namespace"
+        );
+
+        // The sandbox must serve the declared port: a listener inside it has to
+        // be reachable from the host. `nc` is contributed so the listener is a
+        // real TCP server rather than a shell extension that may not exist.
+        let started = backend
+            .exec(
+                &record,
+                &[
+                    "sh".to_string(),
+                    "-c".to_string(),
+                    format!(
+                        "(printf 'hello from the sandbox\\n' | nc -l 127.0.0.1 {port}) >/dev/null 2>&1 & echo listening"
+                    ),
+                ],
+            )
+            .await
+            .expect("listener");
+        assert_eq!(
+            started.exit_code, 0,
+            "the sandbox listener did not start: {}",
+            started.stderr
+        );
+        assert!(started.stdout.contains("listening"), "{}", started.stdout);
+
+        let address = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut stream = loop {
+            match std::net::TcpStream::connect_timeout(&address, std::time::Duration::from_millis(250)) {
+                Ok(stream) => break stream,
+                Err(error) if std::time::Instant::now() < deadline => {
+                    let _ = error;
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+                Err(error) => panic!("the host could not reach the sandbox listener: {error}"),
+            }
+        };
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).expect("read timeout");
+        let mut received = String::new();
+        stream.read_to_string(&mut received).expect("read");
+        assert!(
+            received.contains("hello from the sandbox"),
+            "the host did not receive from the sandbox listener: {received}"
+        );
+        println!("host received: {}", received.trim());
+
+        let inspection = backend.inspect(&record).await.expect("inspection");
+        assert_eq!(inspection.egress, EgressPosture::Direct);
+        assert_eq!(inspection.forwards.len(), 1);
+        assert_eq!(inspection.forwards[0].host_port, port);
+        println!(
+            "inspection: egress {:?} forwards {:?}",
+            inspection.egress, inspection.forwards
+        );
+
+        let holder = real_holder(&data);
+        let _ = holder::teardown(
+            &SystemHost::new(),
+            &holder,
+            std::time::Duration::from_secs(10),
+        );
+        let _ = std::fs::remove_dir_all(crate::backends::bubblewrap::workspace::sandbox_directory(
+            "probe",
+            "host-net-proof",
+        ));
+    }
+
+    #[tokio::test]
+    #[ignore = "starts a real sandbox; run where bubblewrap is on PATH"]
+    async fn a_real_denied_sandbox_isolates_the_network() {
+        use crate::backends::bubblewrap::host::SystemHost;
+        use crate::backends::bubblewrap::payload;
+        if crate::backends::bubblewrap::host::Host::resolve(&SystemHost::new(), "nc").is_none() {
+            eprintln!("skipping: nc does not resolve on the host");
+            return;
+        }
+
+        let staged = tempfile::tempdir().expect("staged");
+        let port = free_port();
+        let backend =
+            BubblewrapBackend::new(BubblewrapSettings::default(), Arc::new(SystemHost::new()));
+        let request = real_request("denied-net-proof", staged.path(), Vec::new());
+        let record = backend.create(&request).await.expect("created");
+        let data = payload::BubblewrapData::from_record(&record).expect("payload");
+
+        let host_net = std::fs::read_link("/proc/self/ns/net").expect("host net namespace");
+        let sandbox_net = std::fs::read_link(format!("/proc/{}/ns/net", data.sandbox_pid))
+            .expect("sandbox net namespace");
+        assert_ne!(
+            host_net, sandbox_net,
+            "the denied sandbox shares the host network namespace"
+        );
+        println!("host net namespace: {host_net:?}");
+        println!("sandbox net namespace: {sandbox_net:?}");
+
+        // The sandbox serves the same port on its own loopback, which the host
+        // must not reach: a connection that succeeds here means the two share a
+        // network namespace.
+        let started = backend
+            .exec(
+                &record,
+                &[
+                    "sh".to_string(),
+                    "-c".to_string(),
+                    format!(
+                        "(printf 'hello from the sandbox\\n' | nc -l 127.0.0.1 {port}) >/dev/null 2>&1 & echo listening"
+                    ),
+                ],
+            )
+            .await
+            .expect("listener");
+        assert_eq!(
+            started.exit_code, 0,
+            "the sandbox listener did not start: {}",
+            started.stderr
+        );
+        assert!(started.stdout.contains("listening"), "{}", started.stdout);
+
+        let address = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+        let reachable = std::net::TcpStream::connect_timeout(
+            &address,
+            std::time::Duration::from_secs(2),
+        );
+        assert!(
+            reachable.is_err(),
+            "the host reached the denied sandbox listener on port {port}"
+        );
+
+        let inspection = backend.inspect(&record).await.expect("inspection");
+        assert_eq!(inspection.egress, EgressPosture::Denied);
+        assert!(inspection.forwards.is_empty());
+        println!(
+            "inspection: egress {:?} forwards {:?}",
+            inspection.egress, inspection.forwards
+        );
+
+        let holder = real_holder(&data);
+        let _ = crate::backends::bubblewrap::holder::teardown(
+            &SystemHost::new(),
+            &holder,
+            std::time::Duration::from_secs(10),
+        );
+        let _ = std::fs::remove_dir_all(crate::backends::bubblewrap::workspace::sandbox_directory(
+            "probe",
+            "denied-net-proof",
+        ));
     }
 }
