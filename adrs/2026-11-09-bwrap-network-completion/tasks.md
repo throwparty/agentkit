@@ -106,7 +106,7 @@ Amend FR-003 in `adrs/2026-11-07-linux-bwrap-provider/spec.md` and `spec.toon`. 
 | Depends On | T-005,T-007 |
 | References | documentation,run-command-namespaces,host-net-eperm,no-lifecycle-change |
 
-### T-009: Run the suite and clippy
+### T-009: [x] Run the suite and clippy
 
 Run `cargo test -p agentkit-litterbox` and `cargo clippy -p agentkit-litterbox --all-targets -- -D warnings`. Fix failures caused by these changes. Run the ignored tests and record their output.
 
