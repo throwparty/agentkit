@@ -29,13 +29,6 @@ pub struct StoredSandbox {
 pub enum LoadedSandbox {
     /// A record written by this version.
     Current(StoredSandbox),
-    /// A record written by an earlier release. It is reported, never adopted.
-    Legacy {
-        /// The file holding it, so the user can remove it.
-        path: PathBuf,
-        /// The identifier the old record used, when it named one.
-        container_id: Option<String>,
-    },
     /// A record that cannot be read at all.
     Corrupt {
         /// The file holding it.
@@ -50,7 +43,7 @@ impl LoadedSandbox {
     pub fn record(&self) -> Option<&crate::sandbox::contract::SandboxRecord> {
         match self {
             Self::Current(stored) => Some(&stored.sandbox),
-            Self::Legacy { .. } | Self::Corrupt { .. } => None,
+            Self::Corrupt { .. } => None,
         }
     }
 }
@@ -70,25 +63,6 @@ pub fn store_sandbox_at(dir: &Path, name: &str, stored: &StoredSandbox) -> Resul
 /// Load a record from an explicit directory.
 pub fn load_sandbox_at(dir: &Path, name: &str) -> Result<Option<LoadedSandbox>, Error> {
     load_sandbox_in(dir, name)
-}
-
-/// Every record name in a directory, with what the file turned out to be.
-pub fn names_in(dir: &Path) -> Vec<(String, LoadedSandbox)> {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return Vec::new();
-    };
-
-    entries
-        .filter_map(Result::ok)
-        .filter_map(|entry| {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let name = name.strip_suffix(".toml")?.to_string();
-            load_sandbox_in(dir, &name)
-                .ok()
-                .flatten()
-                .map(|loaded| (name, loaded))
-        })
-        .collect()
 }
 
 /// Remove a record from an explicit directory.
@@ -172,14 +146,13 @@ fn load_sandbox_in(dir: &Path, name: &str) -> Result<Option<LoadedSandbox>, Erro
         }
     };
 
-    // A file with a nested sandbox record is ours. A file without one was
-    // written before the record changed, and is reported, not adopted.
+    // A file with a nested sandbox record is ours. Anything else, including a
+    // file written before the record changed, cannot be read.
     if value.get("sandbox").is_none() {
-        let container_id = value
-            .get("container_id")
-            .and_then(toml::Value::as_str)
-            .map(str::to_string);
-        return Ok(Some(LoadedSandbox::Legacy { path, container_id }));
+        return Ok(Some(LoadedSandbox::Corrupt {
+            path,
+            reason: "the record has no 'sandbox' table".to_string(),
+        }));
     }
 
     match value.try_into::<StoredSandbox>() {
@@ -225,39 +198,6 @@ mod record_tests {
     }
 
     #[test]
-    fn names_in_reports_current_and_legacy_records_only() {
-        let dir = TempDir::new().expect("tempdir");
-        store_value_in(dir.path(), "demo", &stored()).expect("store");
-        std::fs::write(
-            dir.path().join("old.toml"),
-            "container_id = 'abc'\nbranch = 'litterbox/old'\n",
-        )
-        .expect("legacy");
-        std::fs::write(dir.path().join("notes.txt"), "ignore me").expect("notes");
-
-        let mut names: Vec<(String, String)> = super::names_in(dir.path())
-            .into_iter()
-            .map(|(name, loaded)| {
-                let kind = match loaded {
-                    LoadedSandbox::Current(_) => "current",
-                    LoadedSandbox::Legacy { .. } => "legacy",
-                    LoadedSandbox::Corrupt { .. } => "corrupt",
-                };
-                (name, kind.to_string())
-            })
-            .collect();
-        names.sort();
-
-        assert_eq!(
-            names,
-            vec![
-                ("demo".to_string(), "current".to_string()),
-                ("old".to_string(), "legacy".to_string()),
-            ]
-        );
-    }
-
-    #[test]
     fn a_record_whose_name_does_not_match_its_file_is_corrupt() {
         let dir = TempDir::new().expect("tempdir");
         store_value_in(dir.path(), "filed-as", &stored()).expect("store");
@@ -290,26 +230,26 @@ mod record_tests {
     }
 
     #[test]
-    fn a_legacy_record_is_reported_and_never_adopted() {
+    fn a_record_without_a_sandbox_table_is_corrupt() {
         let dir = TempDir::new().expect("tempdir");
-        let legacy = "name = 'demo'\nbranch_name = 'litterbox/demo'\ncontainer_id = 'abc123'\nstatus = 'Active'\nmode = 'Direct'\nproject_slug = 'project'\nforwarded_ports = []\n";
-        std::fs::write(dir.path().join("demo.toml"), legacy).expect("write");
+        let old = "name = 'demo'\nbranch_name = 'litterbox/demo'\ncontainer_id = 'abc123'\nstatus = 'Active'\nmode = 'Direct'\nproject_slug = 'project'\nforwarded_ports = []\n";
+        std::fs::write(dir.path().join("demo.toml"), old).expect("write");
 
         let loaded = load_sandbox_in(dir.path(), "demo")
             .expect("load")
             .expect("present");
         match &loaded {
-            LoadedSandbox::Legacy { path, container_id } => {
+            LoadedSandbox::Corrupt { path, reason } => {
                 assert_eq!(path.file_name().and_then(|n| n.to_str()), Some("demo.toml"));
-                assert_eq!(container_id.as_deref(), Some("abc123"));
+                assert!(reason.contains("sandbox"), "{reason}");
             }
-            other => panic!("expected a legacy record, got {other:?}"),
+            other => panic!("expected a corrupt record, got {other:?}"),
         }
         assert!(loaded.record().is_none());
     }
 
     #[test]
-    fn an_empty_record_is_corrupt_not_legacy() {
+    fn an_empty_record_is_corrupt() {
         let dir = TempDir::new().expect("tempdir");
         std::fs::write(dir.path().join("demo.toml"), "").expect("write");
 
@@ -322,7 +262,7 @@ mod record_tests {
     }
 
     #[test]
-    fn unparsable_toml_is_corrupt_not_legacy() {
+    fn unparsable_toml_is_corrupt() {
         let dir = TempDir::new().expect("tempdir");
         std::fs::write(dir.path().join("demo.toml"), "this is not toml").expect("write");
 
