@@ -704,11 +704,16 @@ impl GitScm {
                     continue;
                 }
 
-                let content = fs::read(&path).map_err(SandboxError::Io)?;
-
-                let blob_oid = self
+                // Stream the file into the object database: build outputs are
+                // large enough that reading one whole into memory is a risk.
+                let mut source = fs::File::open(&path).map_err(SandboxError::Io)?;
+                let mut writer = self
                     .repo
-                    .blob(&content)
+                    .blob_writer(None)
+                    .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+                std::io::copy(&mut source, &mut writer).map_err(SandboxError::Io)?;
+                let blob_oid = writer
+                    .commit()
                     .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
 
                 #[cfg(unix)]
