@@ -12,7 +12,7 @@ use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Component, Path, PathBuf};
 
-use crate::sandbox::contract::Error;
+use crate::sandbox::contract::{Error, SnapshotSelector};
 
 /// The workspace's name, as a path component.
 const WORKSPACE_COMPONENT: &str = "src";
@@ -64,23 +64,40 @@ pub fn transfer_in(root: &Path, source: &Path, destination: &str) -> Result<(), 
 }
 
 /// Copy a sandbox path out to the host.
-pub fn transfer_out(root: &Path, source: &str, destination: &Path) -> Result<(), Error> {
+///
+/// A selector narrows the copy to the paths a snapshot carries; the walk asks
+/// it before reading anything, so a rejected path never reaches the host.
+pub fn transfer_out(
+    root: &Path,
+    source: &str,
+    destination: &Path,
+    selector: Option<&dyn SnapshotSelector>,
+) -> Result<(), Error> {
     let root = Root::open(root)
         .map_err(|error| Error::failed(format!("the workspace cannot be opened: {error}")))?;
     let relative = components(source, "download from the sandbox")?;
     let Some((name, parents)) = relative.split_last() else {
         // The workspace itself: its contents merge into the destination.
-        return copy_contents(&root.directory, destination).map_err(|error| {
-            Error::failed(format!("{} cannot be copied: {error}", root.path.display()))
-        });
+        return copy_contents(&root.directory, Path::new(""), destination, selector);
     };
+    let relative = parents
+        .iter()
+        .map(PathBuf::from)
+        .chain([PathBuf::from(name)])
+        .fold(PathBuf::new(), |mut path, part| {
+            path.push(part);
+            path
+        });
     let parent = descend(&root, parents, false)
         .map_err(|error| Error::failed(format!("{source} cannot be reached: {error}")))?;
     let opened = match open_in(&parent, name, libc::O_PATH) {
         Ok(opened) => opened,
         // A link at the source is copied as a link, not followed.
         Err(error) if error.raw_os_error() == Some(libc::ELOOP) => {
-            return copy_leaf(&parent, name, destination).map_err(|error| {
+            if skipped(selector, &relative, false)? {
+                return Ok(());
+            }
+            return copy_leaf(&parent, name, &relative, destination, selector).map_err(|error| {
                 Error::failed(format!("{source} cannot be copied: {error}"))
             });
         }
@@ -93,13 +110,32 @@ pub fn transfer_out(root: &Path, source: &str, destination: &Path) -> Result<(),
     let metadata = opened.metadata().map_err(|error| {
         Error::failed(format!("{} cannot be read: {error}", root.path.display()))
     })?;
-    let outcome = if metadata.is_dir() {
-        open_in(&parent, name, libc::O_RDONLY | libc::O_DIRECTORY)
-            .and_then(|directory| copy_contents(&directory, destination))
+    if skipped(selector, &relative, metadata.is_dir())? {
+        return Ok(());
+    }
+    if metadata.is_dir() {
+        let directory = open_in(&parent, name, libc::O_RDONLY | libc::O_DIRECTORY)
+            .map_err(|error| Error::failed(format!("{source} cannot be read: {error}")))?;
+        copy_contents(&directory, &relative, destination, selector)
     } else {
-        copy_leaf(&parent, name, destination)
-    };
-    outcome.map_err(|error| Error::failed(format!("{source} cannot be copied: {error}")))
+        copy_leaf(&parent, name, &relative, destination, selector)
+            .map_err(|error| Error::failed(format!("{source} cannot be copied: {error}")))
+    }
+}
+
+/// Whether the selector keeps a path out of the copy.
+fn skipped(
+    selector: Option<&dyn SnapshotSelector>,
+    relative: &Path,
+    is_dir: bool,
+) -> Result<bool, Error> {
+    match selector {
+        // The workspace root is never filtered: it is the thing being copied.
+        Some(selector) if !relative.as_os_str().is_empty() => {
+            Ok(!selector.selects(relative, is_dir)?)
+        }
+        _ => Ok(false),
+    }
 }
 
 /// The workspace root, opened once and never resolved through again.
@@ -270,39 +306,97 @@ fn copy_in(root: &Root, relative: &[OsString], source: &Path) -> io::Result<()> 
 }
 
 /// Copy a directory's entries into an existing host directory.
-fn copy_contents(directory: &std::fs::File, destination: &Path) -> io::Result<()> {
-    std::fs::create_dir_all(destination)?;
-    for name in entries(directory)? {
-        copy_leaf(directory, &name, destination)?;
+fn copy_contents(
+    directory: &std::fs::File,
+    relative: &Path,
+    destination: &Path,
+    selector: Option<&dyn SnapshotSelector>,
+) -> Result<(), Error> {
+    std::fs::create_dir_all(destination).map_err(|error| {
+        Error::failed(format!(
+            "{} cannot be created: {error}",
+            destination.display()
+        ))
+    })?;
+    for name in entries(directory).map_err(|error| {
+        Error::failed(format!("the workspace could not be read: {error}"))
+    })? {
+        copy_leaf(
+            directory,
+            &name,
+            &relative.join(&name),
+            destination,
+            selector,
+        )?;
     }
     Ok(())
 }
 
 /// Copy one entry of a directory into a host directory, keeping a link.
-fn copy_leaf(directory: &std::fs::File, name: &OsStr, destination: &Path) -> io::Result<()> {
+fn copy_leaf(
+    directory: &std::fs::File,
+    name: &OsStr,
+    relative: &Path,
+    destination: &Path,
+    selector: Option<&dyn SnapshotSelector>,
+) -> Result<(), Error> {
     let target = destination.join(name);
     let opened = match open_in(directory, name, libc::O_PATH) {
         Ok(opened) => opened,
         Err(error) if error.raw_os_error() == Some(libc::ELOOP) => {
-            let link = readlink_in(directory, name)?;
-            return std::os::unix::fs::symlink(link, &target);
+            if skipped(selector, relative, false)? {
+                return Ok(());
+            }
+            let link = readlink_in(directory, name).map_err(|error| {
+                Error::failed(format!("{} cannot be read: {error}", target.display()))
+            })?;
+            return std::os::unix::fs::symlink(link, &target).map_err(|error| {
+                Error::failed(format!("{} cannot be created: {error}", target.display()))
+            });
         }
-        Err(error) => return Err(error),
+        Err(error) => {
+            return Err(Error::failed(format!(
+                "{} cannot be read: {error}",
+                target.display()
+            )));
+        }
     };
-    let metadata = opened.metadata()?;
+    let metadata = opened.metadata().map_err(|error| {
+        Error::failed(format!("{} cannot be read: {error}", target.display()))
+    })?;
+    if skipped(selector, relative, metadata.is_dir())? {
+        return Ok(());
+    }
     if metadata.is_dir() {
-        std::fs::create_dir_all(&target)?;
-        let directory = open_in(directory, name, libc::O_RDONLY | libc::O_DIRECTORY)?;
-        for entry in entries(&directory)? {
-            copy_leaf(&directory, &entry, &target)?;
+        std::fs::create_dir_all(&target).map_err(|error| {
+            Error::failed(format!("{} cannot be created: {error}", target.display()))
+        })?;
+        let directory = open_in(directory, name, libc::O_RDONLY | libc::O_DIRECTORY)
+            .map_err(|error| {
+                Error::failed(format!("{} cannot be read: {error}", target.display()))
+            })?;
+        for entry in entries(&directory).map_err(|error| {
+            Error::failed(format!("{} cannot be read: {error}", target.display()))
+        })? {
+            copy_leaf(
+                &directory,
+                &entry,
+                &relative.join(&entry),
+                &target,
+                selector,
+            )?;
         }
         return Ok(());
     }
-    let mut source = open_in(directory, name, libc::O_RDONLY)?;
-    let mut copy = std::fs::File::create(&target)?;
-    io::copy(&mut source, &mut copy)?;
-    copy.set_permissions(metadata.permissions())?;
-    Ok(())
+    let mut source = open_in(directory, name, libc::O_RDONLY).map_err(|error| {
+        Error::failed(format!("{} cannot be read: {error}", target.display()))
+    })?;
+    let mut copy = std::fs::File::create(&target).map_err(|error| {
+        Error::failed(format!("{} cannot be created: {error}", target.display()))
+    })?;
+    io::copy(&mut source, &mut copy)
+        .and_then(|_| copy.set_permissions(metadata.permissions()))
+        .map_err(|error| Error::failed(format!("{} cannot be copied: {error}", target.display())))
 }
 
 /// The names in a directory, read through the descriptor rather than a path.
@@ -368,6 +462,8 @@ fn copy_tree(from: &Path, to: &Path) -> io::Result<()> {
         std::fs::create_dir_all(to)?;
         for entry in std::fs::read_dir(from)? {
             let entry = entry?;
+            // Uploads and the staged copy refuse a link; only a download keeps
+            // one, and it goes through `copy_leaf`.
             copy_tree(&entry.path(), &to.join(entry.file_name()))?;
         }
         return Ok(());
@@ -391,8 +487,8 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        components, copy_from, sandbox_directory, transfer_in, transfer_out, workspace_directory,
-        WORKSPACE_COMPONENT,
+        WORKSPACE_COMPONENT, components, copy_from, sandbox_directory, transfer_in, transfer_out,
+        workspace_directory,
     };
     use crate::backends::bubblewrap::view::WORKSPACE;
 
@@ -530,7 +626,8 @@ mod tests {
         std::fs::create_dir_all(&root).expect("root");
         std::os::unix::fs::symlink("/etc", root.join("link")).expect("symlink");
         let destination = temporary.path().join("snapshot");
-        let error = transfer_out(&root, "/src/link/passwd", &destination).expect_err("refused");
+        let error =
+            transfer_out(&root, "/src/link/passwd", &destination, None).expect_err("refused");
         assert!(!destination.join("passwd").exists(), "{error}");
     }
 
@@ -543,7 +640,7 @@ mod tests {
         std::os::unix::fs::symlink("../README.md", root.join("src").join("up-link"))
             .expect("symlink");
         let destination = temporary.path().join("snapshot");
-        transfer_out(&root, "/src", &destination).expect("downloaded");
+        transfer_out(&root, "/src", &destination, None).expect("downloaded");
         assert_eq!(
             std::fs::read(destination.join("README.md")).expect("read"),
             b"hello"
@@ -584,7 +681,7 @@ mod tests {
         copy_from(&source, &root).expect("copied");
         let destination = temporary.path().join("out");
         std::fs::create_dir_all(&destination).expect("dir");
-        transfer_out(&root, "README.md", &destination).expect("downloaded");
+        transfer_out(&root, "README.md", &destination, None).expect("downloaded");
         assert_eq!(
             std::fs::read(destination.join("README.md")).expect("read"),
             b"hello"
@@ -596,12 +693,14 @@ mod tests {
         let (temporary, source) = staged();
         let root = temporary.path().join("workspace");
         copy_from(&source, &root).expect("copied");
-        let error = transfer_out(&root, "../../etc/passwd", temporary.path()).expect_err("refused");
+        let error = transfer_out(&root, "../../etc/passwd", temporary.path(), None)
+            .expect_err("refused");
         assert!(
             error.to_string().contains("leaves the sandbox workspace"),
             "{error}"
         );
-        let error = transfer_out(&root, "/etc/passwd", temporary.path()).expect_err("refused");
+        let error =
+            transfer_out(&root, "/etc/passwd", temporary.path(), None).expect_err("refused");
         assert!(
             error.to_string().contains("leaves the sandbox workspace"),
             "{error}"

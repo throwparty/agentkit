@@ -575,6 +575,18 @@ impl Error {
     }
 }
 
+/// Decides which paths in a workspace a snapshot carries.
+///
+/// A backend evaluates this during the transfer, before it reads a path, so a
+/// rejected path never leaves the sandbox. Paths are relative to the workspace
+/// root and use `/` separators, as a repository records them.
+pub trait SnapshotSelector: Send + Sync {
+    /// Whether the path, relative to the workspace root, belongs in the
+    /// snapshot. `is_dir` says whether the path names a directory, which some
+    /// ignore patterns distinguish.
+    fn selects(&self, relative: &std::path::Path, is_dir: bool) -> Result<bool, Error>;
+}
+
 /// The operations every backend can honour.
 ///
 /// Object-safe: methods take `&self` and return boxed futures, so a caller can
@@ -603,11 +615,16 @@ pub trait Backend: Send + Sync {
     ) -> BoxFuture<'a, Result<(), Error>>;
 
     /// Copy a sandbox path out to the host.
+    ///
+    /// A selector narrows the copy to the paths a snapshot carries; every
+    /// backend evaluates it before reading a path, so a rejected path is never
+    /// transferred. `None` copies everything.
     fn download<'a>(
         &'a self,
         sandbox: &'a SandboxRecord,
         source: &'a str,
         destination: &'a std::path::Path,
+        selector: Option<&'a dyn SnapshotSelector>,
     ) -> BoxFuture<'a, Result<(), Error>>;
 
     /// Describe a sandbox without changing it.
@@ -680,6 +697,7 @@ mod tests {
             _sandbox: &'a SandboxRecord,
             _source: &'a str,
             _destination: &'a std::path::Path,
+            _selector: Option<&'a dyn super::SnapshotSelector>,
         ) -> BoxFuture<'a, Result<(), Error>> {
             Box::pin(async { Err(Error::failed("stub")) })
         }

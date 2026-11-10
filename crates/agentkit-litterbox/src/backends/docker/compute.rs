@@ -531,12 +531,18 @@ impl DockerCompute {
         src_path: &str,
         dest_path: &Path,
         workspace: &str,
+        selector: Option<&dyn crate::sandbox::contract::SnapshotSelector>,
     ) -> Result<(), ComputeError> {
-        // Stream the archive to a temporary file so a large workspace never
-        // has to fit in memory before the cap or extraction can reject it.
-        let mut staged = tempfile::tempfile()?;
-        self.download_into(container_id, src_path, &mut staged)
+        // The daemon archives a whole path and cannot leave anything out of it,
+        // so the archive is filtered as it arrives: a rejected path is never
+        // written to the host and never counts toward the transfer limit. What
+        // arrives is held in a capped file rather than memory, so a large
+        // workspace never has to fit in either.
+        let staged = CappedFile::new(tempfile::tempfile()?, EXTRACT_MAX_BYTES);
+        let mut kept = SelectingArchive::new(staged, workspace, selector);
+        self.download_into(container_id, src_path, &mut kept)
             .await?;
+        let mut staged = kept.into_inner().into_inner();
         staged.seek(SeekFrom::Start(0))?;
         extract_tar(dest_path, staged, workspace)?;
         Ok(())
@@ -562,11 +568,11 @@ impl DockerCompute {
             })
     }
 
-    async fn download_into(
+    async fn download_into<W: Write>(
         &self,
         container_id: &str,
         src_path: &str,
-        destination: &mut fs::File,
+        destination: &mut SelectingArchive<'_, W>,
     ) -> Result<(), ComputeError> {
         let options = Some(
             DownloadFromContainerOptionsBuilder::default()
@@ -574,21 +580,13 @@ impl DockerCompute {
                 .build(),
         );
         let mut stream = self.client.download_from_container(container_id, options);
-        let mut total = 0u64;
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|source| ComputeError::ContainerDownload {
                 source: backend_error(source),
             })?;
-            total = total.saturating_add(chunk.len() as u64);
-            if total > EXTRACT_MAX_BYTES {
-                return Err(ComputeError::TransferTooLarge {
-                    limit_bytes: EXTRACT_MAX_BYTES,
-                });
-            }
-            destination.write_all(&chunk)?;
+            destination.select(&chunk)?;
         }
-        destination.flush()?;
-        Ok(())
+        destination.finish()
     }
 }
 
@@ -850,6 +848,182 @@ fn stripped_entry(path: &Path, workspace: &str) -> Option<std::path::PathBuf> {
     }
 }
 
+/// The size of a tar header block, and of the padding that rounds an entry up.
+const BLOCK: usize = 512;
+
+/// How much of an entry the stream still owes.
+#[derive(Clone, Copy)]
+enum Body {
+    /// A header block is due next.
+    Header,
+    /// Copy the rest of the entry to the sink.
+    Copy(u64),
+    /// Drop the rest of the entry.
+    Skip(u64),
+    /// Hold the rest of a metadata entry until the entry it describes is
+    /// decided.
+    Hold(u64),
+}
+
+/// Forwards only the archive entries a selector keeps.
+///
+/// The daemon archives a whole path and has no way to leave a path out, so the
+/// selection happens on the stream as it arrives: a rejected entry's contents
+/// are read and dropped rather than staged. Metadata entries are held back with
+/// the entry they describe, so a long name never dangles in front of a file the
+/// archive no longer carries.
+struct SelectingArchive<'a, W: Write> {
+    sink: W,
+    workspace: String,
+    selector: Option<&'a dyn crate::sandbox::contract::SnapshotSelector>,
+    pending: Vec<u8>,
+    header: Vec<u8>,
+    body: Body,
+}
+
+impl<'a, W: Write> SelectingArchive<'a, W> {
+    fn new(
+        sink: W,
+        workspace: &str,
+        selector: Option<&'a dyn crate::sandbox::contract::SnapshotSelector>,
+    ) -> Self {
+        Self {
+            sink,
+            workspace: workspace.trim_matches('/').to_string(),
+            selector,
+            pending: Vec::new(),
+            header: Vec::with_capacity(BLOCK),
+            body: Body::Header,
+        }
+    }
+
+    fn into_inner(self) -> W {
+        self.sink
+    }
+
+    fn finish(&mut self) -> Result<(), ComputeError> {
+        self.sink.flush()?;
+        Ok(())
+    }
+
+    /// Take a chunk of the archive, keeping what the selector wants.
+    fn select(&mut self, mut chunk: &[u8]) -> Result<(), ComputeError> {
+        while !chunk.is_empty() {
+            match self.body {
+                Body::Copy(remaining) => {
+                    let take = remaining.min(chunk.len() as u64) as usize;
+                    self.sink.write_all(&chunk[..take])?;
+                    chunk = &chunk[take..];
+                    self.body = if take as u64 == remaining {
+                        Body::Header
+                    } else {
+                        Body::Copy(remaining - take as u64)
+                    };
+                }
+                Body::Skip(remaining) => {
+                    let take = remaining.min(chunk.len() as u64) as usize;
+                    chunk = &chunk[take..];
+                    self.body = if take as u64 == remaining {
+                        Body::Header
+                    } else {
+                        Body::Skip(remaining - take as u64)
+                    };
+                }
+                Body::Hold(remaining) => {
+                    let take = remaining.min(chunk.len() as u64) as usize;
+                    self.pending.extend_from_slice(&chunk[..take]);
+                    chunk = &chunk[take..];
+                    self.body = if take as u64 == remaining {
+                        Body::Header
+                    } else {
+                        Body::Hold(remaining - take as u64)
+                    };
+                }
+                Body::Header => {
+                    let want = BLOCK - self.header.len();
+                    let take = want.min(chunk.len());
+                    self.header.extend_from_slice(&chunk[..take]);
+                    chunk = &chunk[take..];
+                    if self.header.len() == BLOCK {
+                        let block = std::mem::replace(&mut self.header, Vec::with_capacity(BLOCK));
+                        self.block(&block)?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Decide one header block, and what follows it.
+    fn block(&mut self, block: &[u8]) -> Result<(), ComputeError> {
+        if block.iter().all(|byte| *byte == 0) {
+            // The end-of-archive marker. It is kept so the spool stays a valid
+            // archive, and headers stay expected in case another follows.
+            self.sink.write_all(block)?;
+            self.body = Body::Header;
+            return Ok(());
+        }
+
+        let header = tar::Header::from_byte_slice(block);
+        let entry_type = header.entry_type();
+        let size = header.size().unwrap_or(0);
+        let padded = size.saturating_add(BLOCK as u64 - 1) / BLOCK as u64 * BLOCK as u64;
+
+        // Metadata describes the entry that follows it, so it waits for that
+        // entry's decision rather than being written on its own.
+        if entry_type.is_pax_local_extensions()
+            || entry_type.is_gnu_longname()
+            || entry_type.is_gnu_longlink()
+        {
+            self.pending.extend_from_slice(block);
+            self.body = Body::Hold(padded);
+            return Ok(());
+        }
+        // A global header applies to everything that follows it.
+        if entry_type.is_pax_global_extensions() {
+            self.pending.extend_from_slice(block);
+            self.sink.write_all(&self.pending)?;
+            self.pending.clear();
+            self.body = Body::Copy(padded);
+            return Ok(());
+        }
+
+        let kept = match self.selector {
+            None => true,
+            Some(selector) => {
+                match header
+                    .path()
+                    .ok()
+                    .and_then(|path| stripped_entry(&path, &self.workspace))
+                {
+                    // The header's name is what a long name is truncated from,
+                    // so a decision drawn from it can only keep more than the
+                    // real name would. The metadata held in `pending` carries
+                    // the full name to the extractor.
+                    Some(relative) => selector
+                        .selects(&relative, entry_type.is_dir())
+                        .map_err(|error| ComputeError::Config(error.to_string()))?,
+                    // The workspace directory itself, which is the destination
+                    // rather than something inside it.
+                    None => false,
+                }
+            }
+        };
+
+        if kept {
+            self.sink.write_all(&self.pending)?;
+            self.sink.write_all(block)?;
+            self.body = Body::Copy(padded);
+        } else {
+            self.body = Body::Skip(padded);
+        }
+        self.pending.clear();
+
+        Ok(())
+    }
+}
+
 fn extract_tar<R: Read + Seek>(
     dest_path: &Path,
     mut source: R,
@@ -1019,6 +1193,7 @@ mod tests {
 mod transfer_tests {
     use std::fs;
     use std::io::Cursor;
+    use std::path::Path;
 
     use super::{build_tar, extract_tar};
 
@@ -1127,6 +1302,107 @@ mod transfer_tests {
             "unexpected error: {error}"
         );
         assert!(!dir.path().parent().unwrap().join("escape").exists());
+    }
+
+    /// Rejects the paths a sandbox builds rather than edits.
+    struct RejectBuildOutput;
+
+    impl crate::sandbox::contract::SnapshotSelector for RejectBuildOutput {
+        fn selects(
+            &self,
+            relative: &Path,
+            _is_dir: bool,
+        ) -> Result<bool, crate::sandbox::contract::Error> {
+            Ok(!relative.starts_with("target") && !relative.starts_with("node_modules"))
+        }
+    }
+
+    fn filtered(
+        archive: &[u8],
+        workspace: &str,
+        selector: Option<&dyn crate::sandbox::contract::SnapshotSelector>,
+    ) -> Vec<u8> {
+        filtered_within(archive, workspace, selector, super::EXTRACT_MAX_BYTES)
+    }
+
+    fn filtered_within(
+        archive: &[u8],
+        workspace: &str,
+        selector: Option<&dyn crate::sandbox::contract::SnapshotSelector>,
+        limit: u64,
+    ) -> Vec<u8> {
+        let mut kept =
+            super::SelectingArchive::new(super::CappedBuffer::new(limit), workspace, selector);
+        // Awkward chunks: a header or an entry that straddles a boundary still
+        // has to be read as one.
+        for chunk in archive.chunks(7) {
+            kept.select(chunk).expect("filter");
+        }
+        kept.finish().expect("finish");
+        kept.into_inner().into_vec()
+    }
+
+    #[test]
+    fn the_transfer_keeps_only_what_the_selector_wants() {
+        let mut builder = tar::Builder::new(Vec::new());
+        append_file(&mut builder, "sandbox/README.md", b"hello");
+        append_file(&mut builder, "sandbox/target/artifact", b"built");
+        let archive = builder.into_inner().expect("finish");
+
+        let kept = filtered(&archive, "/sandbox", Some(&RejectBuildOutput));
+        let dir = tempfile::tempdir().expect("tempdir");
+        extract_tar(dir.path(), Cursor::new(&kept), "/sandbox").expect("extract");
+        assert!(dir.path().join("README.md").is_file());
+        assert!(!dir.path().join("target").exists());
+    }
+
+    #[test]
+    fn a_rejected_link_does_not_abort_the_transfer() {
+        let mut builder = tar::Builder::new(Vec::new());
+        append_file(&mut builder, "sandbox/README.md", b"hello");
+        append_symlink(
+            &mut builder,
+            "sandbox/node_modules/.bin/tool",
+            "/etc/passwd",
+        );
+        let archive = builder.into_inner().expect("finish");
+
+        let kept = filtered(&archive, "/sandbox", Some(&RejectBuildOutput));
+        let dir = tempfile::tempdir().expect("tempdir");
+        extract_tar(dir.path(), Cursor::new(&kept), "/sandbox").expect("extract");
+        assert!(dir.path().join("README.md").is_file());
+        assert!(!dir.path().join("node_modules").exists());
+    }
+
+    #[test]
+    fn a_rejected_entry_does_not_count_toward_the_limit() {
+        let mut builder = tar::Builder::new(Vec::new());
+        append_file(&mut builder, "sandbox/README.md", b"hello");
+        append_file(&mut builder, "sandbox/target/artifact", &[b'x'; 64 * 1024]);
+        let archive = builder.into_inner().expect("finish");
+
+        // Room for what is kept, nowhere near what is rejected.
+        let kept = filtered_within(&archive, "/sandbox", Some(&RejectBuildOutput), 16 * 1024);
+        let dir = tempfile::tempdir().expect("tempdir");
+        extract_tar(dir.path(), Cursor::new(&kept), "/sandbox").expect("extract");
+        assert!(dir.path().join("README.md").is_file());
+    }
+
+    #[test]
+    fn the_transfer_keeps_a_long_path_with_its_metadata() {
+        let directory = "d".repeat(150);
+        let mut builder = tar::Builder::new(Vec::new());
+        append_file(
+            &mut builder,
+            &format!("sandbox/{directory}/file.txt"),
+            b"long",
+        );
+        let archive = builder.into_inner().expect("finish");
+
+        let kept = filtered(&archive, "/sandbox", Some(&RejectBuildOutput));
+        let dir = tempfile::tempdir().expect("tempdir");
+        extract_tar(dir.path(), Cursor::new(&kept), "/sandbox").expect("extract");
+        assert!(dir.path().join(&directory).join("file.txt").is_file());
     }
 
     #[cfg(unix)]

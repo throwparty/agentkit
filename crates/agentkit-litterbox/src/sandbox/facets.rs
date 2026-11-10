@@ -110,6 +110,7 @@ mod tests {
             _sandbox: &'a SandboxRecord,
             _source: &'a str,
             _destination: &'a std::path::Path,
+            _selector: Option<&'a dyn crate::sandbox::contract::SnapshotSelector>,
         ) -> BoxFuture<'a, Result<(), Error>> {
             Box::pin(async { Err(Error::failed("stub")) })
         }

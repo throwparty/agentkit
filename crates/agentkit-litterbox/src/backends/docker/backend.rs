@@ -499,13 +499,14 @@ impl Backend for DockerBackend {
         sandbox: &'a SandboxRecord,
         source: &'a str,
         destination: &'a Path,
+        selector: Option<&'a dyn crate::sandbox::contract::SnapshotSelector>,
     ) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async move {
             let source = confined(source, sandbox)?;
             let data = DockerData::from_record(sandbox)?;
             match self
                 .compute
-                .download_path(&data.container, &source, destination, WORKDIR)
+                .download_path(&data.container, &source, destination, WORKDIR, selector)
                 .await
             {
                 Ok(()) => {}
