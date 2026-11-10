@@ -662,9 +662,9 @@ impl GitScm {
             }
 
             let child = relative.join(&file_name);
-            let metadata = entry.metadata().map_err(SandboxError::Io)?;
+            let file_type = entry.file_type().map_err(SandboxError::Io)?;
 
-            if metadata.is_dir() {
+            if file_type.is_dir() {
                 if filter.skips_dir(&child)? {
                     continue;
                 }
@@ -683,7 +683,23 @@ impl GitScm {
                 builder
                     .insert(&*name_str, sub_tree_oid, 0o040000)
                     .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
-            } else {
+            } else if file_type.is_symlink() {
+                if filter.skips_file(&child)? {
+                    continue;
+                }
+
+                // Git records a link as its target path, never the content the
+                // link points at.
+                let target = fs::read_link(&path).map_err(SandboxError::Io)?;
+                let blob_oid = self
+                    .repo
+                    .blob(target.as_os_str().as_encoded_bytes())
+                    .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+
+                builder
+                    .insert(&*name_str, blob_oid, 0o120000)
+                    .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+            } else if file_type.is_file() {
                 if filter.skips_file(&child)? {
                     continue;
                 }
@@ -698,6 +714,7 @@ impl GitScm {
                 #[cfg(unix)]
                 let filemode = {
                     use std::os::unix::fs::PermissionsExt;
+                    let metadata = entry.metadata().map_err(SandboxError::Io)?;
                     let mode = metadata.permissions().mode();
                     if mode & 0o111 != 0 {
                         0o100755
@@ -1441,6 +1458,46 @@ mod tests {
             "the host checkout's rules must not reach the snapshot"
         );
         assert!(tree.get_name("README.md").is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn commit_snapshot_from_staging_stores_symlinks_as_links() {
+        use std::os::unix::fs::symlink;
+
+        let (_tempdir, repo) = init_repo();
+        let scm = GitScm {
+            repo,
+            mode: ScmMode::Direct,
+            snapshot_branch: Some("test-snapshot".to_string()),
+            host_repo_path: None,
+        };
+
+        let staging_dir = TempDir::new().expect("staging dir");
+        let outside = TempDir::new().expect("outside");
+        fs::write(outside.path().join("secret"), "do not read this").expect("write secret");
+        symlink(outside.path().join("secret"), staging_dir.path().join("link"))
+            .expect("symlink");
+        // A link back up the tree must not be followed, or the walk recurses.
+        symlink("..", staging_dir.path().join("loop")).expect("loop symlink");
+
+        let oid = scm
+            .commit_snapshot_from_staging(staging_dir.path(), "Test snapshot")
+            .expect("commit")
+            .expect("oid");
+
+        let tree = scm.repo.find_commit(oid).expect("commit").tree().expect("tree");
+        let link = tree.get_name("link").expect("link entry");
+        assert_eq!(link.filemode(), 0o120000, "a link stays a link");
+        let blob = scm.repo.find_blob(link.id()).expect("blob");
+        assert_eq!(
+            blob.content(),
+            outside.path().join("secret").as_os_str().as_encoded_bytes()
+        );
+        assert_eq!(
+            tree.get_name("loop").expect("loop entry").filemode(),
+            0o120000
+        );
     }
 
     #[test]
