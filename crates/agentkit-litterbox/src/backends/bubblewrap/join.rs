@@ -11,6 +11,7 @@ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::sync::Mutex;
 
 use super::BACKEND;
+use super::backend::Network;
 use super::host::Host;
 use super::payload::BubblewrapData;
 use super::view::WORKSPACE;
@@ -166,21 +167,7 @@ pub fn run(
         .map(|(_, value)| value.clone());
     let candidates = candidates(&arguments[0], search_path.as_deref())?;
     let expected = data.namespaces;
-    // A namespace the sandbox shares with the caller cannot be entered: it is
-    // owned by a user namespace the caller has no capability in, and there is
-    // nothing to enter anyway. Host networking is the case that matters.
-    let mut skip = [false; 7];
-    for (index, name) in ["user", "ipc", "net", "pid", "mnt", "uts", "cgroup"]
-        .iter()
-        .enumerate()
-    {
-        if let (Ok(sandbox), Ok(current)) = (
-            std::fs::read_link(format!("/proc/{}/ns/{name}", data.sandbox_pid)),
-            std::fs::read_link(format!("/proc/self/ns/{name}")),
-        ) {
-            skip[index] = sandbox == current;
-        }
-    }
+    let skip = skipped(data.network);
 
     // `fork` in a threaded process is only safe while no other thread holds a
     // lock the child might need. The child touches no lock, but the lock still
@@ -259,6 +246,18 @@ pub fn run(
         stdout,
         stderr,
     })
+}
+
+/// Which namespaces the child skips entering.
+///
+/// Only the network namespace is skipped, and only when the sandbox shares the
+/// host's. That namespace is owned by the initial user namespace, where this
+/// process has no capability, so `setns` would fail with `EPERM`. Every other
+/// namespace is entered and all seven are checked against the record.
+fn skipped(network: Network) -> [bool; 7] {
+    let mut skip = [false; 7];
+    skip[2] = network == Network::Host;
+    skip
 }
 
 /// The paths execve should try, in order, for a program name.
@@ -638,8 +637,17 @@ static JOIN: Mutex<()> = Mutex::new(());
 
 #[cfg(test)]
 mod tests {
-    use super::{Step, read_bounded, step_name};
+    use super::{Network, Step, read_bounded, skipped, step_name};
     use std::io::Write;
+
+    #[test]
+    fn only_the_host_network_namespace_is_skipped() {
+        assert_eq!(skipped(Network::Denied), [false; 7]);
+        assert_eq!(
+            skipped(Network::Host),
+            [false, false, true, false, false, false, false]
+        );
+    }
 
     #[test]
     fn every_step_has_its_own_code() {

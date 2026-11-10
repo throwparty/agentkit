@@ -54,7 +54,7 @@ Extract the `Host` forward loop from `create_sandbox` into a function returning 
 | Depends On |  |
 | References | host-port-forwarding,ports-work,bad-port-name,denied-with-ports |
 
-### T-005: Skip only the host network namespace
+### T-005: [x] Skip only the host network namespace
 
 In `join.rs`, replace the `skip[7]` array computed by comparing `/proc/<sandbox-pid>/ns/<name>` with `/proc/self/ns/<name>` with a decision from `data.network`. When it is `Host`, skip the `setns` for `CLONE_NEWNET` only. When it is `Denied`, skip nothing. Enter the other six namespaces in both cases. Keep `namespaces_match` comparing all seven recorded numbers. Add a unit test for the decision.
 
