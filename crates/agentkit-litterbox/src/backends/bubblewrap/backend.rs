@@ -406,10 +406,16 @@ impl Backend for BubblewrapBackend {
         sandbox: &'a SandboxRecord,
         source: &'a str,
         destination: &'a Path,
+        selector: Option<&'a dyn crate::sandbox::contract::SnapshotSelector>,
     ) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async move {
             let data = self.live(sandbox)?;
-            workspace::transfer_out(Path::new(&data.workspace_host), source, destination)
+            workspace::transfer_out(
+                Path::new(&data.workspace_host),
+                source,
+                destination,
+                selector,
+            )
         })
     }
 

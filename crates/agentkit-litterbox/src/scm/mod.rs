@@ -275,6 +275,14 @@ impl ThreadSafeScm {
         Ok(())
     }
 
+    /// The paths this sandbox's snapshot carries.
+    ///
+    /// `rules_root` is the tree the ignore rules are read from: the sandbox's
+    /// own copy of the workspace.
+    pub fn snapshot_filter(&self, rules_root: &Path) -> Result<SnapshotFilter, SandboxError> {
+        self.lock()?.snapshot_filter(rules_root)
+    }
+
     pub fn commit_snapshot_from_staging(
         &self,
         staging_path: &Path,
@@ -454,6 +462,7 @@ impl Scm for GitScm {
         let Some(workdir) = self.repo.workdir() else {
             return Ok(None);
         };
+        // The checkout is its own sandbox here, so its rules are the sandbox's.
         self.commit_snapshot_from_staging(workdir, message)
     }
 
@@ -533,6 +542,8 @@ impl GitScm {
             .treebuilder(None)
             .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
 
+        // The staged tree is the sandbox's, so its rules are the ones that
+        // decide what the snapshot records; the transfer applied the same ones.
         let filter = self.snapshot_filter(staging_path)?;
         self.add_directory_to_tree(&mut builder, staging_path, Path::new(""), &filter)?;
 
@@ -748,7 +759,7 @@ pub struct SnapshotFilter {
     /// The checkout libgit2 evaluates rules against. Kept alive because it owns
     /// the directory the sandbox's rule files are mirrored into.
     _rules: tempfile::TempDir,
-    checkout: Repository,
+    checkout: Mutex<Repository>,
     tracked: HashSet<PathBuf>,
     tracked_dirs: HashSet<PathBuf>,
 }
@@ -776,7 +787,7 @@ impl SnapshotFilter {
 
         Ok(Self {
             _rules: rules,
-            checkout,
+            checkout: Mutex::new(checkout),
             tracked,
             tracked_dirs,
         })
@@ -803,7 +814,11 @@ impl SnapshotFilter {
     }
 
     fn ignored(&self, relative: &Path) -> Result<bool, SandboxError> {
-        self.checkout
+        let checkout = self
+            .checkout
+            .lock()
+            .map_err(|_| SandboxError::Config("Mutex poisoned".to_string()))?;
+        checkout
             .status_should_ignore(relative)
             .map_err(|source| SandboxError::Scm(ScmError::Status { source }))
     }
@@ -838,6 +853,47 @@ fn mirror_ignore_files(from: &Path, to: &Path) -> Result<(), SandboxError> {
     }
 
     Ok(())
+}
+
+impl crate::sandbox::contract::SnapshotSelector for SnapshotFilter {
+    fn selects(
+        &self,
+        relative: &Path,
+        is_dir: bool,
+    ) -> Result<bool, crate::sandbox::contract::Error> {
+        let skips = if is_dir {
+            self.skips_dir(relative)
+        } else {
+            self.skips_file(relative)
+        };
+        skips
+            .map(|skips| !skips)
+            .map_err(|error| crate::sandbox::contract::Error::failed(error.to_string()))
+    }
+}
+
+/// Selects the ignore files a snapshot's rules are read from.
+///
+/// A snapshot has to know the sandbox's own rules before it decides what to
+/// transfer, so the transfer runs twice: once for these files, and once for
+/// everything else under the rules they describe.
+pub struct IgnoreFiles;
+
+impl crate::sandbox::contract::SnapshotSelector for IgnoreFiles {
+    fn selects(
+        &self,
+        relative: &Path,
+        is_dir: bool,
+    ) -> Result<bool, crate::sandbox::contract::Error> {
+        // A directory is kept so the walk reaches the rules nested inside it.
+        if is_dir {
+            return Ok(true);
+        }
+        Ok(relative
+            .file_name()
+            .is_some_and(|name| name == ".gitignore")
+            || relative == Path::new(".git/info/exclude"))
+    }
 }
 
 fn repo_prefix_from_path(path: &Path) -> String {

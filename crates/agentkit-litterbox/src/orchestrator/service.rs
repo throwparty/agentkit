@@ -987,7 +987,7 @@ impl Sandboxes {
             .await?;
         selected
             .core()
-            .download(&stored.sandbox, source, destination)
+            .download(&stored.sandbox, source, destination, None)
             .await
     }
 
@@ -998,15 +998,35 @@ impl Sandboxes {
             .select_for(&stored.sandbox, "snapshot the workspace")
             .await?;
 
+        let scm = self.snapshot_scm(&stored)?;
+
         let staging = tempfile::tempdir()
             .map_err(|error| Error::failed(format!("could not create a staging dir: {error}")))?;
         let workspace = selected.core().inspect(&stored.sandbox).await?.workspace;
+
+        // The rules that decide what a snapshot carries live in the sandbox, so
+        // they are fetched first: the bulk transfer is then filtered by the
+        // rules in force, and the commit uses the same ones.
+        let rules = tempfile::tempdir()
+            .map_err(|error| Error::failed(format!("could not create a rules dir: {error}")))?;
         selected
             .core()
-            .download(&stored.sandbox, &workspace, staging.path())
+            .download(
+                &stored.sandbox,
+                &workspace,
+                rules.path(),
+                Some(&crate::scm::IgnoreFiles),
+            )
+            .await?;
+        let selector = scm
+            .snapshot_filter(rules.path())
+            .map_err(|error| Error::failed(error.to_string()))?;
+
+        selected
+            .core()
+            .download(&stored.sandbox, &workspace, staging.path(), Some(&selector))
             .await?;
 
-        let scm = self.snapshot_scm(&stored)?;
         scm.commit_snapshot_from_staging(staging.path(), message)?;
         Ok(())
     }
