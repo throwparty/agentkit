@@ -93,7 +93,7 @@ Add two `#[ignore]` tests in `backend.rs`. The host test constructs `BubblewrapS
 | Depends On | T-002,T-003,T-004,T-005,T-006 |
 | References | host-network-proof,host-listener-reachable,namespaces-work,suite-and-lints |
 
-### T-008: Align the provider spec and docs
+### T-008: [x] Align the provider spec and docs
 
 Amend FR-003 in `adrs/2026-11-07-linux-bwrap-provider/spec.md` and `spec.toon`. It should say the command enters every namespace except the network namespace when `payload.toml` says `host`, because that namespace is owned by the initial user namespace and `setns` fails with EPERM. It should also say the network number is still checked. Check `docs/docs/user/litterbox/backends.mdx` and `docs/docs/user/litterbox/reference/config.mdx` against the code. Do not touch lifecycle or holder sections.
 
