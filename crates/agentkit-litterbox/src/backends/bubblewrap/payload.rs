@@ -163,9 +163,10 @@ impl BubblewrapData {
 #[cfg(test)]
 mod tests {
     use super::{BubblewrapData, RecordedMount, RecordedRoot, VERSION};
+    use crate::backends::bubblewrap::backend::Network;
     use crate::backends::bubblewrap::host::NamespaceInodes;
     use crate::backends::bubblewrap::view::{Access, Mount, Pinned, View, WORKSPACE};
-    use crate::sandbox::contract::{Error, SandboxRecord};
+    use crate::sandbox::contract::{Error, Forward, SandboxRecord};
     use crate::sandbox::environment::Provenance;
 
     fn pinned(path: &str, read_only: bool) -> Pinned {
@@ -234,7 +235,7 @@ mod tests {
                 steps: Vec::new(),
             },
             forwards: Vec::new(),
-            network: crate::backends::bubblewrap::backend::Network::Denied,
+            network: Network::Denied,
         }
     }
 
@@ -256,6 +257,24 @@ mod tests {
         assert_eq!(read.namespaces, [1, 2, 3, 4, 5, 6, 7]);
         assert_eq!(read.mounts().len(), 2);
         assert_eq!(read.mounts()[1].access, Access::ReadWrite);
+    }
+
+    #[test]
+    fn a_host_payload_round_trips_its_network_and_forwards() {
+        let mut data = data();
+        data.network = Network::Host;
+        data.forwards = vec![Forward {
+            name: "www".to_string(),
+            target: 8080,
+            host_port: 8080,
+            bind: "127.0.0.1".to_string(),
+            env_var: "LITTERBOX_FWD_PORT_WWW".to_string(),
+        }];
+
+        let read = BubblewrapData::from_record(&record(&data)).expect("readable");
+        assert_eq!(read, data);
+        assert_eq!(read.network, Network::Host);
+        assert_eq!(read.forwards, data.forwards);
     }
 
     #[test]
