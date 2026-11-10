@@ -103,8 +103,9 @@ impl BubblewrapBackend {
         holder_command: &holder::Command,
         workspace: &Path,
     ) -> Result<View, Error> {
+        let requested = Self::requested_paths(request, holder_command, self.settings.network);
         View::build(
-            &Self::requested_paths(request, holder_command, self.settings.network),
+            &requested,
             workspace,
             &self.boundaries(&request.project_slug, &request.name)?,
         )
@@ -895,6 +896,7 @@ impl BubblewrapBackend {
 
 #[cfg(test)]
 mod tests {
+    use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
     use super::{BubblewrapBackend, BubblewrapSettings, Network};
@@ -973,7 +975,7 @@ mod tests {
             placement: Placement::Host,
             sandbox: None,
             contributions: Contributions {
-                mounts: vec![std::path::PathBuf::from("/opt/toolchain/abc")],
+                mounts: vec![PathBuf::from("/opt/toolchain/abc")],
                 ..Contributions::default()
             },
         });
@@ -984,11 +986,53 @@ mod tests {
         };
         let requested = BubblewrapBackend::requested_paths(&request, &command, Network::Denied);
         assert_eq!(requested.len(), 1);
-        assert_eq!(
-            requested[0].path,
-            std::path::PathBuf::from("/opt/toolchain/abc")
-        );
+        assert_eq!(requested[0].path, PathBuf::from("/opt/toolchain/abc"));
         assert!(requested[0].contributed);
+    }
+
+    #[test]
+    fn a_host_sandbox_requests_the_resolver_and_certificate_paths() {
+        let request = request(Vec::new());
+        let command = crate::backends::bubblewrap::holder::Command {
+            shell: PathBuf::from("/usr/bin/sh"),
+            binds: Vec::new(),
+            path: String::new(),
+        };
+        let host_paths: Vec<PathBuf> =
+            BubblewrapBackend::requested_paths(&request, &command, Network::Host)
+                .into_iter()
+                .map(|requested| requested.path)
+                .collect();
+        for path in [
+            "/etc/resolv.conf",
+            "/etc/hosts",
+            "/etc/nsswitch.conf",
+            "/etc/ssl",
+        ] {
+            if Path::new(path).exists() {
+                assert!(
+                    host_paths.contains(&PathBuf::from(path)),
+                    "the host view is missing {path}"
+                );
+            }
+        }
+
+        let denied_paths: Vec<PathBuf> =
+            BubblewrapBackend::requested_paths(&request, &command, Network::Denied)
+                .into_iter()
+                .map(|requested| requested.path)
+                .collect();
+        for path in [
+            "/etc/resolv.conf",
+            "/etc/hosts",
+            "/etc/nsswitch.conf",
+            "/etc/ssl",
+        ] {
+            assert!(
+                !denied_paths.contains(&PathBuf::from(path)),
+                "the denied view requested {path}"
+            );
+        }
     }
 
     #[tokio::test]
