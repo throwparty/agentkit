@@ -41,7 +41,7 @@ In `BubblewrapBackend::inspect`, use `data.network` in the `Verdict::Absent` bra
 | Depends On |  |
 | References | inspection-egress,egress-field-works |
 
-### T-004: Make the forward construction fallible
+### T-004: [x] Make the forward construction fallible
 
 Extract the `Host` forward loop from `create_sandbox` into a function returning `Result<Vec<Forward>, Error>`. Call `forwarded_port_env_var` and return its error. Remove the `filter_map`. Keep the `denied` plus ports `Unsupported` error and its remedy. Add tests for a host port, a denied port and a bad port name.
 

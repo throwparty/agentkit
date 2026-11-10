@@ -13,8 +13,9 @@ use super::view::{Boundaries, RenderOptions, Requested, View, WORKSPACE};
 use super::{environment, holder, join, lifecycle, readiness, validate, workspace};
 use crate::backends::shared::{EXEC_OUTPUT_CAP, PROVISION_OUTPUT_CAP, run_steps};
 use crate::sandbox::contract::{
-    Backend, ContributionSort, ContributionSupport, CreateRequest, Error, Execution, Inspection,
-    ProvisioningClass, ProvisioningFailure, SandboxRecord, Scope,
+    Backend, ContributionSort, ContributionSupport, CreateRequest, Error, Execution, Forward,
+    Inspection, ProvisioningClass, ProvisioningFailure, SandboxRecord, Scope,
+    forwarded_port_env_var,
 };
 use crate::sandbox::facets::{Lifecycle, Limits, ResourceLimits};
 use crate::sandbox::report::{Capability, EgressPosture, Readiness, State};
@@ -608,8 +609,16 @@ impl Limits for BubblewrapBackend {
 }
 
 impl BubblewrapBackend {
-    async fn create_sandbox(&self, request: &CreateRequest) -> Result<SandboxRecord, Error> {
-        if !request.ports.is_empty() && self.settings.network != Network::Host {
+    /// The forwards a request needs under a network setting.
+    ///
+    /// A shared network means the sandbox listens on the host port directly,
+    /// so the host port and the target are the same. A port whose name cannot
+    /// become an environment variable is an error, never a dropped entry.
+    fn forwards(request: &CreateRequest, network: Network) -> Result<Vec<Forward>, Error> {
+        if request.ports.is_empty() {
+            return Ok(Vec::new());
+        }
+        if network != Network::Host {
             return Err(Error::Unsupported {
                 operation: format!("create the sandbox '{}'", request.name),
                 backend: BACKEND.to_string(),
@@ -623,28 +632,25 @@ impl BubblewrapBackend {
             });
         }
 
-        let forwards: Vec<crate::sandbox::contract::Forward> =
-            if self.settings.network == Network::Host {
-                request
-                    .ports
-                    .iter()
-                    .filter_map(|port| {
-                        let env_var =
-                            crate::sandbox::contract::forwarded_port_env_var(&port.name).ok()?;
-                        Some(crate::sandbox::contract::Forward {
-                            name: port.name.clone(),
-                            target: port.target,
-                            // A shared network means the sandbox listens on the host
-                            // port directly, so the two are the same.
-                            host_port: port.target,
-                            bind: request.forward_bind.clone(),
-                            env_var,
-                        })
-                    })
-                    .collect()
-            } else {
-                Vec::new()
-            };
+        request
+            .ports
+            .iter()
+            .map(|port| {
+                let env_var = forwarded_port_env_var(&port.name)
+                    .map_err(|message| Error::Misconfigured { message })?;
+                Ok(Forward {
+                    name: port.name.clone(),
+                    target: port.target,
+                    host_port: port.target,
+                    bind: request.forward_bind.clone(),
+                    env_var,
+                })
+            })
+            .collect()
+    }
+
+    async fn create_sandbox(&self, request: &CreateRequest) -> Result<SandboxRecord, Error> {
+        let forwards = Self::forwards(request, self.settings.network)?;
 
         let directory = workspace::sandbox_directory(&request.project_slug, &request.name);
         if directory.exists() {
@@ -1192,6 +1198,50 @@ mod tests {
                 assert_eq!(primitive, "a shared host network");
             }
             other => panic!("expected unsupported, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_host_port_becomes_a_forward_with_the_same_host_port() {
+        let request = request(vec![RequestedPort {
+            name: "www".to_string(),
+            target: 8080,
+        }]);
+        let forwards = BubblewrapBackend::forwards(&request, Network::Host).expect("forwards");
+        assert_eq!(forwards.len(), 1);
+        assert_eq!(forwards[0].name, "www");
+        assert_eq!(forwards[0].target, 8080);
+        assert_eq!(forwards[0].host_port, 8080);
+        assert_eq!(forwards[0].bind, "127.0.0.1");
+        assert_eq!(forwards[0].env_var, "LITTERBOX_FWD_PORT_WWW");
+    }
+
+    #[test]
+    fn a_denied_port_names_the_setting_that_would_allow_it() {
+        let request = request(vec![RequestedPort {
+            name: "www".to_string(),
+            target: 8080,
+        }]);
+        match BubblewrapBackend::forwards(&request, Network::Denied) {
+            Err(Error::Unsupported { reason, remedy, .. }) => {
+                assert!(reason.contains("network"), "{reason}");
+                assert!(remedy.contains("host"), "{remedy}");
+            }
+            other => panic!("expected unsupported, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_port_name_that_cannot_be_an_environment_variable_is_refused() {
+        let request = request(vec![RequestedPort {
+            name: "----".to_string(),
+            target: 8080,
+        }]);
+        match BubblewrapBackend::forwards(&request, Network::Host) {
+            Err(Error::Misconfigured { message }) => {
+                assert!(message.contains("not a valid port name"), "{message}");
+            }
+            other => panic!("expected misconfigured, got {other:?}"),
         }
     }
 
