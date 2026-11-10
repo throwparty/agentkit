@@ -15,7 +15,7 @@ Add tests in `config.rs` and `config_loader.rs` for both values and the ownershi
 | Depends On |  |
 | References | network-setting,setting-works,project-sets-host,local-override-sets-host,project-cannot-widen |
 
-### T-002: Test the arguments and host mounts
+### T-002: [x] Test the arguments and host mounts
 
 In `view.rs`, add tests for the arguments Litterbox gives bubblewrap under each setting. `denied` includes `--unshare-net`; `host` does not and still unshares the other five namespaces. Under `host`, the view requests `/etc/resolv.conf`, `/etc/hosts`, `/etc/nsswitch.conf` and `/etc/ssl` when those paths exist. Under `denied`, it requests none of them. If `build_view` is awkward to test because it reads the filesystem, extract the path list into a helper and test the helper.
 
