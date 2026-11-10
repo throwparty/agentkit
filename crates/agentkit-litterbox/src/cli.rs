@@ -78,10 +78,6 @@ enum Commands {
         /// Delete even if the sandbox is active
         #[arg(short, long)]
         force: bool,
-
-        /// Remove a record written by an earlier release instead of a sandbox
-        #[arg(long)]
-        discard_legacy: bool,
     },
 
     /// Report the backends available on this machine, their readiness and their
@@ -142,11 +138,7 @@ pub async fn run() -> ExitCode {
         Commands::Stdio => handle_stdio(backend).await,
         Commands::Pause { name, all, machine } => handle_pause(backend, name, all, machine).await,
         Commands::Resume { name } => handle_resume(backend, name).await,
-        Commands::Delete {
-            name,
-            force,
-            discard_legacy,
-        } => handle_delete(backend, name, force, discard_legacy).await,
+        Commands::Delete { name, force } => handle_delete(backend, name, force).await,
         Commands::Shell { name, command } => handle_shell(backend, name, command).await,
         Commands::Backends { json } => handle_backends(backend, json).await,
         Commands::Doctor { json } => handle_doctor(backend, json).await,
@@ -215,11 +207,6 @@ async fn handle_list(backend: Option<String>) -> ExitCode {
 
     println!("records {}", sandboxes.records_dir().display());
 
-    for name in &listing.legacy {
-        println!(
-            "{name} legacy-record; run `litterbox delete --discard-legacy {name}` to remove it"
-        );
-    }
     let mut failed = false;
     for entry in &listing.corrupt {
         println!("{entry}");
@@ -335,12 +322,7 @@ async fn handle_resume(backend: Option<String>, name: String) -> ExitCode {
     }
 }
 
-async fn handle_delete(
-    backend: Option<String>,
-    name: String,
-    force: bool,
-    discard_legacy: bool,
-) -> ExitCode {
+async fn handle_delete(backend: Option<String>, name: String, force: bool) -> ExitCode {
     let config = match load_config(backend) {
         Ok(config) => config,
         Err(error) => return report(error),
@@ -349,22 +331,6 @@ async fn handle_delete(
         Ok(sandboxes) => sandboxes,
         Err(error) => return report(error),
     };
-
-    if discard_legacy {
-        return match sandboxes.discard_legacy(&name) {
-            Ok((path, container)) => {
-                println!("Discarded the record at {}", path.display());
-                if let Some(container) = container {
-                    println!(
-                        "The record named compute '{container}'; remove it with your \
-                         backend's tooling before the name is reused"
-                    );
-                }
-                ExitCode::from(0)
-            }
-            Err(error) => report(error),
-        };
-    }
 
     match sandboxes.status(&name).await {
         Ok(SandboxStatus::Active) if !force => {

@@ -32,7 +32,6 @@ pub struct Sandboxes {
     scm: ThreadSafeScm,
     project_slug: String,
     records_dir: std::path::PathBuf,
-    legacy_records_dir: Option<std::path::PathBuf>,
     fixed: Option<Selected>,
 }
 
@@ -41,8 +40,6 @@ pub struct Sandboxes {
 pub struct Listing {
     /// Records written by this version.
     pub sandboxes: Vec<SandboxRecord>,
-    /// Records written by an earlier release, reported and never adopted.
-    pub legacy: Vec<String>,
     /// Records that cannot be read, with the reason.
     pub corrupt: Vec<String>,
     /// Branches with no record: compute the orchestrator cannot address.
@@ -58,26 +55,11 @@ impl Sandboxes {
 
         let records_dir = metadata_store::directory(&project_slug);
 
-        // Records written before the namespace gained its path suffix live
-        // under the bare slug. They are reported, never adopted.
-        let legacy_records_dir = base_slug(&config)
-            .ok()
-            .map(|base| metadata_store::directory(&base))
-            .filter(|dir| *dir != records_dir && dir.is_dir());
-
-        if let Some(dir) = &legacy_records_dir {
-            tracing::warn!(
-                "records from an earlier release are present at {}; they are reported, not adopted",
-                dir.display()
-            );
-        }
-
         Ok(Self {
             config,
             scm,
             project_slug,
             records_dir,
-            legacy_records_dir,
             fixed: None,
         })
     }
@@ -98,7 +80,6 @@ impl Sandboxes {
             scm,
             project_slug,
             records_dir,
-            legacy_records_dir: None,
             fixed: Some(fixed),
         }
     }
@@ -344,40 +325,12 @@ impl Sandboxes {
         lifecycle.resume(&stored.sandbox).await
     }
 
-    /// Remove a record written by an earlier release, without touching compute.
-    ///
-    /// Returns the file and the identifier it named, so the caller can tell the
-    /// operator which compute is now unreferenced.
-    pub fn discard_legacy(
-        &self,
-        name: &str,
-    ) -> Result<(std::path::PathBuf, Option<String>), Error> {
-        let name = self.valid_name(name)?;
-        match metadata_store::load_sandbox_at(&self.records_dir, &name)? {
-            Some(LoadedSandbox::Legacy { path, container_id }) => {
-                metadata_store::remove_sandbox_at(&self.records_dir, &name)?;
-                if let Err(error) = self.scm.delete_branch(&name) {
-                    tracing::warn!(sandbox = %name, %error, "the branch may remain after discarding a legacy record");
-                }
-                Ok((path, container_id))
-            }
-            Some(LoadedSandbox::Current(_)) | Some(LoadedSandbox::Corrupt { .. }) => {
-                Err(Error::Denied {
-                    operation: format!("discard the legacy record '{name}'"),
-                    reason: "it is a current record, not a legacy record".to_string(),
-                })
-            }
-            None => Err(Error::NotFound { name }),
-        }
-    }
-
     /// Every sandbox in this project, current first.
     pub fn list(&self) -> Result<Listing, Error> {
         let mut listing = Listing::default();
         for name in self.scm.list_sandboxes()? {
             match metadata_store::load_sandbox_at(&self.records_dir, &name) {
                 Ok(Some(LoadedSandbox::Current(stored))) => listing.sandboxes.push(stored.sandbox),
-                Ok(Some(LoadedSandbox::Legacy { .. })) => listing.legacy.push(name),
                 Ok(Some(LoadedSandbox::Corrupt { path, reason })) => {
                     listing
                         .corrupt
@@ -385,14 +338,6 @@ impl Sandboxes {
                 }
                 Ok(None) => listing.orphans.push(name),
                 Err(error) => listing.corrupt.push(format!("{name}: {error}")),
-            }
-        }
-        if let Some(dir) = &self.legacy_records_dir {
-            for (name, loaded) in metadata_store::names_in(dir) {
-                if matches!(loaded, LoadedSandbox::Legacy { .. }) && !listing.legacy.contains(&name)
-                {
-                    listing.legacy.push(name);
-                }
             }
         }
 
@@ -477,11 +422,6 @@ impl Sandboxes {
         let name = self.valid_name(name)?;
         match metadata_store::load_sandbox_at(&self.records_dir, &name)? {
             Some(LoadedSandbox::Current(stored)) => Ok(stored),
-            Some(LoadedSandbox::Legacy { path, .. }) => Err(Error::failed(format!(
-                "sandbox '{name}' has a record from an earlier release at {}; \
-                 run `litterbox delete --discard-legacy {name}` and create it again",
-                path.display()
-            ))),
             Some(LoadedSandbox::Corrupt { path, reason }) => Err(Error::failed(format!(
                 "sandbox '{name}' has an unreadable record at {}: {reason}",
                 path.display()
@@ -1697,48 +1637,24 @@ mod seam_tests {
     }
 
     #[tokio::test]
-    async fn discarding_a_current_record_is_denied_not_a_name_conflict() {
-        let (dir, _repo) = repository();
-        let records = TempDir::new().expect("records");
-        let backend = Arc::new(TestBackend::new());
-        let sandboxes = orchestrator(dir.path(), records.path().to_path_buf(), backend, None);
-        sandboxes.create("demo").await.expect("create");
-
-        let error = sandboxes
-            .discard_legacy("demo")
-            .expect_err("a current record is not legacy");
-        match error {
-            Error::Denied {
-                operation, reason, ..
-            } => {
-                assert!(operation.contains("demo"), "{operation}");
-                assert!(reason.contains("current record"), "{reason}");
-            }
-            other => panic!("expected a denial, got {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn a_legacy_record_is_reported_and_discarded() {
+    async fn a_record_without_a_sandbox_table_is_reported_corrupt_and_refused() {
         let (dir, _repo) = repository();
         let records = TempDir::new().expect("records");
         let backend = Arc::new(TestBackend::new());
         let sandboxes = orchestrator(dir.path(), records.path().to_path_buf(), backend, None);
 
         sandboxes.scm().create_branch("demo").expect("branch");
-        let legacy = "name = 'demo'\ncontainer_id = 'abc123'\n";
-        std::fs::write(records.path().join("demo.toml"), legacy).expect("write");
+        let old = "name = 'demo'\ncontainer_id = 'abc123'\n";
+        std::fs::write(records.path().join("demo.toml"), old).expect("write");
 
         let listing = sandboxes.list().expect("list");
-        assert_eq!(listing.legacy, vec!["demo".to_string()]);
-        let error = sandboxes.inspect("demo").await.expect_err("legacy refused");
-        let message = error.to_string();
-        assert!(message.contains("delete --discard-legacy"), "{message}");
-        assert!(message.contains("demo.toml"), "{message}");
+        assert_eq!(listing.corrupt.len(), 1, "{listing:?}");
+        assert!(listing.corrupt[0].contains("demo"), "{listing:?}");
 
-        let (path, container) = sandboxes.discard_legacy("demo").expect("discard");
-        assert_eq!(container.as_deref(), Some("abc123"));
-        assert!(!path.exists(), "the record file was removed");
+        let error = sandboxes.inspect("demo").await.expect_err("refused");
+        let message = error.to_string();
+        assert!(message.contains("unreadable record"), "{message}");
+        assert!(message.contains("demo.toml"), "{message}");
     }
 
     #[tokio::test]
