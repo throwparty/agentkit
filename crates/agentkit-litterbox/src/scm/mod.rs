@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -473,6 +475,47 @@ impl Scm for GitScm {
 }
 
 impl GitScm {
+    /// The paths the snapshot's parent records, which stay tracked however the
+    /// sandbox's ignore rules read.
+    fn snapshot_tracked(&self) -> Result<(HashSet<PathBuf>, HashSet<PathBuf>), SandboxError> {
+        let mut tracked = HashSet::new();
+        let mut tracked_dirs = HashSet::new();
+
+        let Some(parent) = self.snapshot_parent()? else {
+            return Ok((tracked, tracked_dirs));
+        };
+        let tree = parent
+            .tree()
+            .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+
+        tree.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
+            let path = Path::new(root).join(entry.name().unwrap_or_default());
+            for ancestor in path.ancestors().skip(1) {
+                if ancestor.as_os_str().is_empty() {
+                    break;
+                }
+                tracked_dirs.insert(ancestor.to_path_buf());
+            }
+            if entry.kind() == Some(ObjectType::Blob) {
+                tracked.insert(path);
+            }
+            0
+        })
+        .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+
+        Ok((tracked, tracked_dirs))
+    }
+
+    /// The paths this sandbox's snapshot carries.
+    ///
+    /// The rules are read from `rules_root`, the sandbox's own tree: a
+    /// `.gitignore` edited inside the sandbox decides what the snapshot
+    /// records, not the host checkout the branch happens to be stored beside.
+    pub fn snapshot_filter(&self, rules_root: &Path) -> Result<SnapshotFilter, SandboxError> {
+        let (tracked, tracked_dirs) = self.snapshot_tracked()?;
+        SnapshotFilter::open(rules_root, tracked, tracked_dirs)
+    }
+
     fn commit_snapshot_from_staging(
         &self,
         staging_path: &Path,
@@ -490,7 +533,8 @@ impl GitScm {
             .treebuilder(None)
             .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
 
-        self.add_directory_to_tree(&mut builder, staging_path)?;
+        let filter = self.snapshot_filter(staging_path)?;
+        self.add_directory_to_tree(&mut builder, staging_path, Path::new(""), &filter)?;
 
         let tree_oid = builder.write().map_err(|e| {
             // Restore backup on failure
@@ -601,9 +645,9 @@ impl GitScm {
         &self,
         builder: &mut git2::TreeBuilder,
         current_path: &Path,
+        relative: &Path,
+        filter: &SnapshotFilter,
     ) -> Result<(), SandboxError> {
-        use std::fs;
-
         let entries = fs::read_dir(current_path).map_err(SandboxError::Io)?;
 
         for entry in entries {
@@ -617,15 +661,20 @@ impl GitScm {
                 continue;
             }
 
+            let child = relative.join(&file_name);
             let metadata = entry.metadata().map_err(SandboxError::Io)?;
 
             if metadata.is_dir() {
+                if filter.skips_dir(&child)? {
+                    continue;
+                }
+
                 let mut sub_builder = self
                     .repo
                     .treebuilder(None)
                     .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
 
-                self.add_directory_to_tree(&mut sub_builder, &path)?;
+                self.add_directory_to_tree(&mut sub_builder, &path, &child, filter)?;
 
                 let sub_tree_oid = sub_builder
                     .write()
@@ -635,6 +684,10 @@ impl GitScm {
                     .insert(&*name_str, sub_tree_oid, 0o040000)
                     .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
             } else {
+                if filter.skips_file(&child)? {
+                    continue;
+                }
+
                 let content = fs::read(&path).map_err(SandboxError::Io)?;
 
                 let blob_oid = self
@@ -664,6 +717,105 @@ impl GitScm {
 
         Ok(())
     }
+}
+
+/// What a snapshot tracks, decided the way `git add -A` decides it: a path the
+/// snapshot's parent already records is tracked, and the sandbox's ignore rules
+/// apply only to everything else.
+pub struct SnapshotFilter {
+    /// The checkout libgit2 evaluates rules against. Kept alive because it owns
+    /// the directory the sandbox's rule files are mirrored into.
+    _rules: tempfile::TempDir,
+    checkout: Repository,
+    tracked: HashSet<PathBuf>,
+    tracked_dirs: HashSet<PathBuf>,
+}
+
+impl SnapshotFilter {
+    fn open(
+        rules_root: &Path,
+        tracked: HashSet<PathBuf>,
+        tracked_dirs: HashSet<PathBuf>,
+    ) -> Result<Self, SandboxError> {
+        let rules = tempfile::tempdir().map_err(SandboxError::Io)?;
+        let checkout = Repository::init(rules.path())
+            .map_err(|source| SandboxError::Scm(ScmError::Open { source }))?;
+
+        // libgit2 answers ignore questions about a checkout, so the sandbox's
+        // own ignore files are mirrored into this one at the same paths: a
+        // nested rule keeps meaning what it means inside the sandbox.
+        mirror_ignore_files(rules_root, rules.path())?;
+
+        // A repository's own exclude file applies from its root.
+        if let Ok(contents) = fs::read(rules_root.join(".git").join("info").join("exclude")) {
+            let target = checkout.path().join("info").join("exclude");
+            fs::write(target, contents).map_err(SandboxError::Io)?;
+        }
+
+        Ok(Self {
+            _rules: rules,
+            checkout,
+            tracked,
+            tracked_dirs,
+        })
+    }
+
+    fn skips_file(&self, relative: &Path) -> Result<bool, SandboxError> {
+        if self.tracked.contains(relative) {
+            return Ok(false);
+        }
+        self.ignored(relative)
+    }
+
+    /// A directory is skipped only when the snapshot's parent records nothing
+    /// beneath it.
+    fn skips_dir(&self, relative: &Path) -> Result<bool, SandboxError> {
+        if self.tracked_dirs.contains(relative) {
+            return Ok(false);
+        }
+        // The staging tree is not the checkout, so libgit2 cannot stat the
+        // directory to learn it is one; the trailing separator says so.
+        let mut probe = relative.as_os_str().to_owned();
+        probe.push("/");
+        self.ignored(Path::new(&probe))
+    }
+
+    fn ignored(&self, relative: &Path) -> Result<bool, SandboxError> {
+        self.checkout
+            .status_should_ignore(relative)
+            .map_err(|source| SandboxError::Scm(ScmError::Status { source }))
+    }
+}
+
+/// Copy a tree's ignore files into a checkout, leaving everything else behind.
+///
+/// `from` is a tree the sandbox produced; `to` is the scratch checkout libgit2
+/// reads rules from. Only the rule files are needed, so nothing else is copied
+/// and no rule changes meaning: `.gitignore` governs the directory it sits in.
+fn mirror_ignore_files(from: &Path, to: &Path) -> Result<(), SandboxError> {
+    let entries = match fs::read_dir(from) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(SandboxError::Io(error)),
+    };
+
+    for entry in entries {
+        let entry = entry.map_err(SandboxError::Io)?;
+        let name = entry.file_name();
+        if name == ".git" {
+            continue;
+        }
+        // `file_type` does not follow a link, so a linked directory is left
+        // alone rather than walked in circles.
+        if entry.file_type().map_err(SandboxError::Io)?.is_dir() {
+            mirror_ignore_files(&entry.path(), &to.join(&name))?;
+        } else if name == ".gitignore" {
+            fs::create_dir_all(to).map_err(SandboxError::Io)?;
+            fs::copy(entry.path(), to.join(&name)).map_err(SandboxError::Io)?;
+        }
+    }
+
+    Ok(())
 }
 
 fn repo_prefix_from_path(path: &Path) -> String {
@@ -1022,6 +1174,273 @@ mod tests {
             "file.txt"
         );
         assert!(tree.get_name(".git").is_none());
+    }
+
+    #[test]
+    fn commit_snapshot_from_staging_skips_ignored_paths() {
+        let (_tempdir, repo) = init_repo();
+        let scm = GitScm {
+            repo,
+            mode: ScmMode::Direct,
+            snapshot_branch: Some("test-snapshot".to_string()),
+            host_repo_path: None,
+        };
+
+        let staging_dir = TempDir::new().expect("staging dir");
+        fs::write(
+            staging_dir.path().join(".gitignore"),
+            "ignored.txt\n/target/\n",
+        )
+        .expect("write gitignore");
+        let target = staging_dir.path().join("target");
+        fs::create_dir_all(&target).expect("create target");
+        fs::write(target.join("artifact"), "built").expect("write artifact");
+        let source = staging_dir.path().join("src");
+        fs::create_dir_all(&source).expect("create src");
+        fs::write(source.join("main.rs"), "fn main() {}").expect("write source");
+
+        let oid = scm
+            .commit_snapshot_from_staging(staging_dir.path(), "Test snapshot")
+            .expect("commit")
+            .expect("oid");
+
+        let tree = scm
+            .repo
+            .find_commit(oid)
+            .expect("commit")
+            .tree()
+            .expect("tree");
+        assert!(
+            tree.get_name("target").is_none(),
+            "build output must not be tracked"
+        );
+        assert!(tree.get_name("src").is_some(), "source must be tracked");
+    }
+
+    #[test]
+    fn commit_snapshot_from_staging_honours_nested_gitignore() {
+        let (_tempdir, repo) = init_repo();
+        let scm = GitScm {
+            repo,
+            mode: ScmMode::Direct,
+            snapshot_branch: Some("test-snapshot".to_string()),
+            host_repo_path: None,
+        };
+
+        let staging_dir = TempDir::new().expect("staging dir");
+        let staged_nested = staging_dir.path().join("crates").join("thing");
+        fs::create_dir_all(&staged_nested).expect("create staged nested");
+        fs::write(staged_nested.join(".gitignore"), "*.log\n!keep.log\n")
+            .expect("write nested ignore");
+        fs::write(staged_nested.join("debug.log"), "noise").expect("write ignored");
+        fs::write(staged_nested.join("keep.log"), "kept").expect("write kept");
+        fs::write(staged_nested.join("lib.rs"), "pub fn thing() {}").expect("write source");
+
+        let oid = scm
+            .commit_snapshot_from_staging(staging_dir.path(), "Test snapshot")
+            .expect("commit")
+            .expect("oid");
+
+        let tree = scm
+            .repo
+            .find_commit(oid)
+            .expect("commit")
+            .tree()
+            .expect("tree");
+        let crates = tree
+            .get_name("crates")
+            .expect("crates entry")
+            .to_object(&scm.repo)
+            .expect("crates object");
+        let thing = crates
+            .as_tree()
+            .expect("crates tree")
+            .get_name("thing")
+            .expect("thing entry")
+            .to_object(&scm.repo)
+            .expect("thing object");
+        let thing = thing.as_tree().expect("thing tree");
+        assert!(thing.get_name("debug.log").is_none(), "rule must apply");
+        assert!(thing.get_name("keep.log").is_some(), "negation must apply");
+        assert!(thing.get_name("lib.rs").is_some());
+    }
+
+    #[test]
+    fn commit_snapshot_from_staging_keeps_tracked_ignored_files() {
+        let (tempdir, repo) = init_repo();
+        let kept = tempdir.path().join("kept.txt");
+        fs::write(&kept, "tracked").expect("write kept");
+        let mut index = repo.index().expect("index");
+        index.add_path(Path::new("kept.txt")).expect("add kept");
+        index.write().expect("write index");
+        let tree_id = index.write_tree().expect("write tree");
+        let signature = Signature::now("Test", "test@example.com").expect("signature");
+        {
+            let tree = repo.find_tree(tree_id).expect("tree");
+            let parent = repo
+                .head()
+                .expect("head")
+                .peel_to_commit()
+                .expect("head commit");
+            repo.commit(
+                Some("HEAD"),
+                &signature,
+                &signature,
+                "track kept",
+                &tree,
+                &[&parent],
+            )
+            .expect("commit kept");
+        }
+        drop(index);
+
+        let scm = GitScm {
+            repo,
+            mode: ScmMode::Direct,
+            snapshot_branch: Some("test-snapshot".to_string()),
+            host_repo_path: None,
+        };
+
+        let staging_dir = TempDir::new().expect("staging dir");
+        fs::write(
+            staging_dir.path().join(".gitignore"),
+            "ignored.txt\nkept.txt\n",
+        )
+        .expect("write gitignore");
+        fs::write(staging_dir.path().join("kept.txt"), "tracked").expect("write kept");
+
+        let oid = scm
+            .commit_snapshot_from_staging(staging_dir.path(), "Test snapshot")
+            .expect("commit")
+            .expect("oid");
+
+        let tree = scm
+            .repo
+            .find_commit(oid)
+            .expect("commit")
+            .tree()
+            .expect("tree");
+        assert!(
+            tree.get_name("kept.txt").is_some(),
+            "an ignored path the snapshot's parent records must stay"
+        );
+    }
+
+    #[test]
+    fn commit_snapshot_from_staging_tracks_what_the_snapshot_parent_records() {
+        let (tempdir, repo) = init_repo();
+        fs::write(tempdir.path().join("kept.txt"), "tracked").expect("write kept");
+        let mut index = repo.index().expect("index");
+        index.add_path(Path::new("kept.txt")).expect("add kept");
+        index.write().expect("write index");
+        let tree_id = index.write_tree().expect("write tree");
+        let signature = Signature::now("Test", "test@example.com").expect("signature");
+        {
+            let tree = repo.find_tree(tree_id).expect("tree");
+            let parent = repo
+                .head()
+                .expect("head")
+                .peel_to_commit()
+                .expect("head commit");
+            let head = repo
+                .commit(
+                    Some("HEAD"),
+                    &signature,
+                    &signature,
+                    "track kept",
+                    &tree,
+                    &[&parent],
+                )
+                .expect("commit kept");
+            repo.branch(
+                "litterbox/other",
+                &repo.find_commit(head).expect("committed"),
+                false,
+            )
+            .expect("snapshot branch");
+        }
+
+        // The checkout moves to a state that carries no record of the file, so
+        // its index cannot be the snapshot's idea of what is tracked.
+        index
+            .remove_path(Path::new("kept.txt"))
+            .expect("untrack kept");
+        index.write().expect("write index");
+
+        let scm = GitScm {
+            repo,
+            mode: ScmMode::Direct,
+            snapshot_branch: Some("litterbox/other".to_string()),
+            host_repo_path: None,
+        };
+
+        let staging_dir = TempDir::new().expect("staging dir");
+        fs::write(staging_dir.path().join(".gitignore"), "kept.txt\n").expect("write gitignore");
+        fs::write(staging_dir.path().join("kept.txt"), "tracked").expect("write kept");
+
+        let oid = scm
+            .commit_snapshot_from_staging(staging_dir.path(), "Test snapshot")
+            .expect("commit")
+            .expect("oid");
+
+        let tree = scm
+            .repo
+            .find_commit(oid)
+            .expect("commit")
+            .tree()
+            .expect("tree");
+        assert!(
+            tree.get_name("kept.txt").is_some(),
+            "the snapshot's own parent decides what is tracked, not the checkout"
+        );
+    }
+
+    #[test]
+    fn commit_snapshot_from_staging_takes_its_rules_from_the_sandbox_in_remote_mode() {
+        let (host, _host_repo) = init_repo();
+        // The checkout the branch is stored beside ignores logs; the sandbox
+        // does not. The sandbox's rules are the ones the snapshot records.
+        fs::write(host.path().join(".gitignore"), "*.log\n/target/\n").expect("rewrite gitignore");
+
+        let bare = TempDir::new().expect("bare dir");
+        Repository::init_bare(bare.path()).expect("init bare");
+        let mut scm = GitScm::open_with_host(
+            bare.path(),
+            ScmMode::Remote,
+            Some(host.path().to_path_buf()),
+        )
+        .expect("open remote scm");
+        scm.set_snapshot_branch("litterbox/remote".to_string());
+
+        let staging_dir = TempDir::new().expect("staging dir");
+        fs::write(staging_dir.path().join(".gitignore"), "/target/\n")
+            .expect("write sandbox gitignore");
+        let target = staging_dir.path().join("target");
+        fs::create_dir_all(&target).expect("create target");
+        fs::write(target.join("artifact"), "built").expect("write artifact");
+        fs::write(staging_dir.path().join("README.md"), "hello").expect("write readme");
+        fs::write(staging_dir.path().join("notes.log"), "kept").expect("write log");
+
+        let oid = scm
+            .commit_snapshot_from_staging(staging_dir.path(), "Test snapshot")
+            .expect("commit")
+            .expect("oid");
+
+        let tree = scm
+            .repo
+            .find_commit(oid)
+            .expect("commit")
+            .tree()
+            .expect("tree");
+        assert!(
+            tree.get_name("target").is_none(),
+            "the sandbox's rules must apply in remote mode"
+        );
+        assert!(
+            tree.get_name("notes.log").is_some(),
+            "the host checkout's rules must not reach the snapshot"
+        );
+        assert!(tree.get_name("README.md").is_some());
     }
 
     #[test]
