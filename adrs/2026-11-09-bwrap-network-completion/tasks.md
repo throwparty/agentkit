@@ -67,7 +67,7 @@ In `join.rs`, replace the `skip[7]` array computed by comparing `/proc/<sandbox-
 | Depends On |  |
 | References | run-command-namespaces,namespaces-work,host-net-eperm,no-extra-network-machinery |
 
-### T-006: Test the payload round-trip for network and forwards
+### T-006: [x] Test the payload round-trip for network and forwards
 
 Add a test in `payload.rs` that a `BubblewrapData` with `Network::Host` and a `Forward` round-trips through `into_value` and `from_record`. Do not change `VERSION` and do not add v1 handling.
 
