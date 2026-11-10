@@ -17,7 +17,7 @@ use crate::sandbox::contract::{
     ProvisioningClass, ProvisioningFailure, SandboxRecord, Scope,
 };
 use crate::sandbox::facets::{Lifecycle, Limits, ResourceLimits};
-use crate::sandbox::report::{Capability, Readiness, State};
+use crate::sandbox::report::{Capability, EgressPosture, Readiness, State};
 
 /// The descriptor bwrap reports its status on.
 const STATUS_FD: i32 = 3;
@@ -36,6 +36,14 @@ pub enum Network {
 }
 
 impl Network {}
+
+/// The egress posture an inspection reports for a network setting.
+fn egress(network: Network) -> EgressPosture {
+    match network {
+        Network::Host => EgressPosture::Direct,
+        Network::Denied => EgressPosture::Denied,
+    }
+}
 
 /// Bubblewrap's settings, typed here and nowhere else.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -418,28 +426,25 @@ impl Backend for BubblewrapBackend {
                     } else {
                         crate::sandbox::contract::SandboxStatus::Active
                     },
-                    egress: match data.network {
-                        Network::Host => crate::sandbox::report::EgressPosture::Direct,
-                        Network::Denied => crate::sandbox::report::EgressPosture::Denied,
-                    },
+                    egress: egress(data.network),
                     workspace: data.workspace.clone(),
                     environment: data.environment.clone(),
                     forwards: data.forwards.clone(),
                 }),
-                validate::Verdict::Absent => Ok(Inspection {
-                    name: sandbox.name.clone(),
-                    backend: BACKEND.to_string(),
-                    status: crate::sandbox::contract::SandboxStatus::Missing,
-                    egress: crate::sandbox::report::EgressPosture::Denied,
-                    workspace: WORKSPACE.to_string(),
-                    environment: crate::sandbox::environment::Provenance {
-                        origin: crate::sandbox::environment::Origin::Default,
-                        variables: Vec::new(),
-                        host_paths: Vec::new(),
-                        steps: Vec::new(),
-                    },
-                    forwards: Vec::new(),
-                }),
+                validate::Verdict::Absent => {
+                    // The process is gone but the payload is still the record
+                    // of what the sandbox was, including its network posture.
+                    let data = BubblewrapData::from_record(sandbox)?;
+                    Ok(Inspection {
+                        name: sandbox.name.clone(),
+                        backend: BACKEND.to_string(),
+                        status: crate::sandbox::contract::SandboxStatus::Missing,
+                        egress: egress(data.network),
+                        workspace: data.workspace,
+                        environment: data.environment,
+                        forwards: data.forwards,
+                    })
+                }
                 validate::Verdict::Forbidden { reason } => Err(Error::Denied {
                     operation: format!("inspect '{}'", sandbox.name),
                     reason,
@@ -900,12 +905,19 @@ mod tests {
     use std::sync::Arc;
 
     use super::{BubblewrapBackend, BubblewrapSettings, Network};
-    use crate::backends::bubblewrap::host::FakeHost;
+    use crate::backends::bubblewrap::host::{
+        FakeHost, MountEntry, NamespaceInodes, ProcessInfo, ProcessState, RootIdentity,
+    };
+    use crate::backends::bubblewrap::payload::{
+        BubblewrapData, RecordedMount, RecordedRoot, VERSION,
+    };
     use crate::sandbox::contract::{
-        Backend, ContributionSort, CreateRequest, Error, RequestedPort, SandboxAction, SandboxRecord,
-        Workspace,
+        Backend, ContributionSort, CreateRequest, Error, RequestedPort, SandboxAction,
+        SandboxRecord, SandboxStatus, Workspace,
     };
     use crate::sandbox::contract::{Placement, ResolvedStep};
+    use crate::sandbox::environment::{Origin, Provenance};
+    use crate::sandbox::report::EgressPosture;
 
     fn request(ports: Vec<RequestedPort>) -> CreateRequest {
         CreateRequest {
@@ -922,6 +934,139 @@ mod tests {
 
     fn backend() -> BubblewrapBackend {
         BubblewrapBackend::new(BubblewrapSettings::default(), Arc::new(FakeHost::default()))
+    }
+
+    fn payload(network: Network) -> BubblewrapData {
+        BubblewrapData {
+            version: VERSION,
+            launcher_pid: 10,
+            launcher_start: 100,
+            sandbox_pid: 11,
+            sandbox_start: 101,
+            namespaces: [1, 2, 3, 4, 5, 6, 7],
+            uid: 1000,
+            root: RecordedRoot {
+                device: 8,
+                inode: 9,
+            },
+            mounts: vec![RecordedMount {
+                path: "/nix/store/abc".to_string(),
+                read_only: true,
+            }],
+            workspace_host: "/state/workspace".to_string(),
+            workspace: "/src".to_string(),
+            scope: None,
+            paused: false,
+            environment: Provenance {
+                origin: Origin::Default,
+                variables: Vec::new(),
+                host_paths: Vec::new(),
+                steps: Vec::new(),
+            },
+            network,
+            forwards: Vec::new(),
+        }
+    }
+
+    fn record(data: BubblewrapData) -> SandboxRecord {
+        SandboxRecord {
+            name: "demo".to_string(),
+            backend: "bubblewrap".to_string(),
+            project_slug: "project".to_string(),
+            data: data.into_value().expect("payload"),
+        }
+    }
+
+    fn live_host(data: &BubblewrapData) -> FakeHost {
+        let mut host = FakeHost::default();
+        host.processes.insert(
+            data.sandbox_pid,
+            ProcessInfo {
+                state: ProcessState::Waiting,
+                start_time: data.sandbox_start,
+                uid: data.uid,
+            },
+        );
+        host.namespaces.insert(
+            data.sandbox_pid,
+            NamespaceInodes {
+                user: data.namespaces[0],
+                ipc: data.namespaces[1],
+                net: data.namespaces[2],
+                pid: data.namespaces[3],
+                mnt: data.namespaces[4],
+                uts: data.namespaces[5],
+                cgroup: data.namespaces[6],
+            },
+        );
+        host.roots.insert(
+            data.sandbox_pid,
+            RootIdentity {
+                device: data.root.device,
+                inode: data.root.inode,
+            },
+        );
+        let mut mounts: Vec<MountEntry> = data
+            .mounts
+            .iter()
+            .map(|mount| MountEntry {
+                path: PathBuf::from(&mount.path),
+                read_only: mount.read_only,
+                fstype: "ext4".to_string(),
+            })
+            .collect();
+        mounts.push(MountEntry {
+            path: PathBuf::from("/src"),
+            read_only: false,
+            fstype: "ext4".to_string(),
+        });
+        host.mounts.insert(data.sandbox_pid, mounts);
+        host
+    }
+
+    #[tokio::test]
+    async fn inspection_reports_the_recorded_egress_when_live() {
+        for (network, expected) in [
+            (Network::Host, EgressPosture::Direct),
+            (Network::Denied, EgressPosture::Denied),
+        ] {
+            let data = payload(network);
+            let backend =
+                BubblewrapBackend::new(BubblewrapSettings::default(), Arc::new(live_host(&data)));
+            let inspection = backend
+                .inspect(&record(data))
+                .await
+                .expect("inspection succeeds");
+            assert_eq!(inspection.status, SandboxStatus::Active);
+            assert_eq!(inspection.egress, expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn inspection_reports_the_recorded_egress_when_absent() {
+        for (network, expected) in [
+            (Network::Host, EgressPosture::Direct),
+            (Network::Denied, EgressPosture::Denied),
+        ] {
+            let backend = backend();
+            let inspection = backend
+                .inspect(&record(payload(network)))
+                .await
+                .expect("inspection succeeds");
+            assert_eq!(inspection.status, SandboxStatus::Missing);
+            assert_eq!(inspection.egress, expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn inspection_refuses_an_unreadable_payload() {
+        let mut data = payload(Network::Denied);
+        data.version = VERSION - 1;
+        let error = backend()
+            .inspect(&record(data))
+            .await
+            .expect_err("inspection refuses");
+        assert!(matches!(error, Error::Unavailable { .. }), "{error:?}");
     }
 
     #[test]

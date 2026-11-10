@@ -28,7 +28,7 @@ In `view.rs`, add tests for the arguments Litterbox gives bubblewrap under each 
 | Depends On |  |
 | References | host-dns-and-tls,host-dns-and-tls-works,network-tests |
 
-### T-003: Report egress from the payload for dead sandboxes
+### T-003: [x] Report egress from the payload for dead sandboxes
 
 In `BubblewrapBackend::inspect`, use `data.network` in the `Verdict::Absent` branch as well as the live branch. The absent branch currently hardcodes `EgressPosture::Denied`. Keep the `Verdict::Editions` error for an unreadable payload. Add tests with a fake host for live host, live denied, absent host, absent denied and unreadable.
 
