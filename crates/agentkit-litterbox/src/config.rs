@@ -631,7 +631,7 @@ mod tests {
         let config = merge(ProjectFile::default(), project).expect("merge");
 
         assert!(
-            config.backend_settings.get("bubblewrap").is_none(),
+            !config.backend_settings.contains_key("bubblewrap"),
             "a project table contributes no machine settings"
         );
         assert!(
