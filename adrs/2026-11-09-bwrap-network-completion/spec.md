@@ -1,6 +1,6 @@
 # Bubblewrap Network Setting
 
-**Status:** draft  **Created:** 2026-11-09  **Author:** adrian
+**Status:** implemented  **Created:** 2026-11-09  **Author:** adrian
 
 Terms used in this document.
 
