@@ -7,6 +7,9 @@ use git2::{BranchType, ObjectType, Repository};
 
 use crate::domain::{SandboxError, ScmError, ScmMode, slugify};
 
+/// How many times a snapshot may rebuild its commit while another moves the ref.
+const MAX_SNAPSHOT_ATTEMPTS: usize = 8;
+
 pub trait Scm {
     fn mode(&self) -> ScmMode;
     fn create_branch(&self, slug: &str) -> Result<String, SandboxError>;
@@ -124,13 +127,14 @@ impl GitScm {
         }
     }
 
-    fn snapshot_parent(&self) -> Result<Option<git2::Commit<'_>>, SandboxError> {
+    /// The commit the snapshot branch points at, when the branch exists.
+    fn snapshot_target(&self) -> Result<Option<git2::Commit<'_>>, SandboxError> {
         match self.repo.find_reference(&self.snapshot_branch_ref()) {
             Ok(reference) => reference
                 .peel_to_commit()
                 .map(Some)
                 .map_err(|source| SandboxError::Scm(ScmError::Reference { source })),
-            Err(error) if error.code() == git2::ErrorCode::NotFound => self.head_commit_optional(),
+            Err(error) if error.code() == git2::ErrorCode::NotFound => Ok(None),
             Err(source) => Err(SandboxError::Scm(ScmError::Reference { source })),
         }
     }
@@ -427,7 +431,7 @@ impl GitScm {
         let mut tracked = HashSet::new();
         let mut tracked_dirs = HashSet::new();
 
-        let Some(parent) = self.snapshot_parent()? else {
+        let Some(parent) = self.snapshot_target()? else {
             return Ok((tracked, tracked_dirs));
         };
         let tree = parent
@@ -467,11 +471,7 @@ impl GitScm {
         staging_path: &Path,
         message: &str,
     ) -> Result<Option<git2::Oid>, SandboxError> {
-        let parent = self.snapshot_parent()?;
         let signature = self.signature()?;
-
-        // Backup snapshot branch ref before modification (for atomic recovery)
-        let backup = self.backup_snapshot_ref()?;
 
         // Build a new tree from staging directory
         let mut builder = self
@@ -484,109 +484,94 @@ impl GitScm {
         let filter = self.snapshot_filter(staging_path)?;
         self.add_directory_to_tree(&mut builder, staging_path, Path::new(""), &filter)?;
 
-        let tree_oid = builder.write().map_err(|e| {
-            // Restore backup on failure
-            let _ = self.restore_snapshot_ref(&backup);
-            SandboxError::Scm(ScmError::Commit { source: e })
-        })?;
+        let tree_oid = builder
+            .write()
+            .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
 
-        // Check if tree changed
-        if let Some(ref parent_commit) = parent {
-            if parent_commit.tree_id() == tree_oid {
+        let tree = self
+            .repo
+            .find_tree(tree_oid)
+            .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+
+        // Another tool call can snapshot the same sandbox while this tree is
+        // being built, so the branch may move. Build each commit against the
+        // branch as it is now and move the ref only if it still points there,
+        // or one of the two snapshots is silently dropped.
+        let mut attempts = 0;
+        loop {
+            // The branch may not exist yet; its absence and HEAD pointing at a
+            // commit are different facts, and the compare-and-swap needs to
+            // know which it is.
+            let (parent, ref_exists) = match self.snapshot_target()? {
+                Some(commit) => (Some(commit), true),
+                None => (self.head_commit_optional()?, false),
+            };
+            if let Some(ref parent_commit) = parent {
+                if parent_commit.tree_id() == tree_oid {
+                    return Ok(None);
+                }
+            } else if tree_oid == git2::Oid::ZERO_SHA1 {
                 return Ok(None);
             }
-        } else if tree_oid == git2::Oid::ZERO_SHA1 {
-            return Ok(None);
-        }
 
-        let tree = self.repo.find_tree(tree_oid).map_err(|e| {
-            let _ = self.restore_snapshot_ref(&backup);
-            SandboxError::Scm(ScmError::Commit { source: e })
-        })?;
+            let parents: Vec<&git2::Commit> = parent.iter().collect();
+            // Create the commit without updating the ref: the compare-and-swap
+            // below decides whether it becomes the branch tip.
+            let oid = self
+                .repo
+                .commit(None, &signature, &signature, message, &tree, &parents)
+                .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
 
-        let parents: Vec<&git2::Commit> = parent.as_ref().map(|c| vec![c]).unwrap_or_default();
-
-        // Create commit without updating ref (to avoid "current tip is not first parent" when jj modifies branch)
-        let oid = self
-            .repo
-            .commit(
-                None, // Don't update ref yet
-                &signature, &signature, message, &tree, &parents,
-            )
-            .map_err(|e| {
-                let _ = self.restore_snapshot_ref(&backup);
-                SandboxError::Scm(ScmError::Commit { source: e })
-            })?;
-
-        // Force update the ref to point to our new commit (handles concurrent jj updates)
-        // Retry with backoff if locked (jj may be holding the lock)
-        let mut retries = 0;
-        let max_retries = 5;
-        loop {
-            let result = match self.repo.find_reference(&self.snapshot_branch_ref()) {
-                Ok(mut reference) => reference.set_target(oid, message),
-                Err(e) if e.code() == git2::ErrorCode::NotFound => {
-                    self.repo
-                        .reference(&self.snapshot_branch_ref(), oid, false, message)
-                }
-                Err(e) => Err(e),
+            let updated = if ref_exists {
+                let expected = parent
+                    .as_ref()
+                    .map(git2::Commit::id)
+                    .expect("a reference peels to a commit");
+                self.repo
+                    .reference_matching(
+                        &self.snapshot_branch_ref(),
+                        oid,
+                        true,
+                        expected,
+                        message,
+                    )
+                    .map(|_| ())
+            } else {
+                self.repo
+                    .reference(&self.snapshot_branch_ref(), oid, false, message)
+                    .map(|_| ())
             };
 
-            match result {
-                Ok(_) => break,
-                Err(e) if e.code() == git2::ErrorCode::Locked && retries < max_retries => {
-                    retries += 1;
-                    std::thread::sleep(std::time::Duration::from_millis(10 * retries as u64));
+            match updated {
+                Ok(()) => return Ok(Some(oid)),
+                Err(error)
+                    if matches!(
+                        error.code(),
+                        git2::ErrorCode::Modified
+                            | git2::ErrorCode::Exists
+                            | git2::ErrorCode::NotFound
+                    ) && attempts < MAX_SNAPSHOT_ATTEMPTS =>
+                {
+                    attempts += 1;
                     continue;
                 }
-                Err(e) => {
-                    let _ = self.restore_snapshot_ref(&backup);
-                    return Err(SandboxError::Scm(ScmError::Commit { source: e }));
+                Err(error)
+                    if error.code() == git2::ErrorCode::Locked
+                        && attempts < MAX_SNAPSHOT_ATTEMPTS =>
+                {
+                    attempts += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(10 * attempts as u64));
+                    continue;
+                }
+                Err(error) => {
+                    // The ref has not moved: it is only written by a
+                    // compare-and-swap that has not succeeded, so there is
+                    // nothing to roll back. Restoring the tip seen at the start
+                    // would undo whatever another writer has published since.
+                    return Err(SandboxError::Scm(ScmError::Commit { source: error }));
                 }
             }
         }
-
-        Ok(Some(oid))
-    }
-
-    fn backup_snapshot_ref(&self) -> Result<Option<git2::Oid>, SandboxError> {
-        let ref_name = self.snapshot_branch_ref();
-        match self.repo.find_reference(&ref_name) {
-            Ok(reference) => Ok(reference.target()),
-            Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(None),
-            Err(source) => Err(SandboxError::Scm(ScmError::Commit { source })),
-        }
-    }
-
-    fn restore_snapshot_ref(&self, backup: &Option<git2::Oid>) -> Result<(), SandboxError> {
-        let ref_name = self.snapshot_branch_ref();
-
-        match backup {
-            Some(oid) => {
-                // Restore to previous oid
-                self.repo
-                    .reference(&ref_name, *oid, true, "Restore from backup")
-                    .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
-            }
-            None => {
-                // Ref didn't exist before, delete it
-                match self.repo.find_reference(&ref_name) {
-                    Ok(mut reference) => {
-                        reference
-                            .delete()
-                            .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
-                    }
-                    Err(e) if e.code() == git2::ErrorCode::NotFound => {
-                        // Already gone, nothing to do
-                    }
-                    Err(source) => {
-                        return Err(SandboxError::Scm(ScmError::Commit { source }));
-                    }
-                }
-            }
-        }
-
-        Ok(())
     }
 
     fn add_directory_to_tree(
@@ -1168,15 +1153,24 @@ mod tests {
                 .expect("head")
                 .peel_to_commit()
                 .expect("head commit");
-            repo.commit(
-                Some("HEAD"),
-                &signature,
-                &signature,
-                "track kept",
-                &tree,
-                &[&parent],
+            let head = repo
+                .commit(
+                    Some("HEAD"),
+                    &signature,
+                    &signature,
+                    "track kept",
+                    &tree,
+                    &[&parent],
+                )
+                .expect("commit kept");
+            // The snapshot's parent is the branch, not the checkout: a branch
+            // that does not exist yet records nothing.
+            repo.branch(
+                "test-snapshot",
+                &repo.find_commit(head).expect("committed"),
+                false,
             )
-            .expect("commit kept");
+            .expect("snapshot branch");
         }
         drop(index);
 
@@ -1367,6 +1361,49 @@ mod tests {
             tree.get_name("loop").expect("loop entry").filemode(),
             0o120000
         );
+    }
+
+    #[test]
+    fn concurrent_snapshots_all_land_on_the_branch() {
+        let (tempdir, _repo) = init_repo();
+        let path = tempdir.path().to_path_buf();
+
+        let writers: Vec<_> = (0..4)
+            .map(|index| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    let mut scm = GitScm::open_direct(&path).expect("open");
+                    scm.set_snapshot_branch("test-snapshot".to_string());
+                    let staging = TempDir::new().expect("staging");
+                    fs::write(staging.path().join(format!("file{index}.txt")), "content")
+                        .expect("write");
+                    scm.commit_snapshot_from_staging(staging.path(), &format!("snapshot {index}"))
+                        .expect("commit")
+                        .expect("oid");
+                })
+            })
+            .collect();
+        for writer in writers {
+            writer.join().expect("writer");
+        }
+
+        let repo = Repository::open(&path).expect("reopen");
+        let tip = repo
+            .find_reference("refs/heads/test-snapshot")
+            .expect("ref")
+            .peel_to_commit()
+            .expect("tip");
+
+        let mut messages = Vec::new();
+        let mut commit = tip;
+        while commit.message() != Ok("init") {
+            messages.push(commit.message().unwrap_or_default().to_string());
+            commit = commit.parent(0).expect("parent");
+        }
+        messages.sort();
+
+        let expected: Vec<String> = (0..4).map(|index| format!("snapshot {index}")).collect();
+        assert_eq!(messages, expected, "no snapshot may be dropped");
     }
 
     #[test]
