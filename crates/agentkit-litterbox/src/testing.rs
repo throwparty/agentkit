@@ -79,6 +79,8 @@ pub struct TestBackend {
     paused: Mutex<std::collections::HashSet<String>>,
     requests: Mutex<Vec<CreateRequest>>,
     deleted: Mutex<std::collections::HashSet<String>>,
+    /// Every delete this backend performed, in order.
+    delete_log: Mutex<Vec<String>>,
     exec_environments: Mutex<std::collections::HashMap<String, BTreeMap<String, String>>>,
     support: Vec<ContributionSupport>,
     fail_create: bool,
@@ -101,6 +103,7 @@ impl TestBackend {
             paused: Mutex::new(std::collections::HashSet::new()),
             requests: Mutex::new(Vec::new()),
             deleted: Mutex::new(std::collections::HashSet::new()),
+            delete_log: Mutex::new(Vec::new()),
             exec_environments: Mutex::new(std::collections::HashMap::new()),
             support: Vec::new(),
             fail_create: false,
@@ -117,6 +120,7 @@ impl TestBackend {
             paused: Mutex::new(std::collections::HashSet::new()),
             requests: Mutex::new(Vec::new()),
             deleted: Mutex::new(std::collections::HashSet::new()),
+            delete_log: Mutex::new(Vec::new()),
             exec_environments: Mutex::new(std::collections::HashMap::new()),
             support: Vec::new(),
             fail_create: true,
@@ -133,6 +137,7 @@ impl TestBackend {
             paused: Mutex::new(std::collections::HashSet::new()),
             requests: Mutex::new(Vec::new()),
             deleted: Mutex::new(std::collections::HashSet::new()),
+            delete_log: Mutex::new(Vec::new()),
             exec_environments: Mutex::new(std::collections::HashMap::new()),
             support: Vec::new(),
             fail_create: false,
@@ -177,6 +182,11 @@ impl TestBackend {
     /// The create requests this backend has seen, in order.
     pub fn requests(&self) -> Vec<CreateRequest> {
         self.requests.lock().expect("test backend lock").clone()
+    }
+
+    /// Every delete this backend performed, in order.
+    pub fn deletes(&self) -> Vec<String> {
+        self.delete_log.lock().expect("test backend lock").clone()
     }
 
     /// The environment an exec would apply, recorded by name.
@@ -444,6 +454,10 @@ impl Backend for TestBackend {
                 .lock()
                 .map_err(|_| Error::failed("test backend lock poisoned"))?
                 .insert(sandbox.name.clone());
+            self.delete_log
+                .lock()
+                .map_err(|_| Error::failed("test backend lock poisoned"))?
+                .push(sandbox.name.clone());
             self.exec_environments
                 .lock()
                 .map_err(|_| Error::failed("test backend lock poisoned"))?

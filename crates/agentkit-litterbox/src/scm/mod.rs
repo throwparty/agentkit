@@ -68,7 +68,7 @@ impl GitScm {
     }
 
     fn branch_name(slug: &str) -> String {
-        format!("litterbox/{}", slug)
+        branch_name_for(slug)
     }
 
     fn repo_root(&self) -> PathBuf {
@@ -364,11 +364,19 @@ impl Scm for GitScm {
     }
 
     fn make_archive(&self, reference: &str) -> Result<Vec<u8>, SandboxError> {
+        let host;
         let repo = match self.mode {
             ScmMode::Remote => {
-                if let Some(ref host_path) = self.host_repo_path {
-                    &Repository::open(host_path)
-                        .map_err(|source| SandboxError::Scm(ScmError::Open { source }))?
+                // A sandbox branch lives in the bare clone, which owns it. The
+                // host is only the source for a reference the bare clone does
+                // not hold, such as HEAD: the bare clone can be older than the
+                // checkout the user is working in.
+                if self.repo.find_branch(reference, BranchType::Local).is_ok() {
+                    &self.repo
+                } else if let Some(ref host_path) = self.host_repo_path {
+                    host = Repository::open(host_path)
+                        .map_err(|source| SandboxError::Scm(ScmError::Open { source }))?;
+                    &host
                 } else {
                     &self.repo
                 }
@@ -528,13 +536,7 @@ impl GitScm {
                     .map(git2::Commit::id)
                     .expect("a reference peels to a commit");
                 self.repo
-                    .reference_matching(
-                        &self.snapshot_branch_ref(),
-                        oid,
-                        true,
-                        expected,
-                        message,
-                    )
+                    .reference_matching(&self.snapshot_branch_ref(), oid, true, expected, message)
                     .map(|_| ())
             } else {
                 self.repo
@@ -816,6 +818,11 @@ impl crate::sandbox::contract::SnapshotSelector for IgnoreFiles {
             .is_some_and(|name| name == ".gitignore")
             || relative == Path::new(".git/info/exclude"))
     }
+}
+
+/// The branch a sandbox's snapshots live on.
+pub fn branch_name_for(slug: &str) -> String {
+    format!("litterbox/{}", slug)
 }
 
 fn repo_prefix_from_path(path: &Path) -> String {
@@ -1339,8 +1346,11 @@ mod tests {
         let staging_dir = TempDir::new().expect("staging dir");
         let outside = TempDir::new().expect("outside");
         fs::write(outside.path().join("secret"), "do not read this").expect("write secret");
-        symlink(outside.path().join("secret"), staging_dir.path().join("link"))
-            .expect("symlink");
+        symlink(
+            outside.path().join("secret"),
+            staging_dir.path().join("link"),
+        )
+        .expect("symlink");
         // A link back up the tree must not be followed, or the walk recurses.
         symlink("..", staging_dir.path().join("loop")).expect("loop symlink");
 
@@ -1349,7 +1359,12 @@ mod tests {
             .expect("commit")
             .expect("oid");
 
-        let tree = scm.repo.find_commit(oid).expect("commit").tree().expect("tree");
+        let tree = scm
+            .repo
+            .find_commit(oid)
+            .expect("commit")
+            .tree()
+            .expect("tree");
         let link = tree.get_name("link").expect("link entry");
         assert_eq!(link.filemode(), 0o120000, "a link stays a link");
         let blob = scm.repo.find_blob(link.id()).expect("blob");
