@@ -491,6 +491,7 @@ mod tests {
         workspace_directory,
     };
     use crate::backends::bubblewrap::view::WORKSPACE;
+    use crate::sandbox::contract::SnapshotSelector;
 
     fn staged() -> (tempfile::TempDir, std::path::PathBuf) {
         let temporary = tempfile::tempdir().expect("tempdir");
@@ -671,6 +672,37 @@ mod tests {
         assert_eq!(
             std::fs::read_link(&nested).expect("target"),
             Path::new("../README.md")
+        );
+    }
+
+    #[test]
+    fn a_download_drops_paths_the_selector_rejects() {
+        struct RejectTarget;
+
+        impl SnapshotSelector for RejectTarget {
+            fn selects(
+                &self,
+                relative: &Path,
+                _is_dir: bool,
+            ) -> Result<bool, crate::sandbox::contract::Error> {
+                Ok(!relative.starts_with("target"))
+            }
+        }
+
+        let (temporary, source) = staged();
+        let root = temporary.path().join("workspace");
+        copy_from(&source, &root).expect("copied");
+        std::fs::create_dir_all(root.join("target")).expect("target");
+        std::fs::write(root.join("target").join("artifact"), b"built").expect("file");
+
+        let destination = temporary.path().join("snapshot");
+        transfer_out(&root, "/src", &destination, Some(&RejectTarget)).expect("downloaded");
+
+        assert!(destination.join("README.md").is_file());
+        assert!(destination.join("src").join("main.rs").is_file());
+        assert!(
+            !destination.join("target").exists(),
+            "the transfer must not copy a rejected directory"
         );
     }
 

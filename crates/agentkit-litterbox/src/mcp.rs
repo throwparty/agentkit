@@ -190,10 +190,12 @@ impl SandboxServer {
             .await
         {
             // The file landed; a failed snapshot must not read as a failed
-            // write, or the caller will apply the edit twice.
+            // write, or the caller will apply the edit twice. The result says
+            // separately that the edit is not yet recorded.
             tracing::warn!(sandbox = %args.sandbox, %error, "the write landed but the snapshot failed");
+            return mutation_result(Some(error.to_string()));
         }
-        Ok(CallToolResult::success(Vec::new()))
+        mutation_result(None)
     }
 
     #[tool(
