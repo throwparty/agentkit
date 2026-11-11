@@ -26,6 +26,9 @@ pub struct DockerConfig {
     /// Extra Linux capabilities to grant, such as CHOWN or SETUID.
     #[serde(rename = "cap-add", default)]
     pub cap_add: Vec<String>,
+    /// Largest archive, in bytes, a transfer between host and sandbox may carry.
+    #[serde(rename = "max-transfer-bytes")]
+    pub max_transfer_bytes: Option<u64>,
 }
 
 impl DockerConfig {
@@ -91,6 +94,16 @@ impl DockerConfig {
             });
         }
 
+        let max_transfer_bytes = self
+            .max_transfer_bytes
+            .unwrap_or(defaults.max_transfer_bytes);
+        if max_transfer_bytes == 0 {
+            return Err(Error::Misconfigured {
+                message: "backends.docker.max-transfer-bytes is 0; no transfer could succeed"
+                    .to_string(),
+            });
+        }
+
         for capability in &self.cap_add {
             let valid = !capability.is_empty()
                 && capability.chars().all(|character| {
@@ -132,6 +145,7 @@ impl DockerConfig {
             cpus,
             pids_limit,
             cap_add: self.cap_add.clone(),
+            max_transfer_bytes,
         })
     }
 }
@@ -161,6 +175,29 @@ mod tests {
         assert_eq!(settings.cpus, 2);
         assert_eq!(settings.pids_limit, 512);
         assert!(settings.cap_add.is_empty());
+        assert_eq!(
+            settings.max_transfer_bytes,
+            crate::backends::docker::compute::DEFAULT_MAX_TRANSFER_BYTES
+        );
+    }
+
+    #[test]
+    fn the_transfer_limit_follows_the_section() {
+        let config = DockerConfig::from_section(
+            &toml::from_str("image = 'busybox'\nmax-transfer-bytes = 17179869184")
+                .expect("section"),
+        )
+        .expect("config");
+        let settings = config.settings().expect("settings");
+        assert_eq!(settings.max_transfer_bytes, 17_179_869_184);
+
+        let zero = DockerConfig::from_section(
+            &toml::from_str("image = 'busybox'\nmax-transfer-bytes = 0").expect("section"),
+        )
+        .expect("config")
+        .settings()
+        .expect_err("zero is refused");
+        assert!(zero.to_string().contains("max-transfer-bytes"), "{zero}");
     }
 
     #[test]

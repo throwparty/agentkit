@@ -64,6 +64,10 @@ pids-limit = 512
 # Extra Linux capabilities to grant, such as CHOWN or SETUID. Empty by default;
 # every other capability is dropped.
 cap-add = []
+# Largest archive, in bytes, one transfer between host and sandbox may carry,
+# in either direction. Defaults to 4294967296 (4 GiB). Raise it to snapshot a
+# workspace with a large build tree; lower it to bound what a transfer can cost.
+max-transfer-bytes = 4294967296
 
 # Bubblewrap's own section. It needs no image: the sandbox is a holder process
 # in unprivileged user namespaces.
@@ -84,9 +88,9 @@ Prefer pinning the image by digest (`image = "ubuntu@sha256:..."`): a tag can
 change under you, and the image is the sandbox's confinement boundary.
 
 Every backend owns its section: Docker accepts `image`, `memory-mb`, `cpus`,
-`pids-limit` and `cap-add`, and a key Docker does not define is rejected by name
-rather than ignored. Granting a capability widens what code in the sandbox can
-do; add only the ones an image genuinely needs.
+`pids-limit`, `cap-add` and `max-transfer-bytes`, and a key Docker does not
+define is rejected by name rather than ignored. Granting a capability widens
+what code in the sandbox can do; add only the ones an image genuinely needs.
 `litterbox backends` reports what this machine can run, marks the selected
 backend, and explains anything that will not start.
 
