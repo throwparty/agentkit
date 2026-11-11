@@ -20,6 +20,9 @@ pub struct BubblewrapConfig {
     pub tasks: Option<u32>,
     /// Whether the sandbox gets its own network namespace.
     pub network: Option<Network>,
+    /// The program and leading arguments that run a shell string, overriding
+    /// the default of `["sh", "-c"]`.
+    pub shell: Option<Vec<String>>,
 }
 
 impl BubblewrapConfig {
@@ -61,11 +64,25 @@ impl BubblewrapConfig {
                 message: "backends.bubblewrap.tasks is 0; it must be at least 1".to_string(),
             });
         }
+        let shell = match &self.shell {
+            None => super::backend::DEFAULT_SHELL.map(str::to_string).to_vec(),
+            Some(shell) => {
+                if shell.is_empty() || shell.iter().any(String::is_empty) {
+                    return Err(Error::Misconfigured {
+                        message: "backends.bubblewrap.shell must name a program and its arguments; \
+                                  an empty entry is not a command"
+                            .to_string(),
+                    });
+                }
+                shell.clone()
+            }
+        };
 
         Ok(BubblewrapSettings {
             memory_mb: self.memory_mb,
             tasks: self.tasks,
             network: self.network.unwrap_or_default(),
+            shell,
         })
     }
 }
@@ -123,6 +140,31 @@ mod tests {
         let settings = BubblewrapConfig::default().settings().expect("settings");
         assert_eq!(settings.memory_mb, None);
         assert_eq!(settings.tasks, None);
+    }
+
+    #[test]
+    fn the_shell_defaults_to_sh_dash_c() {
+        let settings = BubblewrapConfig::default().settings().expect("settings");
+        assert_eq!(settings.shell, vec!["sh".to_string(), "-c".to_string()]);
+    }
+
+    #[test]
+    fn a_configured_shell_replaces_the_default() {
+        let section: toml::Value =
+            toml::from_str("shell = ['bash', '-lc']").expect("section");
+        let config = BubblewrapConfig::from_section(&section).expect("config");
+        assert_eq!(
+            config.settings().expect("settings").shell,
+            vec!["bash".to_string(), "-lc".to_string()]
+        );
+    }
+
+    #[test]
+    fn an_empty_shell_entry_is_refused() {
+        let section: toml::Value = toml::from_str("shell = []").expect("section");
+        let config = BubblewrapConfig::from_section(&section).expect("config");
+        let error = config.settings().expect_err("refused");
+        assert!(error.to_string().contains("shell"), "{error}");
     }
 
     #[test]

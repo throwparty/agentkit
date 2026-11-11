@@ -27,9 +27,6 @@ const STATUS_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long the view has to finish building.
 pub const READY_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
-/// The shell the holder command is evaluated with.
-const SHELL: &str = "sh";
-
 /// The utility that blocks for the life of the sandbox.
 const SLEEP: &str = "sleep";
 
@@ -41,6 +38,8 @@ const SET_ID: u32 = 0o6000;
 pub struct Command {
     /// The shell that runs the holder command.
     pub shell: PathBuf,
+    /// The arguments the shell takes before the script.
+    pub args: Vec<String>,
     /// The paths to bind: the shell, the utility and the interpreter and
     /// libraries the host's loader resolves for both.
     pub binds: Vec<PathBuf>,
@@ -55,25 +54,45 @@ impl Command {
     /// The shell looks the utility up by name, which is what a multicall binary
     /// needs to pick its behaviour, and the assignment keeps that search out of
     /// the sandbox's own environment.
-    pub fn arguments(&self) -> [String; 2] {
-        [
-            "-c".to_string(),
-            format!("PATH={} exec {SLEEP} infinity", self.path),
-        ]
+    pub fn arguments(&self) -> Vec<String> {
+        let mut arguments = self.args.clone();
+        arguments.push(format!("PATH={} exec {SLEEP} infinity", self.path));
+        arguments
+    }
+
+    /// The program and leading arguments that run a shell script.
+    ///
+    /// This is the argv a sandbox mounts, so a caller that runs a script can
+    /// append it rather than assuming `sh -c` resolves inside the sandbox.
+    pub fn argv(&self) -> Vec<String> {
+        let mut argv = Vec::with_capacity(self.args.len() + 1);
+        argv.push(self.shell.to_string_lossy().to_string());
+        argv.extend(self.args.iter().cloned());
+        argv
+    }
+
+    /// The command that runs a shell script in the sandbox.
+    pub fn run(&self, script: &str) -> Vec<String> {
+        let mut command = self.argv();
+        command.push(script.to_string());
+        command
     }
 }
 
 /// Resolve the holder command and validate the binaries it runs.
-pub fn command(host: &dyn Host) -> Result<Command, Error> {
-    let shell = trusted(host, SHELL)?;
+///
+/// The shell is a program and the arguments it takes before the script, which
+/// is `["sh", "-c"]` unless the configuration says otherwise.
+pub fn command(host: &dyn Host, shell: &[String]) -> Result<Command, Error> {
+    let argv = shell_argv(host, shell)?;
     let sleep = trusted(host, SLEEP)?;
     let mut binds = Vec::new();
     let mut directories: Vec<String> = Vec::new();
-    for path in [&shell, &sleep] {
-        if !binds.contains(path) {
+    for path in [PathBuf::from(&argv[0]), sleep] {
+        if !binds.contains(&path) {
             binds.push(path.clone());
         }
-        for dependency in runtime(path, host.ownership(path).map_or(0, |(_, mode)| mode)) {
+        for dependency in runtime(&path, host.ownership(&path).map_or(0, |(_, mode)| mode)) {
             if !binds.contains(&dependency) {
                 binds.push(dependency);
             }
@@ -91,10 +110,28 @@ pub fn command(host: &dyn Host) -> Result<Command, Error> {
         }
     }
     Ok(Command {
-        shell,
+        shell: PathBuf::from(&argv[0]),
+        args: argv[1..].to_vec(),
         binds,
         path: directories.join(":"),
     })
+}
+
+/// The shell a sandbox evaluates a script with: the resolved program and the
+/// arguments that precede the script.
+///
+/// A caller that has a script asks for this instead of assuming `sh` is on the
+/// sandbox's `PATH`. The program is the one the view binds, so the sandbox can
+/// always run it.
+pub fn shell_argv(host: &dyn Host, shell: &[String]) -> Result<Vec<String>, Error> {
+    let (program, args) = shell.split_first().ok_or_else(|| Error::Misconfigured {
+        message: "backends.bubblewrap.shell is empty; it needs at least the program to run"
+            .to_string(),
+    })?;
+    let program = trusted(host, program)?;
+    let mut argv = vec![program.to_string_lossy().to_string()];
+    argv.extend(args.iter().cloned());
+    Ok(argv)
 }
 
 /// Resolve a binary and check that the sandbox can trust it.
@@ -123,10 +160,10 @@ fn trusted(host: &dyn Host, name: &str) -> Result<PathBuf, Error> {
 }
 
 /// Whether the host can hold a sandbox, as a readiness check.
-pub fn check(host: &dyn Host) -> crate::sandbox::report::Check {
+pub fn check(host: &dyn Host, shell: &[String]) -> crate::sandbox::report::Check {
     use crate::sandbox::report::{Check, State};
     let primitive = "the holder command".to_string();
-    match command(host) {
+    match command(host, shell) {
         Ok(_) => Check {
             primitive,
             state: State::Available,
@@ -651,24 +688,60 @@ mod tests {
 
     #[test]
     fn the_holder_command_binds_the_shell_and_the_utility() {
-        let command = command(&holder_host()).expect("command");
+        let command = command(&holder_host(), &default_shell()).expect("command");
         assert_eq!(command.shell, PathBuf::from("/usr/bin/sh"));
+        assert_eq!(command.args, vec!["-c".to_string()]);
         assert!(command.binds.contains(&PathBuf::from("/usr/bin/sh")));
         assert!(command.binds.contains(&PathBuf::from("/usr/bin/sleep")));
         assert_eq!(
             command.arguments(),
-            [
+            vec![
                 "-c".to_string(),
                 "PATH=/usr/bin exec sleep infinity".to_string()
             ]
         );
+        assert_eq!(
+            command.run("echo hi"),
+            vec![
+                "/usr/bin/sh".to_string(),
+                "-c".to_string(),
+                "echo hi".to_string()
+            ]
+        );
+    }
+
+    fn default_shell() -> Vec<String> {
+        crate::backends::bubblewrap::backend::DEFAULT_SHELL
+            .map(str::to_string)
+            .to_vec()
+    }
+
+    #[test]
+    fn a_configured_shell_replaces_the_default() {
+        let shell = vec!["sh".to_string(), "-ec".to_string()];
+        let command = command(&holder_host(), &shell).expect("command");
+        assert_eq!(command.args, vec!["-ec".to_string()]);
+        assert_eq!(
+            command.run("false"),
+            vec![
+                "/usr/bin/sh".to_string(),
+                "-ec".to_string(),
+                "false".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn an_empty_shell_is_a_configuration_error() {
+        let error = command(&holder_host(), &[]).expect_err("refused");
+        assert!(error.to_string().contains("shell"), "{error}");
     }
 
     #[test]
     fn a_holder_binary_outside_the_host_is_unavailable() {
         let mut host = holder_host();
         host.binaries.remove("sleep");
-        let error = command(&host).expect_err("refused");
+        let error = command(&host, &default_shell()).expect_err("refused");
         assert!(error.to_string().contains("sleep"), "{error}");
     }
 
@@ -676,7 +749,7 @@ mod tests {
     fn a_user_owned_holder_binary_is_refused() {
         let mut host = holder_host();
         host.ownership.insert(PathBuf::from("/usr/bin/sh"), (1000, 0o755));
-        let error = command(&host).expect_err("refused");
+        let error = command(&host, &default_shell()).expect_err("refused");
         assert!(error.to_string().contains("root-owned"), "{error}");
     }
 

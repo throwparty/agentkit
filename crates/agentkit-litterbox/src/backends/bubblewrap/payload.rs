@@ -93,6 +93,16 @@ pub struct Payload {
     pub network: Network,
     /// Ports the sandbox reaches on the host, when it shares the host network.
     pub forwards: Vec<crate::sandbox::contract::Forward>,
+    /// The program and leading arguments that ran a shell string when the
+    /// sandbox was created.
+    ///
+    /// A sandbox mounts the shell it was built against, and the configured
+    /// shell or its canonical path can change afterwards; the argv recorded
+    /// here is the one that resolves inside that sandbox. Payloads written
+    /// before this field existed carry none, and the backend resolves the
+    /// configured shell for them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shell: Vec<String>,
 }
 
 impl Payload {
@@ -236,6 +246,7 @@ mod tests {
             },
             forwards: Vec::new(),
             network: Network::Denied,
+            shell: Vec::new(),
         }
     }
 

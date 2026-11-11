@@ -397,6 +397,14 @@ impl Sandboxes {
         Ok(self.inspect(name).await?.workspace)
     }
 
+    /// The program and leading arguments that evaluate a shell string in the
+    /// sandbox.
+    pub async fn shell(&self, name: &str) -> Result<Vec<String>, Error> {
+        let stored = self.stored(name)?;
+        let selected = self.select_for(&stored.sandbox, "run a command").await?;
+        selected.core().shell(&stored.sandbox)
+    }
+
     /// Pause a sandbox, when its mechanism can.
     pub async fn pause(&self, name: &str) -> Result<(), Error> {
         let stored = self.stored(name)?;
@@ -991,6 +999,21 @@ pub trait SandboxIo {
         command: &'a [String],
     ) -> futures_util::future::BoxFuture<'a, Result<Execution, Error>>;
 
+    /// The program and leading arguments that evaluate a shell string in the
+    /// sandbox.
+    ///
+    /// Callers ask for this rather than prefixing `sh -c` themselves: the
+    /// backend is the only thing that knows what its sandbox can run.
+    fn shell<'a>(
+        &'a self,
+        name: &'a str,
+    ) -> futures_util::future::BoxFuture<'a, Result<Vec<String>, Error>> {
+        Box::pin(async move {
+            let _ = name;
+            Ok(vec!["sh".to_string(), "-c".to_string()])
+        })
+    }
+
     /// Copy a host path into the sandbox.
     fn upload<'a>(
         &'a self,
@@ -1021,6 +1044,13 @@ impl SandboxIo for Sandboxes {
         command: &'a [String],
     ) -> futures_util::future::BoxFuture<'a, Result<Execution, Error>> {
         Box::pin(Sandboxes::exec(self, name, command))
+    }
+
+    fn shell<'a>(
+        &'a self,
+        name: &'a str,
+    ) -> futures_util::future::BoxFuture<'a, Result<Vec<String>, Error>> {
+        Box::pin(Sandboxes::shell(self, name))
     }
 
     fn upload<'a>(

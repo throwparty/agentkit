@@ -46,8 +46,11 @@ fn egress(network: Network) -> EgressPosture {
     }
 }
 
+/// The shell command a configured project falls back to.
+pub const DEFAULT_SHELL: [&str; 2] = ["sh", "-c"];
+
 /// Bubblewrap's settings, typed here and nowhere else.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BubblewrapSettings {
     /// Memory ceiling each sandbox receives, in MiB.
     pub memory_mb: Option<u64>,
@@ -55,6 +58,19 @@ pub struct BubblewrapSettings {
     pub tasks: Option<u32>,
     /// Whether the sandbox gets its own network namespace.
     pub network: Network,
+    /// The program and leading arguments that run a shell string.
+    pub shell: Vec<String>,
+}
+
+impl Default for BubblewrapSettings {
+    fn default() -> Self {
+        Self {
+            memory_mb: None,
+            tasks: None,
+            network: Network::default(),
+            shell: DEFAULT_SHELL.map(str::to_string).to_vec(),
+        }
+    }
 }
 
 /// One create, after its request has been resolved.
@@ -231,6 +247,7 @@ impl BubblewrapBackend {
         workspace: &Path,
         environment: &crate::sandbox::environment::Environment,
         forwards: &[crate::sandbox::contract::Forward],
+        command: &holder::Command,
     ) -> Result<Payload, Error> {
         let launcher = self
             .host
@@ -281,6 +298,7 @@ impl BubblewrapBackend {
             environment: environment.provenance.clone(),
             network: self.settings.network,
             forwards: forwards.to_vec(),
+            shell: command.argv(),
         })
     }
 
@@ -316,6 +334,21 @@ impl BubblewrapBackend {
 }
 
 impl Backend for BubblewrapBackend {
+    fn shell(&self, sandbox: &SandboxRecord) -> Result<Vec<String>, Error> {
+        // The sandbox mounts the shell it was created against; resolving the
+        // configured shell now would name a binary this sandbox may not carry
+        // after a settings change or an upgrade that moved the store path.
+        let data = Payload::from_record(sandbox)?;
+        if !data.shell.is_empty() {
+            return Ok(data.shell);
+        }
+        tracing::warn!(
+            sandbox = %sandbox.name,
+            "the payload predates the recorded shell; resolving it from the configuration"
+        );
+        holder::shell_argv(&*self.host, &self.settings.shell)
+    }
+
     fn create<'a>(
         &'a self,
         request: &'a CreateRequest,
@@ -511,7 +544,7 @@ impl Backend for BubblewrapBackend {
         Box::pin(async {
             Ok(Readiness {
                 backend: BACKEND.to_string(),
-                checks: readiness::checks(&*self.host),
+                checks: readiness::checks(&*self.host, &self.settings.shell),
             })
         })
     }
@@ -521,7 +554,7 @@ impl Backend for BubblewrapBackend {
             let mut capabilities = Vec::new();
             let readiness = Readiness {
                 backend: BACKEND.to_string(),
-                checks: readiness::checks(&*self.host),
+                checks: readiness::checks(&*self.host, &self.settings.shell),
             };
             if let Some(cgroup) = readiness
                 .checks
@@ -677,7 +710,7 @@ impl BubblewrapBackend {
 
         // Every check has to pass except the cgroup one, which the registry
         // gates behind the user's acceptance of the degraded mode.
-        for check in readiness::checks(&*self.host) {
+        for check in readiness::checks(&*self.host, &self.settings.shell) {
             if check.state == State::Available || check.primitive == "a cgroup v2 user scope" {
                 continue;
             }
@@ -703,7 +736,7 @@ impl BubblewrapBackend {
                 reason: "bubblewrap does not resolve on the host".to_string(),
                 remedy: "install bubblewrap or add it to PATH".to_string(),
             })?;
-        let command = holder::command(&*self.host)?;
+        let command = holder::command(&*self.host, &self.settings.shell)?;
         let mut environment = environment::merge(&request.provision)?;
         // A shared network means the sandbox listens on the host, so the
         // project's ports are reachable without a forwarder. Report them the
@@ -856,11 +889,12 @@ impl BubblewrapBackend {
 
         self.apply_limits(&holder)?;
 
-        let data = self.payload(&holder, &view, workspace, environment, forwards)?;
+        let data = self.payload(&holder, &view, workspace, environment, forwards, holder_command)?;
         let last_step = Mutex::new(None);
         let host = self.host.clone();
         let sandbox_name = request.name.clone();
         let payload_for_steps = data.clone();
+        let shell_for_steps = holder_command.clone();
         let provision = run_steps(
             BACKEND,
             &sandbox_name,
@@ -869,7 +903,7 @@ impl BubblewrapBackend {
             move |_identity, run| {
                 let host = host.clone();
                 let data = payload_for_steps.clone();
-                let command = vec!["sh".to_string(), "-c".to_string(), run.to_string()];
+                let command = shell_for_steps.run(run);
                 Box::pin(async move {
                     tokio::task::spawn_blocking(move || {
                         join::run(&*host, &data, &command, PROVISION_OUTPUT_CAP)
@@ -987,6 +1021,7 @@ mod tests {
             },
             network,
             forwards: Vec::new(),
+            shell: Vec::new(),
         }
     }
 
@@ -1083,6 +1118,37 @@ mod tests {
         assert!(matches!(error, Error::Unavailable { .. }), "{error:?}");
     }
 
+    #[tokio::test]
+    async fn the_shell_comes_from_the_payload_that_created_the_sandbox() {
+        // The sandbox mounts the shell it was built against; a different
+        // configuration afterwards must not change what this sandbox runs.
+        let mut data = payload(Network::Denied);
+        data.shell = vec!["/nix/store/recorded/bash".to_string(), "-lc".to_string()];
+        let settings = BubblewrapSettings {
+            shell: vec!["sh".to_string(), "-c".to_string()],
+            ..BubblewrapSettings::default()
+        };
+        let backend = BubblewrapBackend::new(settings, Arc::new(FakeHost::default()));
+
+        assert_eq!(
+            backend.shell(&record(data)).expect("recorded shell"),
+            vec!["/nix/store/recorded/bash".to_string(), "-lc".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_payload_without_a_recorded_shell_falls_back_to_the_configuration() {
+        let data = payload(Network::Denied);
+        let mut host = FakeHost::default();
+        let binary = PathBuf::from("/nix/store/sh/bin/sh");
+        host.binaries.insert("sh".to_string(), binary.clone());
+        host.ownership.insert(binary, (0, 0o555));
+        let backend = BubblewrapBackend::new(BubblewrapSettings::default(), Arc::new(host));
+
+        let shell = backend.shell(&record(data)).expect("configured shell");
+        assert_eq!(shell.first().map(String::as_str), Some("/nix/store/sh/bin/sh"));
+    }
+
     #[test]
     fn both_contribution_sorts_are_available() {
         let support = backend().contribution_support();
@@ -1102,6 +1168,7 @@ mod tests {
     fn holder_command() -> crate::backends::bubblewrap::holder::Command {
         crate::backends::bubblewrap::holder::Command {
             shell: std::path::PathBuf::from("/usr/bin/sh"),
+            args: vec!["-c".to_string()],
             binds: vec![std::path::PathBuf::from("/usr/bin/sh")],
             path: "/usr/bin".to_string(),
         }
@@ -1140,6 +1207,7 @@ mod tests {
         });
         let command = crate::backends::bubblewrap::holder::Command {
             shell: std::path::PathBuf::from("/usr/bin/sh"),
+            args: vec!["-c".to_string()],
             binds: Vec::new(),
             path: String::new(),
         };
@@ -1154,6 +1222,7 @@ mod tests {
         let request = request(Vec::new());
         let command = crate::backends::bubblewrap::holder::Command {
             shell: PathBuf::from("/usr/bin/sh"),
+            args: vec!["-c".to_string()],
             binds: Vec::new(),
             path: String::new(),
         };
