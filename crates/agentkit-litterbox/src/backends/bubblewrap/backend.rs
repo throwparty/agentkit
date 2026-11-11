@@ -57,6 +57,28 @@ pub struct BubblewrapSettings {
     pub network: Network,
 }
 
+/// One create, after its request has been resolved.
+///
+/// The request, the binaries and the environment are all immutable; `started`
+/// is the one piece of state the operation writes, and the caller stops a
+/// holder it finds there when the create fails.
+struct Creation<'a> {
+    /// The request being served.
+    request: &'a CreateRequest,
+    /// The bubblewrap binary the view is rendered against.
+    bwrap: &'a Path,
+    /// The command that keeps the sandbox alive.
+    command: &'a holder::Command,
+    /// The environment the sandbox receives.
+    environment: &'a crate::sandbox::environment::Environment,
+    /// The host directory bound at the workspace path.
+    workspace: &'a Path,
+    /// The ports the sandbox reaches on the host.
+    forwards: &'a [crate::sandbox::contract::Forward],
+    /// The holder, once one has started.
+    started: &'a mut Option<holder::Holder>,
+}
+
 /// Bubblewrap's implementation of the contract.
 pub struct BubblewrapBackend {
     settings: BubblewrapSettings,
@@ -729,15 +751,15 @@ impl BubblewrapBackend {
 
         let mut started: Option<holder::Holder> = None;
         let outcome = self
-            .create_holder(
+            .create_holder(Creation {
                 request,
-                &bwrap,
-                &command,
-                &environment,
-                &workspace,
-                &forwards,
-                &mut started,
-            )
+                bwrap: &bwrap,
+                command: &command,
+                environment: &environment,
+                workspace: &workspace,
+                forwards: &forwards,
+                started: &mut started,
+            })
             .await;
         match outcome {
             Ok(record) => Ok(record),
@@ -748,17 +770,17 @@ impl BubblewrapBackend {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    async fn create_holder(
-        &self,
-        request: &CreateRequest,
-        bwrap: &Path,
-        holder_command: &holder::Command,
-        environment: &crate::sandbox::environment::Environment,
-        workspace: &Path,
-        forwards: &[crate::sandbox::contract::Forward],
-        started: &mut Option<holder::Holder>,
-    ) -> Result<SandboxRecord, Error> {
+    /// Start the holder for one resolved create and record it.
+    async fn create_holder(&self, creation: Creation<'_>) -> Result<SandboxRecord, Error> {
+        let Creation {
+            request,
+            bwrap,
+            command: holder_command,
+            environment,
+            workspace,
+            forwards,
+            started,
+        } = creation;
         workspace::copy_from(&request.workspace.source, workspace)?;
         let view = self.build_view(request, holder_command, workspace)?;
         let holder_arguments = holder_command.arguments();
