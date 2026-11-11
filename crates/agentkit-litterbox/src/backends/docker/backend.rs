@@ -45,6 +45,9 @@ pub struct DockerSettings {
     pub pids_limit: u32,
     /// Extra capabilities granted to the sandbox.
     pub cap_add: Vec<String>,
+    /// Largest archive, in bytes, a transfer between host and sandbox may
+    /// carry.
+    pub max_transfer_bytes: u64,
 }
 
 impl Default for DockerSettings {
@@ -55,6 +58,7 @@ impl Default for DockerSettings {
             cpus: 2,
             pids_limit: 512,
             cap_add: Vec::new(),
+            max_transfer_bytes: compute::DEFAULT_MAX_TRANSFER_BYTES,
         }
     }
 }
@@ -346,8 +350,12 @@ impl Backend for DockerBackend {
 
             let upload = tokio::time::timeout(
                 UPLOAD_TIMEOUT,
-                self.compute
-                    .upload_path(&id, &request.workspace.source, WORKDIR),
+                self.compute.upload_path(
+                    &id,
+                    &request.workspace.source,
+                    WORKDIR,
+                    self.settings.max_transfer_bytes,
+                ),
             )
             .await;
             match upload {
@@ -479,7 +487,7 @@ impl Backend for DockerBackend {
             let data = DockerData::from_record(sandbox)?;
             match self
                 .compute
-                .upload_path(&data.container, source, &destination)
+                .upload_path(&data.container, source, &destination, self.settings.max_transfer_bytes)
                 .await
             {
                 Ok(()) => {}
@@ -506,7 +514,14 @@ impl Backend for DockerBackend {
             let data = DockerData::from_record(sandbox)?;
             match self
                 .compute
-                .download_path(&data.container, &source, destination, WORKDIR, selector)
+                .download_path(
+                    &data.container,
+                    &source,
+                    destination,
+                    WORKDIR,
+                    self.settings.max_transfer_bytes,
+                    selector,
+                )
                 .await
             {
                 Ok(()) => {}

@@ -513,13 +513,11 @@ impl DockerCompute {
         container_id: &str,
         src_path: &Path,
         dest_path: &str,
+        max_bytes: u64,
     ) -> Result<(), ComputeError> {
         // Build the archive into a temporary file and stream it to the daemon,
         // so a large workspace is never held in memory.
-        let file = write_tar(
-            src_path,
-            CappedFile::new(tempfile::tempfile()?, EXTRACT_MAX_BYTES),
-        )?;
+        let file = write_tar(src_path, CappedFile::new(tempfile::tempfile()?, max_bytes))?;
         let mut file = file.into_inner();
         file.seek(SeekFrom::Start(0))?;
         self.upload_stream(container_id, dest_path, file).await
@@ -531,6 +529,7 @@ impl DockerCompute {
         src_path: &str,
         dest_path: &Path,
         workspace: &str,
+        max_bytes: u64,
         selector: Option<&dyn crate::sandbox::contract::SnapshotSelector>,
     ) -> Result<(), ComputeError> {
         // The daemon archives a whole path and cannot leave anything out of it,
@@ -538,13 +537,13 @@ impl DockerCompute {
         // written to the host and never counts toward the transfer limit. What
         // arrives is held in a capped file rather than memory, so a large
         // workspace never has to fit in either.
-        let staged = CappedFile::new(tempfile::tempfile()?, EXTRACT_MAX_BYTES);
+        let staged = CappedFile::new(tempfile::tempfile()?, max_bytes);
         let mut kept = SelectingArchive::new(staged, workspace, selector);
         self.download_into(container_id, src_path, &mut kept)
             .await?;
         let mut staged = kept.into_inner().into_inner();
         staged.seek(SeekFrom::Start(0))?;
-        extract_tar(dest_path, staged, workspace)?;
+        extract_tar(dest_path, staged, workspace, max_bytes)?;
         Ok(())
     }
 
@@ -767,7 +766,7 @@ fn write_tar<W: Write>(src_path: &Path, writer: W) -> Result<W, ComputeError> {
 
 #[cfg(test)]
 fn build_tar(src_path: &Path) -> Result<Vec<u8>, ComputeError> {
-    Ok(write_tar(src_path, CappedBuffer::new(EXTRACT_MAX_BYTES))?.into_vec())
+    Ok(write_tar(src_path, CappedBuffer::new(DEFAULT_MAX_TRANSFER_BYTES))?.into_vec())
 }
 
 /// Read a staged archive back in chunks for the daemon request body.
@@ -1028,6 +1027,7 @@ fn extract_tar<R: Read + Seek>(
     dest_path: &Path,
     mut source: R,
     workspace: &str,
+    max_bytes: u64,
 ) -> Result<(), ComputeError> {
     fs::create_dir_all(dest_path)?;
     let workspace = workspace.trim_matches('/');
@@ -1042,10 +1042,10 @@ fn extract_tar<R: Read + Seek>(
             let entry = entry?;
             entries += 1;
             bytes = bytes.saturating_add(entry.header().size().unwrap_or(0));
-            if entries > EXTRACT_MAX_ENTRIES || bytes > EXTRACT_MAX_BYTES {
+            if entries > EXTRACT_MAX_ENTRIES || bytes > max_bytes {
                 return Err(ComputeError::Config(format!(
                     "the archive exceeds the transfer limit of {EXTRACT_MAX_ENTRIES} entries \
-                     or {EXTRACT_MAX_BYTES} bytes"
+                     or {max_bytes} bytes"
                 )));
             }
 
@@ -1097,7 +1097,9 @@ fn extract_tar<R: Read + Seek>(
 
 /// How many entries and bytes a transfer may carry into the host.
 const EXTRACT_MAX_ENTRIES: usize = 200_000;
-const EXTRACT_MAX_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+/// The largest transfer Docker accepts unless the backend is configured
+/// otherwise.
+pub const DEFAULT_MAX_TRANSFER_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
 /// How long a command may run before it is abandoned.
 pub(super) const EXEC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
@@ -1247,8 +1249,13 @@ mod transfer_tests {
         let archive = builder.into_inner().expect("finish tar");
 
         let dir = tempfile::tempdir().expect("tempdir");
-        let error =
-            extract_tar(dir.path(), Cursor::new(&archive), "/src").expect_err("symlink rejected");
+        let error = extract_tar(
+            dir.path(),
+            Cursor::new(&archive),
+            "/src",
+            super::DEFAULT_MAX_TRANSFER_BYTES,
+        )
+        .expect_err("symlink rejected");
         assert!(
             error.to_string().contains("non-regular"),
             "the refusal names what it rejected: {error}"
@@ -1272,11 +1279,35 @@ mod transfer_tests {
             .expect("append");
         let archive = builder.into_inner().expect("finish");
 
-        extract_tar(dir.path(), Cursor::new(&archive), "/sandbox").expect("extract");
+        extract_tar(
+            dir.path(),
+            Cursor::new(&archive),
+            "/sandbox",
+            super::DEFAULT_MAX_TRANSFER_BYTES,
+        )
+        .expect("extract");
         assert_eq!(
             fs::read_to_string(dir.path().join("README.md")).expect("read"),
             "hello"
         );
+    }
+
+    #[test]
+    fn extraction_refuses_an_archive_over_the_configured_limit() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut builder = tar::Builder::new(Vec::new());
+        let mut header = tar::Header::new_gnu();
+        header.set_size(10);
+        header.set_mode(0o644);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, "sandbox/README.md", &b"0123456789"[..])
+            .expect("append");
+        let archive = builder.into_inner().expect("finish");
+
+        let error = extract_tar(dir.path(), Cursor::new(&archive), "/sandbox", 4)
+            .expect_err("over the limit");
+        assert!(error.to_string().contains("transfer limit"), "{error}");
     }
 
     #[test]
@@ -1295,8 +1326,13 @@ mod transfer_tests {
         let archive = builder.into_inner().expect("finish tar");
 
         let dir = tempfile::tempdir().expect("tempdir");
-        let error =
-            extract_tar(dir.path(), Cursor::new(&archive), "/src").expect_err("traversal rejected");
+        let error = extract_tar(
+            dir.path(),
+            Cursor::new(&archive),
+            "/src",
+            super::DEFAULT_MAX_TRANSFER_BYTES,
+        )
+        .expect_err("traversal rejected");
         assert!(
             error.to_string().contains("escapes"),
             "unexpected error: {error}"
@@ -1322,7 +1358,12 @@ mod transfer_tests {
         workspace: &str,
         selector: Option<&dyn crate::sandbox::contract::SnapshotSelector>,
     ) -> Vec<u8> {
-        filtered_within(archive, workspace, selector, super::EXTRACT_MAX_BYTES)
+        filtered_within(
+            archive,
+            workspace,
+            selector,
+            super::DEFAULT_MAX_TRANSFER_BYTES,
+        )
     }
 
     fn filtered_within(
@@ -1351,7 +1392,13 @@ mod transfer_tests {
 
         let kept = filtered(&archive, "/sandbox", Some(&RejectBuildOutput));
         let dir = tempfile::tempdir().expect("tempdir");
-        extract_tar(dir.path(), Cursor::new(&kept), "/sandbox").expect("extract");
+        extract_tar(
+            dir.path(),
+            Cursor::new(&kept),
+            "/sandbox",
+            super::DEFAULT_MAX_TRANSFER_BYTES,
+        )
+        .expect("extract");
         assert!(dir.path().join("README.md").is_file());
         assert!(!dir.path().join("target").exists());
     }
@@ -1369,7 +1416,13 @@ mod transfer_tests {
 
         let kept = filtered(&archive, "/sandbox", Some(&RejectBuildOutput));
         let dir = tempfile::tempdir().expect("tempdir");
-        extract_tar(dir.path(), Cursor::new(&kept), "/sandbox").expect("extract");
+        extract_tar(
+            dir.path(),
+            Cursor::new(&kept),
+            "/sandbox",
+            super::DEFAULT_MAX_TRANSFER_BYTES,
+        )
+        .expect("extract");
         assert!(dir.path().join("README.md").is_file());
         assert!(!dir.path().join("node_modules").exists());
     }
@@ -1384,7 +1437,13 @@ mod transfer_tests {
         // Room for what is kept, nowhere near what is rejected.
         let kept = filtered_within(&archive, "/sandbox", Some(&RejectBuildOutput), 16 * 1024);
         let dir = tempfile::tempdir().expect("tempdir");
-        extract_tar(dir.path(), Cursor::new(&kept), "/sandbox").expect("extract");
+        extract_tar(
+            dir.path(),
+            Cursor::new(&kept),
+            "/sandbox",
+            super::DEFAULT_MAX_TRANSFER_BYTES,
+        )
+        .expect("extract");
         assert!(dir.path().join("README.md").is_file());
     }
 
@@ -1401,7 +1460,13 @@ mod transfer_tests {
 
         let kept = filtered(&archive, "/sandbox", Some(&RejectBuildOutput));
         let dir = tempfile::tempdir().expect("tempdir");
-        extract_tar(dir.path(), Cursor::new(&kept), "/sandbox").expect("extract");
+        extract_tar(
+            dir.path(),
+            Cursor::new(&kept),
+            "/sandbox",
+            super::DEFAULT_MAX_TRANSFER_BYTES,
+        )
+        .expect("extract");
         assert!(dir.path().join(&directory).join("file.txt").is_file());
     }
 
