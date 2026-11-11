@@ -239,7 +239,10 @@ impl Sandboxes {
         Ok(record)
     }
 
-    /// Delete a sandbox: compute first, then the branch, each half idempotent.
+    /// Delete a sandbox: compute first, then the branch.
+    ///
+    /// A branch that cannot be removed keeps the record, so a retry finishes
+    /// the job instead of orphaning the branch.
     pub async fn delete(&self, name: &str) -> Result<(), Error> {
         let stored = match self.stored(name) {
             Ok(stored) => stored,
@@ -263,13 +266,37 @@ impl Sandboxes {
         tracing::info!(sandbox = %name, backend = %selected.name(), "deleting the sandbox");
         selected.core().delete(&stored.sandbox).await?;
 
-        // A branch that is already gone is not a failure.
-        if let Err(error) = self.scm.delete_branch(&stored.sandbox.name) {
-            tracing::warn!(sandbox = %name, %error, "the branch may remain after delete");
+        // The branch lives in the repository the sandbox was created against,
+        // which the record names; the configured mode may have changed since.
+        let configured = self.config.git.snapshot_mode.unwrap_or_default();
+        let stored_mode = if stored.remote {
+            ScmMode::Remote
+        } else {
+            ScmMode::Direct
+        };
+        let other = if stored_mode == configured {
+            None
+        } else {
+            Some(self.scm_for(&stored)?)
+        };
+        let scm = other.as_ref().unwrap_or(&self.scm);
+        match scm.delete_branch(&stored.sandbox.name) {
+            Ok(()) => {}
+            // A branch that is already gone is not a failure: a retried delete
+            // must finish.
+            Err(crate::domain::SandboxError::SandboxNotFound { .. }) => {}
+            Err(error) => {
+                // Keep the record so the caller can retry. Removing it would
+                // leave a branch nothing points at.
+                return Err(Error::failed(format!(
+                    "the sandbox was removed but its branch '{}' was not: {error}",
+                    stored.branch_name
+                )));
+            }
         }
 
         if stored.remote
-            && self.scm.list_sandboxes().is_ok_and(|left| left.is_empty())
+            && scm.list_sandboxes().is_ok_and(|left| left.is_empty())
             && let Err(error) = VcsStore::destroy_bare(&self.project_slug)
         {
             tracing::warn!(project = %self.project_slug, %error, "the bare clone may remain");
@@ -998,7 +1025,7 @@ impl Sandboxes {
             .select_for(&stored.sandbox, "snapshot the workspace")
             .await?;
 
-        let scm = self.snapshot_scm(&stored)?;
+        let scm = self.scm_for(&stored)?;
 
         let staging = tempfile::tempdir()
             .map_err(|error| Error::failed(format!("could not create a staging dir: {error}")))?;
@@ -1031,7 +1058,7 @@ impl Sandboxes {
         Ok(())
     }
 
-    fn snapshot_scm(&self, stored: &StoredSandbox) -> Result<ThreadSafeScm, Error> {
+    fn scm_for(&self, stored: &StoredSandbox) -> Result<ThreadSafeScm, Error> {
         match stored.remote {
             false => Ok(ThreadSafeScm::for_sandbox(
                 Path::new("."),
@@ -1105,6 +1132,7 @@ mod seam_tests {
     use crate::sandbox::selected::Selected;
     use crate::scm::{Scm, ThreadSafeScm};
     use crate::testing::TestBackend;
+    use crate::domain::ScmMode;
 
     fn repository() -> (TempDir, Repository) {
         let dir = TempDir::new().expect("tempdir");
@@ -1181,6 +1209,9 @@ mod seam_tests {
                 slug: Some("project".to_string()),
                 backends: Some(vec!["test".to_string()]),
             },
+            git: crate::config::GitConfig {
+                snapshot_mode: Some(ScmMode::Direct),
+            },
             provision_definitions: provision,
             backend_sequences,
             allow_project_setup,
@@ -1206,6 +1237,54 @@ mod seam_tests {
             branch_name: format!("litterbox/{name}"),
             remote: false,
         }
+    }
+
+    #[tokio::test]
+    async fn delete_removes_the_branch_and_the_record() {
+        let (dir, _repo) = repository();
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let sandboxes = orchestrator(dir.path(), records.path().to_path_buf(), backend, None);
+        sandboxes.create("demo").await.expect("create");
+
+        sandboxes.delete("demo").await.expect("delete");
+
+        assert!(sandboxes.stored("demo").is_err(), "the record is gone");
+        assert!(
+            sandboxes
+                .scm()
+                .list_sandboxes()
+                .expect("branches")
+                .is_empty()
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_branch_that_cannot_be_removed_keeps_the_record() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
+        let (dir, _repo) = repository();
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let sandboxes = orchestrator(dir.path(), records.path().to_path_buf(), backend, None);
+        sandboxes.create("demo").await.expect("create");
+
+        let holders = dir.path().join(".git/refs/heads/litterbox");
+        fs::set_permissions(&holders, fs::Permissions::from_mode(0o555)).expect("chmod");
+
+        let error = sandboxes
+            .delete("demo")
+            .await
+            .expect_err("the branch failure is reported");
+        assert!(error.to_string().contains("litterbox/demo"), "{error}");
+        assert!(
+            sandboxes.stored("demo").is_ok(),
+            "the record survives so a retry can remove the branch"
+        );
+
+        fs::set_permissions(&holders, fs::Permissions::from_mode(0o755)).expect("chmod back");
     }
 
     #[tokio::test]
