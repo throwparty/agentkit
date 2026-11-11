@@ -130,6 +130,22 @@ mod tests {
 
     use git2::Repository;
 
+    fn archive_entries(archive: &[u8]) -> Vec<String> {
+        let mut reader = tar::Archive::new(std::io::Cursor::new(archive));
+        reader
+            .entries()
+            .expect("entries")
+            .filter_map(|entry| {
+                entry.ok().and_then(|entry| {
+                    entry
+                        .path()
+                        .ok()
+                        .map(|path| path.to_string_lossy().to_string())
+                })
+            })
+            .collect()
+    }
+
     fn init_host_repo() -> (TempDir, Repository) {
         let tempdir = TempDir::new().expect("tempdir");
         let repo = Repository::init(tempdir.path()).expect("repo init");
@@ -371,22 +387,54 @@ mod tests {
         let bare_branch = bare_repo.find_branch(&branch_name, git2::BranchType::Local);
         assert!(bare_branch.is_ok(), "branch should exist in bare clone");
 
-        // make_archive should read from host repo (via host_repo_path), not bare clone
-        let archive = scm.make_archive("HEAD").expect("make archive");
+        // Move the host on after the clone, so the branch and HEAD cannot be
+        // confused: the branch is still at the clone's commit, HEAD is not.
+        fs::write(tempdir.path().join("host-only.txt"), "host").expect("write");
+        let mut index = host_repo.index().expect("index");
+        index
+            .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+            .expect("add");
+        index.write().expect("write");
+        let tree_id = index.write_tree().expect("write tree");
+        let sig = git2::Signature::now("test", "test@test.com").expect("sig");
+        let parent = host_repo.head().ok().and_then(|r| r.peel_to_commit().ok());
+        let parents: Vec<&git2::Commit<'_>> = parent.iter().collect();
+        host_repo
+            .commit(
+                Some("HEAD"),
+                &sig,
+                &sig,
+                "move the host on",
+                &host_repo.find_tree(tree_id).expect("tree"),
+                &parents,
+            )
+            .expect("commit");
 
-        // Verify archive contains hello.txt from host repo
-        let mut ar = tar::Archive::new(std::io::Cursor::new(&archive));
-        let entries: Vec<String> = ar
-            .entries()
-            .expect("entries")
-            .filter_map(|e| {
-                e.ok()
-                    .and_then(|e| e.path().ok().map(|p| p.to_string_lossy().to_string()))
-            })
-            .collect();
+        // A sandbox branch is archived from the bare clone that owns it.
+        let branch_archive = scm
+            .make_archive(&branch_name)
+            .expect("make archive of the sandbox branch");
+        let branch_entries = archive_entries(&branch_archive);
+        assert!(
+            branch_entries.contains(&"hello.txt".to_string()),
+            "archive should contain hello.txt from the branch, got: {branch_entries:?}"
+        );
+        assert!(
+            !branch_entries.contains(&"host-only.txt".to_string()),
+            "the branch archive came from the host, got: {branch_entries:?}"
+        );
+
+        // HEAD still reads from the host repo (via host_repo_path), not the
+        // bare clone.
+        let archive = scm.make_archive("HEAD").expect("make archive");
+        let entries = archive_entries(&archive);
         assert!(
             entries.contains(&"hello.txt".to_string()),
             "archive should contain hello.txt from host repo, got: {entries:?}"
+        );
+        assert!(
+            entries.contains(&"host-only.txt".to_string()),
+            "HEAD should come from the host repo, got: {entries:?}"
         );
 
         // List sandboxes in bare clone
