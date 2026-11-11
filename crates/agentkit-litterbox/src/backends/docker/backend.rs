@@ -487,7 +487,12 @@ impl Backend for DockerBackend {
             let data = DockerData::from_record(sandbox)?;
             match self
                 .compute
-                .upload_path(&data.container, source, &destination, self.settings.max_transfer_bytes)
+                .upload_path(
+                    &data.container,
+                    source,
+                    &destination,
+                    self.settings.max_transfer_bytes,
+                )
                 .await
             {
                 Ok(()) => {}
@@ -897,6 +902,7 @@ mod tests {
     };
     use crate::backends::docker::compute;
     use crate::backends::docker::error::{BackendError, ComputeError, FailureKind};
+    use crate::backends::docker::socket_available;
     use crate::backends::shared::{bounded_output, combined_output, command_failure};
     use crate::sandbox::contract::{
         Contributions, CreateRequest, Error, Execution, Forward, Placement, ProvisioningClass,
@@ -1058,6 +1064,10 @@ mod tests {
 
     #[tokio::test]
     async fn capabilities_name_what_docker_provides() {
+        if !socket_available() {
+            eprintln!("skipping: no Docker socket is reachable from this sandbox");
+            return;
+        }
         let capabilities = backend().capabilities().await.expect("capabilities");
         let describe = |operation: &str| {
             capabilities
@@ -1081,6 +1091,10 @@ mod tests {
 
     #[tokio::test]
     async fn an_unset_image_is_a_configuration_error_at_create() {
+        if !socket_available() {
+            eprintln!("skipping: no Docker socket is reachable from this sandbox");
+            return;
+        }
         let backend = DockerBackend::new(
             compute::DockerCompute::connect().expect("docker client"),
             DockerSettings {
