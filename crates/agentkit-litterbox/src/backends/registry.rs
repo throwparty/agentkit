@@ -481,6 +481,10 @@ mod tests {
 
     #[tokio::test]
     async fn introspection_derives_standard_capabilities_from_the_facets() {
+        if !crate::backends::docker::socket_available() {
+            eprintln!("skipping: no Docker socket is reachable from this sandbox");
+            return;
+        }
         let reports = super::introspect(&Config::default()).await;
         let docker = reports
             .iter()
