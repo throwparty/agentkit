@@ -489,8 +489,13 @@ fn view_is_ready(table: &[MountEntry], expected: &[Mount]) -> bool {
 /// The recorded start time is what distinguishes the sandbox from whatever
 /// holds its pid now, so a stale record cannot kill an unrelated process.
 pub fn teardown(host: &dyn Host, holder: &Holder, timeout: Duration) -> Result<(), Error> {
-    if let Some(start) = holder.sandbox_start {
-        signal(host, holder.sandbox_pid, start, libc::SIGKILL)?;
+    if holder.sandbox_pid != 0 {
+        // A stored pid of zero would name the caller's process group, so it is
+        // refused here, and the recorded start time refuses a pid that has
+        // been reused.
+        if let Some(start) = holder.sandbox_start {
+            signal(host, holder.sandbox_pid, start, libc::SIGKILL)?;
+        }
     }
     if let Some(unit) = &holder.unit {
         let _ = host.write_scope(unit, "cgroup.kill", "1");
@@ -506,6 +511,28 @@ pub fn teardown(host: &dyn Host, holder: &Holder, timeout: Duration) -> Result<(
         }
         std::thread::sleep(Duration::from_millis(10));
     }
+
+    // Pid 1 of the namespace may already be gone while its children live on,
+    // reparented and still holding the workspace open. Address them by the
+    // namespace inode the record kept for exactly this.
+    if holder.namespaces.pid != 0 {
+        for member in host.namespace_members_of(holder.namespaces.pid) {
+            if member == holder.sandbox_pid || host.process(member).is_none() {
+                continue;
+            }
+            // SAFETY: signalling a member of the dead sandbox is the point.
+            let result = unsafe { libc::kill(member as i32, libc::SIGKILL) };
+            if result < 0 {
+                let error = io::Error::last_os_error();
+                if error.raw_os_error() != Some(libc::ESRCH) {
+                    return Err(Error::failed(format!(
+                        "the sandbox left pid {member} behind: {error}"
+                    )));
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -770,6 +797,9 @@ mod tests {
         fn namespace_members(&self, pid: u32) -> Option<Vec<u32>> {
             self.inner.namespace_members(pid)
         }
+        fn namespace_members_of(&self, inode: u64) -> Vec<u32> {
+            self.inner.namespace_members_of(inode)
+        }
         fn user_scope(&self) -> bool {
             self.inner.user_scope()
         }
@@ -825,9 +855,12 @@ mod tests {
     #[test]
     fn a_sandbox_that_is_already_gone_tears_down_cleanly() {
         let host = FakeHost::default();
+        // A pid the kernel cannot allocate, so the test never signals a real
+        // process: pid 11 is a kernel worker on some hosts and kill returns
+        // EPERM there.
         let holder = Holder {
-            launcher_pid: 10,
-            sandbox_pid: 11,
+            launcher_pid: 2_000_000_000,
+            sandbox_pid: 2_000_000_000,
             sandbox_start: None,
             namespaces: NamespaceInodes {
                 user: 1,
@@ -841,5 +874,26 @@ mod tests {
             unit: None,
         };
         teardown(&host, &holder, Duration::from_millis(50)).expect("torn down");
+    }
+
+    #[test]
+    fn a_record_without_a_pid_never_signals_the_process_group() {
+        let host = FakeHost::default();
+        let holder = Holder {
+            launcher_pid: 0,
+            sandbox_pid: 0,
+            sandbox_start: None,
+            namespaces: NamespaceInodes {
+                user: 0,
+                ipc: 0,
+                net: 0,
+                pid: 0,
+                mnt: 0,
+                uts: 0,
+                cgroup: 0,
+            },
+            unit: None,
+        };
+        teardown(&host, &holder, Duration::from_millis(50)).expect("nothing to tear down");
     }
 }

@@ -209,6 +209,9 @@ pub trait Host: Send + Sync {
     fn namespace_members(&self, pid: u32) -> Option<Vec<u32>>;
     /// Whether a delegating user manager can give this process a scope.
     fn user_scope(&self) -> bool;
+    /// Every process whose pid namespace is the given inode, whether or not
+    /// the pid that named it still exists.
+    fn namespace_members_of(&self, inode: u64) -> Vec<u32>;
 }
 
 /// The host this process is running on.
@@ -419,6 +422,28 @@ impl Host for SystemHost {
             .status()
             .is_ok_and(|status| status.success())
     }
+
+    fn namespace_members_of(&self, inode: u64) -> Vec<u32> {
+        let wanted = format!("pid:[{inode}]");
+        let mut members = Vec::new();
+        let Ok(entries) = std::fs::read_dir("/proc") else {
+            return members;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let Some(candidate) = name.to_str().and_then(|name| name.parse::<u32>().ok()) else {
+                continue;
+            };
+            let Ok(link) = std::fs::read_link(format!("/proc/{candidate}/ns/pid")) else {
+                continue;
+            };
+            if link.as_os_str() == std::ffi::OsStr::new(&wanted) {
+                members.push(candidate);
+            }
+        }
+        members.sort_unstable();
+        members
+    }
 }
 
 /// The host, shared with a backend.
@@ -510,6 +535,19 @@ impl Host for FakeHost {
     fn user_scope(&self) -> bool {
         self.user_scope
     }
+
+    fn namespace_members_of(&self, inode: u64) -> Vec<u32> {
+        let mut members: Vec<u32> = self
+            .namespaces
+            .iter()
+            .filter(|(pid, namespaces)| {
+                namespaces.pid == inode && self.processes.contains_key(pid)
+            })
+            .map(|(pid, _)| *pid)
+            .collect();
+        members.sort_unstable();
+        members
+    }
 }
 
 #[cfg(test)]
@@ -551,6 +589,18 @@ mod tests {
         assert_eq!(info.uid, expected);
         assert_ne!(info.state, ProcessState::Zombie);
         assert!(info.start_time > 0);
+    }
+
+    #[test]
+    fn the_system_host_finds_a_namespace_by_inode() {
+        let host = SystemHost::new();
+        let pid = std::process::id();
+        let namespaces = host.namespaces(pid).expect("namespaces");
+        let members = host.namespace_members_of(namespaces.pid);
+        assert!(
+            members.contains(&pid),
+            "this process should be a member: {members:?}"
+        );
     }
 
     #[test]
