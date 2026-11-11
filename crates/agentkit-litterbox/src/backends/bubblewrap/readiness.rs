@@ -11,13 +11,13 @@ use crate::sandbox::report::{Check, Fallback, State};
 pub const FLOOR: (u64, u64, u64) = (0, 8, 0);
 
 /// Every check, in the order a person reads them.
-pub fn checks(host: &dyn Host) -> Vec<Check> {
+pub fn checks(host: &dyn Host, shell: &[String]) -> Vec<Check> {
     vec![
         root_check(host),
         bwrap_check(host),
         userns_check(),
         cgroup_check(host),
-        holder::check(host),
+        holder::check(host, shell),
     ]
 }
 

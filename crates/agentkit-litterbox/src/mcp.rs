@@ -566,19 +566,12 @@ async fn ls_in_sandbox<P: SandboxIo + ?Sized>(
         .await
         .map_err(|error| ToolError::sandbox(Tool::Ls, error))?;
     let sandbox_path = resolve_sandbox_path(&workspace, path);
-    let command = if recursive {
-        vec![
-            "sh".to_string(),
-            "-c".to_string(),
-            format!("find {} -mindepth 1 -print", shell_escape(&sandbox_path)),
-        ]
+    let script = if recursive {
+        format!("find {} -mindepth 1 -print", shell_escape(&sandbox_path))
     } else {
-        vec![
-            "sh".to_string(),
-            "-c".to_string(),
-            format!("ls -1A {}", shell_escape(&sandbox_path)),
-        ]
+        format!("ls -1A {}", shell_escape(&sandbox_path))
     };
+    let command = script_argv(io, name, Tool::Ls, script).await?;
     let result = exec_in_sandbox(io, name, &command)
         .await
         .map_err(|error| ToolError::sandbox(Tool::Ls, error))?;
@@ -658,11 +651,13 @@ async fn read_in_sandbox<P: SandboxIo + ?Sized>(
         .await
         .map_err(|error| ToolError::sandbox(Tool::Read, error))?;
     let sandbox_path = resolve_sandbox_path(&workspace, path);
-    let command = vec![
-        "sh".to_string(),
-        "-c".to_string(),
+    let command = script_argv(
+        io,
+        name,
+        Tool::Read,
         format!("cat -- {}", shell_escape(&sandbox_path)),
-    ];
+    )
+    .await?;
     let result = exec_in_sandbox(io, name, &command)
         .await
         .map_err(|error| ToolError::sandbox(Tool::Read, error))?;
@@ -684,15 +679,17 @@ async fn write_in_sandbox<P: SandboxIo + ?Sized>(
         .await
         .map_err(|error| ToolError::sandbox(Tool::Write, error))?;
     let sandbox_path = resolve_sandbox_path(&workspace, path);
-    let command = vec![
-        "sh".to_string(),
-        "-c".to_string(),
+    let command = script_argv(
+        io,
+        name,
+        Tool::Write,
         format!(
             "printf %s {} > {}",
             shell_escape(content),
             shell_escape(&sandbox_path)
         ),
-    ];
+    )
+    .await?;
     let result = exec_in_sandbox(io, name, &command)
         .await
         .map_err(|error| ToolError::sandbox(Tool::Write, error))?;
@@ -741,18 +738,26 @@ async fn bash_in_sandbox<P: SandboxIo + ?Sized>(
         .workspace(name)
         .await
         .map_err(|error| ToolError::sandbox(Tool::Bash, error))?;
-    let command = build_bash_command(command, workdir, timeout, &workspace);
-    let command = vec!["sh".to_string(), "-c".to_string(), command];
-    exec_in_sandbox(io, name, &command)
+    let shell = io
+        .shell(name)
+        .await
+        .map_err(|error| ToolError::sandbox(Tool::Bash, error))?;
+    let script = build_bash_script(command, workdir, timeout, &workspace, &shell);
+    let mut argv = shell;
+    argv.push(script);
+    exec_in_sandbox(io, name, &argv)
         .await
         .map_err(|error| ToolError::sandbox(Tool::Bash, error))
 }
 
-fn build_bash_command(
+/// The script the sandbox's shell evaluates, with the timeout applied by the
+/// same shell the sandbox runs.
+fn build_bash_script(
     command: &str,
     workdir: Option<&str>,
     timeout: Option<u64>,
     workspace: &str,
+    shell: &[String],
 ) -> String {
     let command = if let Some(workdir) = workdir {
         let sandbox_path = resolve_sandbox_path(workspace, workdir);
@@ -762,9 +767,33 @@ fn build_bash_command(
     };
 
     if let Some(timeout) = timeout {
-        format!("timeout {}s sh -c {}", timeout, shell_escape(&command))
+        let shell = shell
+            .iter()
+            .map(|argument| shell_word(argument))
+            .collect::<Vec<_>>()
+            .join(" ");
+        format!(
+            "timeout {}s {} {}",
+            timeout,
+            shell,
+            shell_escape(&command)
+        )
     } else {
         command
+    }
+}
+
+/// A shell word that needs no quoting is left alone; anything else is escaped.
+fn shell_word(value: &str) -> String {
+    let plain = !value.is_empty()
+        && value.chars().all(|character| {
+            character.is_ascii_alphanumeric()
+                || matches!(character, '_' | '-' | '.' | '/' | '+' | ':' | '=' | '~')
+        });
+    if plain {
+        value.to_string()
+    } else {
+        shell_escape(value)
     }
 }
 
@@ -774,6 +803,25 @@ async fn exec_in_sandbox<P: SandboxIo + ?Sized>(
     command: &[String],
 ) -> Result<Execution, Error> {
     io.exec(name, command).await
+}
+
+/// A script for the sandbox's own shell.
+///
+/// The backend mounts that shell into the sandbox, so a tool that runs a script
+/// asks for it rather than assuming `sh -c` resolves there.
+#[allow(clippy::result_large_err)]
+async fn script_argv<P: SandboxIo + ?Sized>(
+    io: &P,
+    name: &str,
+    tool: Tool,
+    script: String,
+) -> Result<Vec<String>, ToolError> {
+    let mut argv = io
+        .shell(name)
+        .await
+        .map_err(|error| ToolError::sandbox(tool, error))?;
+    argv.push(script);
+    Ok(argv)
 }
 
 fn resolve_sandbox_path(workspace: &str, path: &str) -> String {
@@ -900,11 +948,13 @@ async fn glob_in_sandbox<P: SandboxIo + ?Sized>(
     let base = base_path
         .map(|path| resolve_sandbox_path(&workspace, path))
         .unwrap_or_else(|| workspace.clone());
-    let command = vec![
-        "sh".to_string(),
-        "-c".to_string(),
+    let command = script_argv(
+        io,
+        name,
+        Tool::Glob,
         format!("find {} -mindepth 1 -print", shell_escape(&base)),
-    ];
+    )
+    .await?;
     let result = exec_in_sandbox(io, name, &command)
         .await
         .map_err(|error| ToolError::sandbox(Tool::Glob, error))?;
@@ -969,11 +1019,13 @@ async fn grep_in_sandbox<P: SandboxIo + ?Sized>(
         .await
         .map_err(|error| ToolError::sandbox(Tool::Grep, error))?;
     let sandbox_path = resolve_sandbox_path(&workspace, path);
-    let command = vec![
-        "sh".to_string(),
-        "-c".to_string(),
+    let command = script_argv(
+        io,
+        name,
+        Tool::Grep,
         build_grep_command(pattern, &sandbox_path, include),
-    ];
+    )
+    .await?;
     let result = exec_in_sandbox(io, name, &command)
         .await
         .map_err(|error| ToolError::sandbox(Tool::Grep, error))?;
@@ -1170,6 +1222,7 @@ mod tests {
     struct MultiResultProvider {
         results: Arc<Mutex<Vec<Result<Execution, Error>>>>,
         commands: Arc<Mutex<Vec<Vec<String>>>>,
+        shell: Vec<String>,
     }
 
     impl MultiResultProvider {
@@ -1177,7 +1230,14 @@ mod tests {
             Self {
                 results,
                 commands: Arc::new(Mutex::new(Vec::new())),
+                shell: vec!["sh".to_string(), "-c".to_string()],
             }
+        }
+
+        /// A provider whose sandbox runs scripts through a mounted shell.
+        fn with_shell(mut self, shell: Vec<String>) -> Self {
+            self.shell = shell;
+            self
         }
 
         fn commands(&self) -> Vec<Vec<String>> {
@@ -1186,6 +1246,11 @@ mod tests {
     }
 
     impl SandboxIo for MultiResultProvider {
+        fn shell<'a>(&'a self, _name: &'a str) -> BoxFuture<'a, Result<Vec<String>, Error>> {
+            let shell = self.shell.clone();
+            Box::pin(async move { Ok(shell) })
+        }
+
         fn workspace<'a>(&'a self, _name: &'a str) -> BoxFuture<'a, Result<String, Error>> {
             Box::pin(async { Ok("/src".to_string()) })
         }
@@ -1617,6 +1682,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn every_script_tool_runs_the_sandbox_shell() {
+        // A backend that mounts its own shell has no `sh` on PATH; a tool that
+        // writes `sh -c` itself would fail inside such a sandbox.
+        let shell = vec!["/nix/store/recorded/bash".to_string(), "-lc".to_string()];
+        let ok = || Execution {
+            exit_code: 0,
+            stdout: String::new(),
+            stderr: String::new(),
+        };
+        let results = Arc::new(Mutex::new(vec![
+            Ok(ok()),
+            Ok(ok()),
+            Ok(ok()),
+            Ok(ok()),
+            Ok(ok()),
+        ]));
+        let provider = MultiResultProvider::new(results).with_shell(shell.clone());
+
+        ls_in_sandbox(&provider, "sandbox", "dir", false)
+            .await
+            .expect("ls");
+        read_in_sandbox(&provider, "sandbox", "file.txt", None, None)
+            .await
+            .expect("read");
+        write_in_sandbox(&provider, "sandbox", "file.txt", "text")
+            .await
+            .expect("write");
+        glob_in_sandbox(&provider, "sandbox", "*.txt", None)
+            .await
+            .expect("glob");
+        grep_in_sandbox(&provider, "sandbox", "text", ".", None)
+            .await
+            .expect("grep");
+
+        let commands = provider.commands();
+        assert_eq!(
+            commands.len(),
+            5,
+            "every tool ran one command: {commands:?}"
+        );
+        for command in &commands {
+            assert_eq!(
+                command.get(..shell.len()).map(<[String]>::to_vec),
+                Some(shell.clone()),
+                "the tool ran the sandbox's shell: {command:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn ls_in_sandbox_non_recursive() {
         let result = Execution {
             exit_code: 0,
@@ -1980,23 +2095,27 @@ mod tests {
         assert_eq!(output.stderr, "fail");
     }
 
+    fn shell() -> Vec<String> {
+        vec!["sh".to_string(), "-c".to_string()]
+    }
+
     #[test]
     fn build_bash_command_with_workdir() {
-        let command = build_bash_command("ls", Some("dir"), None, "/src");
+        let command = build_bash_script("ls", Some("dir"), None, "/src", &shell());
         assert!(command.contains("cd '/src/dir'"));
         assert!(command.contains("&& ls"));
     }
 
     #[test]
     fn build_bash_command_with_timeout() {
-        let command = build_bash_command("sleep 5", None, Some(3), "/src");
+        let command = build_bash_script("sleep 5", None, Some(3), "/src", &shell());
         assert!(command.starts_with("timeout 3s sh -c"));
         assert!(command.contains("sleep 5"));
     }
 
     #[test]
     fn build_bash_command_with_workdir_and_timeout() {
-        let command = build_bash_command("ls -la", Some("dir"), Some(5), "/src");
+        let command = build_bash_script("ls -la", Some("dir"), Some(5), "/src", &shell());
         assert!(command.starts_with("timeout 5s sh -c"));
         assert!(command.contains("/src/dir"));
         assert!(command.contains("ls -la"));

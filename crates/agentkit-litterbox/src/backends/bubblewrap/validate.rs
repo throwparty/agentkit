@@ -212,6 +212,7 @@ mod tests {
             },
             forwards: Vec::new(),
             network: crate::backends::bubblewrap::backend::Network::Denied,
+            shell: Vec::new(),
         }
     }
 

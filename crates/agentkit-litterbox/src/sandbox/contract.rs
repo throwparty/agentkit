@@ -600,6 +600,18 @@ pub trait Backend: Send + Sync {
     /// Enumerate sandboxes in the given scope.
     fn list<'a>(&'a self, scope: &'a Scope) -> BoxFuture<'a, Result<Vec<SandboxRecord>, Error>>;
     /// Run one command.
+    /// The program and leading arguments that evaluate a shell string inside
+    /// this backend's sandbox.
+    ///
+    /// A caller that has a script to run asks for this rather than assuming
+    /// `sh -c` resolves in the sandbox. The default is `sh -c`, which is what
+    /// an image-based backend provides; a backend that mounts its own shell
+    /// overrides it and reads it back from the sandbox's own record.
+    fn shell(&self, _sandbox: &SandboxRecord) -> Result<Vec<String>, Error> {
+        Ok(vec!["sh".to_string(), "-c".to_string()])
+    }
+
+    /// Run a command.
     fn exec<'a>(
         &'a self,
         sandbox: &'a SandboxRecord,
