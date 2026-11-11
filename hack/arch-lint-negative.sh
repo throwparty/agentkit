@@ -151,3 +151,28 @@ plant "crates/agentkit-litterbox/src/provision/prepare/mod.rs" \
   "use crate::orchestrator::Sandboxes as _;" \
   "prepare-to-orchestrator" \
   "litterbox-prepare"
+
+# The Nix development-shell layer and the compute providers are independent in
+# both directions: a prepared devShell crosses to a backend as contributions,
+# never as an import, and a backend never learns that Nix exists.
+
+plant "crates/agentkit-litterbox/src/provision/prepare/mod.rs" \
+  "use crate::backends::bubblewrap::BACKEND as _;" \
+  "prepare-to-bubblewrap" \
+  "Independent scopes litterbox-prepare and litterbox-backend-bubblewrap"
+
+plant "crates/agentkit-litterbox/src/provision/kind/mod.rs" \
+  "use crate::backends::bubblewrap::BACKEND as _;" \
+  "kinds-to-bubblewrap" \
+  "Scope \`litterbox-kinds\` may only depend on"
+
+plant "crates/agentkit-litterbox/src/backends/bubblewrap/backend.rs" \
+  "use crate::provision::prepare as _;" \
+  "bubblewrap-to-prepare" \
+  "Scope \`litterbox-backend-bubblewrap\` may only depend on"
+
+plant "crates/agentkit-litterbox/src/backends/bubblewrap/backend.rs" \
+  "use crate::provision::kind as _;" \
+  "bubblewrap-to-kinds" \
+  "must not depend on each other"
+

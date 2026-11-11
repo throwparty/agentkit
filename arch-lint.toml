@@ -2,10 +2,35 @@
 #
 # The ACP wire surfaces in agentkit-tackle (adrs/2026-10-23-tackle-acp-v2) and
 # the Litterbox contract, backends, orchestrator, registry and provisioning
-# resolver (adrs/2026-11-03-sandbox-provider-contract and
-# adrs/2026-11-05-sandbox-provisioning).
+# resolver (adrs/2026-11-03-sandbox-provider-contract,
+# adrs/2026-11-05-sandbox-provisioning and
+# adrs/2026-11-07-linux-bwrap-provider).
+#
+# Two separations carry the design:
+#
+# - a protocol version is reached through acp::common, never through the other
+# version;
+# - a compute provider (a backend) is reached through the contract, never
+# through the Nix development-shell layer, and that layer never reaches a
+# mechanism. A devShell is something a project declares; which mechanism runs
+# it is a separate decision.
 
 preset = "minimal"
+
+[[allow-dep]]
+from = "litterbox-prepare"
+to = ["litterbox-contract", "litterbox-kinds"]
+doc = "adrs/2026-11-07-linux-bwrap-provider"
+
+[[allow-dep]]
+from = "litterbox-kinds"
+to = ["litterbox-contract"]
+doc = "adrs/2026-11-07-linux-bwrap-provider"
+
+[[allow-dep]]
+from = "litterbox-backend-bubblewrap"
+to = ["litterbox-contract"]
+doc = "adrs/2026-11-07-linux-bwrap-provider"
 
 [[deny-scope-dep]]
 from = "acp-v1"
@@ -96,6 +121,7 @@ message = "the registry constructs a backend; it does not pair branches, persist
 from = "litterbox-cli"
 to = [
   "litterbox-backend-docker",
+  "litterbox-backend-bubblewrap",
   "litterbox-scm",
   "litterbox-vcs-store",
   "litterbox-provision",
@@ -108,6 +134,7 @@ message = "the CLI reaches a backend through the orchestrator and the registry, 
 from = "litterbox-mcp"
 to = [
   "litterbox-backend-docker",
+  "litterbox-backend-bubblewrap",
   "litterbox-scm",
   "litterbox-vcs-store",
   "litterbox-provision",
@@ -136,6 +163,7 @@ message = "configuration describes settings; it may reach the pure kind registry
 from = "litterbox-persistence"
 to = [
   "litterbox-backend-docker",
+  "litterbox-backend-bubblewrap",
   "litterbox-registry",
   "litterbox-orchestrator",
   "litterbox-cli",
@@ -151,13 +179,14 @@ message = "persistence depends on the contract's record types only."
 
 [[deny-scope-dep]]
 from = "litterbox-orchestrator"
-to = ["litterbox-backend-docker"]
+to = ["litterbox-backend-docker", "litterbox-backend-bubblewrap"]
 message = "the orchestrator selects a backend through the registry; it does not name a mechanism."
 
 [[deny-scope-dep]]
 from = "litterbox-provision"
 to = [
   "litterbox-backend-docker",
+  "litterbox-backend-bubblewrap",
   "litterbox-registry",
   "litterbox-orchestrator",
   "litterbox-persistence",
@@ -174,6 +203,7 @@ message = "the resolver depends on the contract, configuration and the pure kind
 from = "litterbox-kinds"
 to = [
   "litterbox-backend-docker",
+  "litterbox-backend-bubblewrap",
   "litterbox-registry",
   "litterbox-orchestrator",
   "litterbox-persistence",
@@ -192,6 +222,7 @@ message = "the kind registry is pure: it depends on the contract only, and the r
 from = "litterbox-prepare"
 to = [
   "litterbox-backend-docker",
+  "litterbox-backend-bubblewrap",
   "litterbox-registry",
   "litterbox-orchestrator",
   "litterbox-persistence",
@@ -204,6 +235,24 @@ to = [
   "litterbox-provision"
 ]
 message = "host preparation depends on the contract and the pure kind registry; the orchestrator is its only caller."
+
+[[independent]]
+name = "nix-vs-compute"
+scopes = [
+  "litterbox-prepare",
+  "litterbox-backend-docker",
+  "litterbox-backend-bubblewrap"
+]
+doc = "adrs/2026-11-07-linux-bwrap-provider"
+
+[[independent]]
+name = "kinds-vs-compute"
+scopes = [
+  "litterbox-kinds",
+  "litterbox-backend-docker",
+  "litterbox-backend-bubblewrap"
+]
+doc = "adrs/2026-11-07-linux-bwrap-provider"
 
 [rules.no-unwrap-expect]
 enabled = false
