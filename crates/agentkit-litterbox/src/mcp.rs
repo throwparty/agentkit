@@ -217,9 +217,12 @@ impl SandboxServer {
             )
             .await
         {
+            // The patch landed; see the write tool for why this is not an
+            // error result.
             tracing::warn!(sandbox = %args.sandbox, %error, "the patch landed but the snapshot failed");
+            return mutation_result(Some(error.to_string()));
         }
-        Ok(CallToolResult::success(Vec::new()))
+        mutation_result(None)
     }
 
     #[tool(
@@ -611,6 +614,21 @@ enum SnapshotTrigger {
     Write { path: String },
     Patch { path: String },
     Bash,
+}
+
+/// What `write` and `patch` report once their edit has landed.
+#[derive(Debug, serde::Serialize)]
+struct MutationResult {
+    /// Why the snapshot that records the edit could not be written. Absent
+    /// when the snapshot succeeded; the edit itself landed either way.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    snapshot_error: Option<String>,
+}
+
+fn mutation_result(snapshot_error: Option<String>) -> Result<CallToolResult, McpError> {
+    let content = ContentBlock::json(&MutationResult { snapshot_error })
+        .map_err(|error| McpError::internal_error(error.to_string(), None))?;
+    Ok(CallToolResult::success(vec![content]))
 }
 
 fn snapshot_message(trigger: &SnapshotTrigger) -> String {
@@ -1257,6 +1275,19 @@ mod tests {
         ) -> BoxFuture<'a, Result<(), Error>> {
             Box::pin(async { Ok(()) })
         }
+    }
+
+    #[test]
+    fn a_mutation_reports_the_snapshot_failure_only_when_it_happens() {
+        let recorded =
+            serde_json::to_value(MutationResult { snapshot_error: None }).expect("serialises");
+        assert_eq!(recorded, serde_json::json!({}));
+
+        let failed = serde_json::to_value(MutationResult {
+            snapshot_error: Some("disk full".to_string()),
+        })
+        .expect("serialises");
+        assert_eq!(failed["snapshot_error"], "disk full");
     }
 
     #[test]
