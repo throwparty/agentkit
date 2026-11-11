@@ -219,7 +219,7 @@ impl Holder {
     /// the identity teardown checks cannot drift from the identity the record
     /// keeps. A start time of zero is the sentinel for one that could not be
     /// read, and is recorded as unknown rather than as a value to match.
-    pub fn from_payload(data: &super::payload::BubblewrapData) -> Self {
+    pub fn from_payload(data: &super::payload::Payload) -> Self {
         Self {
             launcher_pid: data.launcher_pid,
             sandbox_pid: data.sandbox_pid,

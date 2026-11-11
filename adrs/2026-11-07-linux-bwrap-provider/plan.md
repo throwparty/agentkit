@@ -24,7 +24,7 @@ src/
 │       ├── environment.rs     merge, withhold ungranted paths, read back from /proc
 │       ├── workspace.rs       copy the staged tree, upload, download
 │       ├── join.rs            descriptors, setns, second fork, statuses
-│       ├── payload.rs         BubblewrapData v1 and its validation
+│       ├── payload.rs         Payload v1 and its validation
 │       └── backend.rs         the traits, readiness, capabilities
 ├── provision/prepare/         unchanged; produces the contributions
 └── docs/docs/user/litterbox/  backends page and configuration reference
@@ -143,7 +143,7 @@ Opens the seven namespace descriptors and the root descriptor before joining any
 
 Hold everything a later process needs
 
-`BubblewrapData` version 1 holds the payload version, both pids with their start times, the seven inode numbers, the uid, the root device and inode, the mounts with their access, the host and sandbox workspace paths, the scope unit, the paused flag and the provenance. `from_record()` refuses a higher version as unreadable, and refuses a lower version or a missing field as Unavailable with the remedy of deleting and recreating. `into_value()` serialises to toml. This module asserts the metadata store's 0600 file and 0700 directory instead of assuming them.
+`Payload` version 1 holds the payload version, both pids with their start times, the seven inode numbers, the uid, the root device and inode, the mounts with their access, the host and sandbox workspace paths, the scope unit, the paused flag and the provenance. `from_record()` refuses a higher version as unreadable, and refuses a lower version or a missing field as Unavailable with the remedy of deleting and recreating. `into_value()` serialises to toml. This module asserts the metadata store's 0600 file and 0700 directory instead of assuming them.
 
 
 ### payload-validation

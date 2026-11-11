@@ -13,7 +13,7 @@ use std::sync::Mutex;
 use super::BACKEND;
 use super::backend::Network;
 use super::host::{Host, Namespace};
-use super::payload::BubblewrapData;
+use super::payload::Payload;
 use super::view::WORKSPACE;
 use crate::sandbox::contract::{Error, Execution};
 
@@ -103,7 +103,7 @@ impl Step {
 /// it is drained and dropped so the command never blocks on a full pipe.
 pub fn run(
     host: &dyn Host,
-    data: &BubblewrapData,
+    data: &Payload,
     command: &[String],
     cap: usize,
 ) -> Result<Execution, Error> {

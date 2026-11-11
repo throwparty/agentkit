@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use super::BACKEND;
 use super::host::{Host, ProcessState};
-use super::payload::BubblewrapData;
+use super::payload::Payload;
 use crate::sandbox::contract::Error;
 use crate::sandbox::facets::ResourceLimits;
 
@@ -19,7 +19,7 @@ const FREEZE_TIMEOUT: Duration = Duration::from_secs(5);
 const PAUSE_ROUNDS: usize = 10;
 
 /// Pause the sandbox.
-pub async fn pause(host: &dyn Host, data: &BubblewrapData) -> Result<(), Error> {
+pub async fn pause(host: &dyn Host, data: &Payload) -> Result<(), Error> {
     if let Some(unit) = &data.scope {
         return pause_scope(host, unit).await;
     }
@@ -92,7 +92,7 @@ fn pause_namespace(host: &dyn Host, pid: u32) -> Result<(), Error> {
 }
 
 /// Resume the sandbox.
-pub fn resume(host: &dyn Host, data: &BubblewrapData) -> Result<(), Error> {
+pub fn resume(host: &dyn Host, data: &Payload) -> Result<(), Error> {
     if let Some(unit) = &data.scope {
         return host
             .write_scope(unit, "cgroup.freeze", "0")
@@ -109,7 +109,7 @@ pub fn resume(host: &dyn Host, data: &BubblewrapData) -> Result<(), Error> {
 }
 
 /// Whether the sandbox is paused, as the mechanism can observe it.
-pub fn is_paused(host: &dyn Host, data: &BubblewrapData) -> bool {
+pub fn is_paused(host: &dyn Host, data: &Payload) -> bool {
     if let Some(unit) = &data.scope {
         return host
             .read_scope(unit, "cgroup.freeze")
@@ -128,7 +128,7 @@ pub fn is_paused(host: &dyn Host, data: &BubblewrapData) -> bool {
 /// Apply resource bounds to the scope.
 pub fn set_limits(
     host: &dyn Host,
-    data: &BubblewrapData,
+    data: &Payload,
     limits: &ResourceLimits,
 ) -> Result<(), Error> {
     let unit = data.scope.as_deref().ok_or_else(|| Error::Unsupported {
@@ -162,13 +162,13 @@ mod tests {
     use crate::backends::bubblewrap::host::{
         FakeHost, MountEntry, NamespaceInodes, ProcessInfo, ProcessState, RootIdentity,
     };
-    use crate::backends::bubblewrap::payload::BubblewrapData;
+    use crate::backends::bubblewrap::payload::Payload;
     use crate::backends::bubblewrap::payload::{RecordedRoot, VERSION};
     use crate::sandbox::environment::{Origin, Provenance};
     use crate::sandbox::facets::ResourceLimits;
 
-    fn data(scope: Option<&str>, pid: u32) -> BubblewrapData {
-        BubblewrapData {
+    fn data(scope: Option<&str>, pid: u32) -> Payload {
+        Payload {
             version: VERSION,
             launcher_pid: pid + 1,
             launcher_start: 1,

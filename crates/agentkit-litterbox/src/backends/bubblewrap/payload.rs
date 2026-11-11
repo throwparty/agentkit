@@ -60,7 +60,7 @@ pub struct RecordedRoot {
 
 /// Everything the backend keeps about one sandbox.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BubblewrapData {
+pub struct Payload {
     /// The payload version.
     pub version: u32,
     /// The bwrap process the tool started.
@@ -95,7 +95,7 @@ pub struct BubblewrapData {
     pub forwards: Vec<crate::sandbox::contract::Forward>,
 }
 
-impl BubblewrapData {
+impl Payload {
     /// Read the payload out of a record, refusing a payload it cannot honour.
     pub fn from_record(record: &SandboxRecord) -> Result<Self, Error> {
         #[derive(Deserialize)]
@@ -162,7 +162,7 @@ impl BubblewrapData {
 
 #[cfg(test)]
 mod tests {
-    use super::{BubblewrapData, RecordedMount, RecordedRoot, VERSION};
+    use super::{Payload, RecordedMount, RecordedRoot, VERSION};
     use crate::backends::bubblewrap::backend::Network;
     use crate::backends::bubblewrap::host::NamespaceInodes;
     use crate::backends::bubblewrap::view::{Access, Mount, Pinned, View, WORKSPACE};
@@ -205,9 +205,9 @@ mod tests {
         }
     }
 
-    fn data() -> BubblewrapData {
+    fn data() -> Payload {
         let view = view();
-        BubblewrapData {
+        Payload {
             version: VERSION,
             launcher_pid: 10,
             launcher_start: 100,
@@ -239,7 +239,7 @@ mod tests {
         }
     }
 
-    fn record(data: &BubblewrapData) -> SandboxRecord {
+    fn record(data: &Payload) -> SandboxRecord {
         SandboxRecord {
             name: "demo".to_string(),
             backend: "bubblewrap".to_string(),
@@ -251,7 +251,7 @@ mod tests {
     #[test]
     fn a_payload_round_trips() {
         let data = data();
-        let read = BubblewrapData::from_record(&record(&data)).expect("readable");
+        let read = Payload::from_record(&record(&data)).expect("readable");
         assert_eq!(read, data);
         assert_eq!(read.workspace, WORKSPACE);
         assert_eq!(read.namespaces, [1, 2, 3, 4, 5, 6, 7]);
@@ -271,7 +271,7 @@ mod tests {
             env_var: "LITTERBOX_FWD_PORT_WWW".to_string(),
         }];
 
-        let read = BubblewrapData::from_record(&record(&data)).expect("readable");
+        let read = Payload::from_record(&record(&data)).expect("readable");
         assert_eq!(read, data);
         assert_eq!(read.network, Network::Host);
         assert_eq!(read.forwards, data.forwards);
@@ -281,7 +281,7 @@ mod tests {
     fn a_newer_payload_is_unreadable() {
         let mut data = data();
         data.version = VERSION + 1;
-        let error = BubblewrapData::from_record(&record(&data)).expect_err("refused");
+        let error = Payload::from_record(&record(&data)).expect_err("refused");
         assert!(error.to_string().contains("newer release"), "{error}");
     }
 
@@ -289,7 +289,7 @@ mod tests {
     fn an_older_payload_is_unavailable_with_a_remedy() {
         let mut data = data();
         data.version = VERSION - 1;
-        match BubblewrapData::from_record(&record(&data)) {
+        match Payload::from_record(&record(&data)) {
             Err(Error::Unavailable { reason, remedy, .. }) => {
                 assert!(reason.contains("payload version"), "{reason}");
                 assert!(remedy.contains("delete and recreate"), "{remedy}");
@@ -306,7 +306,7 @@ mod tests {
             project_slug: "project".to_string(),
             data: toml::from_str("sandbox_pid = 12").expect("payload"),
         };
-        match BubblewrapData::from_record(&record) {
+        match Payload::from_record(&record) {
             Err(Error::Unavailable { remedy, .. }) => {
                 assert!(remedy.contains("delete and recreate"), "{remedy}");
             }
@@ -327,7 +327,7 @@ mod tests {
             data: value,
         };
         assert!(matches!(
-            BubblewrapData::from_record(&record),
+            Payload::from_record(&record),
             Err(Error::Unavailable { .. })
         ));
     }

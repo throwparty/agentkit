@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use super::host::{Host, NamespaceInodes};
-use super::payload::BubblewrapData;
+use super::payload::Payload;
 use super::view::WORKSPACE;
 use crate::sandbox::contract::{Error, SandboxRecord};
 
@@ -16,7 +16,7 @@ use crate::sandbox::contract::{Error, SandboxRecord};
 #[derive(Debug)]
 pub enum Verdict {
     /// The record describes a live sandbox.
-    Live(Box<BubblewrapData>),
+    Live(Box<Payload>),
     /// The sandbox process is gone.
     Absent,
     /// A live process does not match the record.
@@ -31,7 +31,7 @@ pub enum Verdict {
 #[cfg(test)]
 impl Verdict {
     /// The payload, or the failure a command should report.
-    pub fn require(self, name: &str) -> Result<BubblewrapData, Error> {
+    pub fn require(self, name: &str) -> Result<Payload, Error> {
         match self {
             Self::Live(data) => Ok(*data),
             Self::Absent => Err(Error::NotFound {
@@ -58,7 +58,7 @@ impl Verdict {
 
 /// Validate a record against the host.
 pub fn validate(record: &SandboxRecord, host: &dyn Host) -> Verdict {
-    let data = match BubblewrapData::from_record(record) {
+    let data = match Payload::from_record(record) {
         Ok(data) => data,
         Err(error) => return Verdict::Editions(error),
     };
@@ -165,7 +165,7 @@ mod tests {
         FakeHost, MountEntry, NamespaceInodes, ProcessInfo, ProcessState, RootIdentity,
     };
     use crate::backends::bubblewrap::payload::{
-        BubblewrapData, RecordedMount, RecordedRoot, VERSION,
+        Payload, RecordedMount, RecordedRoot, VERSION,
     };
     use crate::backends::bubblewrap::view::WORKSPACE;
     use crate::sandbox::contract::{Error, SandboxRecord};
@@ -183,8 +183,8 @@ mod tests {
         }
     }
 
-    fn data() -> BubblewrapData {
-        BubblewrapData {
+    fn data() -> Payload {
+        Payload {
             version: VERSION,
             launcher_pid: 10,
             launcher_start: 100,
@@ -215,7 +215,7 @@ mod tests {
         }
     }
 
-    fn record(data: &BubblewrapData) -> SandboxRecord {
+    fn record(data: &Payload) -> SandboxRecord {
         SandboxRecord {
             name: "demo".to_string(),
             backend: "bubblewrap".to_string(),
@@ -224,7 +224,7 @@ mod tests {
         }
     }
 
-    fn host(data: &BubblewrapData) -> FakeHost {
+    fn host(data: &Payload) -> FakeHost {
         let mut host = FakeHost::default();
         host.processes.insert(
             data.sandbox_pid,
