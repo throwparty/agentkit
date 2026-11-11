@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use git2::{BranchType, IndexAddOption, ObjectType, Repository, StatusOptions};
+use git2::{BranchType, ObjectType, Repository};
 
 use crate::domain::{SandboxError, ScmError, ScmMode, slugify};
 
@@ -14,9 +14,6 @@ pub trait Scm {
     fn make_archive(&self, reference: &str) -> Result<Vec<u8>, SandboxError>;
     fn list_sandboxes(&self) -> Result<Vec<String>, SandboxError>;
     fn repo_prefix(&self) -> Result<String, SandboxError>;
-    fn has_changes(&self) -> Result<bool, SandboxError>;
-    fn stage_all(&self) -> Result<(), SandboxError>;
-    fn commit_snapshot(&self, message: &str) -> Result<Option<git2::Oid>, SandboxError>;
     fn apply_patch(&self, diff: &str) -> Result<(), SandboxError>;
 }
 
@@ -135,18 +132,6 @@ impl GitScm {
                 .map_err(|source| SandboxError::Scm(ScmError::Reference { source })),
             Err(error) if error.code() == git2::ErrorCode::NotFound => self.head_commit_optional(),
             Err(source) => Err(SandboxError::Scm(ScmError::Reference { source })),
-        }
-    }
-
-    #[allow(unused)]
-    fn index_has_changes(&self, index: &mut git2::Index) -> Result<bool, SandboxError> {
-        let tree_id = index
-            .write_tree()
-            .map_err(|source| SandboxError::Scm(ScmError::IndexWriteTree { source }))?;
-        if let Some(head) = self.head_commit_optional()? {
-            Ok(head.tree_id() != tree_id)
-        } else {
-            Ok(!index.is_empty())
         }
     }
 
@@ -328,18 +313,6 @@ impl Scm for ThreadSafeScm {
         }
     }
 
-    fn has_changes(&self) -> Result<bool, SandboxError> {
-        self.lock()?.has_changes()
-    }
-
-    fn stage_all(&self) -> Result<(), SandboxError> {
-        self.lock()?.stage_all()
-    }
-
-    fn commit_snapshot(&self, message: &str) -> Result<Option<git2::Oid>, SandboxError> {
-        self.lock()?.commit_snapshot(message)
-    }
-
     fn apply_patch(&self, diff: &str) -> Result<(), SandboxError> {
         self.lock()?.apply_patch(diff)
     }
@@ -428,42 +401,6 @@ impl Scm for GitScm {
 
     fn repo_prefix(&self) -> Result<String, SandboxError> {
         Ok(self.repo_prefix())
-    }
-
-    fn has_changes(&self) -> Result<bool, SandboxError> {
-        let mut status_opts = StatusOptions::new();
-        status_opts.include_untracked(true);
-        status_opts.include_ignored(false);
-
-        let statuses = self
-            .repo
-            .statuses(Some(&mut status_opts))
-            .map_err(|source| SandboxError::Scm(ScmError::Status { source }))?;
-
-        Ok(!statuses.is_empty())
-    }
-
-    fn stage_all(&self) -> Result<(), SandboxError> {
-        let mut index = self
-            .repo
-            .index()
-            .map_err(|source| SandboxError::Scm(ScmError::IndexAdd { source }))?;
-
-        index
-            .add_all(["*"].iter(), IndexAddOption::DEFAULT, None)
-            .map_err(|source| SandboxError::Scm(ScmError::IndexAdd { source }))?;
-
-        index
-            .write()
-            .map_err(|source| SandboxError::Scm(ScmError::IndexWrite { source }))
-    }
-
-    fn commit_snapshot(&self, message: &str) -> Result<Option<git2::Oid>, SandboxError> {
-        let Some(workdir) = self.repo.workdir() else {
-            return Ok(None);
-        };
-        // The checkout is its own sandbox here, so its rules are the sandbox's.
-        self.commit_snapshot_from_staging(workdir, message)
     }
 
     fn apply_patch(&self, diff: &str) -> Result<(), SandboxError> {
@@ -1050,135 +987,6 @@ mod tests {
 
         entries.sort();
         assert_eq!(entries, vec![".gitignore", "README.md"]);
-    }
-
-    #[test]
-    fn has_changes_detects_modified_files() {
-        let (tempdir, repo) = init_repo();
-        let scm = GitScm {
-            repo,
-            mode: ScmMode::Direct,
-            snapshot_branch: None,
-            host_repo_path: None,
-        };
-        fs::write(tempdir.path().join("README.md"), "updated").expect("write");
-
-        assert!(scm.has_changes().expect("has changes"));
-    }
-
-    #[test]
-    fn has_changes_false_when_clean() {
-        let (_tempdir, repo) = init_repo();
-        let scm = GitScm {
-            repo,
-            mode: ScmMode::Direct,
-            snapshot_branch: None,
-            host_repo_path: None,
-        };
-
-        assert!(!scm.has_changes().expect("has changes"));
-    }
-
-    #[test]
-    fn commit_snapshot_returns_none_when_clean() {
-        let (_tempdir, repo) = init_repo();
-        let scm = GitScm {
-            repo,
-            mode: ScmMode::Direct,
-            snapshot_branch: None,
-            host_repo_path: None,
-        };
-
-        let result = scm.commit_snapshot("snapshot").expect("commit");
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn commit_snapshot_creates_commit() {
-        let (tempdir, repo) = init_repo();
-        let scm = GitScm {
-            repo,
-            mode: ScmMode::Direct,
-            snapshot_branch: None,
-            host_repo_path: None,
-        };
-
-        fs::write(tempdir.path().join("README.md"), "updated").expect("write");
-        let oid = scm
-            .commit_snapshot("snapshot: update")
-            .expect("commit")
-            .expect("oid");
-
-        let commit = scm.repo.find_commit(oid).expect("commit lookup");
-        assert_eq!(commit.message().expect("message"), "snapshot: update");
-        let snapshot_ref = scm
-            .repo
-            .find_reference("refs/heads/litterbox-snapshots")
-            .expect("snapshot ref");
-        let snapshot_commit = snapshot_ref.peel_to_commit().expect("snapshot commit");
-        assert_eq!(snapshot_commit.id(), oid);
-    }
-
-    #[test]
-    fn commit_snapshot_leaves_head_unchanged() {
-        let (tempdir, repo) = init_repo();
-        let scm = GitScm {
-            repo,
-            mode: ScmMode::Direct,
-            snapshot_branch: None,
-            host_repo_path: None,
-        };
-        let head_before = scm
-            .repo
-            .head()
-            .expect("head")
-            .peel_to_commit()
-            .expect("head commit")
-            .id();
-
-        fs::write(tempdir.path().join("README.md"), "snapshot").expect("write");
-        let oid = scm
-            .commit_snapshot("snapshot: head")
-            .expect("commit")
-            .expect("oid");
-
-        let head_after = scm
-            .repo
-            .head()
-            .expect("head")
-            .peel_to_commit()
-            .expect("head commit")
-            .id();
-        assert_eq!(head_after, head_before);
-
-        let snapshot_commit = scm.repo.find_commit(oid).expect("snapshot commit");
-        assert_eq!(snapshot_commit.parent_id(0).expect("parent"), head_before);
-    }
-
-    #[test]
-    fn commit_snapshot_chains_on_snapshot_branch() {
-        let (tempdir, repo) = init_repo();
-        let scm = GitScm {
-            repo,
-            mode: ScmMode::Direct,
-            snapshot_branch: None,
-            host_repo_path: None,
-        };
-
-        fs::write(tempdir.path().join("README.md"), "first").expect("write");
-        let first_oid = scm
-            .commit_snapshot("snapshot: first")
-            .expect("commit")
-            .expect("oid");
-
-        fs::write(tempdir.path().join("README.md"), "second").expect("write");
-        let second_oid = scm
-            .commit_snapshot("snapshot: second")
-            .expect("commit")
-            .expect("oid");
-
-        let second_commit = scm.repo.find_commit(second_oid).expect("commit lookup");
-        assert_eq!(second_commit.parent_id(0).expect("parent"), first_oid);
     }
 
     #[test]
@@ -1913,24 +1721,5 @@ mod tests {
         let second_commit = scm.repo.find_commit(second_oid).expect("second commit");
         assert_eq!(second_commit.parent_count(), 1);
         assert_eq!(second_commit.parent_id(0).expect("parent"), initial_oid);
-    }
-    #[test]
-    fn commit_snapshot_on_bare_repo_returns_none() {
-        // Bare repos have no workdir, so commit_snapshot returns Ok(None)
-        let tempdir = TempDir::new().expect("tempdir");
-        let repo = git2::Repository::init_bare(tempdir.path()).expect("init bare");
-        assert!(repo.is_bare());
-
-        let scm = GitScm {
-            repo,
-            mode: ScmMode::Remote,
-            snapshot_branch: None,
-            host_repo_path: None,
-        };
-
-        let result = scm
-            .commit_snapshot("test message")
-            .expect("commit_snapshot");
-        assert!(result.is_none());
     }
 }

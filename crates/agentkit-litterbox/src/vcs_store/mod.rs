@@ -393,10 +393,6 @@ mod tests {
         let sandboxes = scm.list_sandboxes().expect("list sandboxes");
         assert_eq!(sandboxes, vec!["my-sandbox"]);
 
-        // commit_snapshot returns None on bare repo (no workdir)
-        let snapshot = scm.commit_snapshot("test").expect("commit snapshot");
-        assert!(snapshot.is_none(), "bare repo snapshot returns None");
-
         // Delete branch from bare clone
         scm.delete_branch("my-sandbox").expect("delete branch");
 
