@@ -469,6 +469,8 @@ impl Backend for BubblewrapBackend {
             // the pid now belongs to something else.
             if let validate::Verdict::Live(data) = validate::validate(sandbox, &*self.host) {
                 let holder = holder::Holder::from_payload(&data);
+                // Tear down even when pid 1 is already gone: its namespace can
+                // outlive it, and the members are what keep the workspace open.
                 holder::teardown(&*self.host, &holder, std::time::Duration::from_secs(30))?;
             }
             let directory = workspace::sandbox_directory(&sandbox.project_slug, &sandbox.name);
