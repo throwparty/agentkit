@@ -8,7 +8,7 @@ use futures_util::future::BoxFuture;
 
 use super::BACKEND;
 use super::host::SharedHost;
-use super::payload::{BubblewrapData, RecordedMount, RecordedRoot};
+use super::payload::{Payload, RecordedMount, RecordedRoot};
 use super::view::{Boundaries, RenderOptions, Requested, View, WORKSPACE};
 use super::{environment, holder, join, lifecycle, readiness, validate, workspace};
 use crate::backends::shared::{EXEC_OUTPUT_CAP, PROVISION_OUTPUT_CAP, run_steps};
@@ -209,7 +209,7 @@ impl BubblewrapBackend {
         workspace: &Path,
         environment: &crate::sandbox::environment::Environment,
         forwards: &[crate::sandbox::contract::Forward],
-    ) -> Result<BubblewrapData, Error> {
+    ) -> Result<Payload, Error> {
         let launcher = self
             .host
             .process(holder.launcher_pid)
@@ -231,7 +231,7 @@ impl BubblewrapBackend {
             .host
             .namespaces(holder.sandbox_pid)
             .ok_or_else(|| Error::failed("the sandbox namespaces could not be read"))?;
-        Ok(BubblewrapData {
+        Ok(Payload {
             version: super::payload::VERSION,
             launcher_pid: launcher.0,
             launcher_start: launcher.1,
@@ -263,7 +263,7 @@ impl BubblewrapBackend {
     }
 
     /// The payload of a live sandbox, or the failure its operation reports.
-    fn live(&self, sandbox: &SandboxRecord) -> Result<BubblewrapData, Error> {
+    fn live(&self, sandbox: &SandboxRecord) -> Result<Payload, Error> {
         match validate::validate(sandbox, &*self.host) {
             validate::Verdict::Live(data) => Ok(*data),
             validate::Verdict::Absent => Err(Error::NotFound {
@@ -329,7 +329,7 @@ impl Backend for BubblewrapBackend {
                         );
                         continue;
                     };
-                    let data: BubblewrapData = match toml::from_str(&text) {
+                    let data: Payload = match toml::from_str(&text) {
                         Ok(data) => data,
                         Err(error) => {
                             tracing::warn!(
@@ -441,7 +441,7 @@ impl Backend for BubblewrapBackend {
                 validate::Verdict::Absent => {
                     // The process is gone but the payload is still the record
                     // of what the sandbox was, including its network posture.
-                    let data = BubblewrapData::from_record(sandbox)?;
+                    let data = Payload::from_record(sandbox)?;
                     Ok(Inspection {
                         name: sandbox.name.clone(),
                         backend: BACKEND.to_string(),
@@ -909,7 +909,7 @@ mod tests {
         FakeHost, MountEntry, NamespaceInodes, ProcessInfo, ProcessState, RootIdentity,
     };
     use crate::backends::bubblewrap::payload::{
-        BubblewrapData, RecordedMount, RecordedRoot, VERSION,
+        Payload, RecordedMount, RecordedRoot, VERSION,
     };
     use crate::sandbox::contract::{
         Backend, ContributionSort, CreateRequest, Error, RequestedPort, SandboxAction,
@@ -936,8 +936,8 @@ mod tests {
         BubblewrapBackend::new(BubblewrapSettings::default(), Arc::new(FakeHost::default()))
     }
 
-    fn payload(network: Network) -> BubblewrapData {
-        BubblewrapData {
+    fn payload(network: Network) -> Payload {
+        Payload {
             version: VERSION,
             launcher_pid: 10,
             launcher_start: 100,
@@ -968,7 +968,7 @@ mod tests {
         }
     }
 
-    fn record(data: BubblewrapData) -> SandboxRecord {
+    fn record(data: Payload) -> SandboxRecord {
         SandboxRecord {
             name: "demo".to_string(),
             backend: "bubblewrap".to_string(),
@@ -977,7 +977,7 @@ mod tests {
         }
     }
 
-    fn live_host(data: &BubblewrapData) -> FakeHost {
+    fn live_host(data: &Payload) -> FakeHost {
         let mut host = FakeHost::default();
         host.processes.insert(
             data.sandbox_pid,
@@ -1385,7 +1385,7 @@ mod tests {
         let Some(record) = create_or_skip(&backend, &request).await else {
             return;
         };
-        let data = payload::BubblewrapData::from_record(&record).expect("payload");
+        let data = payload::Payload::from_record(&record).expect("payload");
         let holder = holder::Holder::from_payload(&data);
         let command = |program: &str| vec!["sh".to_string(), "-c".to_string(), program.to_string()];
         let write = backend
@@ -1441,7 +1441,7 @@ mod tests {
         let Some(record) = create_or_skip(&backend, &request).await else {
             return;
         };
-        let data = payload::BubblewrapData::from_record(&record).expect("payload");
+        let data = payload::Payload::from_record(&record).expect("payload");
         let holder = holder::Holder::from_payload(&data);
         let outcome = backend
             .exec(
@@ -1473,7 +1473,7 @@ mod tests {
         listener.local_addr().expect("address").port()
     }
 
-    fn real_holder(data: &BubblewrapData) -> crate::backends::bubblewrap::holder::Holder {
+    fn real_holder(data: &Payload) -> crate::backends::bubblewrap::holder::Holder {
         crate::backends::bubblewrap::holder::Holder::from_payload(data)
     }
 
@@ -1515,7 +1515,7 @@ mod tests {
         let Some(record) = create_or_skip(&backend, &request).await else {
             return;
         };
-        let data = payload::BubblewrapData::from_record(&record).expect("payload");
+        let data = payload::Payload::from_record(&record).expect("payload");
 
         let host_net = std::fs::read_link("/proc/self/ns/net").expect("host net namespace");
         let sandbox_net = std::fs::read_link(format!("/proc/{}/ns/net", data.sandbox_pid))
@@ -1636,7 +1636,7 @@ mod tests {
         let Some(record) = create_or_skip(&backend, &request).await else {
             return;
         };
-        let data = payload::BubblewrapData::from_record(&record).expect("payload");
+        let data = payload::Payload::from_record(&record).expect("payload");
 
         let host_net = std::fs::read_link("/proc/self/ns/net").expect("host net namespace");
         let sandbox_net = std::fs::read_link(format!("/proc/{}/ns/net", data.sandbox_pid))

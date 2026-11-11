@@ -82,7 +82,7 @@ Add `environment.rs` merging the resolved steps' contributions in order through 
 
 ### T-007: [x] Add the record payload
 
-Add `payload.rs` with `BubblewrapData` version 1: the payload version, both pids with start times, the seven inode numbers, the uid, the root device and inode, the mounts from host paths with their access, the host and sandbox workspace paths, the scope unit, the paused flag and the provenance. Fail on a higher version as unreadable and on a lower version or missing field as Unavailable.
+Add `payload.rs` with `Payload` version 1: the payload version, both pids with start times, the seven inode numbers, the uid, the root device and inode, the mounts from host paths with their access, the host and sandbox workspace paths, the scope unit, the paused flag and the provenance. Fail on a higher version as unreadable and on a lower version or missing field as Unavailable.
 
 
 | Field | Value |
