@@ -631,12 +631,15 @@ pub trait Backend: Send + Sync {
     /// A selector narrows the copy to the paths a snapshot carries; every
     /// backend evaluates it before reading a path, so a rejected path is never
     /// transferred. `None` copies everything.
+    ///
+    /// The selector is owned so the copy can run as blocking work the caller
+    /// can bound: a borrowed one would tie the copy to the caller's stack.
     fn download<'a>(
         &'a self,
         sandbox: &'a SandboxRecord,
         source: &'a str,
         destination: &'a std::path::Path,
-        selector: Option<&'a dyn SnapshotSelector>,
+        selector: Option<std::sync::Arc<dyn SnapshotSelector>>,
     ) -> BoxFuture<'a, Result<(), Error>>;
 
     /// Describe a sandbox without changing it.
@@ -709,7 +712,7 @@ mod tests {
             _sandbox: &'a SandboxRecord,
             _source: &'a str,
             _destination: &'a std::path::Path,
-            _selector: Option<&'a dyn super::SnapshotSelector>,
+            _selector: Option<std::sync::Arc<dyn super::SnapshotSelector>>,
         ) -> BoxFuture<'a, Result<(), Error>> {
             Box::pin(async { Err(Error::failed("stub")) })
         }
