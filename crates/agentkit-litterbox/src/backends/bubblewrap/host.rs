@@ -30,6 +30,60 @@ pub struct ProcessInfo {
     pub uid: u32,
 }
 
+/// The seven namespaces, in the order every record and descriptor list uses.
+///
+/// The payload stores the inodes as an array, so the order is part of the
+/// record format. This is the one place it is written down.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(usize)]
+pub enum Namespace {
+    /// The user namespace.
+    User = 0,
+    /// The ipc namespace.
+    Ipc = 1,
+    /// The network namespace.
+    Net = 2,
+    /// The pid namespace.
+    Pid = 3,
+    /// The mount namespace.
+    Mnt = 4,
+    /// The uts namespace.
+    Uts = 5,
+    /// The cgroup namespace.
+    Cgroup = 6,
+}
+
+impl Namespace {
+    /// Every namespace, in record order.
+    pub const ALL: [Namespace; 7] = [
+        Namespace::User,
+        Namespace::Ipc,
+        Namespace::Net,
+        Namespace::Pid,
+        Namespace::Mnt,
+        Namespace::Uts,
+        Namespace::Cgroup,
+    ];
+
+    /// The position the namespace takes in a recorded array or descriptor list.
+    pub fn index(self) -> usize {
+        self as usize
+    }
+
+    /// The name the kernel uses for it, as it appears in `/proc`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Namespace::User => "user",
+            Namespace::Ipc => "ipc",
+            Namespace::Net => "net",
+            Namespace::Pid => "pid",
+            Namespace::Mnt => "mnt",
+            Namespace::Uts => "uts",
+            Namespace::Cgroup => "cgroup",
+        }
+    }
+}
+
 /// The seven namespace inodes a sandbox process holds.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NamespaceInodes {
@@ -53,14 +107,47 @@ impl NamespaceInodes {
     /// The inodes in the order the join enters them.
     pub fn entries(&self) -> [(&'static str, u64); 7] {
         [
-            ("user", self.user),
-            ("ipc", self.ipc),
-            ("net", self.net),
-            ("pid", self.pid),
-            ("mnt", self.mnt),
-            ("uts", self.uts),
-            ("cgroup", self.cgroup),
+            (Namespace::User.name(), self.user),
+            (Namespace::Ipc.name(), self.ipc),
+            (Namespace::Net.name(), self.net),
+            (Namespace::Pid.name(), self.pid),
+            (Namespace::Mnt.name(), self.mnt),
+            (Namespace::Uts.name(), self.uts),
+            (Namespace::Cgroup.name(), self.cgroup),
         ]
+    }
+
+    /// The inode recorded for one namespace.
+    pub fn inode(&self, namespace: Namespace) -> u64 {
+        match namespace {
+            Namespace::User => self.user,
+            Namespace::Ipc => self.ipc,
+            Namespace::Net => self.net,
+            Namespace::Pid => self.pid,
+            Namespace::Mnt => self.mnt,
+            Namespace::Uts => self.uts,
+            Namespace::Cgroup => self.cgroup,
+        }
+    }
+}
+
+impl From<[u64; 7]> for NamespaceInodes {
+    fn from(inodes: [u64; 7]) -> Self {
+        Self {
+            user: inodes[Namespace::User.index()],
+            ipc: inodes[Namespace::Ipc.index()],
+            net: inodes[Namespace::Net.index()],
+            pid: inodes[Namespace::Pid.index()],
+            mnt: inodes[Namespace::Mnt.index()],
+            uts: inodes[Namespace::Uts.index()],
+            cgroup: inodes[Namespace::Cgroup.index()],
+        }
+    }
+}
+
+impl From<&NamespaceInodes> for [u64; 7] {
+    fn from(namespaces: &NamespaceInodes) -> Self {
+        Namespace::ALL.map(|namespace| namespaces.inode(namespace))
     }
 }
 
@@ -427,7 +514,31 @@ impl Host for FakeHost {
 
 #[cfg(test)]
 mod tests {
-    use super::{Host, ProcessState, SystemHost};
+    use super::{Host, Namespace, NamespaceInodes, ProcessState, SystemHost};
+
+    #[test]
+    fn the_namespace_table_is_the_record_order() {
+        // The payload keeps the inodes as an array, so the enum's numbering is
+        // the record format. Nothing else may disagree with it.
+        for (position, namespace) in Namespace::ALL.iter().enumerate() {
+            assert_eq!(namespace.index(), position, "{} is out of order", namespace.name());
+        }
+        let inodes = NamespaceInodes {
+            user: 1,
+            ipc: 2,
+            net: 3,
+            pid: 4,
+            mnt: 5,
+            uts: 6,
+            cgroup: 7,
+        };
+        assert_eq!(
+            inodes.entries().map(|(name, _)| name),
+            Namespace::ALL.map(Namespace::name)
+        );
+        assert_eq!(<[u64; 7]>::from(&inodes), [1, 2, 3, 4, 5, 6, 7]);
+        assert_eq!(NamespaceInodes::from([1, 2, 3, 4, 5, 6, 7]), inodes);
+    }
 
     #[test]
     fn the_system_host_reads_this_process() {

@@ -462,21 +462,7 @@ impl Backend for BubblewrapBackend {
             // live process does not match it is cleaned up without a signal:
             // the pid now belongs to something else.
             if let validate::Verdict::Live(data) = validate::validate(sandbox, &*self.host) {
-                let holder = holder::Holder {
-                    launcher_pid: data.launcher_pid,
-                    sandbox_pid: data.sandbox_pid,
-                    sandbox_start: Some(data.sandbox_start),
-                    namespaces: super::host::NamespaceInodes {
-                        user: data.namespaces[0],
-                        ipc: data.namespaces[1],
-                        net: data.namespaces[2],
-                        pid: data.namespaces[3],
-                        mnt: data.namespaces[4],
-                        uts: data.namespaces[5],
-                        cgroup: data.namespaces[6],
-                    },
-                    unit: data.scope.clone(),
-                };
+                let holder = holder::Holder::from_payload(&data);
                 holder::teardown(&*self.host, &holder, std::time::Duration::from_secs(30))?;
             }
             let directory = workspace::sandbox_directory(&sandbox.project_slug, &sandbox.name);
@@ -995,15 +981,7 @@ mod tests {
         );
         host.namespaces.insert(
             data.sandbox_pid,
-            NamespaceInodes {
-                user: data.namespaces[0],
-                ipc: data.namespaces[1],
-                net: data.namespaces[2],
-                pid: data.namespaces[3],
-                mnt: data.namespaces[4],
-                uts: data.namespaces[5],
-                cgroup: data.namespaces[6],
-            },
+            NamespaceInodes::from(data.namespaces),
         );
         host.roots.insert(
             data.sandbox_pid,
@@ -1400,21 +1378,7 @@ mod tests {
             return;
         };
         let data = payload::BubblewrapData::from_record(&record).expect("payload");
-        let holder = holder::Holder {
-            launcher_pid: data.launcher_pid,
-            sandbox_pid: data.sandbox_pid,
-            sandbox_start: Some(data.sandbox_start),
-            namespaces: crate::backends::bubblewrap::host::NamespaceInodes {
-                user: data.namespaces[0],
-                ipc: data.namespaces[1],
-                net: data.namespaces[2],
-                pid: data.namespaces[3],
-                mnt: data.namespaces[4],
-                uts: data.namespaces[5],
-                cgroup: data.namespaces[6],
-            },
-            unit: data.scope.clone(),
-        };
+        let holder = holder::Holder::from_payload(&data);
         let command = |program: &str| vec!["sh".to_string(), "-c".to_string(), program.to_string()];
         let write = backend
             .exec(&record, &command("echo ok > /src/probe.txt; echo written"))
@@ -1470,21 +1434,7 @@ mod tests {
             return;
         };
         let data = payload::BubblewrapData::from_record(&record).expect("payload");
-        let holder = holder::Holder {
-            launcher_pid: data.launcher_pid,
-            sandbox_pid: data.sandbox_pid,
-            sandbox_start: Some(data.sandbox_start),
-            namespaces: crate::backends::bubblewrap::host::NamespaceInodes {
-                user: data.namespaces[0],
-                ipc: data.namespaces[1],
-                net: data.namespaces[2],
-                pid: data.namespaces[3],
-                mnt: data.namespaces[4],
-                uts: data.namespaces[5],
-                cgroup: data.namespaces[6],
-            },
-            unit: data.scope.clone(),
-        };
+        let holder = holder::Holder::from_payload(&data);
         let outcome = backend
             .exec(
                 &record,
@@ -1506,7 +1456,7 @@ mod tests {
         assert!(
             execution
                 .stdout
-                .contains(&format!("pid:[{}]", data.namespaces[3]))
+                .contains(&format!("pid:[{}]", NamespaceInodes::from(data.namespaces).pid))
         );
     }
 
@@ -1516,20 +1466,7 @@ mod tests {
     }
 
     fn real_holder(data: &BubblewrapData) -> crate::backends::bubblewrap::holder::Holder {
-        crate::backends::bubblewrap::holder::Holder {
-            launcher_pid: data.launcher_pid,
-            sandbox_pid: data.sandbox_pid,
-            namespaces: NamespaceInodes {
-                user: data.namespaces[0],
-                ipc: data.namespaces[1],
-                net: data.namespaces[2],
-                pid: data.namespaces[3],
-                mnt: data.namespaces[4],
-                uts: data.namespaces[5],
-                cgroup: data.namespaces[6],
-            },
-            unit: data.scope.clone(),
-        }
+        crate::backends::bubblewrap::holder::Holder::from_payload(data)
     }
 
     fn real_request(name: &str, staged: &Path, ports: Vec<RequestedPort>) -> CreateRequest {
