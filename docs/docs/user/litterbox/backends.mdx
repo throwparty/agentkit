@@ -37,6 +37,16 @@ memory-mb = 4096
 tasks = 512
 ```
 
+The sandbox runs the shell you name for the scripts its tools evaluate. The
+default is `["sh", "-c"]`; if the host's userland has no `sh` entry, name
+another shell. It is resolved on the host and bound into the view, so it does
+not have to be on the sandbox's `PATH`.
+
+```toml
+[backends.bubblewrap]
+shell = ["bash", "-c"]
+```
+
 A project must list the backend to use its provisioning steps:
 
 ```toml
