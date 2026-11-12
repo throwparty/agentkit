@@ -12,7 +12,7 @@ use std::io;
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::FileTypeExt;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::sandbox::contract::Error;
 
@@ -173,8 +173,25 @@ fn check_contributed(path: &Path, workspace: &Path, boundaries: &Boundaries) -> 
             message: format!("{} is not an absolute path", path.display()),
         });
     }
+    // A lexical check is only sound on a normalised path: `..` would let a
+    // contribution name a protected root without spelling it.
+    if path
+        .components()
+        .any(|component| matches!(component, Component::ParentDir | Component::CurDir))
+    {
+        return Err(Error::Misconfigured {
+            message: format!("{} is not a normalised path", path.display()),
+        });
+    }
     for protected in boundaries.protected() {
-        if path == protected || protected.starts_with(path) {
+        // A contribution may be neither a protected root, nor anything inside
+        // one, nor an ancestor of one. Two exceptions: every absolute path
+        // starts with the root, and /tmp is a shared scratch root where a
+        // specific subtree is a legitimate grant.
+        let scratch = protected == Path::new("/tmp");
+        let inside = protected != Path::new("/") && !scratch && path.starts_with(protected);
+        let ancestor = protected.starts_with(path);
+        if path == protected || inside || ancestor {
             return Err(Error::Misconfigured {
                 message: format!("{} is a protected path", path.display()),
             });
