@@ -82,6 +82,19 @@ impl Namespace {
             Namespace::Cgroup => "cgroup",
         }
     }
+
+    /// The name as a C string, for a call that takes one.
+    pub fn c_name(self) -> &'static std::ffi::CStr {
+        match self {
+            Namespace::User => c"user",
+            Namespace::Ipc => c"ipc",
+            Namespace::Net => c"net",
+            Namespace::Pid => c"pid",
+            Namespace::Mnt => c"mnt",
+            Namespace::Uts => c"uts",
+            Namespace::Cgroup => c"cgroup",
+        }
+    }
 }
 
 /// The seven namespace inodes a sandbox process holds.
