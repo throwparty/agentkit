@@ -190,6 +190,20 @@ impl BubblewrapBackend {
                     });
                 }
             }
+            // The certificate bundles are links into a store path, so the
+            // target has to be in the view as well or a TLS client reads a
+            // dangling link. `SSL_CERT_FILE` names the resolved target.
+            for candidate in [
+                "/etc/ssl/certs/ca-bundle.crt",
+                "/etc/ssl/certs/ca-certificates.crt",
+            ] {
+                if let Ok(path) = std::fs::canonicalize(candidate) {
+                    requested.push(Requested {
+                        path,
+                        contributed: false,
+                    });
+                }
+            }
         }
         requested.extend(
             Self::contributed_mounts(request)
@@ -524,8 +538,6 @@ impl Backend for BubblewrapBackend {
             // the pid now belongs to something else.
             if let validate::Verdict::Live(data) = validate::validate(sandbox, &*self.host) {
                 let holder = holder::Holder::from_payload(&data);
-                // Tear down even when pid 1 is already gone: its namespace can
-                // outlive it, and the members are what keep the workspace open.
                 holder::teardown(&*self.host, &holder, std::time::Duration::from_secs(30))?;
             }
             let directory = workspace::sandbox_directory(&sandbox.project_slug, &sandbox.name);
@@ -845,6 +857,7 @@ impl BubblewrapBackend {
             workspace_host: workspace,
             status_fd: STATUS_FD,
             network: self.settings.network,
+            symlinks: &holder_command.symlinks,
         });
         let status_path = workspace
             .parent()
@@ -1171,6 +1184,7 @@ mod tests {
             args: vec!["-c".to_string()],
             binds: vec![std::path::PathBuf::from("/usr/bin/sh")],
             path: "/usr/bin".to_string(),
+            symlinks: Vec::new(),
         }
     }
 
@@ -1210,6 +1224,7 @@ mod tests {
             args: vec!["-c".to_string()],
             binds: Vec::new(),
             path: String::new(),
+            symlinks: Vec::new(),
         };
         let requested = BubblewrapBackend::requested_paths(&request, &command, Network::Denied);
         assert_eq!(requested.len(), 1);
@@ -1225,6 +1240,7 @@ mod tests {
             args: vec!["-c".to_string()],
             binds: Vec::new(),
             path: String::new(),
+            symlinks: Vec::new(),
         };
         let host_paths: Vec<PathBuf> =
             BubblewrapBackend::requested_paths(&request, &command, Network::Host)
@@ -1544,6 +1560,22 @@ mod tests {
                 ],
             )
             .await;
+        // A shebang names /bin/sh or /usr/bin/env by absolute path, so both
+        // have to exist whatever the sandbox's PATH says.
+        let shebang = backend
+            .exec(&record, &["/bin/sh".to_string(), "-c".to_string(), "echo sh".to_string()])
+            .await;
+        let env = backend
+            .exec(
+                &record,
+                &[
+                    "/usr/bin/env".to_string(),
+                    "sh".to_string(),
+                    "-c".to_string(),
+                    "echo env".to_string(),
+                ],
+            )
+            .await;
         let _ = holder::teardown(
             &SystemHost::new(),
             &holder,
@@ -1557,6 +1589,10 @@ mod tests {
                 .stdout
                 .contains(&format!("pid:[{}]", NamespaceInodes::from(data.namespaces).pid))
         );
+        let shebang = shebang.expect("executed");
+        assert_eq!(shebang.exit_code, 0, "{}", shebang.stderr);
+        let env = env.expect("executed");
+        assert_eq!(env.exit_code, 0, "{}", env.stderr);
     }
 
     fn free_port() -> u16 {
