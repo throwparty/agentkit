@@ -344,9 +344,13 @@ pub struct Start<'a> {
     pub scope: Option<(&'a Path, &'a str)>,
     /// Where bwrap writes its status document.
     pub host: &'a dyn Host,
+    /// Where the status document is written on the host.
     pub status_path: &'a Path,
     /// Where bwrap's diagnostics go.
     pub stderr_path: &'a Path,
+    /// The descriptor bwrap is told to report on, which is chosen above every
+    /// pinned mount descriptor so the two cannot collide.
+    pub descriptor: i32,
     /// The mount descriptors the mechanism is handed, which are close-on-exec
     /// everywhere else.
     pub inherit: &'a [i32],
@@ -400,19 +404,22 @@ pub fn start(start: &Start<'_>) -> Result<Holder, Error> {
         }
     }
     let status_fd = status.as_raw_fd();
+    let target = start.descriptor;
     let inherit = start.inherit.to_vec();
     // SAFETY: dup2, fcntl and close are async-signal-safe and every descriptor
     // is open for the lifetime of the spawn.
     unsafe {
         use std::os::unix::process::CommandExt;
         command.pre_exec(move || {
-            if libc::dup2(status_fd, 3) < 0 {
+            // The target is above every pinned mount descriptor, so this
+            // cannot replace one of them.
+            if libc::dup2(status_fd, target) < 0 {
                 return Err(io::Error::last_os_error());
             }
             // `dup2` with the same descriptor does nothing, so the close-on-exec
             // flag has to be cleared explicitly or the status file never
             // reaches bwrap.
-            if libc::fcntl(3, libc::F_SETFD, 0) < 0 {
+            if libc::fcntl(target, libc::F_SETFD, 0) < 0 {
                 return Err(io::Error::last_os_error());
             }
             // The mount descriptors are close-on-exec everywhere else; this is
@@ -569,25 +576,102 @@ pub fn teardown(host: &dyn Host, holder: &Holder, timeout: Duration) -> Result<(
 
     // Pid 1 of the namespace may already be gone while its children live on,
     // reparented and still holding the workspace open. Address them by the
-    // namespace inode the record kept for exactly this.
+    // namespace inode the record kept for exactly this, and wait for them:
+    // signal delivery is not proof of exit, and the state directory is removed
+    // as soon as this returns.
     if holder.namespaces.pid != 0 {
-        for member in host.namespace_members_of(holder.namespaces.pid) {
-            if member == holder.sandbox_pid || host.process(member).is_none() {
-                continue;
+        loop {
+            let members: Vec<u32> = host
+                .namespace_members_of(holder.namespaces.pid)
+                .into_iter()
+                .filter(|member| *member != holder.sandbox_pid)
+                .collect();
+            if members.is_empty() {
+                break;
             }
-            // SAFETY: signalling a member of the dead sandbox is the point.
-            let result = unsafe { libc::kill(member as i32, libc::SIGKILL) };
-            if result < 0 {
-                let error = io::Error::last_os_error();
-                if error.raw_os_error() != Some(libc::ESRCH) {
-                    return Err(Error::failed(format!(
-                        "the sandbox left pid {member} behind: {error}"
-                    )));
-                }
+            for member in &members {
+                signal_member(host, holder.namespaces.pid, *member)?;
             }
+            if Instant::now() >= deadline {
+                return Err(Error::failed(format!(
+                    "sandbox '{}' left {} process(es) in its pid namespace after {}s",
+                    holder.sandbox_pid,
+                    members.len(),
+                    timeout.as_secs()
+                )));
+            }
+            std::thread::sleep(Duration::from_millis(10));
         }
     }
+    // The transient scope is not retired by its own exit, and a name left
+    // behind cannot be used again.
+    if let Some(unit) = &holder.unit {
+        host.retire_scope(unit);
+    }
 
+    Ok(())
+}
+
+/// Signal one process the dead sandbox left in its pid namespace.
+///
+/// The pid came from an enumeration, which is a fact about a moment: by the
+/// time it is read it may name an unrelated process. A pidfd pins whichever
+/// process holds the pid now, the namespace is read back through that pin, and
+/// the signal goes to the pinned descriptor rather than to the number again.
+fn signal_member(host: &dyn Host, inode: u64, pid: u32) -> Result<(), Error> {
+    // SAFETY: pidfd_open has no preconditions and reports a stale pid as an
+    // error rather than acting on it.
+    let descriptor = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
+    if descriptor >= 0 {
+        // SAFETY: the syscall returned a descriptor this value now owns.
+        let descriptor = unsafe { std::os::fd::OwnedFd::from_raw_fd(descriptor as i32) };
+        // The descriptor holds the process still, so what is read here is what
+        // is signalled. A pid that was reused outside the namespace is left
+        // alone: only the sandbox's own remnants are signalled.
+        match host.namespaces(pid) {
+            Some(namespaces) if namespaces.pid == inode => {}
+            _ => return Ok(()),
+        }
+        // SAFETY: the pidfd names the process that was just validated.
+        let outcome = unsafe {
+            libc::syscall(
+                libc::SYS_pidfd_send_signal,
+                descriptor.as_raw_fd(),
+                libc::SIGKILL,
+                std::ptr::null::<libc::siginfo_t>(),
+                0,
+            )
+        };
+        if outcome < 0 {
+            let error = io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::ESRCH) {
+                // It exited between the pin and the signal.
+                return Ok(());
+            }
+            return Err(Error::failed(format!(
+                "a process left in the sandbox namespace could not be signalled: {error}"
+            )));
+        }
+        return Ok(());
+    }
+
+    // A kernel without pidfds leaves a window between the check and the call,
+    // so the namespace is read as late as it can be.
+    match host.namespaces(pid) {
+        Some(namespaces) if namespaces.pid == inode => {}
+        _ => return Ok(()),
+    }
+    // SAFETY: kill has no preconditions; the pid belongs to the namespace just
+    // validated.
+    let outcome = unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+    if outcome < 0 {
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() != Some(libc::ESRCH) {
+            return Err(Error::failed(format!(
+                "a process left in the sandbox namespace could not be killed: {error}"
+            )));
+        }
+    }
     Ok(())
 }
 
@@ -988,6 +1072,56 @@ mod tests {
             unit: None,
         };
         teardown(&host, &holder, Duration::from_millis(50)).expect("torn down");
+    }
+
+    #[test]
+    fn a_member_that_does_not_leave_fails_the_teardown() {
+        // A pid the host cannot have: opening it fails, and nothing is
+        // signalled for real while the test runs.
+        let member = 2_000_000_000;
+        let mut host = FakeHost::default();
+        host.processes.insert(
+            member,
+            ProcessInfo {
+                state: ProcessState::Running,
+                start_time: 1,
+                uid: 1000,
+            },
+        );
+        host.namespaces.insert(
+            member,
+            NamespaceInodes {
+                user: 1,
+                ipc: 2,
+                net: 3,
+                pid: 4,
+                mnt: 5,
+                uts: 6,
+                cgroup: 7,
+            },
+        );
+        let holder = Holder {
+            launcher_pid: 0,
+            sandbox_pid: 2_000_000_001,
+            sandbox_start: None,
+            namespaces: NamespaceInodes {
+                user: 1,
+                ipc: 2,
+                net: 3,
+                pid: 4,
+                mnt: 5,
+                uts: 6,
+                cgroup: 7,
+            },
+            unit: None,
+        };
+
+        let error = teardown(&host, &holder, Duration::from_millis(30))
+            .expect_err("the member outlives the teardown");
+        assert!(
+            error.to_string().contains("pid namespace"),
+            "the failure names what is left behind: {error}"
+        );
     }
 
     #[test]

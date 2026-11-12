@@ -223,6 +223,8 @@ pub trait Host: Send + Sync {
     fn namespace_members(&self, pid: u32) -> Option<Vec<u32>>;
     /// Whether a delegating user manager can give this process a scope.
     fn user_scope(&self) -> bool;
+    /// Ask the user manager to forget the transient scope it ran.
+    fn retire_scope(&self, _unit: &str) {}
     /// Every process whose pid namespace is the given inode, whether or not
     /// the pid that named it still exists.
     fn namespace_members_of(&self, inode: u64) -> Vec<u32>;
@@ -445,6 +447,25 @@ impl Host for SystemHost {
             .unwrap_or_else(|poison| poison.into_inner())
             .insert(unit.to_string(), directory.clone());
         Some(directory)
+    }
+
+    fn retire_scope(&self, unit: &str) {
+        // A transient scope is not retired by its own exit; leaving it behind
+        // makes the same unit name fail on the next attempt.
+        for arguments in [
+            vec!["--user", "stop", &format!("{unit}.scope")],
+            vec!["--user", "reset-failed", &format!("{unit}.scope")],
+        ] {
+            let outcome = std::process::Command::new("systemctl")
+                .args(&arguments)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+            if !outcome.is_ok_and(|status| status.success()) {
+                tracing::warn!(unit = %unit, "the scope unit could not be retired");
+            }
+        }
     }
 
     fn read_scope(&self, unit: &str, file: &str) -> Option<String> {

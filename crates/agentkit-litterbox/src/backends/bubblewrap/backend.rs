@@ -850,12 +850,20 @@ impl BubblewrapBackend {
         } else {
             None
         };
+        // The status descriptor is chosen above every pinned mount descriptor,
+        // so bwrap's report cannot collide with a mount the view handed it.
+        let status_fd = view
+            .descriptors()
+            .iter()
+            .copied()
+            .max()
+            .map_or(STATUS_FD, |highest| highest.max(STATUS_FD - 1) + 1);
         let argv = view.render(&RenderOptions {
             bwrap,
             holder: &holder_command.shell,
             holder_arguments: &holder_arguments,
             workspace_host: workspace,
-            status_fd: STATUS_FD,
+            status_fd,
             network: self.settings.network,
             symlinks: &holder_command.symlinks,
         });
@@ -885,6 +893,7 @@ impl BubblewrapBackend {
                     .map(|(launcher, unit)| (launcher.as_path(), unit.as_str())),
                 status_path: &spawn_status,
                 stderr_path: &spawn_stderr,
+                descriptor: status_fd,
                 inherit: &spawn_inherit,
             })
         })
