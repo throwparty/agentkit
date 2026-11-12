@@ -63,6 +63,29 @@ pub fn transfer_in(root: &Path, source: &Path, destination: &str) -> Result<(), 
     })
 }
 
+/// The destination, opened once and never resolved through again.
+///
+/// Everything below it is created and opened relative to a descriptor, so a
+/// link in the caller's destination tree is refused rather than followed: a
+/// download of `sub/file` cannot truncate a file outside the tree even when
+/// `sub` is a link.
+struct Destination {
+    directory: std::fs::File,
+}
+
+impl Destination {
+    fn open(path: &Path) -> io::Result<Self> {
+        // The caller names the root, so its parents are the caller's business;
+        // everything below it is resolved from this descriptor instead.
+        std::fs::create_dir_all(path)?;
+        let directory = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY)
+            .open(path)?;
+        Ok(Self { directory })
+    }
+}
+
 /// Copy a sandbox path out to the host.
 ///
 /// A selector narrows the copy to the paths a snapshot carries; the walk asks
@@ -75,10 +98,21 @@ pub fn transfer_out(
 ) -> Result<(), Error> {
     let root = Root::open(root)
         .map_err(|error| Error::failed(format!("the workspace cannot be opened: {error}")))?;
+    let destination = Destination::open(destination).map_err(|error| {
+        Error::failed(format!(
+            "{} cannot be created: {error}",
+            destination.display()
+        ))
+    })?;
     let relative = components(source, "download from the sandbox")?;
     let Some((name, parents)) = relative.split_last() else {
         // The workspace itself: its contents merge into the destination.
-        return copy_contents(&root.directory, Path::new(""), destination, selector);
+        return copy_contents(
+            &root.directory,
+            Path::new(""),
+            &destination.directory,
+            selector,
+        );
     };
     let relative = parents
         .iter()
@@ -97,14 +131,13 @@ pub fn transfer_out(
             if skipped(selector, &relative, false)? {
                 return Ok(());
             }
-            return copy_leaf(&parent, name, &relative, destination, selector).map_err(|error| {
-                Error::failed(format!("{source} cannot be copied: {error}"))
-            });
+            let target = readlink_in(&parent, name)
+                .map_err(|error| Error::failed(format!("{source} cannot be read: {error}")))?;
+            return symlink_in(&destination.directory, name, &target)
+                .map_err(|error| Error::failed(format!("{source} cannot be copied: {error}")));
         }
         Err(error) => {
-            return Err(Error::failed(format!(
-                "{source} cannot be read: {error}"
-            )));
+            return Err(Error::failed(format!("{source} cannot be read: {error}")));
         }
     };
     let metadata = opened.metadata().map_err(|error| {
@@ -114,11 +147,15 @@ pub fn transfer_out(
         return Ok(());
     }
     if metadata.is_dir() {
+        // The descriptor is the one validated above: the name is not resolved
+        // a second time.
         let directory = open_in(&parent, name, libc::O_RDONLY | libc::O_DIRECTORY)
             .map_err(|error| Error::failed(format!("{source} cannot be read: {error}")))?;
-        copy_contents(&directory, &relative, destination, selector)
+        let created = directory_in(&destination.directory, name)
+            .map_err(|error| Error::failed(format!("{source} cannot be copied: {error}")))?;
+        copy_contents(&directory, &relative, &created, selector)
     } else {
-        copy_leaf(&parent, name, &relative, destination, selector)
+        copy_leaf(&parent, name, &relative, &destination.directory, selector)
             .map_err(|error| Error::failed(format!("{source} cannot be copied: {error}")))
     }
 }
@@ -209,12 +246,23 @@ fn descend(root: &Root, relative: &[OsString], create: bool) -> io::Result<std::
 
 /// Open one name inside a pinned directory without following a link.
 fn open_in(directory: &std::fs::File, name: &OsStr, flags: i32) -> io::Result<std::fs::File> {
+    open_at(directory, name, flags, 0)
+}
+
+/// Open one name inside a pinned directory, with a mode for the created case.
+fn open_at(
+    directory: &std::fs::File,
+    name: &OsStr,
+    flags: i32,
+    mode: u32,
+) -> io::Result<std::fs::File> {
     let name = CString::new(name.as_bytes())
         .map_err(|_| io::Error::other("a path component holds a NUL byte"))?;
     // SAFETY: open_how is a plain struct of integers, for which all-zero is a
     // valid value.
     let mut how: libc::open_how = unsafe { std::mem::zeroed() };
     how.flags = (flags | libc::O_CLOEXEC) as u64;
+    how.mode = mode as u64;
     how.resolve = libc::RESOLVE_BENEATH | libc::RESOLVE_NO_SYMLINKS;
     // SAFETY: the descriptor is a directory, the pointer outlives the call and
     // the struct matches the kernel's layout for open_how.
@@ -239,6 +287,35 @@ fn mkdir_in(directory: &std::fs::File, name: &OsStr) -> io::Result<()> {
         .map_err(|_| io::Error::other("a path component holds a NUL byte"))?;
     // SAFETY: the descriptor is a directory and the name is a single component.
     if unsafe { libc::mkdirat(directory.as_raw_fd(), name.as_ptr(), 0o755) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// A directory inside a pinned parent, created when it does not exist yet.
+///
+/// The name is resolved once, beneath the parent and without following a link,
+/// so a link the sandbox planted at the destination cannot be written through.
+fn directory_in(directory: &std::fs::File, name: &OsStr) -> io::Result<std::fs::File> {
+    match open_in(directory, name, libc::O_RDONLY | libc::O_DIRECTORY) {
+        Ok(opened) => Ok(opened),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            mkdir_in(directory, name)?;
+            open_in(directory, name, libc::O_RDONLY | libc::O_DIRECTORY)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Create a link inside a pinned directory.
+fn symlink_in(directory: &std::fs::File, name: &OsStr, target: &Path) -> io::Result<()> {
+    let name = CString::new(name.as_bytes())
+        .map_err(|_| io::Error::other("a path component holds a NUL byte"))?;
+    let target = CString::new(target.as_os_str().as_bytes())
+        .map_err(|_| io::Error::other("a link target holds a NUL byte"))?;
+    // SAFETY: the descriptor is a directory, both names are single components
+    // and the strings outlive the call.
+    if unsafe { libc::symlinkat(target.as_ptr(), directory.as_raw_fd(), name.as_ptr()) } < 0 {
         return Err(io::Error::last_os_error());
     }
     Ok(())
@@ -305,22 +382,16 @@ fn copy_in(root: &Root, relative: &[OsString], source: &Path) -> io::Result<()> 
     Ok(())
 }
 
-/// Copy a directory's entries into an existing host directory.
+/// Copy a directory's entries into an open host directory.
 fn copy_contents(
     directory: &std::fs::File,
     relative: &Path,
-    destination: &Path,
+    destination: &std::fs::File,
     selector: Option<&dyn SnapshotSelector>,
 ) -> Result<(), Error> {
-    std::fs::create_dir_all(destination).map_err(|error| {
-        Error::failed(format!(
-            "{} cannot be created: {error}",
-            destination.display()
-        ))
-    })?;
-    for name in entries(directory).map_err(|error| {
-        Error::failed(format!("the workspace could not be read: {error}"))
-    })? {
+    for name in entries(directory)
+        .map_err(|error| Error::failed(format!("the workspace could not be read: {error}")))?
+    {
         copy_leaf(
             directory,
             &name,
@@ -332,71 +403,86 @@ fn copy_contents(
     Ok(())
 }
 
-/// Copy one entry of a directory into a host directory, keeping a link.
+/// Copy one entry of a directory into an open host directory, keeping a link.
 fn copy_leaf(
     directory: &std::fs::File,
     name: &OsStr,
     relative: &Path,
-    destination: &Path,
+    destination: &std::fs::File,
     selector: Option<&dyn SnapshotSelector>,
 ) -> Result<(), Error> {
-    let target = destination.join(name);
     let opened = match open_in(directory, name, libc::O_PATH) {
         Ok(opened) => opened,
+        // A link is copied as a link, never resolved: the snapshot records the
+        // target, and following it would read outside the workspace.
         Err(error) if error.raw_os_error() == Some(libc::ELOOP) => {
             if skipped(selector, relative, false)? {
                 return Ok(());
             }
-            let link = readlink_in(directory, name).map_err(|error| {
-                Error::failed(format!("{} cannot be read: {error}", target.display()))
+            let target = readlink_in(directory, name).map_err(|error| {
+                Error::failed(format!("{} cannot be read: {error}", relative.display()))
             })?;
-            return std::os::unix::fs::symlink(link, &target).map_err(|error| {
-                Error::failed(format!("{} cannot be created: {error}", target.display()))
+            return symlink_in(destination, name, &target).map_err(|error| {
+                Error::failed(format!("{} cannot be copied: {error}", relative.display()))
             });
         }
         Err(error) => {
             return Err(Error::failed(format!(
                 "{} cannot be read: {error}",
-                target.display()
+                relative.display()
             )));
         }
     };
     let metadata = opened.metadata().map_err(|error| {
-        Error::failed(format!("{} cannot be read: {error}", target.display()))
+        Error::failed(format!("{} cannot be read: {error}", relative.display()))
     })?;
     if skipped(selector, relative, metadata.is_dir())? {
         return Ok(());
     }
     if metadata.is_dir() {
-        std::fs::create_dir_all(&target).map_err(|error| {
-            Error::failed(format!("{} cannot be created: {error}", target.display()))
-        })?;
-        let directory = open_in(directory, name, libc::O_RDONLY | libc::O_DIRECTORY)
-            .map_err(|error| {
-                Error::failed(format!("{} cannot be read: {error}", target.display()))
+        let source =
+            open_in(directory, name, libc::O_RDONLY | libc::O_DIRECTORY).map_err(|error| {
+                Error::failed(format!("{} cannot be read: {error}", relative.display()))
             })?;
-        for entry in entries(&directory).map_err(|error| {
-            Error::failed(format!("{} cannot be read: {error}", target.display()))
-        })? {
-            copy_leaf(
-                &directory,
-                &entry,
-                &relative.join(&entry),
-                &target,
-                selector,
-            )?;
-        }
-        return Ok(());
+        let target = directory_in(destination, name).map_err(|error| {
+            Error::failed(format!("{} cannot be created: {error}", relative.display()))
+        })?;
+        return copy_contents(&source, relative, &target, selector);
     }
-    let mut source = open_in(directory, name, libc::O_RDONLY).map_err(|error| {
-        Error::failed(format!("{} cannot be read: {error}", target.display()))
+    if !metadata.is_file() {
+        // A FIFO would block the transfer and a device would stream without
+        // bound, so neither is copied.
+        return Err(Error::failed(format!(
+            "{} is not a file or directory; a download copies neither",
+            relative.display()
+        )));
+    }
+    // The descriptor is opened nonblocking and validated after the check, so a
+    // name swapped for a FIFO between the two opens cannot wedge the transfer,
+    // and the bytes come from the descriptor that was validated.
+    let mut source =
+        open_in(directory, name, libc::O_RDONLY | libc::O_NONBLOCK).map_err(|error| {
+            Error::failed(format!("{} cannot be read: {error}", relative.display()))
+        })?;
+    let opened = source.metadata().map_err(|error| {
+        Error::failed(format!("{} cannot be read: {error}", relative.display()))
     })?;
-    let mut copy = std::fs::File::create(&target).map_err(|error| {
-        Error::failed(format!("{} cannot be created: {error}", target.display()))
-    })?;
+    if !opened.is_file() {
+        return Err(Error::failed(format!(
+            "{} is not a file or directory; a download copies neither",
+            relative.display()
+        )));
+    }
+    let mut copy = open_at(
+        destination,
+        name,
+        libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC,
+        0o600,
+    )
+    .map_err(|error| Error::failed(format!("{} cannot be created: {error}", relative.display())))?;
     io::copy(&mut source, &mut copy)
-        .and_then(|_| copy.set_permissions(metadata.permissions()))
-        .map_err(|error| Error::failed(format!("{} cannot be copied: {error}", target.display())))
+        .and_then(|_| copy.set_permissions(opened.permissions()))
+        .map_err(|error| Error::failed(format!("{} cannot be copied: {error}", relative.display())))
 }
 
 /// The names in a directory, read through the descriptor rather than a path.
@@ -673,6 +759,47 @@ mod tests {
             std::fs::read_link(&nested).expect("target"),
             Path::new("../README.md")
         );
+    }
+
+    #[test]
+    fn a_download_does_not_write_through_a_link_in_the_destination() {
+        let (temporary, source) = staged();
+        let root = temporary.path().join("workspace");
+        copy_from(&source, &root).expect("copied");
+
+        // The sandbox carries `src/main.rs`; the destination already has `src`
+        // pointing somewhere else. Resolving the destination by path would
+        // truncate the file outside the tree.
+        let elsewhere = tempfile::tempdir().expect("elsewhere");
+        let destination = temporary.path().join("snapshot");
+        std::fs::create_dir_all(&destination).expect("destination");
+        std::os::unix::fs::symlink(elsewhere.path(), destination.join("src")).expect("symlink");
+
+        let error = transfer_out(&root, "/src", &destination, None).expect_err("refused");
+        assert!(
+            !elsewhere.path().join("main.rs").exists(),
+            "nothing is written through the link: {error}"
+        );
+    }
+
+    #[test]
+    fn a_download_refuses_a_fifo_in_the_workspace() {
+        let (temporary, source) = staged();
+        let root = temporary.path().join("workspace");
+        copy_from(&source, &root).expect("copied");
+        let fifo = root.join("pipe");
+        let name = std::ffi::CString::new(fifo.to_string_lossy().as_bytes()).expect("name");
+        // SAFETY: the path is a NUL-terminated string and mkfifo has no
+        // aliasing requirements.
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0, "mkfifo");
+
+        let destination = temporary.path().join("snapshot");
+        let error = transfer_out(&root, "/src", &destination, None).expect_err("refused");
+        assert!(
+            error.to_string().contains("not a file or directory"),
+            "a FIFO would block the transfer: {error}"
+        );
+        assert!(!destination.join("pipe").exists());
     }
 
     #[test]
