@@ -5,6 +5,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 /// What a process is doing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -271,6 +272,49 @@ impl SystemHost {
         let end = text.find(']')?;
         text[start..end].parse().ok()
     }
+
+    /// Ask the user manager for a throwaway scope, with a deadline.
+    fn probe_scope(&self) -> bool {
+        const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+        let Some(launcher) = self.resolve("systemd-run") else {
+            return false;
+        };
+        let mut child = match std::process::Command::new(launcher)
+            .args(["--user", "--scope", "--quiet", "--", "true"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(error) => {
+                tracing::warn!(%error, "the user manager could not be asked for a scope");
+                return false;
+            }
+        };
+        let deadline = Instant::now() + PROBE_TIMEOUT;
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => return status.success(),
+                Ok(None) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Ok(None) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    tracing::warn!(
+                        "the user manager did not answer within {}s",
+                        PROBE_TIMEOUT.as_secs()
+                    );
+                    return false;
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "the user manager probe failed");
+                    return false;
+                }
+            }
+        }
+    }
 }
 
 impl Host for SystemHost {
@@ -362,6 +406,21 @@ impl Host for SystemHost {
     }
 
     fn scope_directory(&self, unit: &str) -> Option<PathBuf> {
+        // The cgroup path of a live scope does not move, and resolving it costs
+        // a `systemctl show` per call; a freeze poll would otherwise spawn one
+        // every ten milliseconds.
+        static DIRECTORIES: std::sync::OnceLock<
+            std::sync::Mutex<std::collections::HashMap<String, PathBuf>>,
+        > = std::sync::OnceLock::new();
+        let cache = DIRECTORIES
+            .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+        if let Some(known) = cache
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .get(unit)
+        {
+            return Some(known.clone());
+        }
         let output = std::process::Command::new("systemctl")
             .args([
                 "--user",
@@ -380,7 +439,12 @@ impl Host for SystemHost {
         if control_group.is_empty() {
             return None;
         }
-        Some(Path::new("/sys/fs/cgroup").join(control_group.trim_start_matches('/')))
+        let directory = Path::new("/sys/fs/cgroup").join(control_group.trim_start_matches('/'));
+        cache
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .insert(unit.to_string(), directory.clone());
+        Some(directory)
     }
 
     fn read_scope(&self, unit: &str, file: &str) -> Option<String> {
@@ -423,17 +487,10 @@ impl Host for SystemHost {
     fn user_scope(&self) -> bool {
         // A binary and a cgroup mount do not prove a usable user manager: on a
         // host with systemd installed but no user bus, `systemd-run --user`
-        // fails even though both are present. Ask the manager itself.
-        let Some(launcher) = self.resolve("systemd-run") else {
-            return false;
-        };
-        std::process::Command::new(launcher)
-            .args(["--user", "--scope", "--quiet", "--", "true"])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .is_ok_and(|status| status.success())
+        // fails even though both are present. Ask the manager itself, once per
+        // process, and refuse to hang on a wedged bus.
+        static ANSWER: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ANSWER.get_or_init(|| self.probe_scope())
     }
 
     fn namespace_members_of(&self, inode: u64) -> Vec<u32> {
