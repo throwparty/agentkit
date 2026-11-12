@@ -512,7 +512,7 @@ impl Backend for DockerBackend {
         sandbox: &'a SandboxRecord,
         source: &'a str,
         destination: &'a Path,
-        selector: Option<&'a dyn crate::sandbox::contract::SnapshotSelector>,
+        selector: Option<std::sync::Arc<dyn crate::sandbox::contract::SnapshotSelector>>,
     ) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async move {
             let source = confined(source, sandbox)?;
@@ -525,7 +525,7 @@ impl Backend for DockerBackend {
                     destination,
                     WORKDIR,
                     self.settings.max_transfer_bytes,
-                    selector,
+                    selector.as_deref(),
                 )
                 .await
             {

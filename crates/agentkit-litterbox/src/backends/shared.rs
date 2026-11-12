@@ -21,6 +21,12 @@ pub(crate) const CREATE_BUDGET: Duration = Duration::from_secs(2 * 60 * 60);
 /// How long a workspace upload may take before create is rolled back.
 pub(crate) const UPLOAD_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
+/// How long a workspace download may take before the copy is abandoned.
+///
+/// A snapshot copies the whole workspace, so this is the time a build output
+/// the snapshot keeps can take; the copy holds no runtime worker while it runs.
+pub(crate) const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+
 /// How much output one provisioning step may buffer in the transport.
 pub(crate) const PROVISION_OUTPUT_CAP: usize = 16 * 1024;
 

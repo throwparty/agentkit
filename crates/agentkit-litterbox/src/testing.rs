@@ -370,7 +370,7 @@ impl Backend for TestBackend {
         _sandbox: &'a SandboxRecord,
         source: &'a str,
         destination: &'a std::path::Path,
-        _selector: Option<&'a dyn crate::sandbox::contract::SnapshotSelector>,
+        _selector: Option<std::sync::Arc<dyn crate::sandbox::contract::SnapshotSelector>>,
     ) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async move {
             if !source.starts_with(&self.workspace) {

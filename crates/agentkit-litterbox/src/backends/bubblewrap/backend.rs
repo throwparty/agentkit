@@ -7,11 +7,13 @@ use std::sync::Mutex;
 use futures_util::future::BoxFuture;
 
 use super::BACKEND;
-use super::host::SharedHost;
+use super::host::{Host, SharedHost};
 use super::payload::{Payload, RecordedMount, RecordedRoot};
 use super::view::{Boundaries, RenderOptions, Requested, View, WORKSPACE};
 use super::{environment, holder, join, lifecycle, readiness, validate, workspace};
-use crate::backends::shared::{EXEC_OUTPUT_CAP, PROVISION_OUTPUT_CAP, run_steps};
+use crate::backends::shared::{
+    DOWNLOAD_TIMEOUT, EXEC_OUTPUT_CAP, PROVISION_OUTPUT_CAP, UPLOAD_TIMEOUT, run_steps,
+};
 use crate::sandbox::contract::{
     Backend, ContributionSort, ContributionSupport, CreateRequest, Error, Execution, Forward,
     Inspection, ProvisioningClass, ProvisioningFailure, SandboxRecord, Scope,
@@ -20,7 +22,7 @@ use crate::sandbox::contract::{
 use crate::sandbox::facets::{Lifecycle, Limits, ResourceLimits};
 use crate::sandbox::report::{Capability, EgressPosture, Readiness, State};
 
-/// The descriptor bwrap reports its status on.
+/// The descriptor bwrap reports its status on when no mount outranks it.
 const STATUS_FD: i32 = 3;
 
 /// Whether the sandbox gets its own network namespace.
@@ -91,6 +93,8 @@ struct Creation<'a> {
     workspace: &'a Path,
     /// The ports the sandbox reaches on the host.
     forwards: &'a [crate::sandbox::contract::Forward],
+    /// Whether the sandbox is launched inside a user scope.
+    scoped: bool,
     /// The holder, once one has started.
     started: &'a mut Option<holder::Holder>,
 }
@@ -330,20 +334,46 @@ impl BubblewrapBackend {
             validate::Verdict::Editions(error) => Err(error),
         }
     }
+}
 
-    fn cleanup(&self, project: &str, name: &str, holder: Option<&holder::Holder>) {
-        if let Some(holder) = holder
-            && let Err(error) =
-                holder::teardown(&*self.host, holder, std::time::Duration::from_secs(10))
-        {
-            tracing::warn!(%error, "the sandbox did not stop after a failed create");
+/// Run one blocking transfer off the runtime, bounded by a deadline.
+///
+/// The work itself cannot be cancelled; what is bounded is how long the caller
+/// waits for it.
+async fn transfer<F>(budget: std::time::Duration, work: F) -> Result<(), Error>
+where
+    F: FnOnce() -> Result<(), Error> + Send + 'static,
+{
+    let started = std::time::Instant::now();
+    let joined = tokio::task::spawn_blocking(work);
+    match tokio::time::timeout(budget, joined).await {
+        Ok(Ok(outcome)) => {
+            tracing::debug!(
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                "the transfer finished"
+            );
+            outcome
         }
-        let directory = workspace::sandbox_directory(project, name);
-        if let Err(error) = std::fs::remove_dir_all(&directory)
-            && error.kind() != std::io::ErrorKind::NotFound
-        {
-            tracing::warn!(%error, "the state directory could not be removed");
-        }
+        Ok(Err(error)) => Err(Error::failed(format!("the transfer task failed: {error}"))),
+        Err(_) => Err(Error::failed(format!(
+            "the transfer exceeded the {}s deadline",
+            budget.as_secs()
+        ))),
+    }
+}
+
+/// Stop a half-started sandbox and remove its state.
+fn cleanup(host: &dyn Host, project: &str, name: &str, holder: Option<&holder::Holder>) {
+    if let Some(holder) = holder
+        && let Err(error) = holder::teardown(host, holder, std::time::Duration::from_secs(10))
+    {
+        tracing::warn!(%error, "the sandbox did not stop after a failed create");
+    }
+    let directory = workspace::sandbox_directory(project, name);
+    if let Err(error) = std::fs::remove_dir_all(&directory)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!(%error, "the state directory could not be removed");
     }
 }
 
@@ -466,7 +496,13 @@ impl Backend for BubblewrapBackend {
     ) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async move {
             let data = self.live(sandbox)?;
-            workspace::transfer_in(Path::new(&data.workspace_host), source, destination)
+            let root = Path::new(&data.workspace_host).to_path_buf();
+            let source = source.to_path_buf();
+            let destination = destination.to_string();
+            transfer(UPLOAD_TIMEOUT, move || {
+                workspace::transfer_in(&root, &source, &destination)
+            })
+            .await
         })
     }
 
@@ -475,16 +511,20 @@ impl Backend for BubblewrapBackend {
         sandbox: &'a SandboxRecord,
         source: &'a str,
         destination: &'a Path,
-        selector: Option<&'a dyn crate::sandbox::contract::SnapshotSelector>,
+        selector: Option<std::sync::Arc<dyn crate::sandbox::contract::SnapshotSelector>>,
     ) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async move {
             let data = self.live(sandbox)?;
-            workspace::transfer_out(
-                Path::new(&data.workspace_host),
-                source,
-                destination,
-                selector,
-            )
+            let root = Path::new(&data.workspace_host).to_path_buf();
+            let source = source.to_string();
+            let destination = destination.to_path_buf();
+            // The selector is owned, so the copy runs where it cannot hold a
+            // runtime worker: a workspace of any size is bounded by the
+            // deadline rather than by how long the caller is willing to wait.
+            transfer(DOWNLOAD_TIMEOUT, move || {
+                workspace::transfer_out(&root, &source, &destination, selector.as_deref())
+            })
+            .await
         })
     }
 
@@ -536,9 +576,34 @@ impl Backend for BubblewrapBackend {
             // failure only means the process is not signalled. A record whose
             // live process does not match it is cleaned up without a signal:
             // the pid now belongs to something else.
-            if let validate::Verdict::Live(data) = validate::validate(sandbox, &*self.host) {
-                let holder = holder::Holder::from_payload(&data);
-                holder::teardown(&*self.host, &holder, std::time::Duration::from_secs(30))?;
+            match validate::validate(sandbox, &*self.host) {
+                validate::Verdict::Live(data) => {
+                    let holder = holder::Holder::from_payload(&data);
+                    let host = self.host.clone();
+                    // Tear down even when pid 1 is already gone: its namespace
+                    // can outlive it, and the members are what keep the
+                    // workspace open. The wait happens off the runtime.
+                    transfer(std::time::Duration::from_secs(30), move || {
+                        holder::teardown(&*host, &holder, std::time::Duration::from_secs(30))
+                    })
+                    .await?;
+                }
+                other => {
+                    // Nothing is signalled, so nothing confirms the process is
+                    // gone; the state is still removed, but the decision is
+                    // recorded rather than taken silently.
+                    let reason = match other {
+                        validate::Verdict::Absent => "the sandbox process is gone".to_string(),
+                        validate::Verdict::Forbidden { reason } => {
+                            format!("the record does not match the live process: {reason}")
+                        }
+                        validate::Verdict::Editions(_) => {
+                            "the record cannot be read, so no process is identified".to_string()
+                        }
+                        validate::Verdict::Live(_) => unreachable!("handled above"),
+                    };
+                    tracing::warn!(sandbox = %sandbox.name, %reason, "deleting without a teardown");
+                }
             }
             let directory = workspace::sandbox_directory(&sandbox.project_slug, &sandbox.name);
             match std::fs::remove_dir_all(&directory) {
@@ -642,14 +707,29 @@ impl Lifecycle for BubblewrapBackend {
     fn pause<'a>(&'a self, sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async move {
             let data = self.live(sandbox)?;
-            lifecycle::pause(&*self.host, &data).await
+            tracing::info!(sandbox = %sandbox.name, "pausing the sandbox");
+            let outcome = lifecycle::pause(&*self.host, &data).await;
+            match &outcome {
+                Ok(()) => tracing::info!(sandbox = %sandbox.name, "the sandbox is paused"),
+                Err(error) => tracing::warn!(sandbox = %sandbox.name, %error, "the sandbox was not paused"),
+            }
+            outcome
         })
     }
 
     fn resume<'a>(&'a self, sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async move {
             let data = self.live(sandbox)?;
-            lifecycle::resume(&*self.host, &data)
+            tracing::info!(sandbox = %sandbox.name, "resuming the sandbox");
+            let host = self.host.clone();
+            let outcome = tokio::task::spawn_blocking(move || lifecycle::resume(&*host, &data))
+                .await
+                .map_err(|error| Error::failed(format!("the resume task failed: {error}")))?;
+            match &outcome {
+                Ok(()) => tracing::info!(sandbox = %sandbox.name, "the sandbox is resumed"),
+                Err(error) => tracing::warn!(sandbox = %sandbox.name, %error, "the sandbox was not resumed"),
+            }
+            outcome
         })
     }
 }
@@ -748,6 +828,31 @@ impl BubblewrapBackend {
                 reason: "bubblewrap does not resolve on the host".to_string(),
                 remedy: "install bubblewrap or add it to PATH".to_string(),
             })?;
+        // Whether a scope can be had decides the launch path and whether the
+        // configured bounds can be applied. Ask once, before anything starts,
+        // so a request that cannot be honoured is refused rather than paid for
+        // and then rolled back.
+        let scoped = self.scoped();
+        if !scoped && (self.settings.memory_mb.is_some() || self.settings.tasks.is_some()) {
+            return Err(Error::Unsupported {
+                operation: format!("create the sandbox '{}'", request.name),
+                backend: BACKEND.to_string(),
+                primitive: "a cgroup v2 user scope".to_string(),
+                reason: "the host has no usable user scope, so the configured memory and task \
+                         bounds cannot be applied"
+                    .to_string(),
+                remedy: "remove the bounds, enable a delegating user manager, or accept the \
+                         degraded mode without bounds"
+                    .to_string(),
+            });
+        }
+        tracing::info!(
+            sandbox = %request.name,
+            project = %request.project_slug,
+            scoped,
+            network = ?self.settings.network,
+            "creating the sandbox"
+        );
         let command = holder::command(&*self.host, &self.settings.shell)?;
         let mut environment = environment::merge(&request.provision)?;
         // A shared network means the sandbox listens on the host, so the
@@ -803,13 +908,27 @@ impl BubblewrapBackend {
                 environment: &environment,
                 workspace: &workspace,
                 forwards: &forwards,
+                scoped,
                 started: &mut started,
             })
             .await;
         match outcome {
-            Ok(record) => Ok(record),
+            Ok(record) => {
+                tracing::info!(sandbox = %request.name, "the sandbox is created");
+                Ok(record)
+            }
             Err(error) => {
-                self.cleanup(&request.project_slug, &request.name, started.as_ref());
+                // The cleanup waits for the sandbox to stop, so it must not run
+                // on a runtime worker.
+                let host = self.host.clone();
+                let project = request.project_slug.clone();
+                let name = request.name.clone();
+                let held = started.clone();
+                let _ = tokio::task::spawn_blocking(move || {
+                    cleanup(&*host, &project, &name, held.as_ref());
+                })
+                .await;
+                tracing::warn!(sandbox = %request.name, %error, "the sandbox was not created");
                 Err(error)
             }
         }
@@ -824,12 +943,18 @@ impl BubblewrapBackend {
             environment,
             workspace,
             forwards,
+            scoped,
             started,
         } = creation;
-        workspace::copy_from(&request.workspace.source, workspace)?;
+        transfer(std::time::Duration::from_secs(600), {
+            let staged = request.workspace.source.clone();
+            let destination = workspace.to_path_buf();
+            move || workspace::copy_from(&staged, &destination)
+        })
+        .await?;
         let view = self.build_view(request, holder_command, workspace)?;
         let holder_arguments = holder_command.arguments();
-        let scope = if self.scoped() {
+        let scope = if scoped {
             let launcher = self
                 .host
                 .resolve("systemd-run")
@@ -838,13 +963,21 @@ impl BubblewrapBackend {
                     reason: "the scope launcher does not resolve on the host".to_string(),
                     remedy: "install systemd or accept the degraded mode".to_string(),
                 })?;
+            // A transient unit outlives a failed create, and a name that has
+            // been used before cannot be used again; the clock makes every
+            // attempt distinct.
+            let nonce = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|elapsed| elapsed.as_nanos() as u64)
+                .unwrap_or_default();
             Some((
                 launcher,
                 format!(
-                    "litterbox-{}-{}-{}",
+                    "litterbox-{}-{}-{}-{}",
                     request.project_slug,
                     request.name,
-                    std::process::id()
+                    std::process::id(),
+                    nonce
                 ),
             ))
         } else {

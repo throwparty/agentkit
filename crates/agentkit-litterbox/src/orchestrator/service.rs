@@ -1146,7 +1146,7 @@ impl Sandboxes {
                 &stored.sandbox,
                 &workspace,
                 rules.path(),
-                Some(&crate::scm::IgnoreFiles),
+                Some(std::sync::Arc::new(crate::scm::IgnoreFiles)),
             )
             .await?;
         let selector = scm
@@ -1155,7 +1155,12 @@ impl Sandboxes {
 
         selected
             .core()
-            .download(&stored.sandbox, &workspace, staging.path(), Some(&selector))
+            .download(
+                &stored.sandbox,
+                &workspace,
+                staging.path(),
+                Some(std::sync::Arc::new(selector)),
+            )
             .await?;
 
         scm.commit_snapshot_from_staging(staging.path(), message)?;
