@@ -120,8 +120,8 @@ pub trait Host: Send + Sync {
     fn write_scope(&self, unit: &str, file: &str, value: &str) -> std::io::Result<()>;
     /// Every process in the namespace the given pid belongs to.
     fn namespace_members(&self, pid: u32) -> Option<Vec<u32>>;
-    /// A process's cumulative CPU time in clock ticks.
-    fn cpu_time(&self, pid: u32) -> Option<u64>;
+    /// Whether a delegating user manager can give this process a scope.
+    fn user_scope(&self) -> bool;
 }
 
 /// The host this process is running on.
@@ -317,14 +317,20 @@ impl Host for SystemHost {
         Some(members)
     }
 
-    fn cpu_time(&self, pid: u32) -> Option<u64> {
-        let text = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-        let close = text.rfind(')')?;
-        let fields: Vec<&str> = text[close + 1..].split_whitespace().collect();
-        // Field 14 and 15 in the whole line; eleven fields precede utime.
-        let utime: u64 = fields.get(11)?.parse().ok()?;
-        let stime: u64 = fields.get(12)?.parse().ok()?;
-        Some(utime + stime)
+    fn user_scope(&self) -> bool {
+        // A binary and a cgroup mount do not prove a usable user manager: on a
+        // host with systemd installed but no user bus, `systemd-run --user`
+        // fails even though both are present. Ask the manager itself.
+        let Some(launcher) = self.resolve("systemd-run") else {
+            return false;
+        };
+        std::process::Command::new(launcher)
+            .args(["--user", "--scope", "--quiet", "--", "true"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
     }
 }
 
@@ -351,6 +357,8 @@ pub struct FakeHost {
     pub ownership: std::collections::HashMap<PathBuf, (u32, u32)>,
     /// Scope files, keyed by unit and file name.
     pub scopes: std::collections::HashMap<(String, String), String>,
+    /// Whether a user manager answers for this host.
+    pub user_scope: bool,
 }
 
 #[cfg(test)]
@@ -412,8 +420,8 @@ impl Host for FakeHost {
         self.processes.get(&pid).map(|_| vec![pid])
     }
 
-    fn cpu_time(&self, pid: u32) -> Option<u64> {
-        self.processes.get(&pid).map(|_| 0)
+    fn user_scope(&self) -> bool {
+        self.user_scope
     }
 }
 

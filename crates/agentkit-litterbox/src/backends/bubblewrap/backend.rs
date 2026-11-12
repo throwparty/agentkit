@@ -11,7 +11,7 @@ use super::host::SharedHost;
 use super::payload::{BubblewrapData, RecordedMount, RecordedRoot};
 use super::view::{Boundaries, RenderOptions, Requested, View, WORKSPACE};
 use super::{environment, holder, join, lifecycle, readiness, validate, workspace};
-use crate::backends::shared::run_steps;
+use crate::backends::shared::{EXEC_OUTPUT_CAP, PROVISION_OUTPUT_CAP, run_steps};
 use crate::sandbox::contract::{
     Backend, ContributionSort, ContributionSupport, CreateRequest, Error, Execution, Inspection,
     ProvisioningClass, ProvisioningFailure, SandboxRecord, Scope,
@@ -78,7 +78,9 @@ impl BubblewrapBackend {
     }
 
     fn scoped(&self) -> bool {
-        self.host.resolve("systemd-run").is_some()
+        // The same probe readiness reports, so a host without a user manager
+        // is launched unscoped instead of failing at create.
+        self.host.user_scope()
     }
 
     /// Gather the mounts the steps contributed.
@@ -369,7 +371,9 @@ impl Backend for BubblewrapBackend {
             };
             let host = self.host.clone();
             let command = command.to_vec();
-            tokio::task::spawn_blocking(move || join::run_serialised(&*host, &data, &command))
+            tokio::task::spawn_blocking(move || {
+                join::run(&*host, &data, &command, EXEC_OUTPUT_CAP)
+            })
                 .await
                 .map_err(|error| Error::failed(format!("the join task failed: {error}")))?
         })
@@ -446,12 +450,15 @@ impl Backend for BubblewrapBackend {
 
     fn delete<'a>(&'a self, sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async move {
-            // A record that cannot be read is still removable, so the payload
-            // failure is not fatal here.
-            if let Ok(data) = BubblewrapData::from_record(sandbox) {
+            // A record that cannot be read is still removable, so an edition
+            // failure only means the process is not signalled. A record whose
+            // live process does not match it is cleaned up without a signal:
+            // the pid now belongs to something else.
+            if let validate::Verdict::Live(data) = validate::validate(sandbox, &*self.host) {
                 let holder = holder::Holder {
                     launcher_pid: data.launcher_pid,
                     sandbox_pid: data.sandbox_pid,
+                    sandbox_start: Some(data.sandbox_start),
                     namespaces: super::host::NamespaceInodes {
                         user: data.namespaces[0],
                         ipc: data.namespaces[1],
@@ -463,9 +470,7 @@ impl Backend for BubblewrapBackend {
                     },
                     unit: data.scope.clone(),
                 };
-                if self.host.process(data.sandbox_pid).is_some() {
-                    holder::teardown(&*self.host, &holder, std::time::Duration::from_secs(30))?;
-                }
+                holder::teardown(&*self.host, &holder, std::time::Duration::from_secs(30))?;
             }
             let directory = workspace::sandbox_directory(&sandbox.project_slug, &sandbox.name);
             match std::fs::remove_dir_all(&directory) {
@@ -795,6 +800,7 @@ impl BubblewrapBackend {
         let spawn_host = self.host.clone();
         let spawn_status = status_path.clone();
         let spawn_stderr = stderr_path.clone();
+        let spawn_inherit = view.descriptors();
         let holder = tokio::task::spawn_blocking(move || {
             holder::start(&holder::Start {
                 argv: &spawn_argv,
@@ -805,6 +811,7 @@ impl BubblewrapBackend {
                     .map(|(launcher, unit)| (launcher.as_path(), unit.as_str())),
                 status_path: &spawn_status,
                 stderr_path: &spawn_stderr,
+                inherit: &spawn_inherit,
             })
         })
         .await
@@ -837,7 +844,7 @@ impl BubblewrapBackend {
                 let command = vec!["sh".to_string(), "-c".to_string(), run.to_string()];
                 Box::pin(async move {
                     tokio::task::spawn_blocking(move || {
-                        join::run_serialised(&*host, &data, &command)
+                        join::run(&*host, &data, &command, PROVISION_OUTPUT_CAP)
                     })
                     .await
                     .map_err(|error| Error::failed(format!("the step task failed: {error}")))?
@@ -1155,6 +1162,7 @@ mod tests {
         let holder = holder::Holder {
             launcher_pid: data.launcher_pid,
             sandbox_pid: data.sandbox_pid,
+            sandbox_start: Some(data.sandbox_start),
             namespaces: crate::backends::bubblewrap::host::NamespaceInodes {
                 user: data.namespaces[0],
                 ipc: data.namespaces[1],
@@ -1224,6 +1232,7 @@ mod tests {
         let holder = holder::Holder {
             launcher_pid: data.launcher_pid,
             sandbox_pid: data.sandbox_pid,
+            sandbox_start: Some(data.sandbox_start),
             namespaces: crate::backends::bubblewrap::host::NamespaceInodes {
                 user: data.namespaces[0],
                 ipc: data.namespaces[1],

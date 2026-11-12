@@ -21,22 +21,21 @@ const PAUSE_ROUNDS: usize = 10;
 /// Pause the sandbox.
 pub async fn pause(host: &dyn Host, data: &BubblewrapData) -> Result<(), Error> {
     if let Some(unit) = &data.scope {
-        return pause_scope(host, unit, data.sandbox_pid).await;
+        return pause_scope(host, unit).await;
     }
     pause_namespace(host, data.sandbox_pid)
 }
 
-async fn pause_scope(host: &dyn Host, unit: &str, pid: u32) -> Result<(), Error> {
+async fn pause_scope(host: &dyn Host, unit: &str) -> Result<(), Error> {
     host.write_scope(unit, "cgroup.freeze", "1")
         .map_err(|error| Error::failed(format!("the sandbox could not be frozen: {error}")))?;
 
-    let before = host.cpu_time(pid).unwrap_or_default();
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    // The kernel reports completion in `cgroup.events`; CPU samples cannot
+    // distinguish a frozen sandbox from one that is simply idle, and a single
+    // tick during the freeze would look like progress.
     let started = std::time::Instant::now();
     loop {
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        let now = host.cpu_time(pid).unwrap_or_default();
-        if now == before {
+        if frozen(host, unit) {
             return Ok(());
         }
         if started.elapsed() >= FREEZE_TIMEOUT {
@@ -45,12 +44,19 @@ async fn pause_scope(host: &dyn Host, unit: &str, pid: u32) -> Result<(), Error>
                 "the sandbox kept making progress after it was frozen",
             ));
         }
-        // The CPU counter can only be compared between samples; keep the
-        // baseline and wait for a window where it does not move.
-        if started.elapsed() > Duration::from_millis(500) && now == before {
-            return Ok(());
-        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
+}
+
+/// Whether the scope reports every member frozen.
+fn frozen(host: &dyn Host, unit: &str) -> bool {
+    host.read_scope(unit, "cgroup.events")
+        .is_some_and(|text| {
+            text.lines().any(|line| {
+                let mut fields = line.split_whitespace();
+                fields.next() == Some("frozen") && fields.next() == Some("1")
+            })
+        })
 }
 
 fn pause_namespace(host: &dyn Host, pid: u32) -> Result<(), Error> {
@@ -236,6 +242,10 @@ mod tests {
         host.scopes.insert(
             ("unit".to_string(), "cgroup.freeze".to_string()),
             "0".to_string(),
+        );
+        host.scopes.insert(
+            ("unit".to_string(), "cgroup.events".to_string()),
+            "populated 1\nfrozen 1\n".to_string(),
         );
         let data = data(Some("unit"), 11);
         assert!(!is_paused(&host, &data));

@@ -11,7 +11,7 @@
 //! is emitted, so it outlives the tool the way a branch does.
 
 use std::io;
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, FromRawFd};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -203,6 +203,9 @@ pub struct Holder {
     pub launcher_pid: u32,
     /// The sandbox's pid 1.
     pub sandbox_pid: u32,
+    /// When the sandbox's pid 1 started, if it was known. Teardown refuses to
+    /// signal a pid it cannot confirm this way.
+    pub sandbox_start: Option<u64>,
     /// The namespaces bwrap reported.
     pub namespaces: NamespaceInodes,
     /// The scope unit holding the sandbox, when there is one.
@@ -271,6 +274,9 @@ pub struct Start<'a> {
     pub status_path: &'a Path,
     /// Where bwrap's diagnostics go.
     pub stderr_path: &'a Path,
+    /// The mount descriptors the mechanism is handed, which are close-on-exec
+    /// everywhere else.
+    pub inherit: &'a [i32],
 }
 
 /// Start the sandbox and return once bwrap has reported it.
@@ -321,8 +327,9 @@ pub fn start(start: &Start<'_>) -> Result<Holder, Error> {
         }
     }
     let status_fd = status.as_raw_fd();
-    // SAFETY: dup2 is async-signal-safe and the descriptor is open for the
-    // lifetime of the spawn.
+    let inherit = start.inherit.to_vec();
+    // SAFETY: dup2, fcntl and close are async-signal-safe and every descriptor
+    // is open for the lifetime of the spawn.
     unsafe {
         use std::os::unix::process::CommandExt;
         command.pre_exec(move || {
@@ -334,6 +341,13 @@ pub fn start(start: &Start<'_>) -> Result<Holder, Error> {
             // reaches bwrap.
             if libc::fcntl(3, libc::F_SETFD, 0) < 0 {
                 return Err(io::Error::last_os_error());
+            }
+            // The mount descriptors are close-on-exec everywhere else; this is
+            // the one launch that is allowed to carry them.
+            for descriptor in &inherit {
+                if libc::fcntl(*descriptor, libc::F_SETFD, 0) < 0 {
+                    return Err(io::Error::last_os_error());
+                }
             }
             Ok(())
         });
@@ -356,9 +370,21 @@ pub fn start(start: &Start<'_>) -> Result<Holder, Error> {
                 .host
                 .namespaces(status.sandbox_pid)
                 .unwrap_or(status.namespaces);
+            let sandbox_start = start
+                .host
+                .process(status.sandbox_pid)
+                .map(|process| process.start_time);
+            // The launcher outlives this call, so nothing here can wait for it.
+            // Dropping a `Child` does not reap it, so a thread waits for it
+            // instead; otherwise every deleted sandbox leaves the server
+            // holding a zombie.
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
             return Ok(Holder {
                 launcher_pid,
                 sandbox_pid: status.sandbox_pid,
+                sandbox_start,
                 namespaces,
                 unit: start.scope.map(|(_, unit)| unit.to_string()),
             });
@@ -366,6 +392,7 @@ pub fn start(start: &Start<'_>) -> Result<Holder, Error> {
         if Instant::now() >= deadline {
             let diagnostic = diagnostic(start.stderr_path);
             let _ = child.kill();
+            let _ = child.wait();
             return Err(Error::failed(format!(
                 "the sandbox did not report itself within {}s{diagnostic}",
                 STATUS_TIMEOUT.as_secs()
@@ -440,17 +467,12 @@ fn view_is_ready(table: &[MountEntry], expected: &[Mount]) -> bool {
 }
 
 /// Kill the sandbox and wait for it to disappear.
+///
+/// The recorded start time is what distinguishes the sandbox from whatever
+/// holds its pid now, so a stale record cannot kill an unrelated process.
 pub fn teardown(host: &dyn Host, holder: &Holder, timeout: Duration) -> Result<(), Error> {
-    // SAFETY: kill has no preconditions; a stale pid is refused by validation
-    // before this is called.
-    let result = unsafe { libc::kill(holder.sandbox_pid as i32, libc::SIGKILL) };
-    if result < 0 {
-        let error = io::Error::last_os_error();
-        if error.raw_os_error() != Some(libc::ESRCH) {
-            return Err(Error::failed(format!(
-                "the sandbox could not be killed: {error}"
-            )));
-        }
+    if let Some(start) = holder.sandbox_start {
+        signal(host, holder.sandbox_pid, start, libc::SIGKILL)?;
     }
     if let Some(unit) = &holder.unit {
         let _ = host.write_scope(unit, "cgroup.kill", "1");
@@ -467,6 +489,61 @@ pub fn teardown(host: &dyn Host, holder: &Holder, timeout: Duration) -> Result<(
         std::thread::sleep(Duration::from_millis(10));
     }
     Ok(())
+}
+
+/// Signal a process, refusing a pid that has been reused.
+///
+/// A pidfd pins the process between the check and the signal, so the identity
+/// that was validated is the one that receives it.
+fn signal(host: &dyn Host, pid: u32, start: u64, number: i32) -> Result<(), Error> {
+    // SAFETY: pidfd_open has no preconditions and reports a stale pid as an
+    // error rather than acting on it.
+    let descriptor = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
+    if descriptor >= 0 {
+        // SAFETY: the syscall returned a descriptor this value now owns.
+        let descriptor = unsafe { std::os::fd::OwnedFd::from_raw_fd(descriptor as i32) };
+        if !identity_matches(host, pid, start) {
+            return Ok(());
+        }
+        // SAFETY: the pidfd names the process that was just validated.
+        let outcome = unsafe {
+            libc::syscall(
+                libc::SYS_pidfd_send_signal,
+                descriptor.as_raw_fd(),
+                number,
+                std::ptr::null::<libc::siginfo_t>(),
+                0,
+            )
+        };
+        if outcome < 0 {
+            return Err(Error::failed(format!(
+                "the sandbox could not be signalled: {}",
+                io::Error::last_os_error()
+            )));
+        }
+        return Ok(());
+    }
+    // The kernel may not offer pidfds; checking again before the signal leaves
+    // only the window between the check and the call.
+    if !identity_matches(host, pid, start) {
+        return Ok(());
+    }
+    // SAFETY: kill has no preconditions; the pid was just validated.
+    let outcome = unsafe { libc::kill(pid as i32, number) };
+    if outcome < 0 {
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() != Some(libc::ESRCH) {
+            return Err(Error::failed(format!(
+                "the sandbox could not be killed: {error}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn identity_matches(host: &dyn Host, pid: u32, start: u64) -> bool {
+    host.process(pid)
+        .is_some_and(|process| process.start_time == start)
 }
 
 fn diagnostic(path: &Path) -> String {
@@ -675,8 +752,8 @@ mod tests {
         fn namespace_members(&self, pid: u32) -> Option<Vec<u32>> {
             self.inner.namespace_members(pid)
         }
-        fn cpu_time(&self, pid: u32) -> Option<u64> {
-            self.inner.cpu_time(pid)
+        fn user_scope(&self) -> bool {
+            self.inner.user_scope()
         }
     }
 
@@ -733,6 +810,7 @@ mod tests {
         let holder = Holder {
             launcher_pid: 10,
             sandbox_pid: 11,
+            sandbox_start: None,
             namespaces: NamespaceInodes {
                 user: 1,
                 ipc: 2,

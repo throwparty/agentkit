@@ -24,6 +24,13 @@ pub(crate) const UPLOAD_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 /// How much output one provisioning step may buffer in the transport.
 pub(crate) const PROVISION_OUTPUT_CAP: usize = 16 * 1024;
 
+/// How much of each stream an executed command may buffer in the transport.
+///
+/// A command's output is drained whatever happens, so a command that writes
+/// without bound cannot exhaust the server's memory; this is how much of it is
+/// kept and returned.
+pub(crate) const EXEC_OUTPUT_CAP: usize = 1024 * 1024;
+
 /// How much of a failing command's output travels in an error message.
 pub(crate) const ERROR_OUTPUT: usize = 4096;
 
