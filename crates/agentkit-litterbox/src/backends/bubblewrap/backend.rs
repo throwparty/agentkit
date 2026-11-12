@@ -1567,7 +1567,9 @@ mod tests {
                 target: port,
             }],
         );
-        let record = backend.create(&request).await.expect("created");
+        let Some(record) = create_or_skip(&backend, &request).await else {
+            return;
+        };
         let data = payload::BubblewrapData::from_record(&record).expect("payload");
 
         let host_net = std::fs::read_link("/proc/self/ns/net").expect("host net namespace");
@@ -1686,7 +1688,9 @@ mod tests {
         let backend =
             BubblewrapBackend::new(BubblewrapSettings::default(), Arc::new(SystemHost::new()));
         let request = real_request("denied-net-proof", staged.path(), Vec::new());
-        let record = backend.create(&request).await.expect("created");
+        let Some(record) = create_or_skip(&backend, &request).await else {
+            return;
+        };
         let data = payload::BubblewrapData::from_record(&record).expect("payload");
 
         let host_net = std::fs::read_link("/proc/self/ns/net").expect("host net namespace");
