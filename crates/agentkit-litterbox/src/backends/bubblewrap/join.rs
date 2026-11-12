@@ -12,7 +12,7 @@ use std::sync::Mutex;
 
 use super::BACKEND;
 use super::backend::Network;
-use super::host::Host;
+use super::host::{Host, Namespace};
 use super::payload::BubblewrapData;
 use super::view::WORKSPACE;
 use crate::sandbox::contract::{Error, Execution};
@@ -112,7 +112,8 @@ pub fn run(
     })?;
 
     let mut descriptors = Vec::new();
-    for name in ["user", "ipc", "net", "pid", "mnt", "uts", "cgroup"] {
+    for namespace in Namespace::ALL {
+        let name = namespace.name();
         let path = format!("/proc/{}/ns/{name}", data.sandbox_pid);
         let file = std::fs::File::open(&path).map_err(|error| {
             Error::failed(format!("the {name} namespace could not be opened: {error}"))
@@ -139,7 +140,7 @@ pub fn run(
         ),
         None => None,
     };
-    let user = descriptors[0].as_raw_fd();
+    let user = descriptors[Namespace::User.index()].as_raw_fd();
     // SAFETY: the descriptor is a namespace descriptor and the ioctl only
     // reads it.
     let owner = unsafe { libc::ioctl(user, NS_GET_USERNS, 0) };
@@ -256,7 +257,7 @@ pub fn run(
 /// namespace is entered and all seven are checked against the record.
 fn skipped(network: Network) -> [bool; 7] {
     let mut skip = [false; 7];
-    skip[2] = network == Network::Host;
+    skip[Namespace::Net.index()] = network == Network::Host;
     skip
 }
 
@@ -323,18 +324,19 @@ impl Child<'_> {
     /// step over the status pipe and exits.
     fn run(&self) -> ! {
         let order = [
-            (Step::Ipc, 1, libc::CLONE_NEWIPC),
-            (Step::Net, 2, libc::CLONE_NEWNET),
-            (Step::Pid, 3, libc::CLONE_NEWPID),
-            (Step::Mnt, 4, libc::CLONE_NEWNS),
-            (Step::Uts, 5, libc::CLONE_NEWUTS),
-            (Step::Cgroup, 6, libc::CLONE_NEWCGROUP),
+            (Step::Ipc, Namespace::Ipc, libc::CLONE_NEWIPC),
+            (Step::Net, Namespace::Net, libc::CLONE_NEWNET),
+            (Step::Pid, Namespace::Pid, libc::CLONE_NEWPID),
+            (Step::Mnt, Namespace::Mnt, libc::CLONE_NEWNS),
+            (Step::Uts, Namespace::Uts, libc::CLONE_NEWUTS),
+            (Step::Cgroup, Namespace::Cgroup, libc::CLONE_NEWCGROUP),
         ];
 
         if setns(self.owner, libc::CLONE_NEWUSER).is_err() {
             self.fail(Step::OwnUser);
         }
-        for (step, index, flag) in order {
+        for (step, namespace, flag) in order {
+            let index = namespace.index();
             if self.skip[index] {
                 continue;
             }
@@ -342,7 +344,13 @@ impl Child<'_> {
                 self.fail(step);
             }
         }
-        if !self.skip[0] && setns(self.descriptors[0], libc::CLONE_NEWUSER).is_err() {
+        if !self.skip[Namespace::User.index()]
+            && setns(
+                self.descriptors[Namespace::User.index()],
+                libc::CLONE_NEWUSER,
+            )
+            .is_err()
+        {
             self.fail(Step::SandboxUser);
         }
         // Entering the cgroup namespace does not put this process in the
@@ -460,9 +468,8 @@ impl Child<'_> {
     }
 
     fn namespaces_match(&self) -> bool {
-        let names = ["user", "ipc", "net", "pid", "mnt", "uts", "cgroup"];
-        for (index, name) in names.iter().enumerate() {
-            let Ok(link) = std::fs::read_link(format!("/proc/self/ns/{name}")) else {
+        for namespace in Namespace::ALL {
+            let Ok(link) = std::fs::read_link(format!("/proc/self/ns/{}", namespace.name())) else {
                 return false;
             };
             let text = link.to_string_lossy();
@@ -475,7 +482,7 @@ impl Child<'_> {
             let Ok(inode) = text[start + 1..end].parse::<u64>() else {
                 return false;
             };
-            if inode != self.expected[index] {
+            if inode != self.expected[namespace.index()] {
                 return false;
             }
         }

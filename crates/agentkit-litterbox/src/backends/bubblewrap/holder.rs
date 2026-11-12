@@ -212,6 +212,24 @@ pub struct Holder {
     pub unit: Option<String>,
 }
 
+impl Holder {
+    /// Rebuild the holder a record describes.
+    ///
+    /// This is the one place the payload's field list becomes a `Holder`, so
+    /// the identity teardown checks cannot drift from the identity the record
+    /// keeps. A start time of zero is the sentinel for one that could not be
+    /// read, and is recorded as unknown rather than as a value to match.
+    pub fn from_payload(data: &super::payload::BubblewrapData) -> Self {
+        Self {
+            launcher_pid: data.launcher_pid,
+            sandbox_pid: data.sandbox_pid,
+            sandbox_start: (data.sandbox_start != 0).then_some(data.sandbox_start),
+            namespaces: NamespaceInodes::from(data.namespaces),
+            unit: data.scope.clone(),
+        }
+    }
+}
+
 /// Parse bwrap's status document.
 pub fn parse_status(text: &str) -> Option<Status> {
     let text = text.trim();
