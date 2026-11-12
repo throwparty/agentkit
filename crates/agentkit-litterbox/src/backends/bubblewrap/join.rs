@@ -9,6 +9,7 @@ use std::ffi::CString;
 use std::io::Read;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use super::BACKEND;
 use super::backend::Network;
@@ -169,6 +170,11 @@ pub fn run(
     let candidates = candidates(&arguments[0], search_path.as_deref())?;
     let expected = data.namespaces;
     let skip = skipped(data.network);
+    // Everything the child needs is built here: between fork and exec it may
+    // touch neither the allocator nor any lock another thread might hold.
+    let dot = cstr(".");
+    let workspace_path = cstr(WORKSPACE);
+    let self_namespaces = cstr("/proc/self/ns");
 
     // `fork` in a threaded process is only safe while no other thread holds a
     // lock the child might need. The child touches no lock, but the lock still
@@ -196,6 +202,9 @@ pub fn run(
             stderr: stderr_write.as_raw_fd(),
             status: status_write.as_raw_fd(),
             scope: scope.as_ref().map(AsRawFd::as_raw_fd),
+            self_namespaces: &self_namespaces,
+            dot: &dot,
+            workspace: &workspace_path,
             arguments: &arguments,
             candidates: &candidates,
             environment: &environment,
@@ -218,8 +227,28 @@ pub fn run(
     let stdout_reader = std::thread::spawn(move || read_bounded(stdout_read, cap));
     // The status pipe reports setup failures and closes when the command is
     // exec'd, so this returns once the launch is over rather than when the
-    // command finishes.
-    let failure = read_step(status_read);
+    // command finishes. It is bounded, so a launch that wedges cannot hold the
+    // join lock for the life of the server.
+    let failure = match read_step(status_read, Instant::now() + LAUNCH_TIMEOUT) {
+        Ok(failure) => failure,
+        Err(error) => {
+            // The pid this process owns is the waiter; the command it forked
+            // asks the kernel to kill it when the waiter goes, so both are
+            // reaped rather than one left holding the pipes.
+            // SAFETY: the pid is the child this process forked.
+            unsafe { libc::kill(child, libc::SIGKILL) };
+            // SAFETY: the pid is the child this process forked.
+            unsafe { libc::waitpid(child, std::ptr::null_mut(), 0) };
+            // The readers end when the last writer is gone; joining them keeps
+            // their threads from outliving the join.
+            let _ = stdout_reader.join();
+            let _ = stderr_reader.join();
+            return Err(Error::failed(format!(
+                "{BACKEND}: the join did not report within {}s: {error}",
+                LAUNCH_TIMEOUT.as_secs()
+            )));
+        }
+    };
     drop(guard);
 
     let mut status = 0;
@@ -312,6 +341,9 @@ struct Child<'a> {
     stderr: RawFd,
     status: RawFd,
     scope: Option<RawFd>,
+    self_namespaces: &'a CString,
+    dot: &'a CString,
+    workspace: &'a CString,
     arguments: &'a [CString],
     candidates: &'a [CString],
     environment: &'a [CString],
@@ -335,6 +367,16 @@ impl Child<'_> {
         if setns(self.owner, libc::CLONE_NEWUSER).is_err() {
             self.fail(Step::OwnUser);
         }
+        // The scope is joined before the cgroup namespace is entered: from
+        // inside that namespace this process's own cgroup is outside its root,
+        // and the kernel refuses to migrate a process whose cgroup it cannot
+        // see. It is also joined before the sandbox's own user namespace, which
+        // does not carry the capability the cgroup namespace needs.
+        if let Some(scope) = self.scope
+            && !attach(scope)
+        {
+            self.fail(Step::Attach);
+        }
         for (step, namespace, flag) in order {
             let index = namespace.index();
             if self.skip[index] {
@@ -353,13 +395,6 @@ impl Child<'_> {
         {
             self.fail(Step::SandboxUser);
         }
-        // Entering the cgroup namespace does not put this process in the
-        // scope's cgroup, so it is added before it can fork anything.
-        if let Some(scope) = self.scope
-            && !attach(scope)
-        {
-            self.fail(Step::Attach);
-        }
 
         // SAFETY: the only calls between here and exec are async-signal-safe.
         let grandchild = unsafe { libc::fork() };
@@ -377,6 +412,38 @@ impl Child<'_> {
             exit(exit_code(status));
         }
 
+        // The command dies with the waiter that forked it, so a launch that
+        // wedges cannot leave a process behind after the tool has given up on
+        // it. The parent is read first: if it is already gone, the signal will
+        // never arrive and this process has to go by itself.
+        // SAFETY: prctl and getppid have no preconditions.
+        let waiter = unsafe { libc::getppid() };
+        if unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) } < 0 {
+            self.fail(Step::Fork);
+        }
+        // SAFETY: as above.
+        if unsafe { libc::getppid() } != waiter {
+            self.fail(Step::Fork);
+        }
+
+        // The namespace directory is opened here, after the join and before
+        // the chroot: the descriptor the tool holds names the tool's own
+        // namespaces, so verifying against it would reject a join that worked.
+        let namespaces = {
+            // SAFETY: the path is a constant built before the fork and the
+            // descriptor is this process's.
+            unsafe {
+                libc::openat(
+                    libc::AT_FDCWD,
+                    self.self_namespaces.as_ptr(),
+                    libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC,
+                )
+            }
+        };
+        if namespaces < 0 {
+            self.fail(Step::Verify);
+        }
+
         // The command must never see the tool's own input: in an MCP server
         // that is the request stream.
         if unsafe { libc::dup2(self.stdin, 0) } < 0
@@ -387,13 +454,16 @@ impl Child<'_> {
         }
 
         // SAFETY: fchdir and chroot operate on the descriptor this child owns.
-        let dot = cstr(".");
-        if unsafe { libc::fchdir(self.root) } < 0 || unsafe { libc::chroot(dot.as_ptr()) } < 0 {
+        if unsafe { libc::fchdir(self.root) } < 0
+            || unsafe { libc::chroot(self.dot.as_ptr()) } < 0
+        {
             self.fail(Step::Chroot);
         }
-        if unsafe { libc::chdir(cstr(WORKSPACE).as_ptr()) } < 0 {
+        // SAFETY: the path is a constant carried in from the parent.
+        if unsafe { libc::chdir(self.workspace.as_ptr()) } < 0 {
             self.fail(Step::Chdir);
         }
+        // SAFETY: no-new-privileges has no preconditions.
         if unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } < 0 {
             self.fail(Step::NoNewPrivileges);
         }
@@ -406,7 +476,7 @@ impl Child<'_> {
         if !self.capabilities_cleared() {
             self.fail(Step::Capabilities);
         }
-        if !self.namespaces_match() {
+        if !self.namespaces_match(namespaces) {
             self.fail(Step::Verify);
         }
 
@@ -467,21 +537,44 @@ impl Child<'_> {
         unsafe { libc::syscall(libc::SYS_capset, &mut header, data.as_ptr()) == 0 }
     }
 
-    fn namespaces_match(&self) -> bool {
+    fn namespaces_match(&self, namespaces: RawFd) -> bool {
+        // Read through the descriptor this process opened after the fork and
+        // parse the inode by hand: allocating here could deadlock against
+        // another thread's allocator lock while the join lock is held.
+        let mut buffer = [0u8; 64];
         for namespace in Namespace::ALL {
-            let Ok(link) = std::fs::read_link(format!("/proc/self/ns/{}", namespace.name())) else {
+            let name = namespace.c_name();
+            // SAFETY: the descriptor names this process's namespace directory,
+            // the name is a constant, and the buffer is writable for its whole
+            // length.
+            let length = unsafe {
+                libc::readlinkat(
+                    namespaces,
+                    name.as_ptr(),
+                    buffer.as_mut_ptr().cast(),
+                    buffer.len(),
+                )
+            };
+            if length <= 0 {
+                return false;
+            }
+            let link = &buffer[..length as usize];
+            let Some(start) = link.iter().position(|byte| *byte == b'[') else {
                 return false;
             };
-            let text = link.to_string_lossy();
-            let Some(start) = text.find('[') else {
+            let Some(end) = link.iter().position(|byte| *byte == b']') else {
                 return false;
             };
-            let Some(end) = text.find(']') else {
+            if end <= start + 1 {
                 return false;
-            };
-            let Ok(inode) = text[start + 1..end].parse::<u64>() else {
-                return false;
-            };
+            }
+            let mut inode: u64 = 0;
+            for byte in &link[start + 1..end] {
+                if !byte.is_ascii_digit() {
+                    return false;
+                }
+                inode = inode.saturating_mul(10).saturating_add(u64::from(byte - b'0'));
+            }
             if inode != self.expected[namespace.index()] {
                 return false;
             }
@@ -597,15 +690,31 @@ fn cstr(value: &str) -> CString {
     CString::new(value).expect("a constant path has no NUL")
 }
 
-/// The step the child reported, if any.
-fn read_step(mut file: std::fs::File) -> Option<Step> {
+/// Read the step the child reported, if any, within the deadline.
+fn read_step(mut file: std::fs::File, deadline: Instant) -> std::io::Result<Option<Step>> {
+    // SAFETY: the descriptor is open for reading and F_SETFL applies to it.
+    let flags = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETFL) };
+    if flags < 0
+        || unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0
+    {
+        return Err(std::io::Error::last_os_error());
+    }
     let mut byte = [0u8; 1];
     loop {
         match file.read(&mut byte) {
-            Ok(0) => return None,
-            Ok(_) => return Step::from_code(byte[0]),
+            Ok(0) => return Ok(None),
+            Ok(_) => return Ok(Step::from_code(byte[0])),
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(_) => return None,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                if Instant::now() >= deadline {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "the launch did not finish",
+                    ));
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            Err(error) => return Err(error),
         }
     }
 }
@@ -641,6 +750,9 @@ fn read_bounded(mut file: std::fs::File, cap: usize) -> String {
 /// Serialise launches, because `fork` in a threaded process relies on the child
 /// not touching a lock another thread holds.
 static JOIN: Mutex<()> = Mutex::new(());
+
+/// How long a launch has to exec the command before it is abandoned.
+const LAUNCH_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[cfg(test)]
 mod tests {
