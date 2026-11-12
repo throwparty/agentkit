@@ -16,7 +16,7 @@ agentkit-docgen = {path = "../agentkit-docgen"}
 agentkit-models = {path = "../agentkit-models"}
 agentkit-common = {path = "../agentkit-common"}
 agentkit-script = {path = "../agentkit-script"}
-agent-client-protocol = {version = "3.5.0", features = [
+agent-client-protocol = {version = "5.0.0", features = [
   "process",
   "stdio",
   "unstable_session_fork",
