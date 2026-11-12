@@ -222,7 +222,7 @@ fn pin(path: &Path) -> io::Result<File> {
     // SAFETY: open_how is a plain struct of integers, for which all-zero is a
     // valid value.
     let mut how: libc::open_how = unsafe { std::mem::zeroed() };
-    how.flags = libc::O_PATH as u64;
+    how.flags = (libc::O_PATH | libc::O_CLOEXEC) as u64;
     how.resolve = libc::RESOLVE_NO_SYMLINKS | libc::RESOLVE_NO_MAGICLINKS;
     // SAFETY: the pointers are valid for the duration of the call and the
     // struct matches the kernel's layout for open_how.
@@ -266,6 +266,14 @@ impl View {
             .iter()
             .map(|pinned| pinned.mount.clone())
             .collect()
+    }
+
+    /// The descriptors the mechanism is handed, in render order.
+    ///
+    /// Each is close-on-exec, so only the launch that clears the flag inherits
+    /// it; nothing else the backend spawns can recover the mount.
+    pub fn descriptors(&self) -> Vec<i32> {
+        self.pinned.iter().map(Pinned::fd).collect()
     }
 
     /// Render bwrap's argv for this view.

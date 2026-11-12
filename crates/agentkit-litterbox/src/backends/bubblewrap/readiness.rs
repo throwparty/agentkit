@@ -165,8 +165,7 @@ fn read_sysctl(path: &str) -> Option<String> {
 
 fn cgroup_check(host: &dyn Host) -> Check {
     let primitive = "a cgroup v2 user scope".to_string();
-    let usable = host.resolve("systemd-run").is_some()
-        && std::fs::metadata("/sys/fs/cgroup/cgroup.controllers").is_ok();
+    let usable = host.user_scope() && std::fs::metadata("/sys/fs/cgroup/cgroup.controllers").is_ok();
     if usable {
         return Check {
             primitive,
