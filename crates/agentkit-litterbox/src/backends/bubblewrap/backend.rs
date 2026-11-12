@@ -893,7 +893,8 @@ mod tests {
     use super::{BubblewrapBackend, BubblewrapSettings, Network};
     use crate::backends::bubblewrap::host::FakeHost;
     use crate::sandbox::contract::{
-        Backend, ContributionSort, CreateRequest, Error, RequestedPort, SandboxAction, Workspace,
+        Backend, ContributionSort, CreateRequest, Error, RequestedPort, SandboxAction, SandboxRecord,
+        Workspace,
     };
     use crate::sandbox::contract::{Placement, ResolvedStep};
 
@@ -1117,6 +1118,26 @@ mod tests {
         );
     }
 
+    /// Create a sandbox, or skip the test when this host cannot run one.
+    ///
+    /// The host suite is ignored by default but CI runs ignored tests too,
+    /// and a runner that blocks unprivileged user namespaces cannot create a
+    /// sandbox at all. The ADR says to skip with the requirement named rather
+    /// than fail.
+    async fn create_or_skip(
+        backend: &BubblewrapBackend,
+        request: &CreateRequest,
+    ) -> Option<SandboxRecord> {
+        match backend.create(request).await {
+            Ok(record) => Some(record),
+            Err(Error::Unavailable { reason, remedy, .. }) => {
+                eprintln!("skipping: {reason}; {remedy}");
+                None
+            }
+            Err(error) => panic!("create failed: {error}"),
+        }
+    }
+
     #[tokio::test]
     #[ignore = "starts a real sandbox; run where bubblewrap is on PATH"]
     async fn a_real_sandbox_confines_writes() {
@@ -1127,7 +1148,9 @@ mod tests {
         let backend =
             BubblewrapBackend::new(BubblewrapSettings::default(), Arc::new(SystemHost::new()));
         let request = test_request("confine", staged.path());
-        let record = backend.create(&request).await.expect("created");
+        let Some(record) = create_or_skip(&backend, &request).await else {
+            return;
+        };
         let data = payload::BubblewrapData::from_record(&record).expect("payload");
         let holder = holder::Holder {
             launcher_pid: data.launcher_pid,
@@ -1194,7 +1217,9 @@ mod tests {
         let backend =
             BubblewrapBackend::new(BubblewrapSettings::default(), Arc::new(SystemHost::new()));
         let request = test_request("demo", staged.path());
-        let record = backend.create(&request).await.expect("created");
+        let Some(record) = create_or_skip(&backend, &request).await else {
+            return;
+        };
         let data = payload::BubblewrapData::from_record(&record).expect("payload");
         let holder = holder::Holder {
             launcher_pid: data.launcher_pid,
