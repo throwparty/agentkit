@@ -82,6 +82,11 @@ tasks = 512
 # sandbox reaches whatever the host reaches and a listener it starts is
 # reachable from the host. A project that declares a port needs "host".
 network = "denied"
+# The program and leading arguments that run a shell string. The default is
+# ["sh", "-c"]; a host whose userland has no `sh` entry can name another shell,
+# for example ["bash", "-c"]. The program is resolved on the host and bound
+# into the sandbox, so it does not have to be on the sandbox's PATH.
+shell = ["sh", "-c"]
 ```
 
 Prefer pinning the image by digest (`image = "ubuntu@sha256:..."`): a tag can
