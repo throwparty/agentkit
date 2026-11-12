@@ -17,7 +17,8 @@ tracing-subscriber = {version = "0.3", features = ["json", "env-filter", "regist
 uuid = {version = "1", features = ["v4"]}
 axum = {version = "0.8", features = ["macros"]}
 tower-http = {version = "0.7", features = ["cors", "trace"]}
-sqlx = {version = "0.9", features = ["runtime-tokio", "sqlite", "migrate"]}
+# See agentkit-tackle: the git commit allows the patched libsqlite3-sys.
+sqlx = {git = "https://github.com/launchbadge/sqlx", rev = "987b8c5a74b6da8b71da6b5549925a7f6e59aac9", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"]}
 oauth2 = {version = "5", default-features = false, features = ["reqwest", "pkce-plain"]}
 url = "2"
 chrono = {version = "0.4", features = ["serde"]}
