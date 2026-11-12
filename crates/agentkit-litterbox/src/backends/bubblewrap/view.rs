@@ -257,6 +257,8 @@ pub struct RenderOptions<'a> {
     pub status_fd: i32,
     /// Whether the sandbox gets its own network namespace.
     pub network: crate::backends::bubblewrap::backend::Network,
+    /// The links to create in the private root, as `(target, link)`.
+    pub symlinks: &'a [(PathBuf, PathBuf)],
 }
 
 impl View {
@@ -301,6 +303,16 @@ impl View {
         }
         for flag in ["--tmpfs", "/home", "--dir", HOME] {
             push(flag.to_string());
+        }
+        // A shebang names `/bin/sh` or `/usr/bin/env` by absolute path, so the
+        // links have to exist before any script runs, whatever the PATH says.
+        for flag in ["--dir", "/bin", "--dir", "/usr", "--dir", "/usr/bin"] {
+            push(flag.to_string());
+        }
+        for (target, link) in options.symlinks {
+            push("--symlink".to_string());
+            push(target.to_string_lossy().to_string());
+            push(link.to_string_lossy().to_string());
         }
         for pinned in &self.pinned {
             push("--ro-bind".to_string());
@@ -384,6 +396,7 @@ mod tests {
             workspace_host: &workspace,
             status_fd: 3,
             network: crate::backends::bubblewrap::backend::Network::Denied,
+            symlinks: &[],
         };
         let argv: Vec<String> = view
             .render(&options)
@@ -412,6 +425,12 @@ mod tests {
             "/home".to_string(),
             "--dir".to_string(),
             "/home/litterbox".to_string(),
+            "--dir".to_string(),
+            "/bin".to_string(),
+            "--dir".to_string(),
+            "/usr".to_string(),
+            "--dir".to_string(),
+            "/usr/bin".to_string(),
             "--ro-bind".to_string(),
             "/proc/self/fd/<n>".to_string(),
             grant.join("abc").to_string_lossy().to_string(),
@@ -581,6 +600,7 @@ mod tests {
             workspace_host: &workspace,
             status_fd: 3,
             network: crate::backends::bubblewrap::backend::Network::Denied,
+            symlinks: &[],
         };
         let argv = view.render(&options);
         let contains = |flag: &str| argv.iter().any(|argument| argument == flag);

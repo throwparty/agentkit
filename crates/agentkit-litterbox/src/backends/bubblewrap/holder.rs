@@ -46,6 +46,9 @@ pub struct Command {
     /// The directory list the shell searches for the utility, which is not the
     /// sandbox's `PATH`.
     pub path: String,
+    /// The links the sandbox needs to look like a POSIX system: the mechanism's
+    /// shell at `/bin/sh` and, when the host has one, `env` at `/usr/bin/env`.
+    pub symlinks: Vec<(PathBuf, PathBuf)>,
 }
 
 impl Command {
@@ -86,9 +89,18 @@ impl Command {
 pub fn command(host: &dyn Host, shell: &[String]) -> Result<Command, Error> {
     let argv = shell_argv(host, shell)?;
     let sleep = trusted(host, SLEEP)?;
+    let mut binaries = vec![PathBuf::from(&argv[0]), sleep];
+    let mut symlinks = vec![(PathBuf::from(&argv[0]), PathBuf::from("/bin/sh"))];
+    // `/usr/bin/env` is what a `#!/usr/bin/env <tool>` shebang runs; a
+    // devShell's scripts use it even though the sandbox's own PATH may not
+    // name it.
+    if let Some(env) = optional(host, "env") {
+        symlinks.push((env.clone(), PathBuf::from("/usr/bin/env")));
+        binaries.push(env);
+    }
     let mut binds = Vec::new();
     let mut directories: Vec<String> = Vec::new();
-    for path in [PathBuf::from(&argv[0]), sleep] {
+    for path in binaries {
         if !binds.contains(&path) {
             binds.push(path.clone());
         }
@@ -114,7 +126,13 @@ pub fn command(host: &dyn Host, shell: &[String]) -> Result<Command, Error> {
         args: argv[1..].to_vec(),
         binds,
         path: directories.join(":"),
+        symlinks,
     })
+}
+
+/// Resolve a binary the sandbox benefits from but does not require.
+fn optional(host: &dyn Host, name: &str) -> Option<PathBuf> {
+    trusted(host, name).ok()
 }
 
 /// The shell a sandbox evaluates a script with: the resolved program and the
@@ -708,6 +726,29 @@ mod tests {
                 "echo hi".to_string()
             ]
         );
+        assert!(
+            command
+                .symlinks
+                .contains(&(PathBuf::from("/usr/bin/sh"), PathBuf::from("/bin/sh"))),
+            "a shebang needs /bin/sh"
+        );
+    }
+
+    #[test]
+    fn env_is_linked_when_the_host_has_one() {
+        let mut host = holder_host();
+        host.binaries
+            .insert("env".to_string(), PathBuf::from("/opt/bin/env"));
+        host.ownership
+            .insert(PathBuf::from("/opt/bin/env"), (0, 0o755));
+        let command = command(&host, &default_shell()).expect("command");
+        assert!(
+            command
+                .symlinks
+                .contains(&(PathBuf::from("/opt/bin/env"), PathBuf::from("/usr/bin/env"))),
+            "#!/usr/bin/env needs the link"
+        );
+        assert!(command.binds.contains(&PathBuf::from("/opt/bin/env")));
     }
 
     fn default_shell() -> Vec<String> {
