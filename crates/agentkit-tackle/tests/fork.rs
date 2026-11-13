@@ -1,13 +1,13 @@
 //! Fork integration tests: the RFD path, the v1 /fork fallback,
 //! seed insertion, fork titles, and script-failure grace.
 
-use agentkit_tackle::agent_client_protocol::schema::v1::ForkSessionRequest;
-use agentkit_tackle::agent_client_protocol::schema::v1::{
+use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
+use agentkit_tackle::agent_client_protocol::v1::schema::ForkSessionRequest;
+use agentkit_tackle::agent_client_protocol::v1::schema::{
     ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, SessionNotification,
     SessionUpdate, TextContent,
 };
-use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
-use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
+use agentkit_tackle::agent_client_protocol::{v1::ConnectionTo, AcpAgent, Agent, Client};
 use agentkit_tackle::store::{SessionStore, TurnKind};
 use std::sync::{Arc as StdArc, Mutex as StdMutex};
 
@@ -54,7 +54,7 @@ async fn rfd_fork_creates_a_titled_fork_with_lineage() {
     let agent = spawn_agent(dir.path());
 
     Client
-        .builder()
+        .v1()
         .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
             connection
                 .send_request(InitializeRequest::new(ProtocolVersion::V1))
@@ -89,7 +89,7 @@ async fn rfd_fork_creates_a_titled_fork_with_lineage() {
             // The fork is a separate, listable session.
             let listed = connection
                 .send_request(
-                    agentkit_tackle::agent_client_protocol::schema::v1::ListSessionsRequest::new(),
+                    agentkit_tackle::agent_client_protocol::v1::schema::ListSessionsRequest::new(),
                 )
                 .block_task()
                 .await?;
@@ -146,7 +146,7 @@ async fn fallback_fork_reports_the_id_and_seeds() {
     let seen_handler = seen.clone();
 
     Client
-        .builder()
+        .v1()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
                 if let SessionUpdate::AgentMessageChunk(chunk) = &notification.update {
@@ -181,7 +181,7 @@ async fn fallback_fork_reports_the_id_and_seeds() {
                 .await?;
             assert!(matches!(
                 response.stop_reason,
-                agentkit_tackle::agent_client_protocol::schema::v1::StopReason::EndTurn
+                agentkit_tackle::agent_client_protocol::v1::schema::StopReason::EndTurn
             ));
 
             // The report surfaced as an agent chunk carrying the fork's
@@ -236,7 +236,7 @@ async fn script_failure_never_fails_the_fork() {
     let agent = spawn_agent_with_config(dir.path());
 
     Client
-        .builder()
+        .v1()
         .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
             connection
                 .send_request(InitializeRequest::new(ProtocolVersion::V1))

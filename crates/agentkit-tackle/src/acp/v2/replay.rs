@@ -9,7 +9,7 @@
 
 use crate::acp::common::replay::{walk, ReplayEvent};
 use crate::invokables::titles;
-use agent_client_protocol::schema::v2::{
+use agent_client_protocol::v2::schema::{
     AgentMessage, Content, ContentBlock, MessageId, SessionId, SessionUpdate, ToolCallContent,
     ToolCallId, ToolCallStatus, ToolCallUpdate, UpdateSessionNotification, UserMessage,
 };
@@ -28,7 +28,7 @@ pub(super) fn replay_updates(
 fn wire_block(block: &crate::acp::common::content::Block) -> ContentBlock {
     match serde_json::from_value(block.to_value()) {
         Ok(block) => block,
-        Err(_) => ContentBlock::Text(agent_client_protocol::schema::v2::TextContent::new(
+        Err(_) => ContentBlock::Text(agent_client_protocol::v2::schema::TextContent::new(
             block.as_text().unwrap_or("[unsupported content]"),
         )),
     }

@@ -3,7 +3,7 @@
 
 use super::wire_kind;
 use crate::acp::common::replay::{walk, ReplayEvent};
-use agent_client_protocol::schema::v1::{SessionId, SessionNotification, SessionUpdate};
+use agent_client_protocol::v1::schema::{SessionId, SessionNotification, SessionUpdate};
 
 /// Maps stored messages to replay notifications via the shared neutral walk:
 /// user/assistant messages become message chunks sharing the stored message id
@@ -23,8 +23,8 @@ pub(super) fn replay_updates(
 
 fn wire_block(
     block: &crate::acp::common::content::Block,
-) -> agent_client_protocol::schema::v1::ContentBlock {
-    use agent_client_protocol::schema::v1::{ContentBlock, TextContent};
+) -> agent_client_protocol::v1::schema::ContentBlock {
+    use agent_client_protocol::v1::schema::{ContentBlock, TextContent};
     match serde_json::from_value(block.to_value()) {
         Ok(block) => block,
         Err(_) => ContentBlock::Text(TextContent::new(
@@ -34,7 +34,7 @@ fn wire_block(
 }
 
 fn render(session_id: &SessionId, event: ReplayEvent) -> Vec<SessionNotification> {
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         ContentChunk, MessageId, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate,
         ToolCallUpdateFields,
     };
@@ -108,7 +108,7 @@ fn notification(session_id: &SessionId, update: SessionUpdate) -> SessionNotific
 mod tests {
     use super::*;
     use crate::store::{AssembledMessage, Message, Role, TurnKind};
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         ContentBlock, SessionUpdate, ToolCallContent, ToolCallStatus,
     };
 

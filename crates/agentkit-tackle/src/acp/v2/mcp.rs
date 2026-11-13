@@ -3,7 +3,7 @@
 
 use super::negotiation::ConnectionNegotiation;
 use crate::config::McpServerConfig;
-use agent_client_protocol::schema::v2::McpServer;
+use agent_client_protocol::v2::schema::McpServer;
 
 /// Maps a v2 client-forwarded MCP server onto the pool's spawn configuration.
 /// SSE and ACP transports are not advertised, so those entries are skipped;
@@ -65,7 +65,7 @@ pub(super) async fn connect_forwarded_servers(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::schema::v2::{
+    use agent_client_protocol::v2::schema::{
         EnvVariable, HttpHeader, McpServerHttp, McpServerStdio,
     };
 

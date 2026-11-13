@@ -12,11 +12,11 @@ use crate::agent::config_options::Notice;
 use crate::agent::runtime::TurnRuntime;
 use crate::content::timestamp;
 use crate::state::TackleState;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     ContentBlock, ContentChunk, MessageId, SessionId, SessionInfoUpdate, SessionNotification,
     SessionUpdate, TextContent,
 };
-use agent_client_protocol::ConnectionTo;
+use agent_client_protocol::v1::ConnectionTo;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 

@@ -2,12 +2,12 @@
 //! one session database — cross-process session/list visibility, lease
 //! contention with precise errors, and fork lineage across processes.
 
-use agentkit_tackle::agent_client_protocol::schema::v1::ForkSessionRequest;
-use agentkit_tackle::agent_client_protocol::schema::v1::{
+use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
+use agentkit_tackle::agent_client_protocol::v1::schema::ForkSessionRequest;
+use agentkit_tackle::agent_client_protocol::v1::schema::{
     InitializeRequest, ListSessionsRequest, NewSessionRequest, PromptRequest, TextContent,
 };
-use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
-use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
+use agentkit_tackle::agent_client_protocol::{v1::ConnectionTo, AcpAgent, Agent, Client};
 use agentkit_tackle::store::SessionStore;
 
 fn spawn_agent(dir: &std::path::Path, name: &str) -> AcpAgent {
@@ -57,7 +57,7 @@ async fn sessions_are_visible_across_processes() {
 
     // Process A creates a session; process B lists it.
     Client
-        .builder()
+        .v1()
         .connect_with(agent_a, |connection: ConnectionTo<Agent>| async move {
             connection
                 .send_request(InitializeRequest::new(ProtocolVersion::V1))
@@ -75,7 +75,7 @@ async fn sessions_are_visible_across_processes() {
         .expect("process A creates");
 
     Client
-        .builder()
+        .v1()
         .connect_with(agent_b, |connection: ConnectionTo<Agent>| async move {
             connection
                 .send_request(InitializeRequest::new(ProtocolVersion::V1))
@@ -112,7 +112,7 @@ async fn lease_contention_fails_precisely() {
     // Process A creates the session and runs the slow /compact,
     // holding the lease; process B's prompt hits the contention error.
     let created_id = Client
-        .builder()
+        .v1()
         .connect_with(agent_a1, |connection: ConnectionTo<Agent>| async move {
             connection
                 .send_request(InitializeRequest::new(ProtocolVersion::V1))
@@ -133,7 +133,7 @@ async fn lease_contention_fails_precisely() {
         async {
             let created_id = created_id.clone();
             Client
-                .builder()
+                .v1()
                 .connect_with(agent_a2, |connection: ConnectionTo<Agent>| async move {
                     connection
                         .send_request(InitializeRequest::new(ProtocolVersion::V1))
@@ -141,10 +141,10 @@ async fn lease_contention_fails_precisely() {
                         .await?;
                     connection
                         .send_request(PromptRequest::new(
-                            agentkit_tackle::agent_client_protocol::schema::v1::SessionId::new(
+                            agentkit_tackle::agent_client_protocol::v1::schema::SessionId::new(
                                 created_id.clone(),
                             ),
-                            vec![agentkit_tackle::agent_client_protocol::schema::v1::ContentBlock::Text(
+                            vec![agentkit_tackle::agent_client_protocol::v1::schema::ContentBlock::Text(
                                 TextContent::new("/compact".to_owned()),
                             )],
                         ))
@@ -158,7 +158,7 @@ async fn lease_contention_fails_precisely() {
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
             let created_id = created_id.clone();
             Client
-                .builder()
+                .v1()
                 .connect_with(agent_b, |connection: ConnectionTo<Agent>| async move {
                     connection
                         .send_request(InitializeRequest::new(ProtocolVersion::V1))
@@ -166,10 +166,10 @@ async fn lease_contention_fails_precisely() {
                         .await?;
                     connection
                         .send_request(PromptRequest::new(
-                            agentkit_tackle::agent_client_protocol::schema::v1::SessionId::new(
+                            agentkit_tackle::agent_client_protocol::v1::schema::SessionId::new(
                                 created_id.clone(),
                             ),
-                            vec![agentkit_tackle::agent_client_protocol::schema::v1::ContentBlock::Text(
+                            vec![agentkit_tackle::agent_client_protocol::v1::schema::ContentBlock::Text(
                                 TextContent::new("any prompt".to_owned()),
                             )],
                         ))
@@ -198,7 +198,7 @@ async fn fork_lineage_spans_processes() {
     let agent_b = spawn_agent(dir.path(), "b");
 
     let source_id = Client
-        .builder()
+        .v1()
         .connect_with(agent_a, |connection: ConnectionTo<Agent>| async move {
             connection
                 .send_request(InitializeRequest::new(ProtocolVersion::V1))
@@ -216,7 +216,7 @@ async fn fork_lineage_spans_processes() {
     // Process B forks process A's session.
     let fork_source = source_id.clone();
     let fork_id = Client
-        .builder()
+        .v1()
         .connect_with(agent_b, |connection: ConnectionTo<Agent>| async move {
             connection
                 .send_request(InitializeRequest::new(ProtocolVersion::V1))
@@ -224,7 +224,7 @@ async fn fork_lineage_spans_processes() {
                 .await?;
             let forked = connection
                 .send_request(ForkSessionRequest::new(
-                    agentkit_tackle::agent_client_protocol::schema::v1::SessionId::new(
+                    agentkit_tackle::agent_client_protocol::v1::schema::SessionId::new(
                         fork_source.clone(),
                     ),
                     std::path::PathBuf::from("/lineage"),

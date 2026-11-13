@@ -2,10 +2,11 @@
 //! advertised as `!mcp.<server>.*`, and its tool is callable through the
 //! permission pipeline.
 
-use agentkit_tackle::agent_client_protocol::schema::v2;
 use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
+use agentkit_tackle::agent_client_protocol::v2::schema as v2;
 use agentkit_tackle::agent_client_protocol::{
-    on_receive_notification, on_receive_request, AcpAgent, Agent, Client, V2ConnectionTo,
+    on_receive_notification, on_receive_request, v2::ConnectionTo as V2ConnectionTo, AcpAgent,
+    Agent, Client,
 };
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

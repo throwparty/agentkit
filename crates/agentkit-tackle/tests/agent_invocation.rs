@@ -3,13 +3,13 @@
 //! nested final message returns as the tool result. Before the fix the
 //! invokable was advertised to the model but every call errored.
 
-use agentkit_tackle::agent_client_protocol::schema::v1::{
+use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
+use agentkit_tackle::agent_client_protocol::v1::schema::{
     ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
     SessionNotification, SessionUpdate, TextContent,
 };
-use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
-use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
+use agentkit_tackle::agent_client_protocol::{v1::ConnectionTo, AcpAgent, Agent, Client};
 use agentkit_tackle::store::{SessionKind, SessionStore};
 use std::sync::{Arc as StdArc, Mutex as StdMutex};
 use wiremock::matchers::method;
@@ -165,7 +165,7 @@ async fn agent_invocation_returns_the_nested_final_message() {
     let results_handler = results.clone();
 
     Client
-        .builder()
+        .v1()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
                 if let SessionUpdate::ToolCallUpdate(update) = &notification.update {

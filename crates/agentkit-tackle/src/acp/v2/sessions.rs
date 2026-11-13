@@ -13,7 +13,7 @@ use crate::scripts::host::NoticeSink;
 use crate::state::TackleState;
 use crate::store::ListFilter;
 use agent_client_protocol::role::acp::Client;
-use agent_client_protocol::schema::v2::{
+use agent_client_protocol::v2::schema::{
     AbsolutePath, AvailableCommandsUpdate, CloseSessionRequest, CloseSessionResponse,
     ConfigOptionUpdate, ContentBlock, Cost, DeleteSessionRequest, DeleteSessionResponse,
     ForkSessionRequest, ForkSessionResponse, IdleStateUpdate, ListSessionsRequest,
@@ -24,7 +24,10 @@ use agent_client_protocol::schema::v2::{
     SetSessionConfigOptionResponse, StateUpdate, UpdateSessionNotification, UsageUpdate,
     UserMessage,
 };
-use agent_client_protocol::{Error, Responder, V2ConnectionTo};
+use agent_client_protocol::{
+    v2::{ConnectionTo as V2ConnectionTo, Responder},
+    Error,
+};
 use std::sync::Arc;
 
 use super::{store_session_id, wire_session_id};
@@ -34,7 +37,7 @@ use super::{store_session_id, wire_session_id};
 async fn send_usage_snapshot(
     state: &TackleState,
     cx: &V2ConnectionTo<Client>,
-    wire_session: &agent_client_protocol::schema::v2::SessionId,
+    wire_session: &agent_client_protocol::v2::schema::SessionId,
     store_session: &crate::store::SessionId,
 ) -> Result<(), Error> {
     let session = state

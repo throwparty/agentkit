@@ -2,7 +2,7 @@
 
 use super::negotiation::ConnectionNegotiation;
 use crate::state::TackleState;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     InitializeRequest, LoadSessionRequest, NewSessionRequest, ResumeSessionRequest,
 };
 use agent_client_protocol::Agent;
@@ -18,7 +18,7 @@ pub(crate) fn agent(
     elicitation: Arc<crate::mcp::DynamicElicitationSink>,
 ) -> impl agent_client_protocol::ConnectTo<agent_client_protocol::role::acp::Client> {
     Agent
-        .builder()
+        .v1()
         .name("tackle")
         .on_receive_request(
             {
@@ -40,7 +40,7 @@ pub(crate) fn agent(
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
-            async move |_request: agent_client_protocol::schema::v1::AuthenticateRequest,
+            async move |_request: agent_client_protocol::v1::schema::AuthenticateRequest,
                         responder,
                         _cx| { super::initialize::handle_authenticate(responder) },
             agent_client_protocol::on_receive_request!(),
@@ -59,7 +59,7 @@ pub(crate) fn agent(
         .on_receive_request(
             {
                 let state = state.clone();
-                async move |request: crate::agent_client_protocol::schema::v1::ListSessionsRequest,
+                async move |request: crate::agent_client_protocol::v1::schema::ListSessionsRequest,
                             responder,
                             _cx| {
                     super::sessions::handle_list_sessions(state.clone(), request, responder).await
@@ -71,7 +71,7 @@ pub(crate) fn agent(
             {
                 let state = state.clone();
                 let negotiation = negotiation.clone();
-                async move |request: agent_client_protocol::schema::v1::CloseSessionRequest,
+                async move |request: agent_client_protocol::v1::schema::CloseSessionRequest,
                             responder,
                             cx| {
                     super::sessions::handle_close_session(
@@ -91,7 +91,7 @@ pub(crate) fn agent(
                 let state = state.clone();
                 let negotiation = negotiation.clone();
                 let owner = owner.clone();
-                async move |request: agent_client_protocol::schema::v1::PromptRequest,
+                async move |request: agent_client_protocol::v1::schema::PromptRequest,
                             responder,
                             cx| {
                     super::prompt::handle_prompt(
@@ -110,7 +110,7 @@ pub(crate) fn agent(
         .on_receive_request(
             {
                 let state = state.clone();
-                async move |request: agent_client_protocol::schema::v1::DeleteSessionRequest,
+                async move |request: agent_client_protocol::v1::schema::DeleteSessionRequest,
                             responder,
                             _cx| {
                     super::sessions::handle_delete_session(state.clone(), request, responder).await
@@ -150,7 +150,7 @@ pub(crate) fn agent(
             {
                 let state = state.clone();
                 let negotiation = negotiation.clone();
-                async move |request: agent_client_protocol::schema::v1::SetSessionConfigOptionRequest,
+                async move |request: agent_client_protocol::v1::schema::SetSessionConfigOptionRequest,
                             responder,
                             cx| {
                     super::sessions::handle_set_config(state.clone(), negotiation.clone(), cx, request, responder)
@@ -165,7 +165,7 @@ pub(crate) fn agent(
             {
                 let state = state.clone();
                 let negotiation = negotiation.clone();
-                async move |request: agent_client_protocol::schema::v1::ForkSessionRequest,
+                async move |request: agent_client_protocol::v1::schema::ForkSessionRequest,
                             responder,
                             cx| {
                     super::sessions::handle_fork_session(state.clone(), negotiation.clone(), cx, request, responder)
@@ -180,7 +180,7 @@ pub(crate) fn agent(
         .on_receive_notification(
             {
                 let negotiation = negotiation.clone();
-                async move |notification: agent_client_protocol::schema::v1::CancelNotification,
+                async move |notification: agent_client_protocol::v1::schema::CancelNotification,
                             _cx| {
                     let store_session = crate::state::store_session_id(&notification.session_id);
                     negotiation.cancel(&store_session);

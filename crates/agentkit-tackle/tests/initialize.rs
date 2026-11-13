@@ -3,13 +3,13 @@
 //! binary as a subprocess and drives it with the SDK's client — the same
 //! shape the golden transcripts replay.
 
-use agentkit_tackle::agent_client_protocol::schema::v1::{
+use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
+use agentkit_tackle::agent_client_protocol::v1::schema::{
     ClientCapabilities, InitializeRequest, ListSessionsRequest, LoadSessionRequest, McpServer,
     McpServerStdio, Meta, NewSessionRequest, SessionCapabilities, SessionNotification,
     SessionUpdate,
 };
-use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
-use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
+use agentkit_tackle::agent_client_protocol::{v1::ConnectionTo, AcpAgent, Agent, Client};
 use std::sync::{Arc as StdArc, Mutex as StdMutex};
 
 /// Replayed chunks observed by the notification handler: (role, message
@@ -35,7 +35,7 @@ async fn initialize_negotiates_v1_and_advertises_capabilities() {
     let agent = spawn_agent(dir.path());
 
     Client
-        .builder()
+        .v1()
         .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
             let response = connection
                 .send_request(InitializeRequest::new(ProtocolVersion::V1))
@@ -91,7 +91,7 @@ async fn session_lifecycle_round_trips() {
     let agent = spawn_agent(dir.path());
 
     Client
-        .builder()
+        .v1()
         .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
             connection
                 .send_request(InitializeRequest::new(ProtocolVersion::V1))
@@ -118,7 +118,7 @@ async fn session_lifecycle_round_trips() {
             // session/close: the session stays listable.
             let closed = connection
                 .send_request(
-                    agentkit_tackle::agent_client_protocol::schema::v1::CloseSessionRequest::new(
+                    agentkit_tackle::agent_client_protocol::v1::schema::CloseSessionRequest::new(
                         session_id.clone(),
                     ),
                 )
@@ -134,7 +134,7 @@ async fn session_lifecycle_round_trips() {
             // session/delete: hides it.
             let deleted = connection
                 .send_request(
-                    agentkit_tackle::agent_client_protocol::schema::v1::DeleteSessionRequest::new(
+                    agentkit_tackle::agent_client_protocol::v1::schema::DeleteSessionRequest::new(
                         session_id.clone(),
                     ),
                 )
@@ -158,7 +158,7 @@ async fn session_lifecycle_round_trips() {
 /// `restart_load.rs`, which pairs it with a real turn.
 #[tokio::test(flavor = "multi_thread")]
 async fn session_load_on_an_empty_session_answers() {
-    use agentkit_tackle::agent_client_protocol::schema::v1::SessionNotification;
+    use agentkit_tackle::agent_client_protocol::v1::schema::SessionNotification;
 
     let dir = tempfile::tempdir().unwrap();
     let agent = spawn_agent(dir.path());
@@ -167,10 +167,10 @@ async fn session_load_on_an_empty_session_answers() {
     let seen_handler = seen.clone();
 
     Client
-        .builder()
+        .v1()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
-                if let agentkit_tackle::agent_client_protocol::schema::v1::SessionUpdate::UserMessageChunk(chunk) =
+                if let agentkit_tackle::agent_client_protocol::v1::schema::SessionUpdate::UserMessageChunk(chunk) =
                     &notification.update
                 {
                     let mut seen = seen_handler.lock().unwrap();
@@ -178,7 +178,7 @@ async fn session_load_on_an_empty_session_answers() {
                         "user".into(),
                         chunk.message_id.as_ref().map(|id| id.to_string()),
                         match &chunk.content {
-                            agentkit_tackle::agent_client_protocol::schema::v1::ContentBlock::Text(text) => {
+                            agentkit_tackle::agent_client_protocol::v1::schema::ContentBlock::Text(text) => {
                                 text.text.clone()
                             }
                             _ => String::new(),
@@ -228,7 +228,7 @@ async fn available_commands_are_advertised_after_session_new_and_load() {
     let seen_handler = seen.clone();
 
     Client
-        .builder()
+        .v1()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
                 if let SessionUpdate::AvailableCommandsUpdate(update) = &notification.update {
@@ -336,7 +336,7 @@ async fn direct_invocation_runs_an_mcp_tool_and_reports_the_result() {
     let advertised_handler = advertised.clone();
 
     Client
-        .builder()
+        .v1()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
                 match &notification.update {
@@ -412,11 +412,11 @@ async fn direct_invocation_runs_an_mcp_tool_and_reports_the_result() {
                 calls.lock().unwrap().clear();
                 let response = connection
                     .send_request(
-                        agentkit_tackle::agent_client_protocol::schema::v1::PromptRequest::new(
+                        agentkit_tackle::agent_client_protocol::v1::schema::PromptRequest::new(
                             created.session_id.clone(),
                             vec![
-                                agentkit_tackle::agent_client_protocol::schema::v1::ContentBlock::Text(
-                                    agentkit_tackle::agent_client_protocol::schema::v1::TextContent::new(
+                                agentkit_tackle::agent_client_protocol::v1::schema::ContentBlock::Text(
+                                    agentkit_tackle::agent_client_protocol::v1::schema::TextContent::new(
                                         command.to_owned(),
                                     ),
                                 ),
@@ -428,7 +428,7 @@ async fn direct_invocation_runs_an_mcp_tool_and_reports_the_result() {
 
                 assert_eq!(
                     response.stop_reason,
-                    agentkit_tackle::agent_client_protocol::schema::v1::StopReason::EndTurn,
+                    agentkit_tackle::agent_client_protocol::v1::schema::StopReason::EndTurn,
                     "{command}"
                 );
 
@@ -464,11 +464,11 @@ async fn editor_command_toggles_and_reports() {
     let replies_handler = replies.clone();
 
     Client
-        .builder()
+        .v1()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
                 if let SessionUpdate::AgentMessageChunk(chunk) = &notification.update {
-                    if let agentkit_tackle::agent_client_protocol::schema::v1::ContentBlock::Text(
+                    if let agentkit_tackle::agent_client_protocol::v1::schema::ContentBlock::Text(
                         text,
                     ) = &chunk.content
                     {
@@ -503,11 +503,11 @@ async fn editor_command_toggles_and_reports() {
                 replies.lock().unwrap().clear();
                 let response = connection
                     .send_request(
-                        agentkit_tackle::agent_client_protocol::schema::v1::PromptRequest::new(
+                        agentkit_tackle::agent_client_protocol::v1::schema::PromptRequest::new(
                             created.session_id.clone(),
                             vec![
-                                agentkit_tackle::agent_client_protocol::schema::v1::ContentBlock::Text(
-                                    agentkit_tackle::agent_client_protocol::schema::v1::TextContent::new(
+                                agentkit_tackle::agent_client_protocol::v1::schema::ContentBlock::Text(
+                                    agentkit_tackle::agent_client_protocol::v1::schema::TextContent::new(
                                         command,
                                     ),
                                 ),
@@ -518,7 +518,7 @@ async fn editor_command_toggles_and_reports() {
                     .await?;
                 assert_eq!(
                     response.stop_reason,
-                    agentkit_tackle::agent_client_protocol::schema::v1::StopReason::EndTurn,
+                    agentkit_tackle::agent_client_protocol::v1::schema::StopReason::EndTurn,
                     "{command}"
                 );
                 let seen = replies.lock().unwrap().clone();
@@ -547,7 +547,7 @@ async fn forwarded_mcp_servers_reach_the_session() {
     let advertised_handler = advertised.clone();
 
     Client
-        .builder()
+        .v1()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
                 match &notification.update {
@@ -618,11 +618,11 @@ async fn forwarded_mcp_servers_reach_the_session() {
 
             let response = connection
                 .send_request(
-                    agentkit_tackle::agent_client_protocol::schema::v1::PromptRequest::new(
+                    agentkit_tackle::agent_client_protocol::v1::schema::PromptRequest::new(
                         created.session_id.clone(),
                         vec![
-                            agentkit_tackle::agent_client_protocol::schema::v1::ContentBlock::Text(
-                                agentkit_tackle::agent_client_protocol::schema::v1::TextContent::new(
+                            agentkit_tackle::agent_client_protocol::v1::schema::ContentBlock::Text(
+                                agentkit_tackle::agent_client_protocol::v1::schema::TextContent::new(
                                     r#"/!mcp.echo.echo {"text":"forwarded"}"#.to_owned(),
                                 ),
                             ),
@@ -633,7 +633,7 @@ async fn forwarded_mcp_servers_reach_the_session() {
                 .await?;
             assert_eq!(
                 response.stop_reason,
-                agentkit_tackle::agent_client_protocol::schema::v1::StopReason::EndTurn,
+                agentkit_tackle::agent_client_protocol::v1::schema::StopReason::EndTurn,
             );
 
             let seen = calls.lock().unwrap().clone();
@@ -665,7 +665,7 @@ async fn forwarded_failures_are_reported_at_the_first_turn() {
         .client_capabilities(ClientCapabilities::new().meta(Meta::from(meta)));
 
     Client
-        .builder()
+        .v1()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
                 if let SessionUpdate::Notice(notice) = &notification.update {
@@ -723,7 +723,7 @@ async fn an_unsupported_protocol_version_is_negotiated_down() {
     let agent = spawn_agent(dir.path());
 
     Client
-        .builder()
+        .v1()
         .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
             let unsupported: ProtocolVersion = serde_json::from_str("65535").unwrap();
             let response = connection

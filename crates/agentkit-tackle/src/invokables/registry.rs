@@ -9,7 +9,7 @@ use super::tool_name::{
 };
 use crate::definitions::{context, Definitions};
 use crate::mcp::{McpPool, NamespacedTool};
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     AvailableCommand, AvailableCommandInput, UnstructuredCommandInput,
 };
 use std::collections::BTreeMap;

@@ -5,13 +5,13 @@ use crate::agent::sink::{ToolCall, ToolCallStatus, ToolCallUpdate, TurnSink};
 use crate::invokables::titles::ToolKind;
 use crate::state::wire_session_id;
 use crate::store::SessionId;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     ContentBlock, ContentChunk, Cost, MessageId, SessionInfoUpdate, SessionNotification,
     SessionUpdate, TextContent, ToolCall as WireToolCall, ToolCallContent, ToolCallId,
     ToolCallStatus as WireStatus, ToolCallUpdate as WireToolCallUpdate, ToolCallUpdateFields,
     UsageUpdate,
 };
-use agent_client_protocol::{Client, ConnectionTo};
+use agent_client_protocol::{v1::ConnectionTo, Client};
 
 /// Reports the turn loop's events over `cx`.
 pub struct ConnectionTurnSink {
@@ -44,8 +44,8 @@ fn text_chunk(message_id: &str, text: &str) -> ContentChunk {
         .message_id(MessageId::new(message_id.to_owned()))
 }
 
-pub(crate) fn wire_kind(kind: ToolKind) -> agent_client_protocol::schema::v1::ToolKind {
-    use agent_client_protocol::schema::v1::ToolKind as Wire;
+pub(crate) fn wire_kind(kind: ToolKind) -> agent_client_protocol::v1::schema::ToolKind {
+    use agent_client_protocol::v1::schema::ToolKind as Wire;
     match kind {
         ToolKind::Read => Wire::Read,
         ToolKind::Edit => Wire::Edit,

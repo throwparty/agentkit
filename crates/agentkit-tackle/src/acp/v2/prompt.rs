@@ -20,13 +20,16 @@ use crate::scripts::host::NoticeSink;
 use crate::state::TackleState;
 use crate::store::SessionId;
 use agent_client_protocol::role::acp::Client;
-use agent_client_protocol::schema::v2::{
+use agent_client_protocol::v2::schema::{
     AgentMessage, AvailableCommandsUpdate, CompactionId, CompactionStatus, CompactionUpdate,
     ContentBlock, Cost, ErrorStopReason, IdleStateUpdate, MessageId, PromptRequest, PromptResponse,
     RunningStateUpdate, SessionUpdate, StateUpdate, StopReason, TextContent,
     UpdateSessionNotification, UsageUpdate, UserMessage,
 };
-use agent_client_protocol::{Error, Responder, V2ConnectionTo};
+use agent_client_protocol::{
+    v2::{ConnectionTo as V2ConnectionTo, Responder},
+    Error,
+};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -212,7 +215,7 @@ async fn run_prompt_after_begin(
     cx.send_notification(UpdateSessionNotification::new(
         request.session_id.clone(),
         SessionUpdate::UserMessage(
-            UserMessage::new(agent_client_protocol::schema::v2::MessageId::new(
+            UserMessage::new(agent_client_protocol::v2::schema::MessageId::new(
                 user_message_id,
             ))
             .content(prompt_blocks),
@@ -409,7 +412,7 @@ async fn run_prompt_after_begin(
                         "v2 turn failed"
                     );
                     StopReason::Error(ErrorStopReason::new().error(
-                        agent_client_protocol::schema::v2::Error::internal_error().data(err),
+                        agent_client_protocol::v2::schema::Error::internal_error().data(err),
                     ))
                 }
             };
@@ -466,7 +469,7 @@ fn message_upsert(message_id: MessageId, patch: MessagePatch) -> AgentMessage {
 /// Announces one whole agent message (the v2 upsert shape) under its id.
 fn announce_agent_message(
     cx: &V2ConnectionTo<Client>,
-    wire_session: &agent_client_protocol::schema::v2::SessionId,
+    wire_session: &agent_client_protocol::v2::schema::SessionId,
     message_id: MessageId,
     blocks: Vec<ContentBlock>,
 ) {
@@ -480,7 +483,7 @@ fn announce_agent_message(
 /// content blocks.
 fn announce_stored_message(
     cx: &V2ConnectionTo<Client>,
-    wire_session: &agent_client_protocol::schema::v2::SessionId,
+    wire_session: &agent_client_protocol::v2::schema::SessionId,
     message: &crate::store::Message,
 ) {
     let blocks = serde_json::from_str::<Vec<ContentBlock>>(&message.content).unwrap_or_default();
@@ -494,7 +497,7 @@ fn announce_stored_message(
 async fn run_context(
     state: &Arc<TackleState>,
     cx: &V2ConnectionTo<Client>,
-    wire_session: &agent_client_protocol::schema::v2::SessionId,
+    wire_session: &agent_client_protocol::v2::schema::SessionId,
     store_session: &SessionId,
     turn_id: &crate::store::TurnId,
     actor_name: &str,
@@ -556,7 +559,7 @@ async fn run_runtime_command(
     state: &Arc<TackleState>,
     negotiation: &Arc<ConnectionNegotiation>,
     cx: &V2ConnectionTo<Client>,
-    wire_session: &agent_client_protocol::schema::v2::SessionId,
+    wire_session: &agent_client_protocol::v2::schema::SessionId,
     turn_id: &crate::store::TurnId,
     reply: &str,
 ) -> Result<(), String> {
@@ -577,7 +580,7 @@ async fn run_runtime_command(
 async fn run_fork(
     state: &Arc<TackleState>,
     cx: &V2ConnectionTo<Client>,
-    wire_session: &agent_client_protocol::schema::v2::SessionId,
+    wire_session: &agent_client_protocol::v2::schema::SessionId,
     store_session: &SessionId,
     turn_id: &crate::store::TurnId,
 ) -> Result<(), String> {
@@ -606,7 +609,7 @@ async fn run_fork(
 async fn run_compaction(
     state: &Arc<TackleState>,
     cx: &V2ConnectionTo<Client>,
-    wire_session: &agent_client_protocol::schema::v2::SessionId,
+    wire_session: &agent_client_protocol::v2::schema::SessionId,
     store_session: &SessionId,
     turn_id: &crate::store::TurnId,
     first_text: &str,
@@ -666,7 +669,7 @@ mod tests {
 
     fn update(patch: MessagePatch) -> serde_json::Value {
         let notification = UpdateSessionNotification::new(
-            agent_client_protocol::schema::v2::SessionId::new("s"),
+            agent_client_protocol::v2::schema::SessionId::new("s"),
             SessionUpdate::AgentMessage(message_upsert(MessageId::new("m"), patch)),
         );
         serde_json::to_value(notification).expect("serialises")

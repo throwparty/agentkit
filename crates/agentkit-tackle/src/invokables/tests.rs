@@ -3,7 +3,7 @@
 use super::*;
 use crate::definitions::{ActorMeta, Definition, Definitions, PersonaMeta, PromptMeta};
 use crate::mcp::NamespacedTool;
-use agent_client_protocol::schema::v1::AvailableCommandInput;
+use agent_client_protocol::v1::schema::AvailableCommandInput;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;

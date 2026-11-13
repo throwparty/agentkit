@@ -6,7 +6,7 @@ use crate::acp::common::cancellation::{CancelRegistration, CancellationRegistry}
 use crate::invokables::client_tools::TerminalTracker;
 use crate::mcp::McpPool;
 use crate::store::SessionId;
-use agent_client_protocol::schema::v2::AvailableCommand;
+use agent_client_protocol::v2::schema::AvailableCommand;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 

@@ -2,7 +2,7 @@
 //! features tackle implements, and the client-advertised unstable subset.
 
 use crate::state::TackleState;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     AgentCapabilities, McpCapabilities, PromptCapabilities, SessionCapabilities,
     SessionCloseCapabilities, SessionDeleteCapabilities, SessionForkCapabilities,
     SessionListCapabilities, SessionResumeCapabilities,
@@ -32,7 +32,7 @@ impl UnstableFeature {
 
     /// The client-advertised subset of unstable features, read from
     /// `clientCapabilities._meta`.
-    pub fn advertised_in(meta: &Option<agent_client_protocol::schema::v1::Meta>) -> BTreeSet<Self> {
+    pub fn advertised_in(meta: &Option<agent_client_protocol::v1::schema::Meta>) -> BTreeSet<Self> {
         let mut supported = BTreeSet::new();
         for feature in [Self::Fork, Self::SessionCompaction, Self::SessionNotices] {
             if meta
@@ -51,8 +51,8 @@ impl TackleState {
     /// features tackle implements (advertised unconditionally — the gate
     /// applies to *sending* RFD-shaped updates).
     pub(super) fn capabilities(&self) -> AgentCapabilities {
-        let mut unstable: agent_client_protocol::schema::v1::Meta =
-            agent_client_protocol::schema::v1::Meta::new();
+        let mut unstable: agent_client_protocol::v1::schema::Meta =
+            agent_client_protocol::v1::schema::Meta::new();
         for feature in [
             UnstableFeature::Fork,
             UnstableFeature::SessionCompaction,

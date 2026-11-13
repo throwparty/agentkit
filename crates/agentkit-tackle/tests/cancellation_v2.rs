@@ -1,10 +1,10 @@
 //! v2 turn cancellation: `session/cancel`, `session/close`, and a cancel
 //! after completion, observed through the v2 idle state machine.
 
-use agentkit_tackle::agent_client_protocol::schema::v2;
 use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
+use agentkit_tackle::agent_client_protocol::v2::schema as v2;
 use agentkit_tackle::agent_client_protocol::{
-    on_receive_notification, AcpAgent, Agent, Client, V2ConnectionTo,
+    on_receive_notification, v2::ConnectionTo as V2ConnectionTo, AcpAgent, Agent, Client,
 };
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

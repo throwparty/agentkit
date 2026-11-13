@@ -15,14 +15,14 @@ use crate::agent::fork::{self, fork_access};
 use crate::agent::{config_options, script_loop};
 use crate::content::timestamp;
 use crate::state::{store_session_id, wire_session_id, TackleState};
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     CloseSessionResponse, ConfigOptionUpdate, ContentBlock, ContentChunk, DeleteSessionResponse,
     ForkSessionResponse, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, MessageId,
     Meta, NewSessionRequest, NewSessionResponse, ReleaseTerminalRequest, ResumeSessionRequest,
     ResumeSessionResponse, SessionConfigOptionValue, SessionInfo, SessionNotification,
     SessionUpdate, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, TerminalId,
 };
-use agent_client_protocol::{Error, Responder};
+use agent_client_protocol::{v1::Responder, Error};
 use std::sync::Arc;
 
 /// Sends exactly one usage snapshot for a live session: the effective
@@ -32,7 +32,7 @@ use std::sync::Arc;
 async fn send_usage_snapshot(
     state: &TackleState,
     cx: &Cx,
-    wire_session: &agent_client_protocol::schema::v1::SessionId,
+    wire_session: &agent_client_protocol::v1::schema::SessionId,
 ) -> Result<(), Error> {
     let session_id = store_session_id(wire_session);
     let session = state
@@ -156,7 +156,7 @@ pub(super) async fn handle_new_session(
 /// configured ephemeral policy.
 pub(super) async fn handle_list_sessions(
     state: Arc<TackleState>,
-    request: agent_client_protocol::schema::v1::ListSessionsRequest,
+    request: agent_client_protocol::v1::schema::ListSessionsRequest,
     responder: Responder<ListSessionsResponse>,
 ) -> Result<(), Error> {
     let cwd = request
@@ -203,7 +203,7 @@ pub(super) async fn handle_close_session(
     state: Arc<TackleState>,
     negotiation: Arc<ConnectionNegotiation>,
     cx: Cx,
-    request: agent_client_protocol::schema::v1::CloseSessionRequest,
+    request: agent_client_protocol::v1::schema::CloseSessionRequest,
     responder: Responder<CloseSessionResponse>,
 ) -> Result<(), Error> {
     // A close cancels the session's in-flight turn, as if `session/cancel`
@@ -241,7 +241,7 @@ pub(super) async fn handle_close_session(
 /// `session/delete`: delete the session and drop its permission grants.
 pub(super) async fn handle_delete_session(
     state: Arc<TackleState>,
-    request: agent_client_protocol::schema::v1::DeleteSessionRequest,
+    request: agent_client_protocol::v1::schema::DeleteSessionRequest,
     responder: Responder<DeleteSessionResponse>,
 ) -> Result<(), Error> {
     state
@@ -420,7 +420,7 @@ pub(super) async fn handle_fork_session(
     state: Arc<TackleState>,
     negotiation: Arc<ConnectionNegotiation>,
     cx: Cx,
-    request: agent_client_protocol::schema::v1::ForkSessionRequest,
+    request: agent_client_protocol::v1::schema::ForkSessionRequest,
     responder: Responder<ForkSessionResponse>,
 ) -> Result<(), Error> {
     let source = store_session_id(&request.session_id);

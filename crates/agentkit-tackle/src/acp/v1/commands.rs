@@ -4,7 +4,7 @@ use super::client_tools;
 use super::negotiation::ConnectionNegotiation;
 use crate::mcp::ServerStatus;
 use crate::state::TackleState;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     AvailableCommandsUpdate, Notice, NoticeSeverity, SessionUpdate,
 };
 
@@ -52,9 +52,9 @@ pub(super) async fn available_commands_update(
 /// advertises neither), so those entries are skipped; HTTP headers are
 /// not modelled by the pool configuration and are dropped.
 pub(super) fn forwarded_mcp_server(
-    server: &agent_client_protocol::schema::v1::McpServer,
+    server: &agent_client_protocol::v1::schema::McpServer,
 ) -> Option<(String, crate::config::McpServerConfig)> {
-    use agent_client_protocol::schema::v1::McpServer;
+    use agent_client_protocol::v1::schema::McpServer;
     match server {
         McpServer::Stdio(stdio) => Some((
             stdio.name.clone(),
@@ -91,7 +91,7 @@ pub(super) fn forwarded_mcp_server(
 /// statuses; a session is never failed by a forwarded server.
 pub(super) async fn connect_forwarded_servers(
     negotiation: &ConnectionNegotiation,
-    servers: &[agent_client_protocol::schema::v1::McpServer],
+    servers: &[agent_client_protocol::v1::schema::McpServer],
 ) {
     let forwarded: Vec<_> = servers.iter().filter_map(forwarded_mcp_server).collect();
     if forwarded.is_empty() {

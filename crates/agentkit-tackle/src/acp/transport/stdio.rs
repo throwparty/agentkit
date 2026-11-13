@@ -10,6 +10,7 @@ use crate::state::TackleState;
 use agent_client_protocol::Lines;
 use futures::io::{AsyncBufReadExt as _, AsyncWriteExt as _};
 use futures::StreamExt as _;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt as _};
 
@@ -45,21 +46,45 @@ pub async fn run_stdio(state: Arc<TackleState>) -> agent_client_protocol::Result
             .chain(reader.lines()),
     )
         as std::pin::Pin<Box<dyn futures::Stream<Item = std::io::Result<String>> + Send>>;
+
+    // A client that stops reading before the harness has finished writing
+    // leaves the pipe closed, and the next line fails with `EPIPE`. The
+    // client going away is a clean end to the connection, not a fault:
+    // the SDK reports a non-zero exit after shutdown as an error, so exit
+    // zero rather than surfacing a broken pipe nothing can read.
+    let peer_gone = Arc::new(AtomicBool::new(false));
     let outgoing = Box::pin(futures::sink::unfold(
-        stdout,
-        async move |mut writer, line: String| {
-            writer.write_all(line.as_bytes()).await?;
-            writer.write_all(b"\n").await?;
-            writer.flush().await?;
-            Ok::<_, std::io::Error>(writer)
+        (stdout, Arc::clone(&peer_gone)),
+        async |(mut writer, peer_gone), line: String| {
+            let written = async {
+                writer.write_all(line.as_bytes()).await?;
+                writer.write_all(b"\n").await?;
+                writer.flush().await?;
+                Ok::<(), std::io::Error>(())
+            }
+            .await;
+            match written {
+                Ok(()) => Ok((writer, peer_gone)),
+                Err(error) => {
+                    if error.kind() == std::io::ErrorKind::BrokenPipe {
+                        peer_gone.store(true, Ordering::Relaxed);
+                    }
+                    Err(error)
+                }
+            }
         },
     ))
         as std::pin::Pin<Box<dyn futures::Sink<String, Error = std::io::Error> + Send>>;
 
-    tokio::select! {
+    let outcome = tokio::select! {
         result = run_acp_over(state, setup, Lines::new(outgoing, incoming)) => result,
         _ = crate::cli::wait_for_shutdown() => Ok(()),
+    };
+    if peer_gone.load(Ordering::Relaxed) {
+        tracing::debug!("client stopped reading; ending the connection");
+        return Ok(());
     }
+    outcome
 }
 
 fn io_error(error: std::io::Error) -> agent_client_protocol::Error {

@@ -7,14 +7,14 @@ use super::support::Cx;
 use crate::agent::seed as first_run;
 use crate::mcp::{DynamicElicitationSink, Elicitation, ElicitationResponse, ElicitationSink};
 use crate::state::TackleState;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::schema::ProtocolVersion;
+use agent_client_protocol::v1::schema::{
     AuthMethod, AuthMethodAgent, AuthenticateResponse, CreateElicitationRequest, ElicitationAction,
     ElicitationCapabilities, ElicitationFormMode, ElicitationId, ElicitationMode,
     ElicitationRequestScope, ElicitationSchema, ElicitationScope, ElicitationUrlMode,
     Implementation, InitializeRequest, InitializeResponse,
 };
-use agent_client_protocol::schema::ProtocolVersion;
-use agent_client_protocol::{Error, Responder};
+use agent_client_protocol::{v1::Responder, Error};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -125,7 +125,7 @@ fn elicitation_request(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         ElicitationFormCapabilities, ElicitationUrlCapabilities,
     };
 

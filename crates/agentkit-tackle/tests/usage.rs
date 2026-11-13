@@ -2,13 +2,13 @@
 //! unpriced endpoints, one snapshot per lifecycle path, unknown-window
 //! silence, and the ephemeral report.
 
-use agentkit_tackle::agent_client_protocol::schema::v1::{
+use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
+use agentkit_tackle::agent_client_protocol::v1::schema::{
     ContentBlock, InitializeRequest, ListSessionsRequest, LoadSessionRequest, NewSessionRequest,
     PromptRequest, ResumeSessionRequest, SessionNotification, SessionUpdate, StopReason,
     TextContent,
 };
-use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
-use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
+use agentkit_tackle::agent_client_protocol::{v1::ConnectionTo, AcpAgent, Agent, Client};
 use std::sync::{Arc as StdArc, Mutex as StdMutex};
 use wiremock::matchers::method;
 use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
@@ -104,7 +104,7 @@ async fn priced_usage_carries_cost_and_each_lifecycle_path_sends_one_snapshot() 
     let usage: StdArc<StdMutex<Vec<UsageRecord>>> = StdArc::default();
     let handler = usage.clone();
     Client
-        .builder()
+        .v1()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
                 if let SessionUpdate::UsageUpdate(update) = &notification.update {
@@ -236,7 +236,7 @@ async fn unpriced_endpoint_omits_cost() {
     let usage: StdArc<StdMutex<Vec<UsageRecord>>> = StdArc::default();
     let handler = usage.clone();
     Client
-        .builder()
+        .v1()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
                 if let SessionUpdate::UsageUpdate(update) = &notification.update {
@@ -305,7 +305,7 @@ async fn unknown_window_is_silent_and_the_report_says_so() {
     let usage_handler = usage.clone();
     let chunks_handler = chunks.clone();
     Client
-        .builder()
+        .v1()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
                 match &notification.update {

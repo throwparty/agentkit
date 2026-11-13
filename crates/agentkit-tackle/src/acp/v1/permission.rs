@@ -1,7 +1,7 @@
 //! The ACP `session/request_permission` bridge: the PermissionRequester the permission pipeline asks through.
 
 use super::wire_kind;
-use agent_client_protocol::schema::v1::SessionId;
+use agent_client_protocol::v1::schema::SessionId;
 
 /// The ACP `session/request_permission` bridge.
 ///
@@ -12,7 +12,7 @@ use agent_client_protocol::schema::v1::SessionId;
 /// call behind it (project trust consent) falls back to a synthetic,
 /// per-invokable id.
 pub(super) struct AcpPermissionRequester {
-    pub(super) cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
+    pub(super) cx: agent_client_protocol::v1::ConnectionTo<agent_client_protocol::Client>,
     pub(super) session_id: SessionId,
 }
 
@@ -29,9 +29,9 @@ pub(super) fn permission_option_id(choice: crate::permissions::PermissionChoice)
 
 pub(super) fn permission_option_kind(
     choice: crate::permissions::PermissionChoice,
-) -> agent_client_protocol::schema::v1::PermissionOptionKind {
+) -> agent_client_protocol::v1::schema::PermissionOptionKind {
     use crate::permissions::PermissionChoice as C;
-    use agent_client_protocol::schema::v1::PermissionOptionKind as K;
+    use agent_client_protocol::v1::schema::PermissionOptionKind as K;
     match choice {
         C::AllowOnce => K::AllowOnce,
         C::AllowAlways => K::AllowAlways,
@@ -48,7 +48,7 @@ impl crate::permissions::PermissionRequester for AcpPermissionRequester {
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = crate::permissions::PermissionChoice> + Send + '_>,
     > {
-        use agent_client_protocol::schema::v1;
+        use agent_client_protocol::v1::schema as v1;
         let choices = crate::permissions::ask_options();
         let options: Vec<v1::PermissionOption> = choices
             .iter()

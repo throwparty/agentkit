@@ -27,15 +27,15 @@
 //! every assertion below records instead of aborting, so a single run
 //! exposes the whole list.
 
-use agentkit_tackle::agent_client_protocol::schema::v1::{
+use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
+use agentkit_tackle::agent_client_protocol::v1::schema::{
     ContentBlock, InitializeRequest, ListSessionsRequest, NewSessionRequest, PromptRequest,
     RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
     SelectedPermissionOutcome, SessionId, SessionNotification, SessionUpdate, StopReason,
     TextContent,
 };
-use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
 use agentkit_tackle::agent_client_protocol::{
-    AcpAgent, Agent, Channel, Client, ConnectionTo, RawJsonRpcMessage, TransportFrame,
+    v1::ConnectionTo, AcpAgent, Agent, Channel, Client, RawJsonRpcMessage, TransportFrame,
 };
 use std::sync::{Arc as StdArc, Mutex as StdMutex};
 use wiremock::matchers::method;
@@ -253,9 +253,9 @@ fn session_key(id: &SessionId) -> String {
     id.0.to_string()
 }
 
-fn block_text(block: &agentkit_tackle::agent_client_protocol::schema::v1::ContentBlock) -> String {
+fn block_text(block: &agentkit_tackle::agent_client_protocol::v1::schema::ContentBlock) -> String {
     match block {
-        agentkit_tackle::agent_client_protocol::schema::v1::ContentBlock::Text(text) => {
+        agentkit_tackle::agent_client_protocol::v1::schema::ContentBlock::Text(text) => {
             text.text.clone()
         }
         _ => String::new(),
@@ -382,7 +382,7 @@ async fn scenario_over(
     let fails_scenario = fails.clone();
 
     Client
-        .builder()
+        .v1()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
                 let session = session_key(&notification.session_id);
@@ -892,7 +892,7 @@ async fn bridge_frames(
 
     let http = reqwest::Client::new();
     let connection: StdArc<StdMutex<Option<String>>> = StdArc::default();
-    let Channel { mut rx, tx } = endpoint;
+    let Channel { mut rx, tx, .. } = endpoint;
     let mut sse_started = false;
 
     while let Some(frame) = rx.next().await {
@@ -1106,7 +1106,7 @@ async fn live_model_tool_turn() {
     let text_handler = text.clone();
 
     Client
-        .builder()
+        .v1()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
                 match &notification.update {
@@ -1118,7 +1118,7 @@ async fn live_model_tool_turn() {
                         );
                     }
                     SessionUpdate::AgentMessageChunk(chunk) => {
-                        if let agentkit_tackle::agent_client_protocol::schema::v1::
+                        if let agentkit_tackle::agent_client_protocol::v1::schema::
                             ContentBlock::Text(body) =
                             &chunk.content
                         {

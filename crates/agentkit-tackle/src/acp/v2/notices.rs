@@ -4,10 +4,10 @@
 use crate::scripts::host::NoticeSink;
 use crate::store::SessionId;
 use agent_client_protocol::role::acp::Client;
-use agent_client_protocol::schema::v2::{
+use agent_client_protocol::v2::schema::{
     Notice, NoticeSeverity, SessionInfoUpdate, SessionUpdate, UpdateSessionNotification,
 };
-use agent_client_protocol::V2ConnectionTo;
+use agent_client_protocol::v2::ConnectionTo as V2ConnectionTo;
 
 pub(super) struct ConnectionNotices {
     pub cx: V2ConnectionTo<Client>,

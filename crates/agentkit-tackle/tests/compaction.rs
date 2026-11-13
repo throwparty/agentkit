@@ -3,12 +3,12 @@
 //! visible usage_update drop, the RFD-shaped update for advertising
 //! clients, and summary storage.
 
-use agentkit_tackle::agent_client_protocol::schema::v1::{
+use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
+use agentkit_tackle::agent_client_protocol::v1::schema::{
     ClientCapabilities, ContentBlock, InitializeRequest, Meta, NewSessionRequest, PromptRequest,
     SessionNotification, SessionUpdate, TextContent,
 };
-use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
-use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
+use agentkit_tackle::agent_client_protocol::{v1::ConnectionTo, AcpAgent, Agent, Client};
 use agentkit_tackle::store::{SessionStore, TurnKind};
 use std::sync::{Arc as StdArc, Mutex as StdMutex};
 
@@ -75,7 +75,7 @@ async fn compaction_intercepts_announces_and_records() {
         .client_capabilities(ClientCapabilities::new().meta(Meta::from(meta)));
 
     Client
-        .builder()
+        .v1()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
                 match &notification.update {
@@ -150,7 +150,7 @@ async fn compaction_intercepts_announces_and_records() {
                 .await?;
             assert!(matches!(
                 response.stop_reason,
-                agentkit_tackle::agent_client_protocol::schema::v1::StopReason::EndTurn
+                agentkit_tackle::agent_client_protocol::v1::schema::StopReason::EndTurn
             ));
 
             // The announcement carries the trigger and counts.
