@@ -4,13 +4,13 @@
 use crate::agent::sink::{ToolCall, ToolCallUpdate, TurnSink};
 use crate::store::SessionId;
 use agent_client_protocol::role::acp::Client;
-use agent_client_protocol::schema::v2::{
+use agent_client_protocol::v2::schema::{
     Content, ContentBlock, ContentChunk, Cost, MessageId, Notice, NoticeSeverity,
     SessionInfoUpdate, SessionUpdate, TextContent, ToolCallContent, ToolCallId,
     ToolCallStatus as WireStatus, ToolCallUpdate as WireToolCallUpdate, ToolKind as WireKind,
     UpdateSessionNotification, UsageUpdate,
 };
-use agent_client_protocol::V2ConnectionTo;
+use agent_client_protocol::v2::ConnectionTo as V2ConnectionTo;
 
 /// Reports the turn loop's events over `cx`.
 pub struct ConnectionTurnSink {
@@ -141,11 +141,11 @@ mod tests {
     #[test]
     fn cost_is_attached_only_when_known() {
         let priced = usage_update(10, 100, Some(0.42));
-        let cost = priced.cost.expect("cost present");
+        let cost = priced.cost.value().expect("cost present");
         assert_eq!(cost.amount, 0.42);
         assert_eq!(cost.currency, "USD");
 
-        assert!(usage_update(10, 100, None).cost.is_none());
+        assert!(usage_update(10, 100, None).cost.is_undefined());
     }
 
     #[test]

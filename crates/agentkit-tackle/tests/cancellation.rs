@@ -1,12 +1,12 @@
 //! Turn cancellation over the in-process client harness: `session/cancel`
 //! resolves an in-flight `session/prompt` with `stopReason: cancelled`.
 
-use agentkit_tackle::agent_client_protocol::schema::v1::{
+use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
+use agentkit_tackle::agent_client_protocol::v1::schema::{
     CancelNotification, CloseSessionRequest, ContentBlock, InitializeRequest, ListSessionsRequest,
     NewSessionRequest, PromptRequest, StopReason, TextContent,
 };
-use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
-use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
+use agentkit_tackle::agent_client_protocol::{v1::ConnectionTo, AcpAgent, Agent, Client};
 use wiremock::matchers::method;
 use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 
@@ -69,7 +69,7 @@ async fn session_cancel_resolves_the_prompt_as_cancelled() {
     let agent = spawn_agent(dir.path());
 
     Client
-        .builder()
+        .v1()
         .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
             connection
                 .send_request(InitializeRequest::new(ProtocolVersion::V1))
@@ -104,7 +104,7 @@ async fn session_cancel_for_an_idle_session_is_a_noop() {
     let agent = spawn_agent(dir.path());
 
     Client
-        .builder()
+        .v1()
         .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
             connection
                 .send_request(InitializeRequest::new(ProtocolVersion::V1))
@@ -139,7 +139,7 @@ async fn session_close_cancels_the_in_flight_prompt() {
     let agent = spawn_agent(dir.path());
 
     Client
-        .builder()
+        .v1()
         .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
             connection
                 .send_request(InitializeRequest::new(ProtocolVersion::V1))
@@ -191,7 +191,7 @@ async fn cancel_request_resolves_the_prompt_as_cancelled() {
     let agent = spawn_agent(dir.path());
 
     Client
-        .builder()
+        .v1()
         .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
             connection
                 .send_request(InitializeRequest::new(ProtocolVersion::V1))
@@ -278,7 +278,7 @@ async fn a_cancelled_turn_releases_the_lease_for_the_next_prompt() {
     let agent = spawn_agent(dir.path());
 
     Client
-        .builder()
+        .v1()
         .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
             connection
                 .send_request(InitializeRequest::new(ProtocolVersion::V1))
@@ -327,7 +327,7 @@ async fn cancel_after_completion_is_a_noop() {
     let agent = spawn_agent(dir.path());
 
     Client
-        .builder()
+        .v1()
         .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
             connection
                 .send_request(InitializeRequest::new(ProtocolVersion::V1))
@@ -423,7 +423,7 @@ fn sse_chunk(text: &str) -> String {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn no_content_update_follows_the_cancelled_response() {
-    use agentkit_tackle::agent_client_protocol::schema::v1::{SessionNotification, SessionUpdate};
+    use agentkit_tackle::agent_client_protocol::v1::schema::{SessionNotification, SessionUpdate};
     use std::sync::{Arc as StdArc, Mutex as StdMutex};
     use std::time::{Duration, Instant};
 
@@ -436,7 +436,7 @@ async fn no_content_update_follows_the_cancelled_response() {
     let handler = seen.clone();
 
     Client
-        .builder()
+        .v1()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
                 if let SessionUpdate::AgentMessageChunk(chunk) = &notification.update {

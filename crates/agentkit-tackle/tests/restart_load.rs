@@ -9,12 +9,12 @@
 //! (`session_load_on_an_empty_session_answers`) — that one loads a
 //! session with no turns and therefore asserts nothing about replay.
 
-use agentkit_tackle::agent_client_protocol::schema::v1::{
+use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
+use agentkit_tackle::agent_client_protocol::v1::schema::{
     ContentBlock, InitializeRequest, ListSessionsRequest, LoadSessionRequest, NewSessionRequest,
     PromptRequest, SessionId, SessionNotification, SessionUpdate, StopReason, TextContent,
 };
-use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
-use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
+use agentkit_tackle::agent_client_protocol::{v1::ConnectionTo, AcpAgent, Agent, Client};
 use std::sync::{Arc as StdArc, Mutex as StdMutex};
 
 /// One replayed notification: (kind, id, payload).
@@ -26,9 +26,9 @@ struct Seen {
     usage_snapshots: usize,
 }
 
-fn chunk_text(block: &agentkit_tackle::agent_client_protocol::schema::v1::ContentBlock) -> String {
+fn chunk_text(block: &agentkit_tackle::agent_client_protocol::v1::schema::ContentBlock) -> String {
     match block {
-        agentkit_tackle::agent_client_protocol::schema::v1::ContentBlock::Text(text) => {
+        agentkit_tackle::agent_client_protocol::v1::schema::ContentBlock::Text(text) => {
             text.text.clone()
         }
         _ => String::new(),
@@ -92,7 +92,7 @@ async fn load_replay(
     let armed_handler = armed.clone();
 
     let result = Client
-        .builder()
+        .v1()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
                 if !*armed_handler.lock().unwrap() {

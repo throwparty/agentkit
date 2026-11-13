@@ -3,14 +3,14 @@
 //! back over ACP to the client, and the client's answer reaches the next
 //! model request as the tool result.
 
-use agentkit_tackle::agent_client_protocol::schema::v1::{
+use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
+use agentkit_tackle::agent_client_protocol::v1::schema::{
     ClientCapabilities, ContentBlock, FileSystemCapabilities, InitializeRequest, NewSessionRequest,
     PromptRequest, ReadTextFileRequest, ReadTextFileResponse, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
     SessionNotification, SessionUpdate, TextContent,
 };
-use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
-use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
+use agentkit_tackle::agent_client_protocol::{v1::ConnectionTo, AcpAgent, Agent, Client};
 use std::path::PathBuf;
 use std::sync::{Arc as StdArc, Mutex as StdMutex};
 use wiremock::matchers::method;
@@ -152,7 +152,7 @@ async fn advertised_fs_read_reaches_the_client_and_returns_to_the_model() {
     let handler_paths = read_paths.clone();
 
     Client
-        .builder()
+        .v1()
         .on_receive_request(
             async move |request: ReadTextFileRequest, responder, _connection| {
                 handler_paths
@@ -253,7 +253,7 @@ async fn direct_invocation_reaches_the_client_tool() {
     let results_handler = results.clone();
 
     Client
-        .builder()
+        .v1()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
                 match &notification.update {
@@ -338,7 +338,7 @@ async fn direct_invocation_reaches_the_client_tool() {
                 .await?;
             assert_eq!(
                 response.stop_reason,
-                agentkit_tackle::agent_client_protocol::schema::v1::StopReason::EndTurn
+                agentkit_tackle::agent_client_protocol::v1::schema::StopReason::EndTurn
             );
             Ok(())
         })

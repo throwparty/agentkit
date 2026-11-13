@@ -1,12 +1,12 @@
 //! `/context`: the ephemeral composition report, its cleanup, and its
 //! no-model error path.
 
-use agentkit_tackle::agent_client_protocol::schema::v1::{
+use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
+use agentkit_tackle::agent_client_protocol::v1::schema::{
     ContentBlock, InitializeRequest, ListSessionsRequest, LoadSessionRequest, NewSessionRequest,
     PromptRequest, SessionNotification, SessionUpdate, StopReason, TextContent,
 };
-use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
-use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
+use agentkit_tackle::agent_client_protocol::{v1::ConnectionTo, AcpAgent, Agent, Client};
 use std::sync::{Arc as StdArc, Mutex as StdMutex};
 
 fn spawn_agent(dir: &std::path::Path, config: &str) -> AcpAgent {
@@ -24,9 +24,9 @@ fn spawn_agent(dir: &std::path::Path, config: &str) -> AcpAgent {
     .unwrap()
 }
 
-fn chunk_text(block: &agentkit_tackle::agent_client_protocol::schema::v1::ContentBlock) -> String {
+fn chunk_text(block: &agentkit_tackle::agent_client_protocol::v1::schema::ContentBlock) -> String {
     match block {
-        agentkit_tackle::agent_client_protocol::schema::v1::ContentBlock::Text(text) => {
+        agentkit_tackle::agent_client_protocol::v1::schema::ContentBlock::Text(text) => {
             text.text.clone()
         }
         _ => String::new(),
@@ -58,7 +58,7 @@ async fn context_reports_and_leaves_no_turn_behind() {
     let chunks: StdArc<StdMutex<Vec<String>>> = StdArc::default();
     let handler = chunks.clone();
     Client
-        .builder()
+        .v1()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
                 if let SessionUpdate::AgentMessageChunk(chunk) = &notification.update {
@@ -128,7 +128,7 @@ async fn context_without_a_model_errors_after_cleanup() {
     let chunks: StdArc<StdMutex<Vec<String>>> = StdArc::default();
     let handler = chunks.clone();
     Client
-        .builder()
+        .v1()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
                 if let SessionUpdate::AgentMessageChunk(chunk) = &notification.update {
@@ -214,12 +214,12 @@ async fn discovered_window_reaches_the_report() {
     let chunk_handler = chunks.clone();
     let size_handler = sizes.clone();
     Client
-        .builder()
+        .v1()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
                 match &notification.update {
                     SessionUpdate::AgentMessageChunk(chunk) => {
-                        if let agentkit_tackle::agent_client_protocol::schema::v1::ContentBlock::Text(
+                        if let agentkit_tackle::agent_client_protocol::v1::schema::ContentBlock::Text(
                             text,
                         ) = &chunk.content
                         {

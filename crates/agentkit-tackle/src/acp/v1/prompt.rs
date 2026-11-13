@@ -18,12 +18,12 @@ use crate::agent::direct::run_direct_invocation;
 use crate::agent::fork::{self, fork_access};
 use crate::agent::prompt::run_prompt_turn;
 use crate::state::{store_session_id, wire_session_id, TackleState};
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     CompactionId, CompactionStatus, CompactionUpdate, ContentBlock, PromptRequest, PromptResponse,
     SessionId, SessionNotification, SessionUpdate, StopReason, TextContent, ToolCall, ToolCallId,
     ToolCallStatus,
 };
-use agent_client_protocol::{Error, Responder};
+use agent_client_protocol::{v1::Responder, Error};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
@@ -326,7 +326,7 @@ pub(super) async fn handle_prompt(
     request: PromptRequest,
     responder: Responder<PromptResponse>,
 ) -> Result<(), Error> {
-    use agent_client_protocol::schema::v1::ContentBlock;
+    use agent_client_protocol::v1::schema::ContentBlock;
 
     // The lease is the one-turn-at-a-time invariant, and the
     // prompt turn and its user message are persisted up front.

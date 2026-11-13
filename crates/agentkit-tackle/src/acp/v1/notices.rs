@@ -3,7 +3,7 @@
 use super::capabilities::UnstableFeature;
 use super::negotiation::ConnectionNegotiation;
 use crate::state::wire_session_id;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     Notice, NoticeSeverity, SessionInfoUpdate, SessionNotification, SessionUpdate,
 };
 
@@ -12,7 +12,7 @@ use agent_client_protocol::schema::v1::{
 /// capability. A narrow seam — one-way notification only, never
 /// the connection, so the script loop cannot issue client requests.
 struct ConnectionNotices {
-    cx: agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
+    cx: agent_client_protocol::v1::ConnectionTo<agent_client_protocol::Client>,
     enabled: bool,
     source: &'static str,
 }
@@ -43,7 +43,7 @@ impl crate::scripts::host::NoticeSink for ConnectionNotices {
 /// Builds the notice sink for `cx`, gated on the client's advertised
 /// notices capability and labelled with the calling path.
 pub(super) fn connection_notices(
-    cx: &agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
+    cx: &agent_client_protocol::v1::ConnectionTo<agent_client_protocol::Client>,
     negotiation: &ConnectionNegotiation,
     source: &'static str,
 ) -> std::sync::Arc<dyn crate::scripts::host::NoticeSink> {

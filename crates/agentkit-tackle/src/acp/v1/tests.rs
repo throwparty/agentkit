@@ -6,8 +6,8 @@ use crate::mcp::McpPool;
 use crate::state::LeaseHeartbeat;
 use std::sync::Arc;
 
-fn client_meta(pairs: &[&str]) -> Option<agent_client_protocol::schema::v1::Meta> {
-    let meta: agent_client_protocol::schema::v1::Meta = pairs
+fn client_meta(pairs: &[&str]) -> Option<agent_client_protocol::v1::schema::Meta> {
+    let meta: agent_client_protocol::v1::schema::Meta = pairs
         .iter()
         .map(|key| ((*key).to_owned(), serde_json::json!({})))
         .collect();

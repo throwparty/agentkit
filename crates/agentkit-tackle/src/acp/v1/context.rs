@@ -9,8 +9,8 @@ use crate::agent::compaction;
 use crate::agent::context_report::{self, ReportInputs};
 use crate::agent::prompt::{build_registry_and_system, resolve_model_and_window, tool_names_for};
 use crate::state::TackleState;
-use agent_client_protocol::schema::v1::{PromptResponse, SessionId, StopReason};
-use agent_client_protocol::{Error, Responder};
+use agent_client_protocol::v1::schema::{PromptResponse, SessionId, StopReason};
+use agent_client_protocol::{v1::Responder, Error};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 

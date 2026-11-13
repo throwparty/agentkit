@@ -5,13 +5,13 @@
 use crate::invokables::titles;
 use crate::permissions::{PermissionChoice, PermissionRequest, PermissionRequester};
 use agent_client_protocol::role::acp::Client;
-use agent_client_protocol::schema::v2::{
+use agent_client_protocol::v2::schema::{
     Content, ContentBlock, PermissionOption, PermissionOptionId, PermissionOptionKind,
     RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionSubject,
     RequiresActionStateUpdate, RunningStateUpdate, SessionId, StateUpdate, TextContent,
     ToolCallContent, ToolCallId, ToolCallUpdate,
 };
-use agent_client_protocol::V2ConnectionTo;
+use agent_client_protocol::v2::ConnectionTo as V2ConnectionTo;
 use std::future::Future;
 use std::pin::Pin;
 

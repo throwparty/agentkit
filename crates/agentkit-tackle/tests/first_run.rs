@@ -4,14 +4,14 @@
 //! advertise authMethods, and configuration errors name the file and
 //! key.
 
-use agentkit_tackle::agent_client_protocol::schema::v1::{
+use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
+use agentkit_tackle::agent_client_protocol::v1::schema::{
     AuthenticateRequest, ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest,
     TextContent,
 };
-use agentkit_tackle::agent_client_protocol::schema::v2;
-use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
+use agentkit_tackle::agent_client_protocol::v2::schema as v2;
 use agentkit_tackle::agent_client_protocol::{
-    AcpAgent, Agent, Client, ConnectionTo, V2ConnectionTo,
+    v1::ConnectionTo, v2::ConnectionTo as V2ConnectionTo, AcpAgent, Agent, Client,
 };
 use agentkit_tackle::store::{SessionStore, TurnKind};
 
@@ -33,7 +33,7 @@ async fn first_run_with_empty_config_seeds_the_session() {
     let agent = spawn_agent(dir.path());
 
     Client
-        .builder()
+        .v1()
         .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
             let response = connection
                 .send_request(InitializeRequest::new(ProtocolVersion::V1))
@@ -73,7 +73,7 @@ async fn first_run_with_empty_config_seeds_the_session() {
                 .await?;
             assert!(matches!(
                 response.stop_reason,
-                agentkit_tackle::agent_client_protocol::schema::v1::StopReason::EndTurn
+                agentkit_tackle::agent_client_protocol::v1::schema::StopReason::EndTurn
             ));
             Ok(())
         })
@@ -95,7 +95,7 @@ async fn builtin_overrides_surface_in_the_seed() {
     let agent = spawn_agent(dir.path());
 
     Client
-        .builder()
+        .v1()
         .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
             connection
                 .send_request(InitializeRequest::new(ProtocolVersion::V1))
@@ -140,7 +140,7 @@ async fn missing_credentials_advertise_auth_methods() {
     let agent = spawn_agent(dir.path());
 
     Client
-        .builder()
+        .v1()
         .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
             let response = connection
                 .send_request(InitializeRequest::new(ProtocolVersion::V1))
@@ -254,11 +254,11 @@ async fn a_new_v1_session_announces_the_seed() {
     let handler = std::sync::Arc::clone(&seen);
 
     Client
-        .builder()
+        .v1()
         .on_receive_notification(
-            async move |notification: agentkit_tackle::agent_client_protocol::schema::v1::SessionNotification,
+            async move |notification: agentkit_tackle::agent_client_protocol::v1::schema::SessionNotification,
                         _cx| {
-                if let agentkit_tackle::agent_client_protocol::schema::v1::SessionUpdate::UserMessageChunk(
+                if let agentkit_tackle::agent_client_protocol::v1::schema::SessionUpdate::UserMessageChunk(
                     chunk,
                 ) = &notification.update
                 {

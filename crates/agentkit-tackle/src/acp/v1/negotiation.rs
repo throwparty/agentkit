@@ -51,7 +51,7 @@ impl ConnectionNegotiation {
 
     pub(super) fn capture(
         &self,
-        capabilities: &agent_client_protocol::schema::v1::ClientCapabilities,
+        capabilities: &agent_client_protocol::v1::schema::ClientCapabilities,
     ) {
         *self.supported.lock().expect("negotiation poisoned") =
             UnstableFeature::advertised_in(&capabilities.meta);

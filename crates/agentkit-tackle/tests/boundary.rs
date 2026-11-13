@@ -6,11 +6,11 @@
 //! idle — so their SQLite WAL setup does not race. A v2 task probes the
 //! session while the v1 turn is in flight.
 
-use agentkit_tackle::agent_client_protocol::schema::v1;
-use agentkit_tackle::agent_client_protocol::schema::v2;
 use agentkit_tackle::agent_client_protocol::schema::{MaybeUndefined, ProtocolVersion};
+use agentkit_tackle::agent_client_protocol::v1::schema as v1;
+use agentkit_tackle::agent_client_protocol::v2::schema as v2;
 use agentkit_tackle::agent_client_protocol::{
-    AcpAgent, Agent, Client, ConnectionTo, V2ConnectionTo,
+    v1::ConnectionTo, v2::ConnectionTo as V2ConnectionTo, AcpAgent, Agent, Client,
 };
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -150,7 +150,7 @@ async fn v1_and_v2_share_the_store_and_leases_without_crossing_wire_variants() {
         let session_slot = Arc::clone(&session_slot);
         async move {
             Client
-                .builder()
+                .v1()
                 .connect_with(v1_agent, |connection: ConnectionTo<Agent>| async move {
                     connection
                         .send_request(v1::InitializeRequest::new(ProtocolVersion::V1))

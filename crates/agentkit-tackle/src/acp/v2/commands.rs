@@ -3,8 +3,8 @@
 
 use super::negotiation::ConnectionNegotiation;
 use crate::state::TackleState;
-use agent_client_protocol::schema::v1::AvailableCommandInput;
-use agent_client_protocol::schema::v2::{
+use agent_client_protocol::v1::schema::AvailableCommandInput;
+use agent_client_protocol::v2::schema::{
     AvailableCommand, AvailableCommandInput as WireInput, Command, TextCommandInput,
 };
 

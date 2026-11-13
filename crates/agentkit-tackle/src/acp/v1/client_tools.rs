@@ -18,8 +18,8 @@ use crate::invokables::client_tools::{
     FS_READ, FS_WRITE, TERMINAL_CREATE, TERMINAL_KILL, TERMINAL_OUTPUT, TERMINAL_RELEASE,
     TERMINAL_WAIT,
 };
-use agent_client_protocol::schema::v1;
-use agent_client_protocol::{Client, ConnectionTo};
+use agent_client_protocol::v1::schema as v1;
+use agent_client_protocol::{v1::ConnectionTo, Client};
 
 /// The client capabilities captured at `initialize`, the source of truth
 /// for which `client.*` tools exist.

@@ -9,7 +9,7 @@ use crate::definitions::Definitions;
 use crate::mcp::McpPool;
 use crate::permissions::{PermissionChoice, PermissionRequest, PermissionRequester};
 use crate::store::SessionStore;
-use agent_client_protocol::schema::v1::SessionId;
+use agent_client_protocol::v1::schema::SessionId;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 

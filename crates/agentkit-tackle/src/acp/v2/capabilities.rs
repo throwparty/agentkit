@@ -3,7 +3,7 @@
 //! the draft fork marker.
 
 use crate::state::TackleState;
-use agent_client_protocol::schema::v2::{
+use agent_client_protocol::v2::schema::{
     AgentCapabilities, McpCapabilities, McpHttpCapabilities, McpStdioCapabilities,
     PromptCapabilities, PromptEmbeddedContextCapabilities, PromptImageCapabilities,
     SessionAdditionalDirectoriesCapabilities, SessionCapabilities, SessionDeleteCapabilities,

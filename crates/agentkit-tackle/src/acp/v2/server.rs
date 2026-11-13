@@ -4,12 +4,12 @@
 use super::negotiation::ConnectionNegotiation;
 use crate::state::TackleState;
 use agent_client_protocol::role::acp::Client;
-use agent_client_protocol::schema::v2::{
+use agent_client_protocol::v2::schema::{
     CancelSessionNotification, CloseSessionRequest, DeleteSessionRequest, ForkSessionRequest,
     InitializeRequest, ListSessionsRequest, LoginAuthRequest, LogoutAuthRequest, NewSessionRequest,
     PromptRequest, ResumeSessionRequest, SetSessionConfigOptionRequest,
 };
-use agent_client_protocol::{Agent, V2ConnectionTo};
+use agent_client_protocol::{v2::ConnectionTo as V2ConnectionTo, Agent};
 use std::sync::Arc;
 
 /// Builds the configured v2 agent: one thin closure per ACP method, capturing

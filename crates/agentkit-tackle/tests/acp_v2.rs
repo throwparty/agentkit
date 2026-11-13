@@ -2,10 +2,11 @@
 //! a streamed prompt turn with the foreground state machine, and the
 //! v1/v2 boundary.
 
-use agentkit_tackle::agent_client_protocol::schema::v2;
 use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
+use agentkit_tackle::agent_client_protocol::v2::schema as v2;
 use agentkit_tackle::agent_client_protocol::{
-    on_receive_notification, AcpAgent, Agent, Client, ConnectionTo, V2ConnectionTo,
+    on_receive_notification, v1::ConnectionTo, v2::ConnectionTo as V2ConnectionTo, AcpAgent, Agent,
+    Client,
 };
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -265,11 +266,11 @@ async fn v1_and_v2_negotiate_independently() {
 
     let v1_agent = spawn_agent(dir.path(), &model_config(&server.uri()));
     let v1 = Client
-        .builder()
+        .v1()
         .connect_with(v1_agent, |connection: ConnectionTo<Agent>| async move {
             let response = connection
                 .send_request(
-                    agentkit_tackle::agent_client_protocol::schema::v1::InitializeRequest::new(
+                    agentkit_tackle::agent_client_protocol::v1::schema::InitializeRequest::new(
                         ProtocolVersion::V1,
                     ),
                 )

@@ -2,12 +2,12 @@
 //! discovery and fallback, switch semantics, window validation, and the
 //! config_option_update.
 
-use agentkit_tackle::agent_client_protocol::schema::v1::{
+use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
+use agentkit_tackle::agent_client_protocol::v1::schema::{
     ForkSessionRequest, InitializeRequest, LoadSessionRequest, NewSessionRequest,
     ResumeSessionRequest, SessionNotification, SessionUpdate, SetSessionConfigOptionRequest,
 };
-use agentkit_tackle::agent_client_protocol::schema::ProtocolVersion;
-use agentkit_tackle::agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo};
+use agentkit_tackle::agent_client_protocol::{v1::ConnectionTo, AcpAgent, Agent, Client};
 use agentkit_tackle::store::SessionStore;
 use std::sync::{Arc as StdArc, Mutex as StdMutex};
 
@@ -68,7 +68,7 @@ async fn selectors_populate_with_discovery_and_fallback() {
     .unwrap();
 
     Client
-        .builder()
+        .v1()
         .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
             connection
                 .send_request(InitializeRequest::new(ProtocolVersion::V1))
@@ -84,14 +84,14 @@ async fn selectors_populate_with_discovery_and_fallback() {
                 .iter()
                 .find(|option| option.id.0.as_ref() == "model")
                 .expect("model selector");
-            let agentkit_tackle::agent_client_protocol::schema::v1::SessionConfigKind::Select(
+            let agentkit_tackle::agent_client_protocol::v1::schema::SessionConfigKind::Select(
                 select,
             ) = &model_selector.kind
             else {
                 panic!("the model selector is a select");
             };
             let values: Vec<String> = match &select.options {
-                agentkit_tackle::agent_client_protocol::schema::v1::SessionConfigSelectOptions::Ungrouped(
+                agentkit_tackle::agent_client_protocol::v1::schema::SessionConfigSelectOptions::Ungrouped(
                     options,
                 ) => options
                     .iter()
@@ -135,7 +135,7 @@ async fn model_switch_is_effective_the_following_turn() {
     let config_handler = config_updates.clone();
 
     Client
-        .builder()
+        .v1()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
                 if let SessionUpdate::ConfigOptionUpdate(_) = &notification.update {
@@ -221,7 +221,7 @@ async fn session_new_seeds_the_effective_model_into_metadata() {
     );
 
     Client
-        .builder()
+        .v1()
         .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
             connection
                 .send_request(InitializeRequest::new(ProtocolVersion::V1))
@@ -237,7 +237,7 @@ async fn session_new_seeds_the_effective_model_into_metadata() {
                 .iter()
                 .find(|option| option.id.0.as_ref() == "model")
                 .expect("model selector");
-            let agentkit_tackle::agent_client_protocol::schema::v1::SessionConfigKind::Select(
+            let agentkit_tackle::agent_client_protocol::v1::schema::SessionConfigKind::Select(
                 select,
             ) = &model_selector.kind
             else {
@@ -275,7 +275,7 @@ async fn load_resume_and_fork_return_config_options() {
     );
 
     Client
-        .builder()
+        .v1()
         .connect_with(agent, |connection: ConnectionTo<Agent>| async move {
             connection
                 .send_request(InitializeRequest::new(ProtocolVersion::V1))

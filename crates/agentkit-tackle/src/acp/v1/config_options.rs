@@ -4,7 +4,7 @@
 use crate::agent::config_options::{
     ConfigOption, ConfigOptionCategory, ConfigOptionKind, Notice, NoticeSeverity,
 };
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     Notice as WireNotice, NoticeSeverity as WireSeverity, SessionConfigId, SessionConfigKind,
     SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelect,
     SessionConfigSelectOption, SessionConfigValueId,
