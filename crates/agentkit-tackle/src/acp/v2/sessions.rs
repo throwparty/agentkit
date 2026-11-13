@@ -32,6 +32,29 @@ use std::sync::Arc;
 
 use super::{store_session_id, wire_session_id};
 
+/// The live session a session-scoped request names.
+///
+/// A session that was never created, was deleted, or that this connection
+/// already closed is not there to answer for: the request gets `-32002` with
+/// the requested id rather than a silently created or resurrected session.
+async fn live_session(
+    state: &TackleState,
+    negotiation: &crate::acp::v2::negotiation::ConnectionNegotiation,
+    wire: &agent_client_protocol::v2::schema::SessionId,
+) -> Result<crate::store::Session, Error> {
+    let store = store_session_id(wire);
+    if negotiation.is_closed(&store) {
+        return Err(common_session::session_not_found(&wire.to_string()));
+    }
+    state
+        .db
+        .get_session(&store)
+        .await
+        .map_err(|err| Error::internal_error().data(err.to_string()))?
+        .filter(|session| session.active)
+        .ok_or_else(|| common_session::session_not_found(&wire.to_string()))
+}
+
 /// Sends exactly one usage snapshot for a live session: the effective model's
 /// window, the assembled-context estimate, and the cumulative cost when known.
 async fn send_usage_snapshot(
@@ -307,12 +330,7 @@ pub(super) async fn handle_resume_session(
 ) -> Result<(), Error> {
     super::mcp::connect_forwarded_servers(&negotiation, &request.mcp_servers).await;
     let session_id = store_session_id(&request.session_id);
-    let session = state
-        .db
-        .get_session(&session_id)
-        .await
-        .map_err(|err| Error::internal_error().data(err.to_string()))?
-        .ok_or_else(|| Error::internal_error().data("no such session".to_owned()))?;
+    let session = live_session(&state, &negotiation, &request.session_id).await?;
 
     match &request.replay_from {
         Some(ReplayFrom::Start(_)) => {
@@ -374,7 +392,12 @@ pub(super) async fn handle_fork_session(
     );
     let fork = fork::create_fork(&state.db, &source)
         .await
-        .map_err(|err| Error::internal_error().data(err.to_string()))?;
+        .map_err(|err| match err {
+            crate::store::StoreError::NotFound(_) => {
+                common_session::session_not_found(&request.session_id.to_string())
+            }
+            other => Error::internal_error().data(other.to_string()),
+        })?;
     fork::fire_session_forked(
         &state,
         access,
@@ -397,17 +420,13 @@ pub(super) async fn handle_fork_session(
 #[tracing::instrument(skip_all, fields(version = "v2", session = %request.session_id))]
 pub(super) async fn handle_set_config(
     state: Arc<TackleState>,
+    negotiation: Arc<crate::acp::v2::negotiation::ConnectionNegotiation>,
     cx: V2ConnectionTo<Client>,
     request: SetSessionConfigOptionRequest,
     responder: Responder<SetSessionConfigOptionResponse>,
 ) -> Result<(), Error> {
     let session_id = store_session_id(&request.session_id);
-    let session = state
-        .db
-        .get_session(&session_id)
-        .await
-        .map_err(|err| Error::internal_error().data(err.to_string()))?
-        .ok_or_else(|| Error::internal_error().data("no such session".to_owned()))?;
+    let session = live_session(&state, &negotiation, &request.session_id).await?;
 
     let mut updates: Vec<config_options::Notice> = Vec::new();
     let applied = match &request.value {
