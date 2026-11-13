@@ -65,13 +65,21 @@ pub(super) async fn connect_forwarded_servers(
 
 /// Checks the servers a client forwarded before a session is created or
 /// resumed: `-32602` for a transport this agent does not serve (only stdio and
-/// HTTP are advertised). A request is never half-honoured: either every
+/// HTTP are advertised) or for two servers sharing a name, which the pool
+/// could not tell apart. A request is never half-honoured: either every
 /// forwarded server is usable, or the session-scoped request is refused.
 pub(super) fn validate_forwarded_servers(servers: &[McpServer]) -> Result<(), Error> {
+    let mut names = std::collections::BTreeSet::new();
     for server in servers {
-        if forwarded_mcp_server(server).is_none() {
+        let Some((name, _)) = forwarded_mcp_server(server) else {
             return Err(Error::invalid_params().data(serde_json::json!({
                 "error": "unsupported MCP server transport",
+            })));
+        };
+        if !names.insert(name.clone()) {
+            return Err(Error::invalid_params().data(serde_json::json!({
+                "error": "duplicate MCP server name",
+                "name": name,
             })));
         }
     }
