@@ -7,6 +7,7 @@ use crate::invokables::client_tools::TerminalTracker;
 use crate::mcp::McpPool;
 use crate::store::SessionId;
 use agent_client_protocol::v2::schema::AvailableCommand;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
@@ -16,6 +17,9 @@ pub struct ConnectionNegotiation {
     mcp_pool: Arc<tokio::sync::Mutex<McpPool>>,
     /// The rendered command list, cached until the pool changes.
     commands: tokio::sync::Mutex<Option<Vec<AvailableCommand>>>,
+    /// Sessions this connection closed: the store still holds the row, but a
+    /// session-scoped request naming one answers `-32002`.
+    closed: std::sync::Mutex<BTreeSet<String>>,
 }
 
 impl ConnectionNegotiation {
@@ -31,7 +35,25 @@ impl ConnectionNegotiation {
             cancellations: Arc::new(CancellationRegistry::new()),
             mcp_pool,
             commands: tokio::sync::Mutex::new(None),
+            closed: std::sync::Mutex::new(BTreeSet::new()),
         }
+    }
+
+    /// Records that this connection closed `session`, so later session-scoped
+    /// requests naming it answer `-32002`.
+    pub(super) fn close_session(&self, session: &str) {
+        self.closed
+            .lock()
+            .expect("negotiation poisoned")
+            .insert(session.to_owned());
+    }
+
+    /// Whether this connection already closed `session`.
+    pub(super) fn is_closed(&self, session: &str) -> bool {
+        self.closed
+            .lock()
+            .expect("negotiation poisoned")
+            .contains(session)
     }
 
     /// The connection's MCP pool handle.
