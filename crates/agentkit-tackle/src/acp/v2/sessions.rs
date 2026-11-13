@@ -428,6 +428,43 @@ pub(super) async fn handle_set_config(
     let session_id = store_session_id(&request.session_id);
     let session = live_session(&state, &negotiation, &request.session_id).await?;
 
+    // The session's own advertisement is the contract: an unadvertised id, a
+    // value the option does not declare, or a value type the option does not
+    // take is the client's mistake, and `-32602` says so.
+    let advertised = config_options::build(&state, &session).await;
+    let Some(option) = advertised
+        .options
+        .iter()
+        .find(|option| option.id.as_str() == request.config_id.0.as_ref())
+    else {
+        return responder.respond_with_error(Error::invalid_params().data(serde_json::json!({
+            "error": "unknown config option",
+            "configId": request.config_id.0,
+        })));
+    };
+    match (&request.value, &option.kind) {
+        (SessionConfigOptionValue::Id { value }, ConfigOptionKind::Select { options, .. }) => {
+            if !options
+                .iter()
+                .any(|choice| choice.value == value.to_string())
+            {
+                return responder.respond_with_error(Error::invalid_params().data(
+                    serde_json::json!({
+                        "error": "unknown config value",
+                        "configId": option.id,
+                        "value": value.to_string(),
+                    }),
+                ));
+            }
+        }
+        _ => {
+            return responder.respond_with_error(Error::invalid_params().data(serde_json::json!({
+                "error": "the option does not take this value type",
+                "configId": option.id,
+            })));
+        }
+    }
+
     let mut updates: Vec<config_options::Notice> = Vec::new();
     let applied = match &request.value {
         SessionConfigOptionValue::Id { value } => {
