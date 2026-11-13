@@ -278,7 +278,10 @@ async fn run_prompt_after_begin(
     let runtime = TurnRuntime {
         cancellation: cancellation.clone(),
         pool: negotiation.mcp_pool(),
-        sink: Arc::new(super::sink::ConnectionTurnSink::new(cx.clone())),
+        sink: Arc::new(super::sink::ConnectionTurnSink::new(
+            cx.clone(),
+            Arc::clone(&negotiation),
+        )),
         requester: Arc::new(super::permission::AcpPermissionRequester {
             cx: cx.clone(),
             session_id: wire_session.clone(),
@@ -286,14 +289,16 @@ async fn run_prompt_after_begin(
         }),
         executor: Arc::new(NoClientTools),
         tracker: negotiation.clone(),
-        compaction_notices: Arc::new(super::notices::ConnectionNotices {
-            cx: cx.clone(),
-            source: "compaction",
-        }),
-        titling_notices: Arc::new(super::notices::ConnectionNotices {
-            cx: cx.clone(),
-            source: "titling",
-        }),
+        compaction_notices: Arc::new(super::notices::ConnectionNotices::new(
+            cx.clone(),
+            Arc::clone(&negotiation),
+            "compaction",
+        )),
+        titling_notices: Arc::new(super::notices::ConnectionNotices::new(
+            cx.clone(),
+            Arc::clone(&negotiation),
+            "titling",
+        )),
         client_tools: Vec::new(),
     };
 
@@ -310,8 +315,15 @@ async fn run_prompt_after_begin(
         );
         let outcome = match dispatch {
             Dispatch::Fork => {
-                let result =
-                    run_fork(&state, &turn_cx, &wire_session, &store_session, &turn.id).await;
+                let result = run_fork(
+                    &state,
+                    &negotiation,
+                    &turn_cx,
+                    &wire_session,
+                    &store_session,
+                    &turn.id,
+                )
+                .await;
                 state.db.release_lease(&store_session, &owner).await.ok();
                 match result {
                     Ok(()) => Ok(TurnStop::EndTurn),
@@ -321,6 +333,7 @@ async fn run_prompt_after_begin(
             Dispatch::Compaction => {
                 let result = run_compaction(
                     &state,
+                    &negotiation,
                     &turn_cx,
                     &wire_session,
                     &store_session,
@@ -622,6 +635,7 @@ async fn run_runtime_command(
 /// session id in the parent turn.
 async fn run_fork(
     state: &Arc<TackleState>,
+    negotiation: &Arc<ConnectionNegotiation>,
     cx: &V2ConnectionTo<Client>,
     wire_session: &agent_client_protocol::v2::schema::SessionId,
     store_session: &SessionId,
@@ -629,10 +643,11 @@ async fn run_fork(
 ) -> Result<(), String> {
     let access = fork_access(
         state,
-        Arc::new(super::notices::ConnectionNotices {
-            cx: cx.clone(),
-            source: "fork",
-        }),
+        Arc::new(super::notices::ConnectionNotices::new(
+            cx.clone(),
+            Arc::clone(negotiation),
+            "fork",
+        )),
     );
     let fork = fork::run_fork(state, access, store_session)
         .await
@@ -651,6 +666,7 @@ async fn run_fork(
 #[allow(clippy::too_many_arguments)]
 async fn run_compaction(
     state: &Arc<TackleState>,
+    negotiation: &Arc<ConnectionNegotiation>,
     cx: &V2ConnectionTo<Client>,
     wire_session: &agent_client_protocol::v2::schema::SessionId,
     store_session: &SessionId,
@@ -659,10 +675,11 @@ async fn run_compaction(
     actor_name: &str,
     context_size: u64,
 ) -> Result<(), String> {
-    let notices: Arc<dyn NoticeSink> = Arc::new(super::notices::ConnectionNotices {
-        cx: cx.clone(),
-        source: "compaction",
-    });
+    let notices: Arc<dyn NoticeSink> = Arc::new(super::notices::ConnectionNotices::new(
+        cx.clone(),
+        Arc::clone(negotiation),
+        "compaction",
+    ));
     let (before, after) = compaction::run_compaction(
         state,
         store_session,

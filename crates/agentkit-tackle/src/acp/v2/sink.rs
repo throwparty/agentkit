@@ -15,14 +15,24 @@ use agent_client_protocol::v2::ConnectionTo as V2ConnectionTo;
 /// Reports the turn loop's events over `cx`.
 pub struct ConnectionTurnSink {
     cx: V2ConnectionTo<Client>,
+    /// The connection's state, so a closed session's stream stays quiet: post
+    /// turn work (titling, compaction) outlives `session/close` and must not
+    /// speak for a session the client has closed.
+    negotiation: std::sync::Arc<super::negotiation::ConnectionNegotiation>,
 }
 
 impl ConnectionTurnSink {
-    pub fn new(cx: V2ConnectionTo<Client>) -> Self {
-        Self { cx }
+    pub fn new(
+        cx: V2ConnectionTo<Client>,
+        negotiation: std::sync::Arc<super::negotiation::ConnectionNegotiation>,
+    ) -> Self {
+        Self { cx, negotiation }
     }
 
     fn send(&self, session: &SessionId, update: SessionUpdate) {
+        if self.negotiation.is_closed(session) {
+            return;
+        }
         let _ = self.cx.send_notification(UpdateSessionNotification::new(
             super::wire_session_id(session),
             update,
