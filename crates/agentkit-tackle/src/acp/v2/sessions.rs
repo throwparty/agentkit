@@ -20,9 +20,9 @@ use agent_client_protocol::v2::schema::{
     ListSessionsResponse, MessageId, NewSessionRequest, NewSessionResponse, Notice, NoticeSeverity,
     ReplayFrom, ResumeSessionRequest, ResumeSessionResponse, SessionConfigId, SessionConfigOption,
     SessionConfigOptionCategory, SessionConfigOptionValue, SessionConfigSelectOption,
-    SessionConfigValueId, SessionInfo, SessionUpdate, SetSessionConfigOptionRequest,
-    SetSessionConfigOptionResponse, StateUpdate, UpdateSessionNotification, UsageUpdate,
-    UserMessage,
+    SessionConfigValueId, SessionInfo, SessionInfoUpdate, SessionUpdate,
+    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, StateUpdate,
+    UpdateSessionNotification, UsageUpdate, UserMessage,
 };
 use agent_client_protocol::{
     v2::{ConnectionTo as V2ConnectionTo, Responder},
@@ -399,6 +399,16 @@ pub(super) async fn handle_resume_session(
         }
     }
 
+    // The replayed history is followed by a last-activity stamp, then the
+    // current state: both precede the response so the client has the whole
+    // picture before it treats the session as attached.
+    cx.send_notification(UpdateSessionNotification::new(
+        request.session_id.clone(),
+        SessionUpdate::SessionInfoUpdate(
+            SessionInfoUpdate::new().updated_at(timestamp(session.updated_at)),
+        ),
+    ))
+    .map_err(|err| Error::internal_error().data(err.to_string()))?;
     cx.send_notification(UpdateSessionNotification::new(
         request.session_id.clone(),
         SessionUpdate::StateUpdate(StateUpdate::Idle(IdleStateUpdate::new())),
