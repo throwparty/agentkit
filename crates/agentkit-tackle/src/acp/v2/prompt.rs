@@ -6,9 +6,7 @@ use super::negotiation::ConnectionNegotiation;
 use crate::acp::common::content::Block;
 use crate::acp::common::dispatch::{decide, Dispatch};
 use crate::acp::common::messages::append_assistant_text;
-use crate::acp::common::session::{
-    begin_prompt_turn, session_not_found, BeginError, BegunTurn,
-};
+use crate::acp::common::session::{begin_prompt_turn, session_not_found, BeginError, BegunTurn};
 use crate::agent::config_options::{effective_context_window, resolve_model_for, session_actor};
 use crate::agent::context_report::{self, ReportInputs};
 use crate::agent::fork::{self, fork_access};
@@ -51,6 +49,12 @@ pub(super) async fn handle_prompt(
     if negotiation.is_closed(&session_id) {
         return responder.respond_with_error(session_not_found(&request.session_id.to_string()));
     }
+    if let Some(kind) = unsupported_prompt_block(&request.prompt) {
+        return responder.respond_with_error(Error::invalid_params().data(serde_json::json!({
+            "error": "unsupported prompt content block",
+            "type": kind,
+        })));
+    }
     let blocks: Vec<Block> = request
         .prompt
         .iter()
@@ -70,9 +74,9 @@ pub(super) async fn handle_prompt(
         Ok(begun) => {
             run_prompt_after_begin(state, negotiation, cx, owner, request, responder, begun).await
         }
-        Err(BeginError::NotFound) => responder.respond_with_error(
-            session_not_found(&request.session_id.to_string()),
-        ),
+        Err(BeginError::NotFound) => {
+            responder.respond_with_error(session_not_found(&request.session_id.to_string()))
+        }
         Err(BeginError::Owned { holder }) if holder == owner.as_str() => {
             // v2 accepts a prompt before the previous turn ends. Wait for
             // this connection's active turn to finish on a spawned task, so
@@ -173,6 +177,32 @@ pub(super) async fn handle_prompt(
             responder.respond_with_error(Error::internal_error().data(err))
         }
     }
+}
+
+/// The wire type of the first prompt block this agent cannot serve, if any.
+///
+/// Text and resource links are mandatory for every agent, and the capability
+/// map advertises images and embedded resources. Audio is not advertised, and
+/// a type this build does not know is not something it can render later, so
+/// the prompt is refused rather than stored and silently dropped.
+fn unsupported_prompt_block(blocks: &[ContentBlock]) -> Option<String> {
+    blocks.iter().find_map(|block| match block {
+        ContentBlock::Text(_)
+        | ContentBlock::Image(_)
+        | ContentBlock::ResourceLink(_)
+        | ContentBlock::Resource(_) => None,
+        other => Some(
+            serde_json::to_value(other)
+                .ok()
+                .and_then(|value| {
+                    value
+                        .get("type")
+                        .and_then(|kind| kind.as_str())
+                        .map(str::to_owned)
+                })
+                .unwrap_or_else(|| "unknown".to_owned()),
+        ),
+    })
 }
 
 async fn run_prompt_after_begin(
