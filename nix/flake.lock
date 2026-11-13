@@ -3,11 +3,11 @@
     "acp-tck": {
       "flake": false,
       "locked": {
-        "lastModified": 1792768869,
-        "narHash": "sha256-XrOVljfG9mekaIl3xitrwenp4BM3HeJ+y8sBNdYUM0s=",
+        "lastModified": 1794492684,
+        "narHash": "sha256-swwQ6lgZZBZMwiXztmnRFYr+iA6qAFICJioWwwedq8E=",
         "owner": "agentclientprotocol",
         "repo": "acp-tck",
-        "rev": "b7f40fb3c003c45926547be5a1f7e2b374035815",
+        "rev": "13c4f7aa2fcaaec32f194e502031717bf28ec700",
         "type": "github"
       },
       "original": {
