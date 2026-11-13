@@ -154,11 +154,25 @@ pub(super) async fn handle_new_session(
 
 /// `session/list`: the stored sessions, filtered by the request's cwd and the
 /// configured ephemeral policy.
+///
+/// The response is a single page, so no cursor is ever issued: a token the
+/// connection never handed out is rejected with `-32602` rather than answered
+/// with the first page as if it had been understood.
 pub(super) async fn handle_list_sessions(
     state: Arc<TackleState>,
     request: agent_client_protocol::v1::schema::ListSessionsRequest,
     responder: Responder<ListSessionsResponse>,
 ) -> Result<(), Error> {
+    if let Some(cursor) = request
+        .cursor
+        .as_deref()
+        .filter(|cursor| !cursor.is_empty())
+    {
+        return responder.respond_with_error(Error::invalid_params().data(serde_json::json!({
+            "error": "unknown session-list cursor",
+            "cursor": cursor,
+        })));
+    }
     let cwd = request
         .cwd
         .as_ref()
