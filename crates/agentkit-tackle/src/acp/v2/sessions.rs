@@ -432,10 +432,11 @@ pub(super) async fn handle_fork_session(
     let source = store_session_id(&request.session_id);
     let access = fork_access(
         &state,
-        Arc::new(super::notices::ConnectionNotices {
-            cx: cx.clone(),
-            source: "fork",
-        }),
+        Arc::new(super::notices::ConnectionNotices::new(
+            cx.clone(),
+            Arc::clone(&negotiation),
+            "fork",
+        )),
     );
     let fork = fork::create_fork(&state.db, &source)
         .await
@@ -519,10 +520,11 @@ pub(super) async fn handle_set_config(
             match request.config_id.0.as_ref() {
                 config_options::MODEL_SELECTOR_ID => {
                     let notices: Arc<dyn NoticeSink> =
-                        Arc::new(super::notices::ConnectionNotices {
-                            cx: cx.clone(),
-                            source: "config switch",
-                        });
+                        Arc::new(super::notices::ConnectionNotices::new(
+                            cx.clone(),
+                            Arc::clone(&negotiation),
+                            "config switch",
+                        ));
                     let access = script_loop::access(&state, 0, Arc::clone(&notices));
                     let mut notify = |notice: config_options::Notice| {
                         updates.push(notice);
