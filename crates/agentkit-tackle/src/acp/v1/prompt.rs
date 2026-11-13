@@ -332,6 +332,11 @@ pub(super) async fn handle_prompt(
     // prompt turn and its user message are persisted up front.
     let begun = match begin_prompt_turn(&state, &request, &owner).await {
         Ok(begun) => begun,
+        Err(BeginError::NotFound) => {
+            return responder.respond_with_error(crate::acp::common::session::session_not_found(
+                &request.session_id.to_string(),
+            ));
+        }
         Err(BeginError::Owned { holder }) => {
             return responder.respond_with_error(Error::internal_error().data(serde_json::json!({
                 "error": "session-actively-owned",
