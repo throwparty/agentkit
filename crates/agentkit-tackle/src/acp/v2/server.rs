@@ -203,11 +203,13 @@ pub(crate) fn agent(
         .on_receive_request(
             {
                 let state = state.clone();
+                let negotiation = negotiation.clone();
                 async move |request: SetSessionConfigOptionRequest,
                             responder,
                             connection: V2ConnectionTo<Client>| {
                     super::sessions::handle_set_config(
                         state.clone(),
+                        negotiation.clone(),
                         connection,
                         request,
                         responder,
