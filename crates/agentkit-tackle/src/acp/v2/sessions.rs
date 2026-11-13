@@ -204,14 +204,10 @@ pub(super) async fn handle_new_session(
         ))?;
     }
 
-    responder.respond(
-        NewSessionResponse::new(wire_session_id(&session.id))
-            .config_options(wire_options(&selectors.options))
-            .available_commands(super::commands::available_commands(&state, &negotiation).await),
-    )?;
-    // The seed is stored as a user message; send it after the response (Zed
-    // drops updates that precede session/new) so a fresh session shows it
-    // without waiting for a replay.
+    // The seed is stored as a user message; announce it before the response.
+    // Announced afterwards, it interleaves with whatever request the client
+    // sends next, and the client cannot tell it from the insertion of that
+    // request.
     let seed_blocks: Vec<ContentBlock> =
         serde_json::from_str(&seed_message.content).unwrap_or_default();
     cx.send_notification(UpdateSessionNotification::new(
@@ -221,6 +217,11 @@ pub(super) async fn handle_new_session(
         ),
     ))
     .map_err(|err| Error::internal_error().data(err.to_string()))?;
+    responder.respond(
+        NewSessionResponse::new(wire_session_id(&session.id))
+            .config_options(wire_options(&selectors.options))
+            .available_commands(super::commands::available_commands(&state, &negotiation).await),
+    )?;
     super::mcp::connect_forwarded_servers(&negotiation, &request.mcp_servers).await;
     // Forwarded servers joined after the response; refresh the command list
     // so their `!mcp.*` entries appear.
