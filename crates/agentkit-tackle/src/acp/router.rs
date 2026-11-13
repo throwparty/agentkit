@@ -7,6 +7,11 @@ use crate::state::TackleState;
 use agent_client_protocol::ConnectTo as _;
 use std::sync::Arc;
 
+/// Every `initialize` protocol version tackle serves, lowest first: the slots
+/// the router below configures. The stdio transport answers a request below
+/// the first of these before the router sees it.
+pub(crate) const SUPPORTED_PROTOCOL_VERSIONS: [u64; 2] = [1, 2];
+
 /// Runs one connection through the version router: the initial `initialize`
 /// selects the protocol implementation, and the connection is forwarded to it.
 pub(crate) async fn run_acp_over<T>(
