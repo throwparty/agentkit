@@ -159,6 +159,9 @@ pub(super) async fn handle_new_session(
             "path": dir.0.to_string_lossy(),
         })));
     }
+    if let Err(error) = super::mcp::validate_forwarded_servers(&request.mcp_servers) {
+        return responder.respond_with_error(error);
+    }
     let additional: Vec<String> = request
         .additional_directories
         .iter()
@@ -369,9 +372,12 @@ pub(super) async fn handle_resume_session(
     request: ResumeSessionRequest,
     responder: Responder<ResumeSessionResponse>,
 ) -> Result<(), Error> {
-    super::mcp::connect_forwarded_servers(&negotiation, &request.mcp_servers).await;
+    if let Err(error) = super::mcp::validate_forwarded_servers(&request.mcp_servers) {
+        return responder.respond_with_error(error);
+    }
     let session_id = store_session_id(&request.session_id);
     let session = live_session(&state, &negotiation, &request.session_id).await?;
+    super::mcp::connect_forwarded_servers(&negotiation, &request.mcp_servers).await;
 
     match &request.replay_from {
         Some(ReplayFrom::Start(_)) => {

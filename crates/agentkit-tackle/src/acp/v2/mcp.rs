@@ -4,6 +4,7 @@
 use super::negotiation::ConnectionNegotiation;
 use crate::config::McpServerConfig;
 use agent_client_protocol::v2::schema::McpServer;
+use agent_client_protocol::Error;
 
 /// Maps a v2 client-forwarded MCP server onto the pool's spawn configuration.
 /// SSE and ACP transports are not advertised, so those entries are skipped;
@@ -60,6 +61,21 @@ pub(super) async fn connect_forwarded_servers(
     }
     crate::mcp::connect_forwarded(negotiation.mcp_pool(), forwarded).await;
     negotiation.invalidate_commands().await;
+}
+
+/// Checks the servers a client forwarded before a session is created or
+/// resumed: `-32602` for a transport this agent does not serve (only stdio and
+/// HTTP are advertised). A request is never half-honoured: either every
+/// forwarded server is usable, or the session-scoped request is refused.
+pub(super) fn validate_forwarded_servers(servers: &[McpServer]) -> Result<(), Error> {
+    for server in servers {
+        if forwarded_mcp_server(server).is_none() {
+            return Err(Error::invalid_params().data(serde_json::json!({
+                "error": "unsupported MCP server transport",
+            })));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
