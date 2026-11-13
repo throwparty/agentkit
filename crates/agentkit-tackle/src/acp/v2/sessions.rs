@@ -260,10 +260,16 @@ pub(super) async fn handle_list_sessions(
             "cursor": cursor,
         })));
     }
-    let cwd = request
-        .cwd
-        .as_ref()
-        .map(|cwd| cwd.0.to_string_lossy().to_string());
+    let cwd = match request.cwd.as_ref() {
+        Some(cwd) if !cwd.0.is_absolute() => {
+            return responder.respond_with_error(Error::invalid_params().data(serde_json::json!({
+                "error": "session/list cwd filter must be absolute",
+                "cwd": cwd.0.to_string_lossy(),
+            })));
+        }
+        Some(cwd) => Some(cwd.0.to_string_lossy().to_string()),
+        None => None,
+    };
     let filter = ListFilter {
         cwd: cwd.as_deref(),
         include_ephemeral: state
