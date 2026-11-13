@@ -131,6 +131,10 @@ fn wire_options(options: &[ConfigOption]) -> Vec<SessionConfigOption> {
 
 /// `session/new`: create the session in the shared store, seed the first turn,
 /// and ride the selectors on the response.
+///
+/// Every path on the request has to be absolute: the session's cwd names a
+/// place this process can be started in, and a relative one would resolve
+/// against whatever working directory the agent happened to have.
 #[tracing::instrument(skip_all, fields(version = "v2", cwd = %request.cwd.0.display()))]
 pub(super) async fn handle_new_session(
     state: Arc<TackleState>,
@@ -139,6 +143,22 @@ pub(super) async fn handle_new_session(
     request: NewSessionRequest,
     responder: Responder<NewSessionResponse>,
 ) -> Result<(), Error> {
+    if !request.cwd.0.is_absolute() {
+        return responder.respond_with_error(Error::invalid_params().data(serde_json::json!({
+            "error": "session/new cwd must be absolute",
+            "cwd": request.cwd.0.to_string_lossy(),
+        })));
+    }
+    if let Some(dir) = request
+        .additional_directories
+        .iter()
+        .find(|dir| !dir.0.is_absolute())
+    {
+        return responder.respond_with_error(Error::invalid_params().data(serde_json::json!({
+            "error": "additionalDirectories entries must be absolute",
+            "path": dir.0.to_string_lossy(),
+        })));
+    }
     let additional: Vec<String> = request
         .additional_directories
         .iter()
