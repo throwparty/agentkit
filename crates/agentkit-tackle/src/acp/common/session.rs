@@ -20,8 +20,20 @@ pub(crate) struct BegunTurn {
     pub user_message_id: String,
 }
 
+/// The `-32002` reply for a session-scoped request naming a session that does
+/// not exist, was deleted, or that this connection already closed.
+pub(crate) fn session_not_found(session_id: &str) -> agent_client_protocol::Error {
+    agent_client_protocol::Error::new(
+        agent_client_protocol::ErrorCode::RESOURCE_NOT_FOUND,
+        "Session not found",
+    )
+    .data(serde_json::json!({ "sessionId": session_id }))
+}
+
 /// Why a prompt turn could not begin.
 pub(crate) enum BeginError {
+    /// The session does not exist, or is no longer active.
+    NotFound,
     /// Another connection holds the session's turn lease.
     Owned { holder: String },
     /// The store failed while acquiring the lease or persisting the turn.
@@ -39,6 +51,15 @@ pub(crate) async fn begin_prompt_turn(
     owner: &str,
 ) -> Result<BegunTurn, BeginError> {
     let blocks_json = content::encode(&blocks);
+    // A turn is only ever appended to a session that exists and is still
+    // active: a closed or deleted session answers `-32002`, not a fresh turn.
+    let session = state
+        .db
+        .get_session(&store_session)
+        .await
+        .map_err(|err| BeginError::Store(err.to_string()))?
+        .filter(|session| session.active)
+        .ok_or(BeginError::NotFound)?;
     let acquired = {
         let mut acquired = false;
         for _ in 0..4 {
@@ -70,18 +91,11 @@ pub(crate) async fn begin_prompt_turn(
         store_session.clone(),
         owner.to_owned(),
     );
-    let head = state
-        .db
-        .get_session(&store_session)
-        .await
-        .ok()
-        .flatten()
-        .and_then(|session| session.head_turn_id);
     let turn = state
         .db
         .append_turn(
             &store_session,
-            head.as_ref(),
+            session.head_turn_id.as_ref(),
             TurnKind::Interaction,
             None,
             TurnUsage::default(),

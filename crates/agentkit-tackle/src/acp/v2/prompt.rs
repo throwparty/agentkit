@@ -6,7 +6,9 @@ use super::negotiation::ConnectionNegotiation;
 use crate::acp::common::content::Block;
 use crate::acp::common::dispatch::{decide, Dispatch};
 use crate::acp::common::messages::append_assistant_text;
-use crate::acp::common::session::{begin_prompt_turn, BeginError, BegunTurn};
+use crate::acp::common::session::{
+    begin_prompt_turn, session_not_found, BeginError, BegunTurn,
+};
 use crate::agent::config_options::{effective_context_window, resolve_model_for, session_actor};
 use crate::agent::context_report::{self, ReportInputs};
 use crate::agent::fork::{self, fork_access};
@@ -65,6 +67,9 @@ pub(super) async fn handle_prompt(
         Ok(begun) => {
             run_prompt_after_begin(state, negotiation, cx, owner, request, responder, begun).await
         }
+        Err(BeginError::NotFound) => responder.respond_with_error(
+            session_not_found(&request.session_id.to_string()),
+        ),
         Err(BeginError::Owned { holder }) if holder == owner.as_str() => {
             // v2 accepts a prompt before the previous turn ends. Wait for
             // this connection's active turn to finish on a spawned task, so
@@ -106,6 +111,11 @@ pub(super) async fn handle_prompt(
                                 begun,
                             )
                             .await
+                        }
+                        Err(BeginError::NotFound) => {
+                            return responder.respond_with_error(session_not_found(
+                                &request.session_id.to_string(),
+                            ))
                         }
                         Err(BeginError::Owned { holder }) if holder == owner.as_str() => {}
                         Err(BeginError::Owned { holder }) => {
