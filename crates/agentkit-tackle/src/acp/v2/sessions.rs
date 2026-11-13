@@ -257,6 +257,7 @@ pub(super) async fn handle_close_session(
         .close_session(&store_session_id(&request.session_id))
         .await
         .map_err(|err| Error::internal_error().data(err.to_string()))?;
+    negotiation.close_session(&store_session);
     state
         .grants
         .lock()

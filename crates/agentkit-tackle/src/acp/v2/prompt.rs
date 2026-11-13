@@ -48,6 +48,9 @@ pub(super) async fn handle_prompt(
     responder: Responder<PromptResponse>,
 ) -> Result<(), Error> {
     let session_id = super::store_session_id(&request.session_id);
+    if negotiation.is_closed(&session_id) {
+        return responder.respond_with_error(session_not_found(&request.session_id.to_string()));
+    }
     let blocks: Vec<Block> = request
         .prompt
         .iter()
