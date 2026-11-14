@@ -15,6 +15,7 @@ use std::time::Instant;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PidState {
     Running,
+    Stopped,
     Zombie,
     Gone,
 }
@@ -95,11 +96,12 @@ impl Host for SystemHost {
         let Some(info) = process_info(pid)? else {
             return Ok(PidState::Gone);
         };
-        // SZOMB is 5 on Darwin; libc does not expose the constant.
-        if info.pbi_status == 5 {
-            Ok(PidState::Zombie)
-        } else {
-            Ok(PidState::Running)
+        // Darwin process states: SSTOP is 4 and SZOMB is 5. libc exposes
+        // neither constant.
+        match info.pbi_status {
+            4 => Ok(PidState::Stopped),
+            5 => Ok(PidState::Zombie),
+            _ => Ok(PidState::Running),
         }
     }
 
@@ -356,6 +358,8 @@ mod tests {
         assert_eq!(host.pid_state(42).expect("state"), PidState::Running);
         assert_eq!(host.process_start(42).expect("start"), start(100));
 
+        host.set_state(42, PidState::Stopped);
+        assert_eq!(host.pid_state(42).expect("state"), PidState::Stopped);
         host.set_state(42, PidState::Zombie);
         assert_eq!(host.pid_state(42).expect("state"), PidState::Zombie);
 

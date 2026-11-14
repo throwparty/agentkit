@@ -21,6 +21,7 @@ use crate::sandbox::contract::{
     Backend, ContributionSort, ContributionSupport, CreateRequest, Error, Execution, Inspection,
     SandboxRecord, Scope,
 };
+use crate::sandbox::facets::Lifecycle;
 use crate::sandbox::report::{Capability, Readiness, State};
 
 /// The Seatbelt backend, over a host seam.
@@ -240,6 +241,123 @@ impl SeatbeltBackend {
         })
     }
 
+    fn pause_sandbox(&self, record: &SandboxRecord) -> Result<(), Error> {
+        let payload = PayloadV1::from_record(record)?;
+        self.require_live(&payload, "pause")?;
+        self.host
+            .signal_group(payload.holder_pid, super::host::Signal::Stop)
+            .map_err(|error| Error::failed(format!("cannot pause the holder: {error}")))?;
+        self.wait_for(&payload, super::host::PidState::Stopped, "pause")
+    }
+
+    fn resume_sandbox(&self, record: &SandboxRecord) -> Result<(), Error> {
+        let payload = PayloadV1::from_record(record)?;
+        match payload.state(self.host.as_ref()) {
+            super::payload::PayloadState::Paused => {}
+            super::payload::PayloadState::Live => return Ok(()),
+            super::payload::PayloadState::Missing => {
+                return Err(Error::NotFound {
+                    name: record.name.clone(),
+                });
+            }
+            super::payload::PayloadState::Foreign => {
+                return Err(Error::Denied {
+                    operation: "resume".to_string(),
+                    reason: "the recorded holder is not the process at that pid".to_string(),
+                });
+            }
+            super::payload::PayloadState::Invalid(reason) => {
+                return Err(Error::failed(reason));
+            }
+        }
+        self.host
+            .signal_group(payload.holder_pid, super::host::Signal::Continue)
+            .map_err(|error| Error::failed(format!("cannot resume the holder: {error}")))?;
+        self.wait_for(&payload, super::host::PidState::Running, "resume")
+    }
+
+    fn delete_sandbox(&self, record: &SandboxRecord) -> Result<(), Error> {
+        let state = self.state_dir(&record.project_slug, &record.name);
+        let payload = PayloadV1::from_record(record).ok();
+        if let Some(payload) = &payload {
+            match payload.state(self.host.as_ref()) {
+                super::payload::PayloadState::Live | super::payload::PayloadState::Paused => {
+                    let _ = self
+                        .host
+                        .signal_group(payload.holder_pid, super::host::Signal::Kill);
+                }
+                super::payload::PayloadState::Missing => {
+                    // The pid is absent; a group may still hold confined
+                    // children. Signal it and log the orphan.
+                    let _ = self
+                        .host
+                        .signal_group(payload.holder_pid, super::host::Signal::Kill);
+                    tracing::warn!(
+                        sandbox = %record.name,
+                        "the holder was gone; the recorded group was signalled as an orphan"
+                    );
+                }
+                super::payload::PayloadState::Foreign => {
+                    tracing::warn!(
+                        sandbox = %record.name,
+                        "the recorded pid now belongs to another process; it was not signalled"
+                    );
+                }
+                super::payload::PayloadState::Invalid(reason) => {
+                    tracing::warn!(sandbox = %record.name, %reason, "the record is not readable");
+                }
+            }
+            let _ = fs::remove_file(&payload.socket);
+        }
+        let _ = fs::remove_dir_all(state);
+        Ok(())
+    }
+
+    fn require_live(&self, payload: &PayloadV1, operation: &str) -> Result<(), Error> {
+        match payload.state(self.host.as_ref()) {
+            super::payload::PayloadState::Live => Ok(()),
+            super::payload::PayloadState::Paused => Ok(()),
+            super::payload::PayloadState::Missing => Err(Error::NotFound {
+                name: payload.tag.clone(),
+            }),
+            super::payload::PayloadState::Foreign => Err(Error::Denied {
+                operation: operation.to_string(),
+                reason: "the recorded holder is not the process at that pid".to_string(),
+            }),
+            super::payload::PayloadState::Invalid(reason) => Err(Error::failed(reason)),
+        }
+    }
+
+    fn wait_for(
+        &self,
+        payload: &PayloadV1,
+        wanted: super::host::PidState,
+        operation: &str,
+    ) -> Result<(), Error> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        loop {
+            match self.host.pid_state(payload.holder_pid) {
+                Ok(state) if state == wanted => return Ok(()),
+                Ok(super::host::PidState::Gone) => {
+                    return Err(Error::NotFound {
+                        name: payload.tag.clone(),
+                    });
+                }
+                Ok(_) if std::time::Instant::now() >= deadline => {
+                    return Err(Error::failed(format!(
+                        "the holder did not reach the expected state for {operation}"
+                    )));
+                }
+                Ok(_) => std::thread::sleep(std::time::Duration::from_millis(10)),
+                Err(error) => {
+                    return Err(Error::failed(format!(
+                        "cannot read the holder state during {operation}: {error}"
+                    )));
+                }
+            }
+        }
+    }
+
     fn holder_for(&self, record: &SandboxRecord) -> Result<Holder, Error> {
         let payload = PayloadV1::from_record(record)?;
         match payload.state(self.host.as_ref()) {
@@ -278,6 +396,16 @@ impl SeatbeltBackend {
                 |state| state.join("holder.log"),
             ),
         ))
+    }
+}
+
+impl Lifecycle for SeatbeltBackend {
+    fn pause<'a>(&'a self, sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>> {
+        Box::pin(async move { self.pause_sandbox(sandbox) })
+    }
+
+    fn resume<'a>(&'a self, sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>> {
+        Box::pin(async move { self.resume_sandbox(sandbox) })
     }
 }
 
@@ -351,16 +479,8 @@ impl Backend for SeatbeltBackend {
         })
     }
 
-    fn delete<'a>(&'a self, _sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>> {
-        Box::pin(async {
-            Err(Error::Unsupported {
-                operation: "delete".to_string(),
-                backend: BACKEND.to_string(),
-                primitive: "a materialised record".to_string(),
-                reason: "delete is not wired yet".to_string(),
-                remedy: "wait for the lifecycle task".to_string(),
-            })
-        })
+    fn delete<'a>(&'a self, sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>> {
+        Box::pin(async move { self.delete_sandbox(sandbox) })
     }
 
     fn readiness<'a>(&'a self) -> BoxFuture<'a, Result<Readiness, Error>> {
@@ -430,8 +550,9 @@ mod tests {
 
     use super::SeatbeltBackend;
     use crate::backends::seatbelt::config::{BaselineSetting, NetworkSetting, Settings};
-    use crate::backends::seatbelt::host::SystemHost;
+    use crate::backends::seatbelt::host::{Host, SystemHost};
     use crate::sandbox::contract::{Backend, CreateRequest, Error, Workspace};
+    use crate::sandbox::facets::Lifecycle;
 
     fn helper() -> PathBuf {
         std::env::current_exe()
@@ -523,16 +644,14 @@ mod tests {
     async fn exec_refuses_a_paused_or_foreign_holder_and_reports_missing() {
         let (backend, mut record, state) = sandbox("state").await;
 
-        let mut paused = payload(&record);
-        paused.paused = true;
-        record.data = paused.to_value().expect("value");
+        backend.pause(&record).await.expect("pause");
         assert!(matches!(
             backend.exec(&record, &["/bin/true".to_string()]).await,
             Err(Error::Denied { .. })
         ));
+        backend.resume(&record).await.expect("resume");
 
         let mut foreign = payload(&record);
-        foreign.paused = false;
         foreign.holder_start_secs += 1;
         record.data = foreign.to_value().expect("value");
         assert!(matches!(
@@ -549,6 +668,56 @@ mod tests {
         ));
 
         let _ = std::fs::remove_dir_all(&state);
+    }
+
+    #[tokio::test]
+    async fn pause_resume_and_delete() {
+        let (backend, record, state) = sandbox("lifecycle").await;
+        let host = Arc::new(SystemHost::new());
+        backend.pause(&record).await.expect("pause");
+        let payload = payload(&record);
+        assert_eq!(
+            payload.state(host.as_ref()),
+            crate::backends::seatbelt::payload::PayloadState::Paused
+        );
+        assert!(matches!(
+            backend.exec(&record, &["/bin/true".to_string()]).await,
+            Err(Error::Denied { .. })
+        ));
+        backend.resume(&record).await.expect("resume");
+        let execution = backend
+            .exec(
+                &record,
+                &[
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    "echo up".to_string(),
+                ],
+            )
+            .await
+            .expect("exec");
+        assert_eq!(execution.stdout, "up\n");
+        backend.delete(&record).await.expect("delete");
+        assert!(!state.exists(), "the state directory is removed");
+    }
+
+    #[tokio::test]
+    async fn delete_succeeds_when_the_holder_is_gone_and_when_the_record_is_unreadable() {
+        let (backend, record, state) = sandbox("delete-gone").await;
+        let payload = payload(&record);
+        let host = SystemHost::new();
+        host.signal_group(
+            payload.holder_pid,
+            crate::backends::seatbelt::host::Signal::Kill,
+        )
+        .expect("kill");
+        backend.delete(&record).await.expect("delete after kill");
+        assert!(!state.exists());
+
+        let (backend, mut record, state) = sandbox("delete-unreadable").await;
+        record.data = toml::Value::Table(Default::default());
+        backend.delete(&record).await.expect("delete unreadable");
+        assert!(!state.exists());
     }
 
     #[tokio::test]
