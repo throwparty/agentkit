@@ -1,9 +1,8 @@
 # Sandbox Provisioning
 
-**Status:** implemented  **Created:** 2026-11-05  **Author:** adrian
+**Status:** implemented **Created:** 2026-11-05 **Author:** adrian
 
 Litterbox creates a sandbox from a project and a machine-selected backend. Today the only preparation a project can declare is `setup-command`, a single string under `[project]`, and the environment is either the backend's default (`EnvironmentSource::Mechanism`) or a host-captured set of variables (`EnvironmentSource::Captured`); the orchestrator hardcodes `Mechanism` (crates/agentkit-litterbox/src/orchestrator/service.rs:154). The provider contract deliberately keeps backends mechanism-neutral and denies the project the choice of backend (adrs/2026-11-03-sandbox-provider-contract, FR-021), yet a project must be able to ship a configuration that works for every engineer who selects a supported backend. The Nix devShell work adds a second kind of preparation that only some backends can serve, and it needs an ordered relationship with the setup command: the devShell environment must exist before the command runs. One string and one environment enum cannot express that. This ADR replaces both with an ordered list of identity-named, typed provisioning steps, selected per backend by the project and resolved for the backend the machine selected. It is the gate for `nix-devshell-env-capture`, which adds the `nix` kind, and for the native backends that consume it. The model follows Vagrant's provisioners: each provisioner has a name, a type and options, and a machine runs them in the order it declares them (https://developer.hashicorp.com/vagrant/docs/provisioning/basic_usage). The existing wording is FR-001 to FR-026 of the provider contract; the existing project-owned key is `[project] setup-command` in crates/agentkit-litterbox/src/config.rs:48.
-
 
 ## Problem
 
@@ -29,7 +28,6 @@ Today the provider contract carries exactly one environment and one setup comman
 - Migrating existing configuration files; setup-command is rejected with the replacement named.
 - Exposing the doctor over MCP; the doctor is a CLI surface, and create carries the same structured failures to MCP.
 - Running backend-specific setup outside the sandbox; a command step runs confined.
-
 
 ## Functional Requirements
 
@@ -266,49 +264,57 @@ A `kind` the binary does not implement fails to load, naming the kind and the kn
 A step defined in `[[provision]]` but absent from every backend's list is reported as a warning at load, not an error; it never runs. A `provision` list for a backend not in `[project] backends` is reported the same way.
 
 **Slug:** `unused-step`
+
 ### EC-002: Shared: Duplicate In Sequence
 
 The same identity twice in one backend's list is an error naming the identity and the backend.
 
 **Slug:** `duplicate-in-sequence`
+
 ### EC-003: Shared: Same Step, Two Backends
 
 One defined step may appear in several backends' lists; it is one definition and runs once in each selected backend's sequence.
 
 **Slug:** `same-step-two-backends`
+
 ### EC-004: Config: Local Empty
 
 A local override that sets an empty `[[provision]]` or an empty backend `provision` list is a deliberate removal, not a fallback to the project's list; the doctor reports the empty sequence. The supported set is replaced separately in `[project] backends`.
 
 **Slug:** `local-empty`
+
 ### EC-005: Config: Backend Settings Alongside
 
 A project file that puts a machine-owned key next to `provision` under `[backends.<name>]` is ignored with the existing notice; `provision` is honoured.
 
 **Slug:** `backend-settings-alongside`
+
 ### EC-006: Shared: Unbuilt Backend Listed
 
 A project may list a backend the binary does not build; the list is inert. Selecting that backend fails as unavailable under the contract's readiness, not as a provisioning error.
 
 **Slug:** `unbuilt-backend-listed`
+
 ### EC-007: Shared: Command Before Environment
 
 A sequence may place a command before the step that provides its environment; this is allowed and the command sees the default environment. The doctor reports the order as written and does not reorder it.
 
 **Slug:** `command-before-environment`
+
 ### EC-008: Shared: Denied Step
 
 A refused `command` step is `Denied` and fails create; it is not treated as unsupported, and no later step runs.
 
 **Slug:** `denied-step`
+
 ### EC-009: Config: Project File Only
 
 A project that defines steps but no `[project] backends` fails to load, naming the missing list; a project that defines the list but no per-backend `provision` lists runs no steps on its supported backends.
 
 **Slug:** `project-file-only`
+
 ### EC-010: Config: Identity Shape
 
 An identity that is empty, does not start with a lowercase letter, or contains a character outside lowercase letters, digits, hyphens and underscores is rejected at load, naming the identity.
 
 **Slug:** `identity-shape`
-

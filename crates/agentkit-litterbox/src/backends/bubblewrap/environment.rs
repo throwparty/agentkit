@@ -284,7 +284,10 @@ mod tests {
         )];
         let environment = merge(&steps).expect("environment");
         assert_eq!(
-            environment.variables.get("GITHUB_TOKEN").map(String::as_str),
+            environment
+                .variables
+                .get("GITHUB_TOKEN")
+                .map(String::as_str),
             Some("hunter2"),
             "the backend does not guess what a variable is for"
         );

@@ -48,7 +48,10 @@ pub struct Contributions {
 
 impl Contributions {
     pub fn new(environment: BTreeMap<String, String>, mounts: Vec<PathBuf>) -> Self {
-        Self { environment, mounts }
+        Self {
+            environment,
+            mounts,
+        }
     }
 }
 
@@ -96,7 +99,12 @@ pub fn parse_step(table: &toml::Table) -> Result<Step, Failure> {
                 .get("installable")
                 .and_then(toml::Value::as_str)
                 .ok_or_else(|| missing(&identity, &kind, "installable"))?;
-            reject_unknown(table, &identity, &kind, &["identity", "kind", "installable"])?;
+            reject_unknown(
+                table,
+                &identity,
+                &kind,
+                &["identity", "kind", "installable"],
+            )?;
             Settings::Devshell {
                 installable: installable.to_string(),
             }
@@ -112,10 +120,10 @@ pub fn parse_step(table: &toml::Table) -> Result<Step, Failure> {
             }
         }
         other => {
-            return Err(
-                Failure::misconfigured(format!("step '{identity}': unknown kind '{other}'"))
-                    .with_step(&identity, other),
-            );
+            return Err(Failure::misconfigured(format!(
+                "step '{identity}': unknown kind '{other}'"
+            ))
+            .with_step(&identity, other));
         }
     };
 
@@ -247,10 +255,17 @@ mod tests {
 
     #[test]
     fn a_key_belonging_to_another_kind_is_refused() {
-        let error =
-            parse_step(&table("identity = 'fetch'\nkind = 'command'\nrun = 'true'\ninstallable = './nix'\n"))
-                .unwrap_err();
-        assert!(error.reason.contains("'installable' is not a command setting"), "{}", error.reason);
+        let error = parse_step(&table(
+            "identity = 'fetch'\nkind = 'command'\nrun = 'true'\ninstallable = './nix'\n",
+        ))
+        .unwrap_err();
+        assert!(
+            error
+                .reason
+                .contains("'installable' is not a command setting"),
+            "{}",
+            error.reason
+        );
     }
 
     #[test]
@@ -275,8 +290,10 @@ mod tests {
 
     #[test]
     fn a_non_string_setting_is_refused_rather_than_coerced() {
-        let error =
-            parse_step(&table("identity = 'dev'\nkind = 'devshell'\ninstallable = 7\n")).unwrap_err();
+        let error = parse_step(&table(
+            "identity = 'dev'\nkind = 'devshell'\ninstallable = 7\n",
+        ))
+        .unwrap_err();
         assert!(error.reason.contains("installable"), "{}", error.reason);
     }
 

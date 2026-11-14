@@ -123,9 +123,8 @@ pub fn run(
     }
     let root = std::fs::File::open(format!("/proc/{}/root", data.sandbox_pid))
         .map_err(|error| Error::failed(format!("the sandbox root could not be opened: {error}")))?;
-    let stdin = std::fs::File::open("/dev/null").map_err(|error| {
-        Error::failed(format!("the null device could not be opened: {error}"))
-    })?;
+    let stdin = std::fs::File::open("/dev/null")
+        .map_err(|error| Error::failed(format!("the null device could not be opened: {error}")))?;
     // The scope is opened before anything is joined: a member of the scope has
     // to be added through a descriptor, not a path that means something else
     // once the cgroup namespace is entered.
@@ -137,7 +136,9 @@ pub fn run(
                      outside its bounds"
                 ))
             })?)
-            .map_err(|error| Error::failed(format!("the sandbox scope cannot be opened: {error}")))?,
+            .map_err(|error| {
+                Error::failed(format!("the sandbox scope cannot be opened: {error}"))
+            })?,
         ),
         None => None,
     };
@@ -454,8 +455,7 @@ impl Child<'_> {
         }
 
         // SAFETY: fchdir and chroot operate on the descriptor this child owns.
-        if unsafe { libc::fchdir(self.root) } < 0
-            || unsafe { libc::chroot(self.dot.as_ptr()) } < 0
+        if unsafe { libc::fchdir(self.root) } < 0 || unsafe { libc::chroot(self.dot.as_ptr()) } < 0
         {
             self.fail(Step::Chroot);
         }
@@ -573,7 +573,9 @@ impl Child<'_> {
                 if !byte.is_ascii_digit() {
                     return false;
                 }
-                inode = inode.saturating_mul(10).saturating_add(u64::from(byte - b'0'));
+                inode = inode
+                    .saturating_mul(10)
+                    .saturating_add(u64::from(byte - b'0'));
             }
             if inode != self.expected[namespace.index()] {
                 return false;

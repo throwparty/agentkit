@@ -50,13 +50,12 @@ async fn pause_scope(host: &dyn Host, unit: &str) -> Result<(), Error> {
 
 /// Whether the scope reports every member frozen.
 fn frozen(host: &dyn Host, unit: &str) -> bool {
-    host.read_scope(unit, "cgroup.events")
-        .is_some_and(|text| {
-            text.lines().any(|line| {
-                let mut fields = line.split_whitespace();
-                fields.next() == Some("frozen") && fields.next() == Some("1")
-            })
+    host.read_scope(unit, "cgroup.events").is_some_and(|text| {
+        text.lines().any(|line| {
+            let mut fields = line.split_whitespace();
+            fields.next() == Some("frozen") && fields.next() == Some("1")
         })
+    })
 }
 
 fn pause_namespace(host: &dyn Host, pid: u32) -> Result<(), Error> {
@@ -126,11 +125,7 @@ pub fn is_paused(host: &dyn Host, data: &Payload) -> bool {
 }
 
 /// Apply resource bounds to the scope.
-pub fn set_limits(
-    host: &dyn Host,
-    data: &Payload,
-    limits: &ResourceLimits,
-) -> Result<(), Error> {
+pub fn set_limits(host: &dyn Host, data: &Payload, limits: &ResourceLimits) -> Result<(), Error> {
     let unit = data.scope.as_deref().ok_or_else(|| Error::Unsupported {
         operation: "bound the sandbox".to_string(),
         backend: BACKEND.to_string(),

@@ -480,9 +480,7 @@ impl Backend for BubblewrapBackend {
             };
             let host = self.host.clone();
             let command = command.to_vec();
-            tokio::task::spawn_blocking(move || {
-                join::run(&*host, &data, &command, EXEC_OUTPUT_CAP)
-            })
+            tokio::task::spawn_blocking(move || join::run(&*host, &data, &command, EXEC_OUTPUT_CAP))
                 .await
                 .map_err(|error| Error::failed(format!("the join task failed: {error}")))?
         })
@@ -711,7 +709,9 @@ impl Lifecycle for BubblewrapBackend {
             let outcome = lifecycle::pause(&*self.host, &data).await;
             match &outcome {
                 Ok(()) => tracing::info!(sandbox = %sandbox.name, "the sandbox is paused"),
-                Err(error) => tracing::warn!(sandbox = %sandbox.name, %error, "the sandbox was not paused"),
+                Err(error) => {
+                    tracing::warn!(sandbox = %sandbox.name, %error, "the sandbox was not paused")
+                }
             }
             outcome
         })
@@ -727,7 +727,9 @@ impl Lifecycle for BubblewrapBackend {
                 .map_err(|error| Error::failed(format!("the resume task failed: {error}")))?;
             match &outcome {
                 Ok(()) => tracing::info!(sandbox = %sandbox.name, "the sandbox is resumed"),
-                Err(error) => tracing::warn!(sandbox = %sandbox.name, %error, "the sandbox was not resumed"),
+                Err(error) => {
+                    tracing::warn!(sandbox = %sandbox.name, %error, "the sandbox was not resumed")
+                }
             }
             outcome
         })
@@ -1044,7 +1046,14 @@ impl BubblewrapBackend {
 
         self.apply_limits(&holder)?;
 
-        let data = self.payload(&holder, &view, workspace, environment, forwards, holder_command)?;
+        let data = self.payload(
+            &holder,
+            &view,
+            workspace,
+            environment,
+            forwards,
+            holder_command,
+        )?;
         let last_step = Mutex::new(None);
         let host = self.host.clone();
         let sandbox_name = request.name.clone();
@@ -1119,9 +1128,7 @@ mod tests {
     use crate::backends::bubblewrap::host::{
         FakeHost, MountEntry, NamespaceInodes, ProcessInfo, ProcessState, RootIdentity,
     };
-    use crate::backends::bubblewrap::payload::{
-        Payload, RecordedMount, RecordedRoot, VERSION,
-    };
+    use crate::backends::bubblewrap::payload::{Payload, RecordedMount, RecordedRoot, VERSION};
     use crate::sandbox::contract::{
         Backend, ContributionSort, CreateRequest, Error, RequestedPort, SandboxAction,
         SandboxRecord, SandboxStatus, Workspace,
@@ -1199,10 +1206,8 @@ mod tests {
                 uid: data.uid,
             },
         );
-        host.namespaces.insert(
-            data.sandbox_pid,
-            NamespaceInodes::from(data.namespaces),
-        );
+        host.namespaces
+            .insert(data.sandbox_pid, NamespaceInodes::from(data.namespaces));
         host.roots.insert(
             data.sandbox_pid,
             RootIdentity {
@@ -1301,7 +1306,10 @@ mod tests {
         let backend = BubblewrapBackend::new(BubblewrapSettings::default(), Arc::new(host));
 
         let shell = backend.shell(&record(data)).expect("configured shell");
-        assert_eq!(shell.first().map(String::as_str), Some("/nix/store/sh/bin/sh"));
+        assert_eq!(
+            shell.first().map(String::as_str),
+            Some("/nix/store/sh/bin/sh")
+        );
     }
 
     #[test]
@@ -1705,7 +1713,14 @@ mod tests {
         // A shebang names /bin/sh or /usr/bin/env by absolute path, so both
         // have to exist whatever the sandbox's PATH says.
         let shebang = backend
-            .exec(&record, &["/bin/sh".to_string(), "-c".to_string(), "echo sh".to_string()])
+            .exec(
+                &record,
+                &[
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    "echo sh".to_string(),
+                ],
+            )
             .await;
         let env = backend
             .exec(
@@ -1726,11 +1741,10 @@ mod tests {
         let execution = outcome.expect("executed");
         assert_eq!(execution.exit_code, 0, "{}", execution.stderr);
         assert!(execution.stdout.contains("hello from the sandbox"));
-        assert!(
-            execution
-                .stdout
-                .contains(&format!("pid:[{}]", NamespaceInodes::from(data.namespaces).pid))
-        );
+        assert!(execution.stdout.contains(&format!(
+            "pid:[{}]",
+            NamespaceInodes::from(data.namespaces).pid
+        )));
         let shebang = shebang.expect("executed");
         assert_eq!(shebang.exit_code, 0, "{}", shebang.stderr);
         let env = env.expect("executed");
@@ -1848,7 +1862,10 @@ mod tests {
         let address = std::net::SocketAddr::from(([127, 0, 0, 1], port));
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let mut stream = loop {
-            match std::net::TcpStream::connect_timeout(&address, std::time::Duration::from_millis(250)) {
+            match std::net::TcpStream::connect_timeout(
+                &address,
+                std::time::Duration::from_millis(250),
+            ) {
                 Ok(stream) => break stream,
                 Err(error) if std::time::Instant::now() < deadline => {
                     let _ = error;
@@ -1857,7 +1874,9 @@ mod tests {
                 Err(error) => panic!("the host could not reach the sandbox listener: {error}"),
             }
         };
-        stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).expect("read timeout");
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .expect("read timeout");
         let mut received = String::new();
         stream.read_to_string(&mut received).expect("read");
         assert!(
@@ -1941,10 +1960,8 @@ mod tests {
         assert!(started.stdout.contains("listening"), "{}", started.stdout);
 
         let address = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-        let reachable = std::net::TcpStream::connect_timeout(
-            &address,
-            std::time::Duration::from_secs(2),
-        );
+        let reachable =
+            std::net::TcpStream::connect_timeout(&address, std::time::Duration::from_secs(2));
         assert!(
             reachable.is_err(),
             "the host reached the denied sandbox listener on port {port}"

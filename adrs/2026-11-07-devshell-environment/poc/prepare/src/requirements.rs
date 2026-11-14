@@ -26,7 +26,11 @@ pub fn check_host(requirements: &[Requirement]) -> Result<(), Failure> {
 }
 
 /// Refuse a sandbox requirement the view cannot meet.
-pub fn check_sandbox(backend: &str, view: &View, requirements: &[Requirement]) -> Result<(), Failure> {
+pub fn check_sandbox(
+    backend: &str,
+    view: &View,
+    requirements: &[Requirement],
+) -> Result<(), Failure> {
     for required in requirements.iter().filter(|r| r.scope == Scope::Sandbox) {
         let path = normalise(&required.name)?;
         if !view.provides(&path) {
@@ -88,11 +92,7 @@ pub fn normalise(named: &str) -> Result<PathBuf, Failure> {
 }
 
 /// Every requirement, both scopes, in the order a refusal should be reported.
-pub fn check(
-    backend: &str,
-    view: &View,
-    requirements: &[Requirement],
-) -> Result<(), Failure> {
+pub fn check(backend: &str, view: &View, requirements: &[Requirement]) -> Result<(), Failure> {
     check_host(requirements)?;
     check_sandbox(backend, view, requirements)
 }
@@ -136,7 +136,10 @@ mod tests {
         let mount = scratch_named("mount");
         std::fs::create_dir_all(mount.join("bin")).expect("mount");
         std::fs::write(mount.join("bin/tool"), b"").expect("tool");
-        let view = view(&[&mount.display().to_string()], &workspace.display().to_string());
+        let view = view(
+            &[&mount.display().to_string()],
+            &workspace.display().to_string(),
+        );
         let tool = mount.join("bin/tool");
         let requirements = [requirement(Scope::Sandbox, &tool.display().to_string())];
         check_sandbox("bwrap", &view, &requirements).expect("satisfied");
@@ -160,7 +163,11 @@ mod tests {
         let requirements = [requirement(Scope::Sandbox, &absent.display().to_string())];
         let failure = check_sandbox("bwrap", &view, &requirements).unwrap_err();
         assert_eq!(failure.class, Class::Unsupported);
-        assert!(failure.reason.contains("does not exist"), "{}", failure.reason);
+        assert!(
+            failure.reason.contains("does not exist"),
+            "{}",
+            failure.reason
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # Bubblewrap Network Setting
 
-**Status:** implemented  **Created:** 2026-11-09  **Author:** adrian
+**Status:** implemented **Created:** 2026-11-09 **Author:** adrian
 
 Terms used in this document.
 
@@ -50,7 +50,6 @@ Terms used in this document.
 
 Background. The `network` setting is already in the code under `crates/agentkit-litterbox/src/backends/bubblewrap/` and in the docs. This ADR fixes what is still wrong. The code that runs a command in an existing sandbox can skip more than the network namespace. The inspection JSON says `denied` for a dead sandbox even when `payload.toml` says `host`. A port can be silently dropped. There is no real-sandbox test for `host`. The ADR also records the DNS and TLS mounts that make `host` usable.
 
-
 ## Problem
 
 With `network = 'host'`, the code that runs a command in an existing sandbox skips any namespace whose number matches the caller's. That is right for the network namespace, because entering the host's network namespace fails with EPERM, but it could also skip another namespace and leave the command partly outside the sandbox. The inspection JSON also hardcodes `denied` for a sandbox whose process is gone, even when `payload.toml` says `host`. A port whose name cannot become an environment variable can vanish from the list. And there is no test that creates a real `host` sandbox and proves the host can reach a port inside it.
@@ -73,7 +72,6 @@ With `network = 'host'`, the code that runs a command in an existing sandbox ski
 - Reading old v1 `payload.toml` files. That is a separate release task.
 - Pause, resume, delete, limits, or the holder's lifetime.
 - Deleting stale state directories or branches.
-
 
 ## Functional Requirements
 
@@ -202,24 +200,27 @@ A listener started inside a host sandbox is reachable from the host on the decla
 A committed project file with `[backends.bubblewrap] network = 'host'` is ignored with a notice. The sandbox is denied unless the user configuration says host.
 
 **Slug:** `project-sets-host`
+
 ### EC-002: Local override sets host
 
 A local override with `network` is rejected by name, and the error points at the user configuration.
 
 **Slug:** `local-override-sets-host`
+
 ### EC-003: Host network namespace cannot be entered
 
 Entering the host's network namespace returns EPERM. Litterbox skips only that one namespace and checks the saved network number instead.
 
 **Slug:** `host-net-eperm`
+
 ### EC-004: Bad port name
 
 A name that cannot become `LITTERBOX_FWD_PORT_*` is an error at configuration and at create. It is never dropped.
 
 **Slug:** `bad-port-name`
+
 ### EC-005: Denied with ports
 
 Creating a denied sandbox with ports fails before any sandbox starts and leaves no state directory.
 
 **Slug:** `denied-with-ports`
-

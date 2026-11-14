@@ -873,7 +873,8 @@ mod tests {
     #[test]
     fn a_user_owned_holder_binary_is_refused() {
         let mut host = holder_host();
-        host.ownership.insert(PathBuf::from("/usr/bin/sh"), (1000, 0o755));
+        host.ownership
+            .insert(PathBuf::from("/usr/bin/sh"), (1000, 0o755));
         let error = command(&host, &default_shell()).expect_err("refused");
         assert!(error.to_string().contains("root-owned"), "{error}");
     }

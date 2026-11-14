@@ -207,7 +207,8 @@ fn components(path: &str, operation: &str) -> Result<Vec<OsString>, Error> {
     if narrowed.is_absolute() {
         let _ = pieces.next();
         match pieces.next() {
-            Some(Component::Normal(first)) if first.as_bytes() == WORKSPACE_COMPONENT.as_bytes() => {}
+            Some(Component::Normal(first))
+                if first.as_bytes() == WORKSPACE_COMPONENT.as_bytes() => {}
             _ => return Err(confinement(path, operation)),
         }
     }
@@ -852,8 +853,8 @@ mod tests {
         let (temporary, source) = staged();
         let root = temporary.path().join("workspace");
         copy_from(&source, &root).expect("copied");
-        let error = transfer_out(&root, "../../etc/passwd", temporary.path(), None)
-            .expect_err("refused");
+        let error =
+            transfer_out(&root, "../../etc/passwd", temporary.path(), None).expect_err("refused");
         assert!(
             error.to_string().contains("leaves the sandbox workspace"),
             "{error}"
@@ -870,10 +871,7 @@ mod tests {
     fn a_workspace_path_resolves_to_components_beneath_the_root() {
         assert_eq!(
             components("/src/a/b", "upload").expect("resolved"),
-            vec![
-                std::ffi::OsString::from("a"),
-                std::ffi::OsString::from("b")
-            ]
+            vec![std::ffi::OsString::from("a"), std::ffi::OsString::from("b")]
         );
         assert_eq!(
             components("/src", "upload").expect("resolved"),

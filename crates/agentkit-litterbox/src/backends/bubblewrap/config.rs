@@ -69,9 +69,10 @@ impl BubblewrapConfig {
             Some(shell) => {
                 if shell.is_empty() || shell.iter().any(String::is_empty) {
                     return Err(Error::Misconfigured {
-                        message: "backends.bubblewrap.shell must name a program and its arguments; \
+                        message:
+                            "backends.bubblewrap.shell must name a program and its arguments; \
                                   an empty entry is not a command"
-                            .to_string(),
+                                .to_string(),
                     });
                 }
                 shell.clone()
@@ -150,8 +151,7 @@ mod tests {
 
     #[test]
     fn a_configured_shell_replaces_the_default() {
-        let section: toml::Value =
-            toml::from_str("shell = ['bash', '-lc']").expect("section");
+        let section: toml::Value = toml::from_str("shell = ['bash', '-lc']").expect("section");
         let config = BubblewrapConfig::from_section(&section).expect("config");
         assert_eq!(
             config.settings().expect("settings").shell,

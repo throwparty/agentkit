@@ -7,6 +7,9 @@
 # The project declares what it needs: the backends whose provisioning it
 # supports, the steps themselves, and each backend's ordered step list.
 
+[backends.bubblewrap]
+provision = ["dev"]
+
 [project]
 backends = ["bubblewrap"]
 
@@ -16,6 +19,3 @@ backends = ["bubblewrap"]
 identity = "dev"
 kind = "devshell"
 installable = "./nix"
-
-[backends.bubblewrap]
-provision = ["dev"]

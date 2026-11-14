@@ -1,5 +1,8 @@
 # The sandbox image is machine-owned: see the configuration reference.
 
+[backends.docker]
+provision = ["serve"]
+
 [[ports]]
 name = "www"
 target = 8080
@@ -11,6 +14,3 @@ backends = ["docker"]
 identity = "serve"
 kind = "command"
 run = "busybox httpd -h public -p 0.0.0.0:8080"
-
-[backends.docker]
-provision = ["serve"]

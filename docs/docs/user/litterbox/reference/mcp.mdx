@@ -30,7 +30,7 @@ Parameters:
 - `sandbox` (string, required) Sandbox name.
 - `pattern` (string, required) Pattern to search for.
 - `path` (string, required) Path inside the sandbox.
-- `include` (string, optional) Glob include filter (e.g., *.rs).
+- `include` (string, optional) Glob include filter (e.g., \*.rs).
 
 ## `ls`
 
@@ -89,7 +89,6 @@ Parameters:
 - `path` (string, required) Path inside the sandbox.
 - `content` (string, required) Full file contents to write.
 
-
 ## Sandbox lifecycle
 
 A sandbox is `active`, `paused` or `missing`. `active` and `paused` are derived from the
@@ -98,10 +97,10 @@ exited. Every command that takes a sandbox expects `active`.
 
 ### Tools
 
-| Tool | `active` | `paused` | `missing` |
-| --- | --- | --- | --- |
-| `bash`, `read`, `write`, `patch`, `ls`, `glob`, `grep` | runs | blocks until the sandbox is resumed | `not found` |
-| `sandbox-ports` | the recorded ports | the recorded ports | the recorded ports |
+| Tool                                                   | `active`           | `paused`                            | `missing`          |
+| ------------------------------------------------------ | ------------------ | ----------------------------------- | ------------------ |
+| `bash`, `read`, `write`, `patch`, `ls`, `glob`, `grep` | runs               | blocks until the sandbox is resumed | `not found`        |
+| `sandbox-ports`                                        | the recorded ports | the recorded ports                  | the recorded ports |
 
 `sandbox-create` is not an operation on an existing sandbox: it takes a new name, and any
 name already in use — `active`, `paused` or `missing` — is a conflict. `sandbox-ports`

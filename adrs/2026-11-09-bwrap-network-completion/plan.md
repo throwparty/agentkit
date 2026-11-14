@@ -6,7 +6,6 @@ The `network` setting and its documentation already exist. This plan corrects th
 
 ## Architecture
 
-
 ```mermaid
 flowchart LR
     U[User configuration] --> C[BubblewrapConfig]
@@ -41,13 +40,11 @@ Parse and enforce the setting
 
 Add explicit tests for denied, host, the default, an unknown value, an unknown key, the project-file notice and the local-override error. No merge logic changes: the existing split already ignores project backend settings and rejects local ones.
 
-
 ### backend.rs: create
 
 Build forwards and refuse ports
 
-Replace the filter_map with a function returning Result<Vec<Forward>, Error>; a bad forwarded_port_env_var is an error. Keep Unsupported for denied with ports.
-
+Replace the filter_map with a function returning Result\<Vec<Forward>, Error>; a bad forwarded_port_env_var is an error. Keep Unsupported for denied with ports.
 
 ### backend.rs: inspect
 
@@ -55,13 +52,11 @@ Report the recorded egress
 
 Use data.network for both the live and absent branches; the absent branch currently hardcodes Denied. An unreadable payload remains Verdict::Editions.
 
-
 ### view.rs
 
 Render the arguments and the host mounts
 
 Add tests that denied has --unshare-net and host does not, and that host requests /etc/resolv.conf, /etc/hosts, /etc/nsswitch.conf and /etc/ssl. The renderer already does this; the tests are the work.
-
 
 ### join.rs
 
@@ -69,13 +64,11 @@ Skip only the host network namespace
 
 Replace the seven-way caller comparison with a pure function of data.network. The child skips CLONE_NEWNET only for host; namespaces_match still compares all seven. A unit test checks the decision; the ignored host test checks the real numbers.
 
-
 ### payload.rs
 
 Record the posture and forwards
 
 The v2 fields already exist. Add a round-trip test for network = host and a Forward. Do not change the version or add v1 compatibility.
-
 
 ### Tests and evidence
 
@@ -83,13 +76,10 @@ Prove it
 
 Add the ignored host and denied tests, run them, and write the commands, namespace numbers and listener output to evidence.md. Amend the provider spec's FR-003.
 
-
 ## Data Flow
 
 A user runs create through the MCP `sandbox-create` tool. The configuration loader merges the user configuration and the project file. The project's `network` is ignored and the user's value or the default is used. The backend builds the view and the forwards, renders the bubblewrap arguments, and writes `payload.toml`. A later `litterbox shell` reads `payload.toml`, opens `/proc/<sandbox-pid>/ns/*`, and decides whether to skip the network namespace. It enters the remaining namespaces, forks, checks the seven numbers, and execs. A later inspection reads `payload.toml` and returns `egress` and `forwards`.
 
-
 ## Deployment
 
 Linux only, as today. No new package, daemon, socket, proxy or process. The host setting needs `/etc/resolv.conf`, `/etc/hosts`, `/etc/nsswitch.conf` and `/etc/ssl`; a missing path is skipped and the sandbox still has the host's network. The ignored real-sandbox tests need bubblewrap, unprivileged user namespaces and a cgroup scope, all of which this host has. They run with `cargo test -p agentkit-litterbox -- --ignored` and write `evidence.md`. Docker and the default denied setting are unchanged.
-

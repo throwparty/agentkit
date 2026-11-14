@@ -164,9 +164,7 @@ mod tests {
     use crate::backends::bubblewrap::host::{
         FakeHost, MountEntry, NamespaceInodes, ProcessInfo, ProcessState, RootIdentity,
     };
-    use crate::backends::bubblewrap::payload::{
-        Payload, RecordedMount, RecordedRoot, VERSION,
-    };
+    use crate::backends::bubblewrap::payload::{Payload, RecordedMount, RecordedRoot, VERSION};
     use crate::backends::bubblewrap::view::WORKSPACE;
     use crate::sandbox::contract::{Error, SandboxRecord};
     use crate::sandbox::environment::{Origin, Provenance};
