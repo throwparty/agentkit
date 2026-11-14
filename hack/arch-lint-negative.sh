@@ -176,3 +176,13 @@ plant "crates/agentkit-litterbox/src/backends/bubblewrap/backend.rs" \
   "bubblewrap-to-kinds" \
   "must not depend on each other"
 
+
+plant "crates/agentkit-litterbox/src/backends/seatbelt/mod.rs" \
+  "use crate::orchestrator::Service as _;" \
+  "seatbelt-to-orchestrator" \
+  "litterbox-backend-seatbelt"
+
+plant "crates/agentkit-litterbox/src/bin/litterbox-seatbelt-helper/main.rs" \
+  "use crate::sandbox::contract::Backend as _;" \
+  "helper-to-contract" \
+  "litterbox-backend-seatbelt-helper"
