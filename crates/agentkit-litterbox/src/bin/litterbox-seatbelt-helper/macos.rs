@@ -507,6 +507,7 @@ fn spawn(
             })
             .collect::<Vec<_>>(),
     )?;
+    let program = resolve_program(&argv[0], &environment)?;
     let parameters: Vec<*const libc::c_char> = holder
         .profile
         .parameters
@@ -570,7 +571,7 @@ fn spawn(
                 .map(|value| value.as_ptr())
                 .chain(std::iter::once(std::ptr::null()))
                 .collect();
-            libc::execve(argv[0], argv.as_ptr(), environment.as_ptr());
+            libc::execve(program.as_ptr(), argv.as_ptr(), environment.as_ptr());
             fail(
                 status_write,
                 3,
@@ -715,6 +716,43 @@ fn set_nonblocking(fd: libc::c_int) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+fn resolve_program(
+    program: &std::ffi::CString,
+    environment: &[std::ffi::CString],
+) -> Result<std::ffi::CString, String> {
+    let name = program.to_bytes();
+    if name.contains(&b'/') {
+        return Ok(program.clone());
+    }
+    let path = environment
+        .iter()
+        .find_map(|value| {
+            let bytes = value.to_bytes();
+            bytes.strip_prefix(b"PATH=").map(<[u8]>::to_vec)
+        })
+        .unwrap_or_else(|| b"/usr/bin:/bin:/usr/sbin:/sbin".to_vec());
+    for directory in path.split(|byte| *byte == b':') {
+        let directory = if directory.is_empty() {
+            b".".as_slice()
+        } else {
+            directory
+        };
+        let mut candidate = directory.to_vec();
+        candidate.push(b'/');
+        candidate.extend_from_slice(name);
+        let candidate =
+            std::ffi::CString::new(candidate).map_err(|_| "the PATH contains a NUL".to_string())?;
+        // SAFETY: access only checks the path, and the candidate is NUL terminated.
+        if unsafe { libc::access(candidate.as_ptr(), libc::X_OK) } == 0 {
+            return Ok(candidate);
+        }
+    }
+    Err(format!(
+        "the command '{}' is not on PATH",
+        String::from_utf8_lossy(name)
+    ))
 }
 
 fn cstrings(values: &[Vec<u8>]) -> Result<Vec<std::ffi::CString>, String> {
@@ -871,6 +909,16 @@ fn error_message(error: *mut libc::c_char) -> String {
 mod tests {
     use super::protocol::{ConfigPayload, WirePosture};
     use super::{path, prepare};
+
+    #[test]
+    fn a_bare_command_is_resolved_through_path() {
+        let environment = vec![std::ffi::CString::new("PATH=/usr/bin:/bin").expect("env")];
+        let ls = std::ffi::CString::new("ls").expect("name");
+        let resolved = super::resolve_program(&ls, &environment).expect("resolved");
+        assert!(resolved.to_string_lossy().ends_with("/ls"));
+        let missing = std::ffi::CString::new("lbx-no-such-command").expect("name");
+        assert!(super::resolve_program(&missing, &environment).is_err());
+    }
 
     #[test]
     fn a_config_becomes_a_profile_input() {

@@ -1205,6 +1205,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_bare_command_name_is_resolved_through_path() {
+        let (backend, record, state) = sandbox("bare-name").await;
+        let execution = backend
+            .exec(&record, &["ls".to_string(), "/".to_string()])
+            .await
+            .expect("exec");
+        assert_eq!(execution.exit_code, 0, "{}", execution.stderr);
+        assert!(execution.stdout.contains("usr"));
+        backend.delete(&record).await.expect("delete");
+        let _ = state;
+    }
+
+    #[tokio::test]
     async fn pause_resume_and_delete() {
         let (backend, record, state) = sandbox("lifecycle").await;
         let host = Arc::new(SystemHost::new());
