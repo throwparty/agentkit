@@ -54,7 +54,7 @@ Add `protocol.rs` with the 12-byte header, the nine frame kinds, and encode and 
 | Depends On | T-001 |
 | References | helper-binary,exec-helper,fail-closed,profile-rejected |
 
-### T-005: Add the host seam
+### T-005: [x] Add the host seam
 
 Add `host.rs` with the `Host` trait covering pid existence, state, start time, group, signal, socket connect, peer uid, real home, realpath, clock and `proc_pidinfo`. Implement `SystemHost` over libc and the file system, and `FakeHost` over a table.
 
