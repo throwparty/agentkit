@@ -41,7 +41,7 @@ Add fixtures for the empty request, one read, two reads sharing an ancestor, a c
 | Depends On | T-002 |
 | References | golden-profiles,profile-baseline,credential-denies,egress-postures |
 
-### T-004: Implement the frame codec
+### T-004: [x] Implement the frame codec
 
 Add `protocol.rs` with the 12-byte header, the nine frame kinds, and encode and decode for Config, Exec, Stdout, Stderr, Exit, Error, Status and StatusReply. Check magic, version, kind and length before allocating.
 
