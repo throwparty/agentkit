@@ -431,7 +431,7 @@ mod tests {
     use super::SeatbeltBackend;
     use crate::backends::seatbelt::config::{BaselineSetting, NetworkSetting, Settings};
     use crate::backends::seatbelt::host::SystemHost;
-    use crate::sandbox::contract::{Backend, CreateRequest, Workspace};
+    use crate::sandbox::contract::{Backend, CreateRequest, Error, Workspace};
 
     fn helper() -> PathBuf {
         std::env::current_exe()
@@ -458,6 +458,97 @@ mod tests {
             mach_services: Vec::new(),
             credential_denies: Vec::new(),
         }
+    }
+
+    async fn sandbox(
+        label: &str,
+    ) -> (
+        SeatbeltBackend,
+        crate::sandbox::contract::SandboxRecord,
+        PathBuf,
+    ) {
+        let helper = helper();
+        assert!(helper.exists(), "build the helper before this test");
+        let source = tempfile::tempdir().expect("source");
+        std::fs::write(source.path().join("README"), b"hello").expect("file");
+        let project = format!("test-{}-{}-{}", std::process::id(), label, line!());
+        let name = "one";
+        let state = agentkit_common::data_dir("litterbox")
+            .join("seatbelt")
+            .join(&project)
+            .join(name);
+        let _ = std::fs::remove_dir_all(&state);
+        let backend = SeatbeltBackend::with_helper(settings(), Arc::new(SystemHost::new()), helper);
+        let request = CreateRequest {
+            name: name.to_string(),
+            project_slug: project,
+            workspace: Workspace {
+                source: source.path().to_path_buf(),
+            },
+            provision: Vec::new(),
+            forward_bind: "127.0.0.1".to_string(),
+            ports: Vec::new(),
+        };
+        let record = backend.create(&request).await.expect("create");
+        (backend, record, state)
+    }
+
+    fn payload(
+        record: &crate::sandbox::contract::SandboxRecord,
+    ) -> crate::backends::seatbelt::payload::PayloadV1 {
+        crate::backends::seatbelt::payload::PayloadV1::from_record(record).expect("payload")
+    }
+
+    #[tokio::test]
+    async fn exec_returns_a_workload_status_and_both_streams() {
+        let (backend, record, state) = sandbox("streams").await;
+        let execution = backend
+            .exec(
+                &record,
+                &[
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    "echo out; echo err >&2; exit 7".to_string(),
+                ],
+            )
+            .await
+            .expect("exec");
+        assert_eq!(execution.exit_code, 7);
+        assert_eq!(execution.stdout, "out\n");
+        assert!(execution.stderr.contains("err"));
+        let _ = std::fs::remove_dir_all(&state);
+    }
+
+    #[tokio::test]
+    async fn exec_refuses_a_paused_or_foreign_holder_and_reports_missing() {
+        let (backend, mut record, state) = sandbox("state").await;
+
+        let mut paused = payload(&record);
+        paused.paused = true;
+        record.data = paused.to_value().expect("value");
+        assert!(matches!(
+            backend.exec(&record, &["/bin/true".to_string()]).await,
+            Err(Error::Denied { .. })
+        ));
+
+        let mut foreign = payload(&record);
+        foreign.paused = false;
+        foreign.holder_start_secs += 1;
+        record.data = foreign.to_value().expect("value");
+        assert!(matches!(
+            backend.exec(&record, &["/bin/true".to_string()]).await,
+            Err(Error::Denied { .. })
+        ));
+
+        let mut missing = payload(&record);
+        missing.holder_pid = 999_999;
+        record.data = missing.to_value().expect("value");
+        assert!(matches!(
+            backend.exec(&record, &["/bin/true".to_string()]).await,
+            Err(Error::NotFound { .. })
+        ));
+
+        let _ = std::fs::remove_dir_all(&state);
     }
 
     #[tokio::test]
