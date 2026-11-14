@@ -112,13 +112,22 @@ impl Holder {
         send(&mut stream, &Message::Config(Box::new(config)))?;
         let reply = receive(&mut stream)?;
         match reply {
-            Message::Ready => Ok(Self {
-                pid,
-                start,
-                socket: socket.to_path_buf(),
-                log: log.to_path_buf(),
-                host,
-            }),
+            Message::Ready => {
+                // The server that created the holder owns the Child handle.
+                // Reap it in a thread so a killed holder does not become a
+                // zombie. A later process that addresses the holder has no
+                // handle; launchd reaps it after the creator exits.
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                });
+                Ok(Self {
+                    pid,
+                    start,
+                    socket: socket.to_path_buf(),
+                    log: log.to_path_buf(),
+                    host,
+                })
+            }
             Message::Error { code, message } => {
                 let _ = host.signal_group(pid, Signal::Kill);
                 let _ = child.wait();

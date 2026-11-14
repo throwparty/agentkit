@@ -915,12 +915,37 @@ mod tests {
         }
     }
 
+    struct Cleanup {
+        pid: u32,
+        socket: PathBuf,
+        state: PathBuf,
+    }
+
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            // SAFETY: the group belongs to a sandbox this test created; a dead
+            // group returns ESRCH and is ignored.
+            unsafe { libc::kill(-(self.pid as libc::pid_t), libc::SIGKILL) };
+            let mut status = 0;
+            // SAFETY: the holder is a child of this test process; waitpid
+            // reaps it. A reaper thread in the holder may have won the race,
+            // in which case this returns ECHILD.
+            unsafe { libc::waitpid(self.pid as libc::pid_t, &mut status, 0) };
+            let _ = std::fs::remove_file(&self.socket);
+            let _ = std::fs::remove_dir_all(&self.state);
+            if let Some(project) = self.state.parent() {
+                let _ = std::fs::remove_dir(project);
+            }
+        }
+    }
+
     async fn sandbox(
         label: &str,
     ) -> (
         SeatbeltBackend,
         crate::sandbox::contract::SandboxRecord,
         PathBuf,
+        Cleanup,
     ) {
         sandbox_with(label, Vec::new()).await
     }
@@ -932,6 +957,7 @@ mod tests {
         SeatbeltBackend,
         crate::sandbox::contract::SandboxRecord,
         PathBuf,
+        Cleanup,
     ) {
         let helper = helper();
         assert!(helper.exists(), "build the helper before this test");
@@ -956,7 +982,13 @@ mod tests {
             ports: Vec::new(),
         };
         let record = backend.create(&request).await.expect("create");
-        (backend, record, state)
+        let payload = payload(&record);
+        let cleanup = Cleanup {
+            pid: payload.holder_pid,
+            socket: payload.socket.clone(),
+            state: state.clone(),
+        };
+        (backend, record, state, cleanup)
     }
 
     fn payload(
@@ -967,7 +999,7 @@ mod tests {
 
     #[tokio::test]
     async fn exec_returns_a_workload_status_and_both_streams() {
-        let (backend, record, state) = sandbox("streams").await;
+        let (backend, record, state, _cleanup) = sandbox("streams").await;
         let execution = backend
             .exec(
                 &record,
@@ -987,7 +1019,7 @@ mod tests {
 
     #[tokio::test]
     async fn exec_refuses_a_paused_or_foreign_holder_and_reports_missing() {
-        let (backend, mut record, state) = sandbox("state").await;
+        let (backend, mut record, state, _cleanup) = sandbox("state").await;
 
         backend.pause(&record).await.expect("pause");
         assert!(matches!(
@@ -1017,7 +1049,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_sandbox_with_no_steps_has_only_the_three_owned_variables() {
-        let (backend, record, state) = sandbox("no-steps").await;
+        let (backend, record, state, _cleanup) = sandbox("no-steps").await;
         let execution = backend
             .exec(&record, &["/usr/bin/env".to_string()])
             .await
@@ -1036,7 +1068,7 @@ mod tests {
 
     #[tokio::test]
     async fn writes_and_reads_outside_the_workspace_are_denied() {
-        let (backend, record, state) = sandbox("isolation").await;
+        let (backend, record, state, _cleanup) = sandbox("isolation").await;
         let outside = "/private/tmp/lbx-t021-outside";
         let _ = std::fs::remove_file(outside);
         let write = backend
@@ -1107,7 +1139,7 @@ mod tests {
                 ..crate::sandbox::contract::Contributions::default()
             },
         };
-        let (backend, record, state) = sandbox_with("collapse", vec![step]).await;
+        let (backend, record, state, _cleanup) = sandbox_with("collapse", vec![step]).await;
         let payload = payload(&record);
         assert_eq!(payload.reads.len(), 1);
         assert_eq!(payload.collapsed.len(), 1);
@@ -1153,7 +1185,7 @@ mod tests {
                 ..crate::sandbox::contract::Contributions::default()
             },
         };
-        let (backend, record, state) = sandbox_with("toolchain", vec![step]).await;
+        let (backend, record, state, _cleanup) = sandbox_with("toolchain", vec![step]).await;
         let workspace = state.join("workspace");
         std::fs::write(
             workspace.join("hello.c"),
@@ -1190,7 +1222,7 @@ mod tests {
         backend.delete(&record).await.expect("delete");
         let _ = std::fs::remove_dir_all(&state);
 
-        let (backend, record, state) = sandbox("no-toolchain").await;
+        let (backend, record, state, _cleanup) = sandbox("no-toolchain").await;
         let workspace = state.join("workspace");
         std::fs::write(workspace.join("hello.c"), b"int main(void){return 0;}\n").expect("source");
         let compile = backend
@@ -1212,7 +1244,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_bare_command_name_is_resolved_through_path() {
-        let (backend, record, state) = sandbox("bare-name").await;
+        let (backend, record, state, _cleanup) = sandbox("bare-name").await;
         let execution = backend
             .exec(&record, &["ls".to_string(), "/".to_string()])
             .await
@@ -1225,7 +1257,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_tool_shell_is_absolute() {
-        let (backend, record, state) = sandbox("tool-shell").await;
+        let (backend, record, state, _cleanup) = sandbox("tool-shell").await;
         assert_eq!(
             backend.shell(&record).expect("shell"),
             vec!["/bin/sh".to_string(), "-c".to_string()]
@@ -1236,7 +1268,7 @@ mod tests {
 
     #[tokio::test]
     async fn pause_resume_and_delete() {
-        let (backend, record, state) = sandbox("lifecycle").await;
+        let (backend, record, state, _cleanup) = sandbox("lifecycle").await;
         let host = Arc::new(SystemHost::new());
         backend.pause(&record).await.expect("pause");
         let payload = payload(&record);
@@ -1267,7 +1299,7 @@ mod tests {
 
     #[tokio::test]
     async fn delete_succeeds_when_the_holder_is_gone_and_when_the_record_is_unreadable() {
-        let (backend, record, state) = sandbox("delete-gone").await;
+        let (backend, record, state, _cleanup) = sandbox("delete-gone").await;
         let payload = payload(&record);
         let host = SystemHost::new();
         host.signal_group(
@@ -1278,7 +1310,7 @@ mod tests {
         backend.delete(&record).await.expect("delete after kill");
         assert!(!state.exists());
 
-        let (backend, mut record, state) = sandbox("delete-unreadable").await;
+        let (backend, mut record, state, _cleanup) = sandbox("delete-unreadable").await;
         record.data = toml::Value::Table(Default::default());
         backend.delete(&record).await.expect("delete unreadable");
         assert!(!state.exists());
@@ -1286,7 +1318,7 @@ mod tests {
 
     #[tokio::test]
     async fn inspect_reports_active_paused_and_missing() {
-        let (backend, record, state) = sandbox("inspect").await;
+        let (backend, record, state, _cleanup) = sandbox("inspect").await;
         let live = backend.inspect(&record).await.expect("inspect");
         assert_eq!(live.status, crate::sandbox::contract::SandboxStatus::Active);
         assert_eq!(live.backend, "seatbelt");
@@ -1318,7 +1350,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_returns_records_and_reports_a_corrupt_payload() {
-        let (backend, record, state) = sandbox("list").await;
+        let (backend, record, state, _cleanup) = sandbox("list").await;
         let repository = backend
             .list(&crate::sandbox::contract::Scope::Repository {
                 project_slug: record.project_slug.clone(),
@@ -1346,7 +1378,7 @@ mod tests {
 
     #[tokio::test]
     async fn upload_and_download_round_trip() {
-        let (backend, record, state) = sandbox("transfer").await;
+        let (backend, record, state, _cleanup) = sandbox("transfer").await;
         let host = tempfile::tempdir().expect("host");
         let source = host.path().join("source");
         std::fs::write(&source, b"payload").expect("source");
@@ -1365,7 +1397,7 @@ mod tests {
 
     #[tokio::test]
     async fn capabilities_name_the_unsupported_operations() {
-        let (backend, _record, state) = sandbox("capabilities").await;
+        let (backend, _record, state, _cleanup) = sandbox("capabilities").await;
         let capabilities = backend.capabilities().await.expect("capabilities");
         assert!(capabilities.iter().any(|entry| {
             entry.operation == "pause and resume"
@@ -1555,6 +1587,12 @@ mod tests {
         assert_eq!(execution.stdout, "hi\n");
         assert_eq!(execution.exit_code, 0);
 
+        backend.delete(&record).await.expect("delete");
         let _ = std::fs::remove_dir_all(&state);
+        let _ = std::fs::remove_dir_all(
+            agentkit_common::data_dir("litterbox")
+                .join("seatbelt")
+                .join(&project),
+        );
     }
 }
