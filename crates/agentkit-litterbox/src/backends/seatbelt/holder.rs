@@ -61,6 +61,12 @@ impl Holder {
             })?;
         }
 
+        tracing::debug!(
+            helper = %helper.display(),
+            socket = %socket.display(),
+            log = %log.display(),
+            "starting the seatbelt holder"
+        );
         let mut child = Command::new(helper)
             .arg("--hold")
             .arg(socket)
@@ -271,5 +277,38 @@ fn log_tail(path: &Path) -> String {
             lines.join("\n")
         }
         Err(_) => "the holder log is not readable".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::map_error;
+    use crate::backends::seatbelt::protocol::ErrorCode;
+    use crate::sandbox::contract::Error;
+
+    #[test]
+    fn every_error_code_maps_to_its_contract_error() {
+        let apply = map_error(ErrorCode::Apply, "bad profile".to_string());
+        assert!(
+            apply.to_string().contains("sandbox_init_with_parameters"),
+            "{apply}"
+        );
+        assert!(apply.to_string().contains("bad profile"), "{apply}");
+
+        let policy = map_error(ErrorCode::Policy, "too large".to_string());
+        assert!(matches!(policy, Error::Misconfigured { .. }), "{policy}");
+
+        let exec = map_error(ErrorCode::Exec, "enoent".to_string());
+        assert!(exec.to_string().contains("could not be executed"), "{exec}");
+        assert!(exec.to_string().contains("enoent"), "{exec}");
+
+        let busy = map_error(ErrorCode::Busy, "too many".to_string());
+        assert!(busy.to_string().contains("too many"), "{busy}");
+
+        let internal = map_error(ErrorCode::Internal, "broken".to_string());
+        assert!(internal.to_string().contains("broken"), "{internal}");
+
+        let protocol = map_error(ErrorCode::Protocol, "bad frame".to_string());
+        assert!(protocol.to_string().contains("bad frame"), "{protocol}");
     }
 }

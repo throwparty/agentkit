@@ -223,7 +223,7 @@ Add the registry entry under `cfg(target_os = 'macos')` with the lifecycle facet
 | Depends On | T-012,T-013,T-014,T-015,T-016 |
 | References | backend-registration,backends-listing,other-backends-unchanged,platform-requirements |
 
-### T-018: Map errors and diagnostics
+### T-018: [x] Map errors and diagnostics
 
 Map helper error codes, connect failures, record outcomes and config failures to contract errors, and distinguish a setup failure, an apply failure and a workload failure. Log the helper argv at debug with no environment value, and document the denial tag query.
 
