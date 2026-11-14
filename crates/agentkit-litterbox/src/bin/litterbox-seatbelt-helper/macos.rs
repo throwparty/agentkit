@@ -798,7 +798,6 @@ fn prepare(config: protocol::ConfigPayload) -> Result<Holder, String> {
         writes: config.writes.iter().map(|value| path(value)).collect(),
         posture,
         tag: String::from_utf8(config.tag).map_err(|_| "the tag is not UTF-8".to_string())?,
-        real_home: path(&config.real_home),
         baseline_reads: config
             .baseline_reads
             .iter()
@@ -812,11 +811,6 @@ fn prepare(config: protocol::ConfigPayload) -> Result<Holder, String> {
                     .map_err(|_| "a mach service is not UTF-8".to_string())
             })
             .collect::<Result<Vec<_>, _>>()?,
-        credential_denies: config
-            .credential_denies
-            .iter()
-            .map(|value| path(value))
-            .collect(),
     };
     let profile = policy::render(&input).map_err(|error| error.to_string())?;
     Ok(Holder {
@@ -934,8 +928,6 @@ mod tests {
             environment: vec![(b"PATH".to_vec(), b"/usr/bin".to_vec())],
             baseline_reads: vec![b"/usr/bin".to_vec()],
             mach_services: vec![b"com.apple.example".to_vec()],
-            credential_denies: vec![b"/Users/tester/.ssh".to_vec()],
-            real_home: b"/Users/tester".to_vec(),
         };
         let holder = prepare(config).expect("prepared");
         assert_eq!(holder.workspace, path(b"/private/tmp/lbx/ws"));

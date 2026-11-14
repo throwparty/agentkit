@@ -14,8 +14,6 @@
   (literal (param "p3"))
   (literal (param "p4"))
   (literal (param "p5"))
-  (literal (param "p6"))
-  (literal (param "p7"))
 )
 (allow file-write*
   (literal "/dev/null")

@@ -142,8 +142,6 @@ pub(crate) struct ConfigPayload {
     pub environment: Environment,
     pub baseline_reads: Vec<Vec<u8>>,
     pub mach_services: Vec<Vec<u8>>,
-    pub credential_denies: Vec<Vec<u8>>,
-    pub real_home: Vec<u8>,
 }
 
 /// One protocol message.
@@ -234,8 +232,6 @@ impl Message {
                 let environment = reader.environment()?;
                 let baseline_reads = reader.strings_u16()?;
                 let mach_services = reader.strings_u16()?;
-                let credential_denies = reader.strings_u16()?;
-                let real_home = reader.string()?;
                 Self::Config(Box::new(ConfigPayload {
                     workspace,
                     reads,
@@ -246,8 +242,6 @@ impl Message {
                     environment,
                     baseline_reads,
                     mach_services,
-                    credential_denies,
-                    real_home,
                 }))
             }
             Kind::Ready => Self::Ready,
@@ -285,8 +279,6 @@ impl Message {
                 writer.environment(&config.environment)?;
                 writer.strings_u16(&config.baseline_reads)?;
                 writer.strings_u16(&config.mach_services)?;
-                writer.strings_u16(&config.credential_denies)?;
-                writer.string(&config.real_home)?;
             }
             Self::Ready | Self::Status | Self::StatusReply => {}
             Self::Exec(argv) => writer.strings_u16(argv)?,
@@ -606,8 +598,6 @@ mod tests {
             environment: vec![(b"PATH".to_vec(), b"/usr/bin".to_vec())],
             baseline_reads: vec![b"/usr/bin".to_vec()],
             mach_services: vec![b"com.apple.example".to_vec()],
-            credential_denies: vec![b"/Users/tester/.ssh".to_vec()],
-            real_home: b"/Users/tester".to_vec(),
         }
     }
 

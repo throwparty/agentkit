@@ -76,12 +76,6 @@ fn config(workspace: &Path) -> Vec<u8> {
         payload.extend_from_slice(&string(value.as_bytes()));
     }
     payload.extend_from_slice(&0u16.to_le_bytes());
-    payload.extend_from_slice(&0u16.to_le_bytes());
-    payload.extend_from_slice(&string(
-        PathBuf::from(std::env::var("HOME").expect("HOME"))
-            .as_os_str()
-            .as_encoded_bytes(),
-    ));
     frame(1, &payload)
 }
 

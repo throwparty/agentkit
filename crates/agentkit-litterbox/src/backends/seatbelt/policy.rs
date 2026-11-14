@@ -37,10 +37,8 @@ pub(crate) struct ProfileInput {
     pub(crate) writes: Vec<PathBuf>,
     pub(crate) posture: Posture,
     pub(crate) tag: String,
-    pub(crate) real_home: PathBuf,
     pub(crate) baseline_reads: Vec<PathBuf>,
     pub(crate) mach_services: Vec<String>,
-    pub(crate) credential_denies: Vec<PathBuf>,
 }
 
 /// A rendered profile and the values to pass with it.
@@ -124,16 +122,6 @@ pub(crate) fn render(input: &ProfileInput) -> Result<RenderedProfile, RenderErro
         push_path(&mut writes, resolve(path)?);
     }
 
-    let mut denies = Vec::new();
-    for path in &input.credential_denies {
-        if !path.is_absolute() {
-            return Err(RenderError::BadPath {
-                value: path.display().to_string(),
-            });
-        }
-        push_path(&mut denies, path.clone());
-    }
-
     let mut services = Vec::new();
     for service in &input.mach_services {
         validate_service(service).map_err(|_| RenderError::InvalidService {
@@ -157,13 +145,10 @@ pub(crate) fn render(input: &ProfileInput) -> Result<RenderedProfile, RenderErro
     };
 
     let mut metadata = Vec::new();
-    for path in reads.iter().chain(writes.iter()).chain(denies.iter()) {
+    for path in reads.iter().chain(writes.iter()) {
         for ancestor in path.ancestors() {
             push_path(&mut metadata, ancestor.to_path_buf());
         }
-    }
-    for ancestor in input.real_home.ancestors() {
-        push_path(&mut metadata, ancestor.to_path_buf());
     }
 
     let mut parameters = Parameters::default();
@@ -219,16 +204,6 @@ pub(crate) fn render(input: &ProfileInput) -> Result<RenderedProfile, RenderErro
                 write_block(&mut text, "(allow network-outbound", &filters);
             }
         }
-    }
-
-    if !denies.is_empty() {
-        let mut filters = Vec::with_capacity(denies.len());
-        for path in &denies {
-            filters.push(subpath_filter(&mut parameters, path)?);
-        }
-        write_block(&mut text, "(deny file-read*", &filters);
-        write_block(&mut text, "(deny file-write*", &filters);
-        write_block(&mut text, "(deny file-write-unlink", &filters);
     }
 
     if parameters.values.len() > MAX_PARAMETERS {
@@ -394,10 +369,8 @@ mod tests {
             writes: Vec::new(),
             posture: Posture::Denied,
             tag: "demo".to_string(),
-            real_home: PathBuf::from("/Users/tester"),
             baseline_reads: Vec::new(),
             mach_services: Vec::new(),
-            credential_denies: Vec::new(),
         }
     }
 
@@ -474,20 +447,6 @@ mod tests {
             "the root ancestor is a literal"
         );
         assert!(canonical.ancestors().count() > 1);
-    }
-
-    #[test]
-    fn credential_denies_are_the_last_layer() {
-        let workspace = workspace();
-        let mut input = input(workspace.path());
-        input
-            .credential_denies
-            .push(PathBuf::from("/Users/tester/.ssh"));
-        let rendered = render(&input).expect("renders");
-        let deny = rendered.text.rfind("(deny file-read*").expect("deny");
-        let allow = rendered.text.rfind("(allow file-write*").expect("allow");
-        assert!(deny > allow);
-        assert!(rendered.text.contains("(deny file-write-unlink"));
     }
 
     #[test]
@@ -625,12 +584,7 @@ mod tests {
 
     const FIXTURE_ROOT: &str = "/private/tmp/lbx-fixture";
 
-    fn fixture_input(
-        reads: &[&str],
-        posture: Posture,
-        services: &[&str],
-        denies: &[&str],
-    ) -> ProfileInput {
+    fn fixture_input(reads: &[&str], posture: Posture, services: &[&str]) -> ProfileInput {
         std::fs::create_dir_all(format!("{FIXTURE_ROOT}/workspace")).expect("workspace");
         for path in reads {
             std::fs::create_dir_all(path).expect("read dir");
@@ -641,24 +595,17 @@ mod tests {
             writes: Vec::new(),
             posture,
             tag: "demo".to_string(),
-            real_home: PathBuf::from("/Users/tester"),
             baseline_reads: Vec::new(),
             mach_services: services.iter().map(|service| service.to_string()).collect(),
-            credential_denies: denies.iter().map(PathBuf::from).collect(),
         }
     }
 
     fn golden_cases() -> Vec<(&'static str, ProfileInput)> {
         vec![
-            ("empty", fixture_input(&[], Posture::Denied, &[], &[])),
+            ("empty", fixture_input(&[], Posture::Denied, &[])),
             (
                 "one-read",
-                fixture_input(
-                    &["/private/tmp/lbx-fixture/read"],
-                    Posture::Denied,
-                    &[],
-                    &[],
-                ),
+                fixture_input(&["/private/tmp/lbx-fixture/read"], Posture::Denied, &[]),
             ),
             (
                 "two-reads",
@@ -669,12 +616,11 @@ mod tests {
                     ],
                     Posture::Denied,
                     &[],
-                    &[],
                 ),
             ),
             (
                 "collapsed",
-                fixture_input(&["/private/tmp"], Posture::Denied, &[], &[]),
+                fixture_input(&["/private/tmp"], Posture::Denied, &[]),
             ),
             (
                 "denied",
@@ -682,19 +628,17 @@ mod tests {
                     &["/private/tmp/lbx-fixture/read"],
                     Posture::Denied,
                     &["com.apple.example"],
-                    &["/Users/tester/.ssh"],
                 ),
             ),
             (
                 "host",
-                fixture_input(&["/private/tmp/lbx-fixture/read"], Posture::Host, &[], &[]),
+                fixture_input(&["/private/tmp/lbx-fixture/read"], Posture::Host, &[]),
             ),
             (
                 "loopback",
                 fixture_input(
                     &["/private/tmp/lbx-fixture/read"],
                     Posture::Loopback(vec!["localhost:8765".to_string()]),
-                    &[],
                     &[],
                 ),
             ),
@@ -756,12 +700,6 @@ mod tests {
             rendered.parameters[2].value.to_bytes(),
             b"/private/tmp/lbx-fixture/read"
         );
-        assert!(
-            rendered
-                .parameters
-                .iter()
-                .any(|parameter| parameter.value.to_bytes() == b"/Users/tester")
-        );
         assert!(!rendered.text.contains("/private/tmp"));
         assert!(!rendered.text.contains("demo"));
     }
@@ -792,7 +730,6 @@ mod tests {
             assert!(!fixture(name).contains("/nix"), "{name}");
         }
         assert!(fixture("denied").contains("(allow mach-lookup"));
-        assert!(fixture("denied").contains("(deny file-read*"));
         assert!(!fixture("denied").contains("network-outbound"));
         assert!(fixture("host").contains("(allow network-outbound)\n"));
         assert!(fixture("loopback").contains("(remote ip (param"));

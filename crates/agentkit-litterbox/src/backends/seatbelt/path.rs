@@ -145,10 +145,10 @@ mod tests {
     fn a_bare_tilde_is_the_home_and_a_named_tilde_is_refused() {
         let home = Path::new(HOME);
         assert_eq!(
-            parse("~", home, "credential-denies").expect("home"),
+            parse("~", home, "baseline-reads").expect("home"),
             PathBuf::from(HOME)
         );
-        let error = parse("~other/src", home, "credential-denies").expect_err("refused");
+        let error = parse("~other/src", home, "baseline-reads").expect_err("refused");
         assert!(error.to_string().contains("~/"), "{error}");
     }
 
