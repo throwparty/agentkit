@@ -8,7 +8,7 @@ use std::fmt;
 const MAGIC: &[u8; 4] = b"LBX1";
 const VERSION: u16 = 1;
 const HEADER_LEN: usize = 12;
-const MAX_FRAME: usize = 1024 * 1024;
+pub(crate) const MAX_FRAME: usize = 1024 * 1024;
 const MAX_STREAM: usize = 64 * 1024;
 const MAX_STRING: usize = 64 * 1024;
 const MAX_COUNT: usize = 4096;

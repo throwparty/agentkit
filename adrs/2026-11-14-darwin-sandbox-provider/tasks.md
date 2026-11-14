@@ -119,7 +119,7 @@ Add `workspace.rs` copying the staged tree into the state directory with each co
 | Depends On | T-001,T-005 |
 | References | workspace-direct,symlinked-contribution,fail-closed |
 
-### T-010: Start the holder, render once and accept configuration
+### T-010: [x] Start the holder, render once and accept configuration
 
 Add the helper binary and its `--probe` and `--hold` modes. `--probe` applies `(version 1)(deny default)` with an empty parameter array. `--hold` calls `setsid`, binds the supplied 0600 socket in the user temp directory, opens `holder.log`, accepts one Config frame, renders through `policy.rs`, and replies Ready or a policy error.
 
