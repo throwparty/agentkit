@@ -249,7 +249,7 @@ Extend the backends page and the configuration reference with seatbelt: the five
 | Depends On | T-017 |
 | References | backend-documentation,egress-postures,developer-directory,no-toolchain,backends-listing |
 
-### T-020: Declare the architecture rules
+### T-020: [x] Declare the architecture rules
 
 Add an arch-lint scope for `src/backends/seatbelt/**` with deny edges to the orchestrator, the command line, MCP, persistence, SCM and provision preparation, and a negative fixture for each edge.
 

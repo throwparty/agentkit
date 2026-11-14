@@ -32,6 +32,16 @@ from = "litterbox-backend-bubblewrap"
 to = ["litterbox-contract"]
 doc = "adrs/2026-11-07-linux-bwrap-provider"
 
+[[allow-dep]]
+from = "litterbox-backend-seatbelt"
+to = ["litterbox-contract"]
+doc = "adrs/2026-11-14-darwin-sandbox-provider"
+
+[[allow-dep]]
+from = "litterbox-backend-seatbelt-helper"
+to = ["litterbox-backend-seatbelt"]
+doc = "adrs/2026-11-14-darwin-sandbox-provider"
+
 [[deny-scope-dep]]
 from = "acp-v1"
 to = ["acp-v2"]
@@ -52,6 +62,7 @@ from = "litterbox-contract"
 to = [
   "litterbox-backend-docker",
   "litterbox-backend-bubblewrap",
+  "litterbox-backend-seatbelt",
   "litterbox-registry",
   "litterbox-orchestrator",
   "litterbox-persistence",
@@ -103,6 +114,25 @@ to = [
 message = "a backend depends on the contract only; branches, records, commands and the kernel are not its business."
 
 [[deny-scope-dep]]
+from = "litterbox-backend-seatbelt"
+to = [
+  "litterbox-registry",
+  "litterbox-orchestrator",
+  "litterbox-persistence",
+  "litterbox-cli",
+  "litterbox-mcp",
+  "litterbox-config",
+  "litterbox-scm",
+  "litterbox-vcs-store",
+  "litterbox-provision",
+  "litterbox-kinds",
+  "litterbox-prepare",
+  "litterbox-backend-docker",
+  "litterbox-backend-bubblewrap"
+]
+message = "a backend depends on the contract only; branches, records, commands and the kernel are not its business."
+
+[[deny-scope-dep]]
 from = "litterbox-registry"
 to = [
   "litterbox-orchestrator",
@@ -122,6 +152,7 @@ from = "litterbox-cli"
 to = [
   "litterbox-backend-docker",
   "litterbox-backend-bubblewrap",
+  "litterbox-backend-seatbelt",
   "litterbox-scm",
   "litterbox-vcs-store",
   "litterbox-provision",
@@ -135,6 +166,7 @@ from = "litterbox-mcp"
 to = [
   "litterbox-backend-docker",
   "litterbox-backend-bubblewrap",
+  "litterbox-backend-seatbelt",
   "litterbox-scm",
   "litterbox-vcs-store",
   "litterbox-provision",
@@ -164,6 +196,7 @@ from = "litterbox-persistence"
 to = [
   "litterbox-backend-docker",
   "litterbox-backend-bubblewrap",
+  "litterbox-backend-seatbelt",
   "litterbox-registry",
   "litterbox-orchestrator",
   "litterbox-cli",
@@ -187,6 +220,7 @@ from = "litterbox-provision"
 to = [
   "litterbox-backend-docker",
   "litterbox-backend-bubblewrap",
+  "litterbox-backend-seatbelt",
   "litterbox-registry",
   "litterbox-orchestrator",
   "litterbox-persistence",
@@ -204,6 +238,7 @@ from = "litterbox-kinds"
 to = [
   "litterbox-backend-docker",
   "litterbox-backend-bubblewrap",
+  "litterbox-backend-seatbelt",
   "litterbox-registry",
   "litterbox-orchestrator",
   "litterbox-persistence",
@@ -223,6 +258,7 @@ from = "litterbox-prepare"
 to = [
   "litterbox-backend-docker",
   "litterbox-backend-bubblewrap",
+  "litterbox-backend-seatbelt",
   "litterbox-registry",
   "litterbox-orchestrator",
   "litterbox-persistence",
@@ -284,6 +320,14 @@ paths = ["crates/agentkit-litterbox/src/backends/docker/**"]
 [[scopes]]
 name = "litterbox-backend-bubblewrap"
 paths = ["crates/agentkit-litterbox/src/backends/bubblewrap/**"]
+
+[[scopes]]
+name = "litterbox-backend-seatbelt"
+paths = ["crates/agentkit-litterbox/src/backends/seatbelt/**"]
+
+[[scopes]]
+name = "litterbox-backend-seatbelt-helper"
+paths = ["crates/agentkit-litterbox/src/bin/litterbox-seatbelt-helper/**"]
 
 [[scopes]]
 name = "litterbox-registry"
