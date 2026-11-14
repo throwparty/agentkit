@@ -97,6 +97,7 @@ impl Payload {
 
         match host.pid_state(self.holder_pid) {
             Ok(PidState::Running) => {}
+            Ok(PidState::Stopped) => return PayloadState::Paused,
             Ok(PidState::Zombie | PidState::Gone) => return PayloadState::Missing,
             Err(error) => {
                 return PayloadState::Invalid(format!("the holder cannot be read: {error}"));
@@ -113,11 +114,7 @@ impl Payload {
                 ));
             }
         }
-        if self.paused {
-            PayloadState::Paused
-        } else {
-            PayloadState::Live
-        }
+        PayloadState::Live
     }
 
     /// The socket path as a path.

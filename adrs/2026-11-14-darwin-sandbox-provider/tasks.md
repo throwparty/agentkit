@@ -171,7 +171,7 @@ Add the backend exec path: validate the record, refuse while paused as Denied, c
 | Depends On | T-011,T-012 |
 | References | exec-helper,environment-exact,lifecycle-works,concurrent-commands |
 
-### T-014: Implement pause, resume, delete and status
+### T-014: [x] Implement pause, resume, delete and status
 
 Add the lifecycle facet: pause and resume signal the recorded group after checking pid, start time and zombie state; delete signals a matching or absent holder, refuses a recycled pid, removes the socket, log, workspace and state, and succeeds when the holder is gone; status proves the socket for an active holder.
 
