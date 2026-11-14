@@ -15,5 +15,6 @@ pub(crate) mod environment;
 pub(crate) mod host;
 pub(crate) mod mounts;
 pub(crate) mod path;
+pub(crate) mod payload;
 pub(crate) mod policy;
 pub(crate) mod protocol;

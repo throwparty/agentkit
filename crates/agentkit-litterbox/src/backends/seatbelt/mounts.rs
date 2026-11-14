@@ -29,7 +29,7 @@ const PROTECTED_ROOTS: &[&str] = &[
 ];
 
 /// A step whose contribution was replaced by one ancestor.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct CollapsedStep {
     pub identity: String,
     pub contributed: usize,
