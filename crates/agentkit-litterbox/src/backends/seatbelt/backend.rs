@@ -1205,6 +1205,80 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_refuses_ports_duplicates_and_bad_tags() {
+        let helper = helper();
+        assert!(helper.exists(), "build the helper before this test");
+        let source = tempfile::tempdir().expect("source");
+        let project = format!("test-refusals-{}", std::process::id());
+        let state = agentkit_common::data_dir("litterbox")
+            .join("seatbelt")
+            .join(&project)
+            .join("one");
+        let _ = std::fs::remove_dir_all(
+            agentkit_common::data_dir("litterbox")
+                .join("seatbelt")
+                .join(&project),
+        );
+        let backend = SeatbeltBackend::with_helper(settings(), Arc::new(SystemHost::new()), helper);
+
+        let ports = CreateRequest {
+            name: "one".to_string(),
+            project_slug: project.clone(),
+            workspace: Workspace {
+                source: source.path().to_path_buf(),
+            },
+            provision: Vec::new(),
+            forward_bind: "127.0.0.1".to_string(),
+            ports: vec![crate::sandbox::contract::RequestedPort {
+                name: "http".to_string(),
+                target: 8080,
+            }],
+        };
+        assert!(matches!(
+            backend.create(&ports).await,
+            Err(Error::Unsupported { .. })
+        ));
+        assert!(!state.exists());
+
+        let bad_tag = CreateRequest {
+            name: "with space".to_string(),
+            project_slug: project.clone(),
+            workspace: Workspace {
+                source: source.path().to_path_buf(),
+            },
+            provision: Vec::new(),
+            forward_bind: "127.0.0.1".to_string(),
+            ports: Vec::new(),
+        };
+        assert!(matches!(
+            backend.create(&bad_tag).await,
+            Err(Error::Misconfigured { .. })
+        ));
+
+        let request = CreateRequest {
+            name: "one".to_string(),
+            project_slug: project.clone(),
+            workspace: Workspace {
+                source: source.path().to_path_buf(),
+            },
+            provision: Vec::new(),
+            forward_bind: "127.0.0.1".to_string(),
+            ports: Vec::new(),
+        };
+        let record = backend.create(&request).await.expect("create");
+        assert!(matches!(
+            backend.create(&request).await,
+            Err(Error::Conflict { .. })
+        ));
+        backend.delete(&record).await.expect("delete");
+        let _ = std::fs::remove_dir_all(
+            agentkit_common::data_dir("litterbox")
+                .join("seatbelt")
+                .join(&project),
+        );
+    }
+
+    #[tokio::test]
     async fn create_exec_and_cleanup() {
         let helper = helper();
         assert!(helper.exists(), "build the helper before this test");
