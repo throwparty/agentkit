@@ -622,4 +622,179 @@ mod tests {
         assert!(validate_service("com.apple.example").is_ok());
         assert!(validate_service("not a service").is_err());
     }
+
+    const FIXTURE_ROOT: &str = "/private/tmp/lbx-fixture";
+
+    fn fixture_input(
+        reads: &[&str],
+        posture: Posture,
+        services: &[&str],
+        denies: &[&str],
+    ) -> ProfileInput {
+        std::fs::create_dir_all(format!("{FIXTURE_ROOT}/workspace")).expect("workspace");
+        for path in reads {
+            std::fs::create_dir_all(path).expect("read dir");
+        }
+        ProfileInput {
+            workspace: PathBuf::from(format!("{FIXTURE_ROOT}/workspace")),
+            reads: reads.iter().map(PathBuf::from).collect(),
+            writes: Vec::new(),
+            posture,
+            tag: "demo".to_string(),
+            real_home: PathBuf::from("/Users/tester"),
+            baseline_reads: Vec::new(),
+            mach_services: services.iter().map(|service| service.to_string()).collect(),
+            credential_denies: denies.iter().map(PathBuf::from).collect(),
+        }
+    }
+
+    fn golden_cases() -> Vec<(&'static str, ProfileInput)> {
+        vec![
+            ("empty", fixture_input(&[], Posture::Denied, &[], &[])),
+            (
+                "one-read",
+                fixture_input(
+                    &["/private/tmp/lbx-fixture/read"],
+                    Posture::Denied,
+                    &[],
+                    &[],
+                ),
+            ),
+            (
+                "two-reads",
+                fixture_input(
+                    &[
+                        "/private/tmp/lbx-fixture/a/one",
+                        "/private/tmp/lbx-fixture/b/two",
+                    ],
+                    Posture::Denied,
+                    &[],
+                    &[],
+                ),
+            ),
+            (
+                "collapsed",
+                fixture_input(&["/private/tmp"], Posture::Denied, &[], &[]),
+            ),
+            (
+                "denied",
+                fixture_input(
+                    &["/private/tmp/lbx-fixture/read"],
+                    Posture::Denied,
+                    &["com.apple.example"],
+                    &["/Users/tester/.ssh"],
+                ),
+            ),
+            (
+                "host",
+                fixture_input(&["/private/tmp/lbx-fixture/read"], Posture::Host, &[], &[]),
+            ),
+            (
+                "loopback",
+                fixture_input(
+                    &["/private/tmp/lbx-fixture/read"],
+                    Posture::Loopback(vec!["localhost:8765".to_string()]),
+                    &[],
+                    &[],
+                ),
+            ),
+        ]
+    }
+
+    fn fixture(name: &str) -> &'static str {
+        match name {
+            "empty" => include_str!("fixtures/empty.sbpl"),
+            "one-read" => include_str!("fixtures/one-read.sbpl"),
+            "two-reads" => include_str!("fixtures/two-reads.sbpl"),
+            "collapsed" => include_str!("fixtures/collapsed.sbpl"),
+            "denied" => include_str!("fixtures/denied.sbpl"),
+            "host" => include_str!("fixtures/host.sbpl"),
+            "loopback" => include_str!("fixtures/loopback.sbpl"),
+            other => panic!("no fixture for {other}"),
+        }
+    }
+
+    #[test]
+    fn golden_profiles_match_their_fixtures() {
+        for (name, input) in golden_cases() {
+            let rendered = render(&input).expect("renders");
+            assert_eq!(rendered.text, fixture(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn the_parameter_table_is_sequential_and_used() {
+        for (name, input) in golden_cases() {
+            let rendered = render(&input).expect("renders");
+            for (index, parameter) in rendered.parameters.iter().enumerate() {
+                assert_eq!(parameter.name, format!("p{index}"), "{name}");
+                assert!(
+                    rendered
+                        .text
+                        .contains(&format!("(param \"{}\")", parameter.name)),
+                    "{name}: {} is unused",
+                    parameter.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_parameter_values_are_the_inputs() {
+        let input = golden_cases()
+            .into_iter()
+            .find(|(name, _)| *name == "one-read")
+            .expect("one-read")
+            .1;
+        let rendered = render(&input).expect("renders");
+        assert_eq!(rendered.parameters[0].value.to_bytes(), b"demo");
+        assert_eq!(
+            rendered.parameters[1].value.to_bytes(),
+            b"/private/tmp/lbx-fixture/workspace"
+        );
+        assert_eq!(
+            rendered.parameters[2].value.to_bytes(),
+            b"/private/tmp/lbx-fixture/read"
+        );
+        assert!(
+            rendered
+                .parameters
+                .iter()
+                .any(|parameter| parameter.value.to_bytes() == b"/Users/tester")
+        );
+        assert!(!rendered.text.contains("/private/tmp"));
+        assert!(!rendered.text.contains("demo"));
+    }
+
+    #[test]
+    fn every_layer_changes_the_text() {
+        assert_ne!(fixture("empty"), fixture("one-read"));
+        assert_ne!(fixture("one-read"), fixture("two-reads"));
+        assert_ne!(fixture("one-read"), fixture("collapsed"));
+        assert_ne!(fixture("empty"), fixture("denied"));
+        assert_ne!(fixture("denied"), fixture("host"));
+        assert_ne!(fixture("host"), fixture("loopback"));
+
+        for name in [
+            "empty",
+            "one-read",
+            "two-reads",
+            "collapsed",
+            "denied",
+            "host",
+            "loopback",
+        ] {
+            assert!(fixture(name).contains("(literal \"/\")"), "{name}");
+            assert!(
+                fixture(name).contains("(allow file-read-metadata"),
+                "{name}"
+            );
+            assert!(!fixture(name).contains("/nix"), "{name}");
+        }
+        assert!(fixture("denied").contains("(allow mach-lookup"));
+        assert!(fixture("denied").contains("(deny file-read*"));
+        assert!(!fixture("denied").contains("network-outbound"));
+        assert!(fixture("host").contains("(allow network-outbound)\n"));
+        assert!(fixture("loopback").contains("(remote ip (param"));
+    }
 }

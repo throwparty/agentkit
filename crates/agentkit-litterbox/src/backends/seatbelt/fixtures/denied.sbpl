@@ -1,0 +1,39 @@
+(version 1)
+(deny default (with message (param "p0")))
+(allow process-exec)
+(allow process-fork)
+(allow process-info* (target same-sandbox))
+(allow signal (target same-sandbox))
+(allow file-read*
+  (literal "/")
+  (subpath (param "p1"))
+  (subpath (param "p2"))
+)
+(allow file-read-metadata
+  (literal (param "p1"))
+  (literal (param "p3"))
+  (literal (param "p4"))
+  (literal (param "p5"))
+  (literal (param "p6"))
+  (literal (param "p2"))
+  (literal (param "p7"))
+  (literal (param "p8"))
+  (literal (param "p9"))
+)
+(allow file-write*
+  (literal "/dev/null")
+  (subpath (param "p1"))
+)
+(allow sysctl-read)
+(allow mach-lookup
+  (global-name (param "p10"))
+)
+(deny file-read*
+  (subpath (param "p7"))
+)
+(deny file-write*
+  (subpath (param "p7"))
+)
+(deny file-write-unlink
+  (subpath (param "p7"))
+)

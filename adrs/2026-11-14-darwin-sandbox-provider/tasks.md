@@ -28,7 +28,7 @@ Add `policy.rs` with the typed layers, the writer and parameter interning. Emit 
 | Depends On | T-001 |
 | References | profile-baseline,credential-denies,egress-posture,golden-profiles |
 
-### T-003: Add golden profiles and their invariants
+### T-003: [x] Add golden profiles and their invariants
 
 Add fixtures for the empty request, one read, two reads sharing an ancestor, a collapsed closure, the denied and host postures, and a loopback endpoint. Each fixture asserts the text with parameter names and the full parameter table.
 
