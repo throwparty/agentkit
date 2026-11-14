@@ -1,0 +1,22 @@
+# Project configuration for macOS hosts. Copy this file to config.toml.
+# Litterbox configuration
+#
+# The sandboxing mechanism and its settings are the user's choice, so they live
+# in ~/.config/agentkit/litterbox/config.toml, not here. A project file may not
+# select or configure a backend.
+#
+# The project declares what it needs: the backends whose provisioning it
+# supports, the steps themselves, and each backend's ordered step list.
+
+[backends.seatbelt]
+provision = ["dev"]
+
+[project]
+backends = ["seatbelt"]
+
+# Enter this repository's development shell on the host and carry what it
+# exports into the sandbox: the environment and the store closure.
+[[provision]]
+identity = "dev"
+kind = "devshell"
+installable = "./nix"

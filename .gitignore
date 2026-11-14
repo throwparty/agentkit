@@ -22,5 +22,8 @@ adrs/**/target/
 # The machine-owned local override is never committed
 .agentkit/litterbox/config.local.toml
 
+# The active per-platform project configuration is generated from a template
+.agentkit/litterbox/config.toml
+
 # Probe build artefacts
 /maps/**/evidence/build/
