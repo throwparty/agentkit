@@ -145,20 +145,9 @@ fn push_unique(paths: &mut Vec<PathBuf>, path: PathBuf) {
 }
 
 fn validate_service(value: &str) -> Result<(), Error> {
-    let valid = !value.is_empty()
-        && value.len() <= 255
-        && value.chars().all(|character| {
-            character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '@' | '-')
-        });
-    if valid {
-        Ok(())
-    } else {
-        Err(Error::Misconfigured {
-            message: format!(
-                "backends.seatbelt.mach-services entry '{value}' is not a mach service name"
-            ),
-        })
-    }
+    super::policy::validate_service(value).map_err(|reason| Error::Misconfigured {
+        message: format!("backends.seatbelt.mach-services entry '{value}' {reason}"),
+    })
 }
 
 #[cfg(test)]
