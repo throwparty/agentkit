@@ -9,9 +9,11 @@
 /// The backend's own name in records and reports.
 pub(crate) const BACKEND: &str = "seatbelt";
 
+pub(crate) mod backend;
 pub(crate) mod config;
 pub(crate) mod defaults;
 pub(crate) mod environment;
+pub(crate) mod holder;
 pub(crate) mod host;
 pub(crate) mod mounts;
 pub(crate) mod path;

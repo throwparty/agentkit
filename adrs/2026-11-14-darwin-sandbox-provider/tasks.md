@@ -145,7 +145,7 @@ Implement the poll loop: accept Exec frames, fork, confine the child with `sandb
 | Depends On | T-010 |
 | References | exec-helper,cost,concurrent-commands,fail-closed,profile-rejected |
 
-### T-012: Implement create
+### T-012: [x] Implement create
 
 Assemble create: validate tag and real home, merge environment, validate and collapse mounts, create the state directory and workspace, generate the socket path, spawn the helper, wait for Ready, run sandbox steps through the shared runner, and write the payload. Refuse a duplicate as Conflict and declared ports as Unsupported.
 
