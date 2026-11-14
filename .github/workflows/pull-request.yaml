@@ -78,6 +78,20 @@ jobs:
       CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
       CACHIX_SIGNING_KEY: ${{ secrets.CACHIX_SIGNING_KEY }}
 
+  test-darwin:
+    name: Build and test (Darwin)
+    needs: changes
+    if: >
+      needs.changes.outputs.agentkit == 'true' ||
+      needs.changes.outputs.agentkit-cargo == 'true'
+    permissions:
+      actions: write # Called workflow uses it for cargo caches
+      contents: read
+    uses: $/.github/workflows/agentkit.build-and-test.darwin.yaml
+    secrets:
+      CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      CACHIX_SIGNING_KEY: ${{ secrets.CACHIX_SIGNING_KEY }}
+
   conformance:
     name: Tackle conformance
     needs: changes
@@ -146,7 +160,7 @@ jobs:
 
   ready:
     name: Ready
-    needs: [test, docs, lint-workflows, lint-nix, release-snapshot, conformance]
+    needs: [test, test-darwin, docs, lint-workflows, lint-nix, release-snapshot, conformance]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     steps:
