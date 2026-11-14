@@ -25,6 +25,10 @@ pub(crate) const UPLOAD_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 ///
 /// A snapshot copies the whole workspace, so this is the time a build output
 /// the snapshot keeps can take; the copy holds no runtime worker while it runs.
+///
+/// Only the Linux mechanism downloads today; the deadline stays shared so a
+/// second downloading backend cannot choose a different one.
+#[cfg_attr(not(target_os = "linux"), expect(dead_code))]
 pub(crate) const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 /// How much output one provisioning step may buffer in the transport.
@@ -35,6 +39,10 @@ pub(crate) const PROVISION_OUTPUT_CAP: usize = 16 * 1024;
 /// A command's output is drained whatever happens, so a command that writes
 /// without bound cannot exhaust the server's memory; this is how much of it is
 /// kept and returned.
+///
+/// Only the Linux mechanism uses this cap today; Docker keeps its own larger
+/// one. The cap stays shared so the exec transports converge.
+#[cfg_attr(not(target_os = "linux"), expect(dead_code))]
 pub(crate) const EXEC_OUTPUT_CAP: usize = 1024 * 1024;
 
 /// How much of a failing command's output travels in an error message.
