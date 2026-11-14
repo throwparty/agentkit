@@ -1,0 +1,42 @@
+# Litterbox
+
+## Project configuration in this repository
+
+The checkout tracks one Litterbox project template per platform:
+
+- `.agentkit/litterbox/config.seatbelt.toml` for macOS
+- `.agentkit/litterbox/config.bubblewrap.toml` for Linux
+
+They declare the same `dev` devshell step and differ only in the backend they
+name. Copy the template for your host over the active project file:
+
+```bash
+cp .agentkit/litterbox/config.seatbelt.toml .agentkit/litterbox/config.toml    # macOS
+cp .agentkit/litterbox/config.bubblewrap.toml .agentkit/litterbox/config.toml  # Linux
+```
+
+`.agentkit/litterbox/config.toml` is ignored, because it names the backend the
+host can run; committing one platform's choice would make the checkout wrong on
+the others. A fresh clone has no active project file, so copy one before
+creating a sandbox.
+
+The backend itself is selected outside the checkout, in the machine
+configuration:
+
+```toml
+# ~/.config/agentkit/litterbox/config.toml
+
+# macOS
+backend = "seatbelt"
+
+# Linux
+backend = "bubblewrap"
+```
+
+Only `[backends.<name>].provision` is project-owned. Every other backend key is
+machine-owned, and `.agentkit/litterbox/config.local.toml` is the ignored
+machine-local override for project-owned settings such as a backend's ordered
+step list.
+
+See [Backends](../user/litterbox/backends) for what each backend does and when
+it is available.

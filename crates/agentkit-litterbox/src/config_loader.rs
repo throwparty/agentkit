@@ -760,7 +760,8 @@ mod tests {
     fn the_committed_project_configurations_still_parse() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         for relative in [
-            ".agentkit/litterbox/config.toml",
+            ".agentkit/litterbox/config.bubblewrap.toml",
+            ".agentkit/litterbox/config.seatbelt.toml",
             "examples/litterbox-static-site/.agentkit/litterbox/config.toml",
         ] {
             let path = root.join(relative);

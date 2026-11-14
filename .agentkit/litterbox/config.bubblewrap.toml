@@ -1,3 +1,4 @@
+# Project configuration for Linux hosts. Copy this file to config.toml.
 # Litterbox configuration
 #
 # The sandboxing mechanism and its settings are the user's choice, so they live
