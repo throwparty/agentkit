@@ -1,8 +1,9 @@
 # Darwin Seatbelt Provider
 
-**Status:** draft **Created:** 2026-11-14 **Author:** adrian
+**Status:** draft  **Created:** 2026-11-14  **Author:** adrian
 
 The map at `maps/2026-10-31-nix-devshell-sandbox` chose the `sandbox_init` entry point family for macOS and recorded a prototype at `adrs/2026-10-31-darwin-app-sandbox`. That prototype proved the mechanism confines an unsigned binary and builds a devShell, but it also makes two assumptions this ADR removes: its baseline hardcodes `/nix/store`, and its helper rebuilds the child environment from a seven-name allowlist. Both conflate the mechanism with Nix. That prototype code is the production implementation: this ADR promotes `poc/custom` into the crate rather than rewriting it, keeping its helper and profile renderer. It supersedes the spike's note that its code is discarded with its ADR. The changes are bounded: the hardcoded store baseline, the environment allowlist, and one profile per invocation. T-043 to T-049 answer the questions that separate them. T-043 shows a platform baseline plus a workspace confines a command with no store grant; a Nix binary aborts on its ungranted dylib. T-044 shows the closure cannot be rendered one rule per path: 238 grants cost about 43ms per command, the serialised profile is capped at 65535 bytes, and 1779 grants are rejected. T-045 shows a later process can stop, continue and kill a recorded process group, and that a `setsid` child escapes it while staying confined. T-046 showed the developer directory is a toolchain input rather than a platform constant and that `Contents/Developer` alone is insufficient; T-053 shows a project can supply the installation root and the licence state as read mounts, so this ADR keeps no Xcode knowledge. T-052 settles lifecycle: a resident holder is the group leader, so a background command stays addressable after its shell exits. T-054 and T-055 show every dynamic SBPL value can be a parameter, so the renderer has no escaper. T-047 shows the helper can pass the contributed environment through untouched. T-048 shows readiness needs a probe process as well as a symbol. T-049 shows fork+apply is not something to rely on in a threaded server, so the server never applies a profile; the holder is single-threaded and applies it in each child. This backend follows `adrs/2026-11-07-linux-bwrap-provider`: the contract is mechanism-neutral, and this backend renders contributions rather than knowing a kind. The two backends share the contract surface, the resolved environment with provenance, and an opaque proxy endpoint; everything else differs on purpose, including the unit of execution, the isolation mechanism, the lifecycle primitive and the proxy transport. Assumptions this specification makes, and what would falsify each. First, that the collapse threshold of 64 paths is safe: 64 grants measured 11.7ms and 100 measured 17.0ms against 42.7ms for 238, and the assumption is falsified if a real devShell profile with 64 grants costs materially more because its rule text is larger. Second, that a devShell closure has one common ancestor: T-022's 238 paths all sit under the store root, and the assumption is falsified by a closure spanning two roots, which the renderer refuses rather than widens. Third, that a compiler's writes to the host user temp directory are non-fatal: measured with clang and xcrun, falsified by a toolchain that fails without them. Fourth, that `sandbox_init_with_parameters` remains exported and enforcing on the target macOS: measured on 27.2.1, falsified by a release without the symbol or with a profile the language no longer applies. Fifth, that a sandboxed listener cannot be reached: T-020 left it untested and the profile emits neither bind nor inbound rule, so ports are refused rather than claimed, and a probe that binds and connects would falsify the refusal.
+
 
 ## Problem
 
@@ -33,6 +34,7 @@ Litterbox has a Docker backend and a Linux bubblewrap backend. On macOS neither 
 - Closing the setsid escape. macOS has no pid namespace, so the group is the only handle.
 - A userland the backend supplies. What a sandbox can run is what its steps contribute.
 - Snapshot, command line and MCP work beyond what the contract already does, and the Linux backend.
+
 
 ## Functional Requirements
 
@@ -251,57 +253,49 @@ On this host a command that compiles C succeeds when the project contributes the
 A macOS that no longer exports `sandbox_init_with_parameters` reports readiness Unavailable and create refuses. Nothing falls back to running unconfined, and the remedy names the platform change rather than suggesting an entitlement build.
 
 **Slug:** `symbol-removed`
-
 ### EC-002: Profile Rejected
 
 A profile the language rejects returns an apply error with the `sandbox_init_with_parameters` message and the command does not run. A profile above 60 KiB is refused by the helper as a policy error before it is applied, and the backend reports Misconfigured with the size, because one measured over-size profile aborted on a libsandbox assertion instead of returning an error.
 
 **Slug:** `profile-rejected`
-
 ### EC-003: Setsid Escape
 
 A command that calls `setsid` leaves its group. It stays confined, because the profile is inherited and cannot be dropped, but pause and delete cannot address it. The backend does not scan for it and does not claim to have killed it.
 
 **Slug:** `setsid-escape`
-
 ### EC-004: Pid Reuse
 
 A holder pid that now belongs to another process is refused by the start-time check and is never signalled. The holder is the only process the backend signals by identity; commands are reached through its group.
 
 **Slug:** `pid-reuse`
-
 ### EC-005: Symlinked Contribution
 
 A contributed path that resolves through a symlink outside the grant is refused at create and named. `/tmp` resolving to `/private/tmp` is the ordinary case and is handled by `realpath`, not by a special rule.
 
 **Slug:** `symlinked-contribution`
-
 ### EC-006: No Toolchain Contributed
 
 A project that contributes no toolchain creates sandboxes normally. A command that needs a compiler fails with the toolchain's own error, and the profile holds no developer path.
 
 **Slug:** `no-xcode`
-
 ### EC-007: Toolchain Licence
 
 A project that contributes the Xcode installation but not its licence state reaches the toolchain's licence error. The sandbox is not reported as broken, and the remedy is the licence command, not a profile change.
 
 **Slug:** `xcode-licence`
-
 ### EC-008: Compiler Cache
 
 A compiler that writes to the host user temp directory reports cache warnings and still builds; T-053 measured exit 0. The backend grants no writable host path for it, and the documentation does not claim that a compiler never writes outside the workspace.
 
 **Slug:** `compiler-temp`
-
 ### EC-009: No Steps
 
 A project with no provisioning step has a sandbox that runs only what the platform baseline provides. Its first command fails with the shell's own error when the command is not in the baseline, and no PATH is invented to hide that.
 
 **Slug:** `no-steps`
-
 ### EC-010: Concurrent Commands
 
 Two commands run at once through the holder, and neither sees the other's output or status because each has its own pipes and its own child. Pause stops both.
 
 **Slug:** `concurrent-commands`
+

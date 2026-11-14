@@ -132,14 +132,14 @@ Defaults:
 The writer emits fixed layers in this order:
 
 1. `(version 1)` and `(deny default (with message (param 'p0')))`.
-1. `(allow process-exec)`, `(allow process-fork)`, `(allow process-info* (target same-sandbox))`, `(allow signal (target same-sandbox))`.
-1. Reads: `(literal '/')`, baseline subpaths, workspace subpath, grant subpaths.
-1. Metadata: one `(allow file-read-metadata ...)` with every ancestor of every read and denied path as `(literal (param 'pN'))`.
-1. Writes: `(literal '/dev/null')` and the workspace subpath.
-1. `(allow sysctl-read)`.
-1. Mach lookup: one `(global-name (param 'pN'))` per service.
-1. Network: nothing when denied; `(allow network-outbound)` when host; `(allow network-outbound (remote ip (param 'pN')))` per endpoint when loopback.
-1. Credential denies last: `(deny file-read* ...)`, `(deny file-write* ...)`, `(deny file-write-unlink ...)`, each over the deny subpaths.
+2. `(allow process-exec)`, `(allow process-fork)`, `(allow process-info* (target same-sandbox))`, `(allow signal (target same-sandbox))`.
+3. Reads: `(literal '/')`, baseline subpaths, workspace subpath, grant subpaths.
+4. Metadata: one `(allow file-read-metadata ...)` with every ancestor of every read and denied path as `(literal (param 'pN'))`.
+5. Writes: `(literal '/dev/null')` and the workspace subpath.
+6. `(allow sysctl-read)`.
+7. Mach lookup: one `(global-name (param 'pN'))` per service.
+8. Network: nothing when denied; `(allow network-outbound)` when host; `(allow network-outbound (remote ip (param 'pN')))` per endpoint when loopback.
+9. Credential denies last: `(deny file-read* ...)`, `(deny file-write* ...)`, `(deny file-write-unlink ...)`, each over the deny subpaths.
 
 The root literal is always present and not configurable. T-043 measured that every exec dies with SIGABRT without it.
 
@@ -188,11 +188,11 @@ Limits: frame at most 1 MiB, argc at most 4096, environment at most 4096 entries
 Startup for `--hold <socket>`:
 
 1. `setsid()`. A failure exits 70 and create fails.
-1. `umask(0o077)`.
-1. Bind the path create supplied, refusing a symlink, and `chmod(0600)`.
-1. `holder.log` is opened `0600` and truncating for stderr; stdin and stdout are null.
-1. Accept one Config connection, render the profile, reply Ready, keep the configuration.
-1. Enter the poll loop.
+2. `umask(0o077)`.
+3. Bind the path create supplied, refusing a symlink, and `chmod(0600)`.
+4. `holder.log` is opened `0600` and truncating for stderr; stdin and stdout are null.
+5. Accept one Config connection, render the profile, reply Ready, keep the configuration.
+6. Enter the poll loop.
 
 `--probe` applies `(version 1)(deny default)` with an empty parameter array and exits 0, or 70 with the message. This is the readiness probe.
 
@@ -207,14 +207,14 @@ Output is buffered per stream up to 1 MiB and drained beyond that, setting the t
 Create:
 
 1. Validate the tag and resolve the real home from `getpwnam`; either failure is `Misconfigured`.
-1. Merge contributions with `Contributions::environment_for(workspace)`, withhold values naming an absolute path outside the workspace and the grants, then set `HOME`, `TMPDIR`, `PWD`. `PATH` is only what the steps contributed.
-1. Validate mounts and collapse a step above 64 paths to its longest common ancestor. Refuse an ancestor of `/` and a collapsed set still above 64.
-1. Build the state directory `data_dir/litterbox/seatbelt/<project>/<name>/` with `0700` and copy the staged workspace into `workspace/`.
-1. Generate a socket path in the user temp directory from 16 random bytes, mode 0600. Spawn the helper with a cleared environment, null stdin and stdout, stderr to `holder.log`, and `--hold <socket>`. Any failure after the state directory exists kills the holder and removes the directory.
-1. Poll `connect` for up to 5 seconds. A timeout kills the helper and returns `Unavailable` with the tail of the log.
-1. Send Config, read Ready or Error.
-1. Run sandbox steps through the shared runner.
-1. Write PayloadV1 and return the record.
+2. Merge contributions with `Contributions::environment_for(workspace)`, withhold values naming an absolute path outside the workspace and the grants, then set `HOME`, `TMPDIR`, `PWD`. `PATH` is only what the steps contributed.
+3. Validate mounts and collapse a step above 64 paths to its longest common ancestor. Refuse an ancestor of `/` and a collapsed set still above 64.
+4. Build the state directory `data_dir/litterbox/seatbelt/<project>/<name>/` with `0700` and copy the staged workspace into `workspace/`.
+5. Generate a socket path in the user temp directory from 16 random bytes, mode 0600. Spawn the helper with a cleared environment, null stdin and stdout, stderr to `holder.log`, and `--hold <socket>`. Any failure after the state directory exists kills the holder and removes the directory.
+6. Poll `connect` for up to 5 seconds. A timeout kills the helper and returns `Unavailable` with the tail of the log.
+7. Send Config, read Ready or Error.
+8. Run sandbox steps through the shared runner.
+9. Write PayloadV1 and return the record.
 
 A duplicate name is `Conflict` before any process starts. Declared ports are `Unsupported`, naming `network-bind`.
 
@@ -229,10 +229,10 @@ Inspect reports Paused from the record without asking a stopped holder. When the
 Each check carries state, reason and remedy:
 
 1. macOS, satisfied at compile time.
-1. `dlsym(RTLD_DEFAULT, 'sandbox_init_with_parameters')` is non-null.
-1. The helper beside the current executable is a regular file after resolution, owned by root or the effective uid, and not group or world writable.
-1. The probe helper exits 0 within 2 seconds.
-1. The parent of the state root is writable.
+2. `dlsym(RTLD_DEFAULT, 'sandbox_init_with_parameters')` is non-null.
+3. The helper beside the current executable is a regular file after resolution, owned by root or the effective uid, and not group or world writable.
+4. The probe helper exits 0 within 2 seconds.
+5. The parent of the state root is writable.
 
 Config failures are `Misconfigured`, not readiness. Create refuses on any check that is not available.
 
@@ -294,7 +294,8 @@ pub struct PayloadV1 {
 
 Declare and resolve the machine-owned section
 
-SeatbeltConfig with deny_unknown_fields: network (denied default, host), baseline (default or none), baseline-reads, mach-services, credential-denies. from_section rejects setup-command with a pointer to \[[provision]\]. settings returns Settings with network, baseline mode, merged read and service lists, and deny additions. Each key failure is Misconfigured and names the key.
+SeatbeltConfig with deny_unknown_fields: network (denied default, host), baseline (default or none), baseline-reads, mach-services, credential-denies. from_section rejects setup-command with a pointer to [[provision]]. settings returns Settings with network, baseline mode, merged read and service lists, and deny additions. Each key failure is Misconfigured and names the key.
+
 
 ### defaults.rs
 
@@ -302,11 +303,13 @@ Hold the three default tables as data
 
 BASELINE_READS, MACH_SERVICES and CREDENTIAL_DENIES as &'static [&'static str]. The baseline excludes every developer path and /nix. The credential list is the FR-013 set, rooted at the real home at render time. One test asserts each table is non-empty and free of duplicates.
 
+
 ### path.rs
 
 Turn configuration strings into absolute paths
 
 expand replaces a leading ~/ with the real home from getpwnam. normalize removes . and resolves .. lexically. validate rejects a relative path, a NUL byte and an empty string. A default that fails realpath at create is skipped with a debug log; a configured path that fails is Misconfigured naming the key and value.
+
 
 ### host.rs
 
@@ -314,11 +317,13 @@ Make every host read injectable
 
 Host declares pid_exists, pid_state, pid_start_time, pid_group, signal_group, connect_socket, peer_uid, real_home, realpath, clock and proc_pidinfo. SystemHost answers from libc, sysctl and the file system. FakeHost answers from a table. The backend holds Arc<dyn Host> and opens no host resource directly.
 
+
 ### mounts.rs
 
 Validate contributions and collapse them
 
 validate rejects a path that is not absolute, not resolvable, a socket, device or FIFO, the workspace or an ancestor of it, a protected root, the metadata directory, the state directory, or a credential path. collapse replaces a step above 64 paths with the longest common ancestor by component comparison, deduped. It refuses a common ancestor of / and a collapsed set above 64, naming the step and count. ancestors returns the parent chain used by the metadata layer.
+
 
 ### environment.rs
 
@@ -326,11 +331,13 @@ Merge, withhold and fix the three owned variables
 
 merge folds steps through Contributions::environment_for(workspace), withholds a variable whose value has an absolute element outside the workspace and the grants (split on :), creates workspace/tmp, then sets HOME=workspace, TMPDIR=workspace/tmp and PWD=workspace. PATH is only contributed. The real home is resolved through Host, not from HOME. Provenance records Set for the three and Removed for withheld names. Values are returned as a map and sent only over the socket.
 
+
 ### policy.rs
 
 Render the profile and its parameter table
 
 The only module that emits SBPL. It builds ordered layers from ProfileInput, resolves every path with realpath and returns BadPath if one fails, interns every dynamic value by exact bytes as p0..pN, emits the fixed text described in the architecture, computes metadata ancestors, and enforces the 60 KiB and 4096 parameter guards. It has no escaping function and no dependency on the crate. Golden tests assert the text with parameter names and the full parameter table.
+
 
 ### protocol.rs
 
@@ -338,11 +345,13 @@ Encode and decode frames
 
 Frame with magic LBX1, version 1, kind, flags and payload length. encode and decode for every kind, with bounds checks before allocation. Limits: 1 MiB frame, 4096 argv entries, 4096 environment entries, 64 KiB per string. A short header, bad magic, bad version or over-length frame is a protocol error. The module has no dependency on the crate.
 
+
 ### seatbelt-helper
 
 Hold the sandbox and confine each child
 
 Second binary target. --probe applies a minimal profile and exits. --hold setsid, binds the 0600 socket, logs to holder.log, accepts Config, renders through policy.rs, replies Ready, then runs the poll loop. For Exec it forks, the child applies the profile with sandbox_init_with_parameters and execs, and the parent streams output and returns status. Exit codes 70, 71 and 126 keep apply, policy and exec failures distinct. It links only libc and std.
+
 
 ### holder.rs
 
@@ -350,11 +359,13 @@ Address the holder from the backend
 
 spawn uses the socket path create generated, starts the helper with a cleared environment and stderr to holder.log, polls connect for 5 seconds, sends Config and waits for Ready. exec connects, sends Exec and decodes frames into Execution, truncating at EXEC_OUTPUT_CAP. pause, resume and destroy signal the recorded group after checking pid, start time and zombie state. status sends Status for inspect. The socket path is the one create generated in the user temp directory.
 
+
 ### payload.rs
 
 Persist what a later process needs
 
 PayloadV1 with the fields in the architecture, toml through the metadata store. from_record refuses a higher version or a missing field as Unavailable with the delete-and-recreate remedy. write asserts 0600 on the file and 0700 on the directory. validate checks pid existence, start time, zombie state and socket path shape.
+
 
 ### readiness.rs
 
@@ -362,11 +373,13 @@ Report whether the mechanism can confine here
 
 Five checks: macOS, dlsym of sandbox_init_with_parameters, helper trust, probe exit, state root parent writable. Each returns a report Check with state, reason and remedy. No check confines the caller or starts a holder. create refuses on any unavailable check.
 
+
 ### workspace.rs
 
 Materialise and transfer the workspace
 
 copy_from copies the staged directory into workspace/ with each component opened without following a link, refusing a symlink, device or FIFO. transfer_in and transfer_out resolve beneath an open directory descriptor. download copies recursively, preserves modes and keeps a symlink as a symlink. Every path given to the holder is built from the state root and the sandbox name.
+
 
 ### backend.rs
 
@@ -374,17 +387,20 @@ Implement the contract and the lifecycle facet
 
 Backend: create, list, exec, upload, download, inspect, delete, readiness, capabilities and contribution_support with environment and mounts available. Lifecycle: pause and resume. No Limits and no Forwarding. create refuses ports as Unsupported and duplicates as Conflict, and returns only after Ready. inspect reports posture, workspace and provenance. list rebuilds payloads for both scopes.
 
+
 ### tests
 
 Cover the refusals as well as the happy path
 
 Unit: config defaults and merge, baseline none, add-only denies, unknown keys, path validation, collapse boundaries, metadata ancestors, parameter interning, golden profiles for both postures, guards, protocol round trip and malformed frames, payload versions, readiness states and error mapping. Host: create with no steps, exact environment, write outside denied, credential read denied, descendant confined, 238-path collapse, pause and resume, background command, delete, setsid escape, holder killed out of band, concurrent commands, status probe. Ignored: a C compile with contributed Xcode paths.
 
+
 ### registry and docs
 
 Make it selectable and keep the rules honest
 
 Add the registry entry under cfg(target_os = 'macos') with lifecycle only. Extend docs/docs/user/litterbox/backends.mdx with readiness, postures, refused ports, no limits, no PATH without steps, baseline modes, and no toolchain knowledge. Extend reference/config.mdx with the five keys. Add an arch-lint scope and a negative fixture for each deny edge.
+
 
 ## Data Flow
 
@@ -394,6 +410,8 @@ A later exec reads the payload, checks the holder pid and start time, connects, 
 
 Pause and resume signal the holder's process group, so a command started earlier and still resident stops and continues with the sandbox. Delete kills the group, removes the socket, log, workspace and state directory. Inspect reports Paused from the record; when active it sends Status to prove the socket before reporting Active.
 
+
 ## Deployment
 
 There is no daemon and no service. One unconfined holder exists per sandbox; the confinement boundary is the child it forks. The backend compiles on macOS only and the registry does not list it elsewhere. State lives at data_dir/litterbox/seatbelt/<project>/<sandbox>/, holding the workspace and holder.log, with 0700 directories and 0600 files; the socket is at a recorded path in the user temp directory. The helper is a second binary in agentkit-litterbox, installed beside the main binary; readiness refuses a missing or writable helper. A machine that selects nothing keeps Docker. No macOS test job exists; the host suite runs on a developer machine or a dedicated runner and, when a job is added, selects only -p agentkit-litterbox --lib backends::seatbelt and --test seatbelt, treats unavailable as failure, and reuses nix develop ./nix.
+
