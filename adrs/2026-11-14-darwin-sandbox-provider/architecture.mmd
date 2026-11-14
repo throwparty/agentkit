@@ -1,0 +1,27 @@
+flowchart TB
+    subgraph Server["litterbox server"]
+        R[registry]
+        B[seatbelt backend]
+        P[(payload store)]
+        W[workspace copy]
+    end
+
+    subgraph Holder["litterbox-seatbelt-helper --hold (unconfined, session leader)"]
+        H[socket loop]
+        C1[child: apply profile, exec]
+        C2[child: apply profile, exec]
+    end
+
+    Steps[resolved provisioning steps] -->|environment, mounts| B
+    R --> B
+    B --> W
+    B -->|spawn with setsid| H
+    B -->|config: workspace, grants, posture, tag, environment| H
+    B -->|exec request| H
+    H --> C1
+    H --> C2
+    C1 -->|stdout, stderr, exit| H
+    C2 -->|stdout, stderr, exit| H
+    H -->|response| B
+    B --> P
+    B -->|SIGSTOP, SIGCONT, SIGKILL to the process group| H
