@@ -132,7 +132,7 @@ Add the helper binary and its `--probe` and `--hold` modes. `--probe` applies `(
 | Depends On | T-002,T-004 |
 | References | helper-binary,readiness-checks,audit-surface,profile-rejected,fail-closed |
 
-### T-011: Execute commands through the holder
+### T-011: [x] Execute commands through the holder
 
 Implement the poll loop: accept Exec frames, fork, confine the child with `sandbox_init_with_parameters` and exec with the configured environment and workspace, stream stdout and stderr, cap each stream at 1 MiB while draining, and return Exit or Error. Kill the child on client disconnect and serve at most 64 concurrent commands.
 
