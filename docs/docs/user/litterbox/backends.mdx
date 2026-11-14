@@ -1,9 +1,8 @@
 # 🧰 Backends
 
-A backend is a sandboxing mechanism: Docker, and bubblewrap on Linux. The macOS
-Seatbelt sandbox is designed for and not yet built. A backend is not tied to a
-platform. It states the primitives it needs, and those primitives decide whether
-it can run on this machine.
+A backend is a sandboxing mechanism: Docker, bubblewrap on Linux, and Seatbelt
+on macOS. A backend is not tied to a platform. It states the primitives it needs,
+and those primitives decide whether it can run on this machine.
 
 ## Choosing one
 
@@ -80,6 +79,60 @@ backend, with one exception: `[backends.<name>].provision` is the project-owned
 ordered list of provisioning steps for that backend. Every other backend key is
 machine-owned; if the project sets one, Litterbox reports it and ignores it, so
 the sandbox runs on your machine, not the maintainer's.
+
+### Seatbelt
+
+`seatbelt` confines each command with the macOS kernel sandbox. A helper binary
+applies a profile to a child and execs, so the command and every descendant are
+confined without a virtual machine, an image or a container runtime. It is
+macOS only.
+
+```toml
+backend = "seatbelt"
+
+[backends.seatbelt]
+# "denied" (the default) emits no outbound rule at all, loopback included.
+# "host" shares the host's network.
+network = "denied"
+# "default" adds the lists below to the built-in OS baseline;
+# "none" uses them as the exact read and service sets.
+baseline = "default"
+baseline-reads = []
+mach-services = []
+credential-denies = []
+```
+
+The default baseline is OS paths only: `/System/Library`, `/System/Applications`,
+`/Library/Frameworks`, `/usr/bin`, `/usr/lib`, `/usr/share`, `/usr/libexec`,
+`/bin`, `/sbin`, `/private/etc`, `/private/var/db/dyld`, `/private/var/select`
+and `/dev`. It names no Nix store and no developer directory. `baseline = "none"`
+lets you start from a narrower set and add what a workload needs, which is the
+way to harden the sandbox beyond the default.
+
+`credential-denies` adds paths to the always-on deny list. A machine can add a
+deny but cannot remove one: the defaults cover SSH keys, cloud and registry
+credentials, keychains and browser profiles.
+
+The backend has no resource limits and forwards no ports. A command that writes
+outside the workspace fails, and a command that needs a compiler gets one only
+when the project contributes the toolchain paths as read mounts; the backend
+does not know what Xcode is. A sandbox with no provisioning step has no `PATH`,
+because the baseline supplies files, not an environment. A devshell step
+contributes its environment and store closure, but the mechanism itself needs
+no Nix: the profile is the same with or without one. A compiler that writes a
+cache to the host temporary directory gets warnings and still succeeds, because
+the backend does not grant that directory.
+
+The holder listens on a short-lived socket in the user temporary directory and
+writes `holder.log` in its state directory. Readiness reports the sandbox
+symbol, the helper's trust, a probe application and a writable state root.
+
+A project must list the backend to use its provisioning steps:
+
+```toml
+[project]
+backends = ["seatbelt"]
+```
 
 ## Seeing what this machine can run
 
