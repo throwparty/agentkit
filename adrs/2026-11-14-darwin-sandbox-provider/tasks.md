@@ -288,14 +288,14 @@ Add an ignored host test that compiles a C file with the Xcode installation root
 | Depends On | T-021 |
 | References | developer-directory,developer-directory-optional,xcode-licence,compiler-temp |
 
-### T-023: Select the tests in CI
+### T-023: [x] Select the tests in CI
 
-Add the macOS job or runner selection for the module and integration targets, with `paths:` triggers and unavailable treated as failure. Reuse `nix develop ./nix` on `aarch64-darwin`.
+Add a reusable Darwin workflow for the module and integration targets, called from the pull request workflow under the same conditions as the build-and-test job, with unavailable treated as failure. Reuse `nix develop ./nix` on `aarch64-darwin`.
 
 
 | Field | Value |
 |-------|-------|
-| Success Criteria | The job selects `-p agentkit-litterbox --lib backends::seatbelt` and `--test seatbelt`. It runs on the triggers that touch the backend or the crate. A missing Seatbelt primitive fails the job rather than skipping it. Ubuntu keeps `cargo test --locked`. |
+| Success Criteria | `agentkit.build-and-test.darwin.yaml` selects `-p agentkit-litterbox --lib backends::seatbelt`, `--test seatbelt_holder` and the ignored contributed-toolchain test. `pull-request.yaml` calls it when the agentkit or agentkit-cargo filters match, exactly as `agentkit.build-and-test.yaml` does. A missing Seatbelt primitive fails the job rather than skipping it. Ubuntu keeps `cargo test --locked`. |
 | Complexity | 🟢 Low |
 | Effort | 2-3h |
 | Depends On | T-021 |

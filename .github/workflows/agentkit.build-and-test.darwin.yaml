@@ -1,0 +1,53 @@
+name: "AgentKit: build and test (Darwin)"
+
+on:
+  workflow_call:
+    secrets:
+      CACHIX_AUTH_TOKEN:
+        description: Cachix authentication token used to push built store paths
+        required: false
+      CACHIX_SIGNING_KEY:
+        description: Cachix signing key used to push built store paths
+        required: false
+
+concurrency:
+  group: agentkit.build-and-test.darwin-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  test:
+    name: Build and test (Darwin)
+    runs-on: macos-26
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: nix develop ./nix --command bash -euo pipefail {0} # zizmor: ignore[misfeature]
+    permissions:
+      actions: write # To manage cargo caches
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Nix
+        uses: $/.github/actions/setup-nix
+        with:
+          push-name: ${{ vars.CACHIX_PUSH_CACHE }}
+          pull-names: ${{ vars.CACHIX_PULL_CACHES }}
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }} # zizmor: ignore[secrets-outside-env]
+          cachix-signing-key: ${{ secrets.CACHIX_SIGNING_KEY }} # zizmor: ignore[secrets-outside-env]
+          github-token: ${{ secrets.GITHUB_TOKEN }} # zizmor: ignore[secrets-outside-env]
+      - name: Build the helper
+        run: cargo build -p agentkit-litterbox --bin litterbox-seatbelt-helper
+      - name: Module tests
+        run: cargo test -p agentkit-litterbox --lib backends::seatbelt
+      - name: Holder tests
+        run: cargo test -p agentkit-litterbox --test seatbelt_holder
+      - name: Contributed toolchain
+        run: >-
+          cargo test -p agentkit-litterbox --lib
+          backends::seatbelt::backend::tests::a_contributed_toolchain
+          -- --ignored
