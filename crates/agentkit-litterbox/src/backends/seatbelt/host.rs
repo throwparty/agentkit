@@ -393,10 +393,8 @@ mod tests {
         assert!(host.process_start(pid).expect("start").secs > 0);
         assert!(host.real_home().expect("home").is_absolute());
         assert!(host.realpath(Path::new("/tmp")).expect("tmp").is_absolute());
-        assert_eq!(
-            host.file_kind(Path::new("/tmp")).expect("kind"),
-            FileKind::Directory
-        );
+        let tmp = host.realpath(Path::new("/tmp")).expect("tmp");
+        assert_eq!(host.file_kind(&tmp).expect("kind"), FileKind::Directory);
     }
 
     #[test]
