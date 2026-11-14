@@ -26,6 +26,16 @@ pub(crate) struct ProcessStart {
     pub micros: u32,
 }
 
+/// What a path is, for the mount rules.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FileKind {
+    File,
+    Directory,
+    Socket,
+    Fifo,
+    Device,
+}
+
 /// A signal the backend may send to a process group.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Signal {
@@ -54,6 +64,7 @@ pub(crate) trait Host: Send + Sync {
     fn peer_uid(&self, stream: &UnixStream) -> io::Result<u32>;
     fn real_home(&self) -> io::Result<PathBuf>;
     fn realpath(&self, path: &Path) -> io::Result<PathBuf>;
+    fn file_kind(&self, path: &Path) -> io::Result<FileKind>;
     fn now(&self) -> Instant;
 }
 
@@ -136,6 +147,24 @@ impl Host for SystemHost {
 
     fn realpath(&self, path: &Path) -> io::Result<PathBuf> {
         std::fs::canonicalize(path)
+    }
+
+    fn file_kind(&self, path: &Path) -> io::Result<FileKind> {
+        use std::os::unix::fs::FileTypeExt;
+
+        let metadata = std::fs::symlink_metadata(path)?;
+        let kind = metadata.file_type();
+        if kind.is_socket() {
+            Ok(FileKind::Socket)
+        } else if kind.is_fifo() {
+            Ok(FileKind::Fifo)
+        } else if kind.is_char_device() || kind.is_block_device() {
+            Ok(FileKind::Device)
+        } else if kind.is_dir() {
+            Ok(FileKind::Directory)
+        } else {
+            Ok(FileKind::File)
+        }
     }
 
     fn now(&self) -> Instant {
@@ -299,6 +328,10 @@ impl Host for FakeHost {
             .unwrap_or_else(|| path.to_path_buf()))
     }
 
+    fn file_kind(&self, _path: &Path) -> io::Result<FileKind> {
+        Ok(FileKind::File)
+    }
+
     fn now(&self) -> Instant {
         Instant::now()
     }
@@ -309,7 +342,7 @@ mod tests {
     use std::os::unix::net::UnixStream;
     use std::path::{Path, PathBuf};
 
-    use super::{FakeHost, Host, PidState, ProcessStart, Signal, SystemHost};
+    use super::{FakeHost, FileKind, Host, PidState, ProcessStart, Signal, SystemHost};
 
     fn start(secs: i64) -> ProcessStart {
         ProcessStart { secs, micros: 7 }
@@ -356,6 +389,10 @@ mod tests {
         assert!(host.process_start(pid).expect("start").secs > 0);
         assert!(host.real_home().expect("home").is_absolute());
         assert!(host.realpath(Path::new("/tmp")).expect("tmp").is_absolute());
+        assert_eq!(
+            host.file_kind(Path::new("/tmp")).expect("kind"),
+            FileKind::Directory
+        );
     }
 
     #[test]

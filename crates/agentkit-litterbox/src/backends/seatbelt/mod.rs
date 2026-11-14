@@ -12,6 +12,7 @@ pub(crate) const BACKEND: &str = "seatbelt";
 pub(crate) mod config;
 pub(crate) mod defaults;
 pub(crate) mod host;
+pub(crate) mod mounts;
 pub(crate) mod path;
 pub(crate) mod policy;
 pub(crate) mod protocol;

@@ -67,7 +67,7 @@ Add `host.rs` with the `Host` trait covering pid existence, state, start time, g
 | Depends On | T-001 |
 | References | test-coverage,fail-closed,record-payload |
 
-### T-006: Validate and collapse contributed mounts
+### T-006: [x] Validate and collapse contributed mounts
 
 Add `mounts.rs` rejecting a path that is not absolute, not resolvable, a socket, device or FIFO, the workspace or its ancestor, a protected root, the metadata or state directory, or a credential path. Collapse a step above 64 paths to its longest common ancestor, deduped, and return the ancestor chain for metadata.
 
