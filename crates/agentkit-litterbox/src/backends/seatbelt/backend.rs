@@ -874,7 +874,7 @@ fn path_bytes(path: &Path) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
     use super::SeatbeltBackend;
@@ -917,6 +917,17 @@ mod tests {
         crate::sandbox::contract::SandboxRecord,
         PathBuf,
     ) {
+        sandbox_with(label, Vec::new()).await
+    }
+
+    async fn sandbox_with(
+        label: &str,
+        provision: Vec<crate::sandbox::contract::ResolvedStep>,
+    ) -> (
+        SeatbeltBackend,
+        crate::sandbox::contract::SandboxRecord,
+        PathBuf,
+    ) {
         let helper = helper();
         assert!(helper.exists(), "build the helper before this test");
         let source = tempfile::tempdir().expect("source");
@@ -935,7 +946,7 @@ mod tests {
             workspace: Workspace {
                 source: source.path().to_path_buf(),
             },
-            provision: Vec::new(),
+            provision,
             forward_bind: "127.0.0.1".to_string(),
             ports: Vec::new(),
         };
@@ -997,6 +1008,119 @@ mod tests {
         ));
 
         let _ = std::fs::remove_dir_all(&state);
+    }
+
+    #[tokio::test]
+    async fn a_sandbox_with_no_steps_has_only_the_three_owned_variables() {
+        let (backend, record, state) = sandbox("no-steps").await;
+        let execution = backend
+            .exec(&record, &["/usr/bin/env".to_string()])
+            .await
+            .expect("exec");
+        let mut names: Vec<&str> = execution
+            .stdout
+            .lines()
+            .filter_map(|line| line.split('=').next())
+            .collect();
+        names.sort_unstable();
+        assert_eq!(names, vec!["HOME", "PWD", "TMPDIR"]);
+        assert!(!execution.stdout.contains("PATH="));
+        backend.delete(&record).await.expect("delete");
+        let _ = state;
+    }
+
+    #[tokio::test]
+    async fn writes_and_reads_outside_the_workspace_are_denied() {
+        let (backend, record, state) = sandbox("isolation").await;
+        let outside = "/private/tmp/lbx-t021-outside";
+        let _ = std::fs::remove_file(outside);
+        let write = backend
+            .exec(
+                &record,
+                &[
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    format!("echo escape > {outside}"),
+                ],
+            )
+            .await
+            .expect("exec");
+        assert_ne!(write.exit_code, 0);
+        assert!(!Path::new(outside).exists());
+
+        let secret = tempfile::tempdir().expect("secret");
+        let secret_file = secret.path().join("credential");
+        std::fs::write(&secret_file, b"material").expect("secret");
+        let read = backend
+            .exec(
+                &record,
+                &[
+                    "/bin/cat".to_string(),
+                    secret_file.to_string_lossy().into_owned(),
+                ],
+            )
+            .await
+            .expect("exec");
+        assert_ne!(read.exit_code, 0);
+        assert!(read.stdout.is_empty());
+
+        let descendant = backend
+            .exec(
+                &record,
+                &[
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    format!("/bin/sh -c 'echo child > {outside}'"),
+                ],
+            )
+            .await
+            .expect("exec");
+        assert_ne!(descendant.exit_code, 0);
+        assert!(!Path::new(outside).exists());
+
+        backend.delete(&record).await.expect("delete");
+        let _ = state;
+    }
+
+    #[tokio::test]
+    async fn a_large_contribution_is_collapsed_through_create() {
+        let source = tempfile::tempdir().expect("source");
+        let closure = source.path().join("closure");
+        for index in 0..=64 {
+            std::fs::create_dir_all(closure.join(format!("p{index}"))).expect("package");
+        }
+        let mounts: Vec<PathBuf> = (0..=64)
+            .map(|index| closure.join(format!("p{index}")))
+            .collect();
+        let step = crate::sandbox::contract::ResolvedStep {
+            identity: "dev".to_string(),
+            kind: "command".to_string(),
+            placement: crate::sandbox::contract::Placement::Host,
+            sandbox: None,
+            contributions: crate::sandbox::contract::Contributions {
+                mounts,
+                ..crate::sandbox::contract::Contributions::default()
+            },
+        };
+        let (backend, record, state) = sandbox_with("collapse", vec![step]).await;
+        let payload = payload(&record);
+        assert_eq!(payload.reads.len(), 1);
+        assert_eq!(payload.collapsed.len(), 1);
+        assert_eq!(payload.collapsed[0].contributed, 65);
+        let execution = backend
+            .exec(
+                &record,
+                &[
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    "echo ok".to_string(),
+                ],
+            )
+            .await
+            .expect("exec");
+        assert_eq!(execution.stdout, "ok\n");
+        backend.delete(&record).await.expect("delete");
+        let _ = state;
     }
 
     #[tokio::test]

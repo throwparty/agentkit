@@ -262,7 +262,7 @@ Add an arch-lint scope for `src/backends/seatbelt/**` with deny edges to the orc
 | Depends On | T-017 |
 | References | audit-surface,fail-closed |
 
-### T-021: Cover the unit and host suites
+### T-021: [x] Cover the unit and host suites
 
 Write the unit tests over `FakeHost`, the renderer and the codec, and the ignored host suite. The host suite covers create with no steps, exact environment, write outside denied, credential read denied, a descendant confined, a 238-path contribution collapsing, pause and resume, a background command, delete, the `setsid` escape, a holder killed out of band, two concurrent commands, the status probe and the readiness probe.
 
