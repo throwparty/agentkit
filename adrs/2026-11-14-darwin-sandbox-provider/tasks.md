@@ -236,7 +236,7 @@ Map helper error codes, connect failures, record outcomes and config failures to
 | Depends On | T-012,T-013 |
 | References | setup-diagnostics,denial-diagnostics,fail-closed,profile-rejected |
 
-### T-019: Document the backend
+### T-019: [x] Document the backend
 
 Extend the backends page and the configuration reference with seatbelt: the five keys and their defaults, the baseline modes, readiness, both postures, refused ports, no limits, no `PATH` without steps, and no toolchain knowledge. State that a sandbox with no steps runs only what the baseline permits.
 

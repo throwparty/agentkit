@@ -87,14 +87,34 @@ network = "denied"
 # for example ["bash", "-c"]. The program is resolved on the host and bound
 # into the sandbox, so it does not have to be on the sandbox's PATH.
 shell = ["sh", "-c"]
+
+# Seatbelt's own section. It needs no image and no daemon: each command runs
+# through a helper that applies a macOS sandbox profile.
+[backends.seatbelt]
+# "denied" (the default) emits no network-outbound rule at all, loopback
+# included. "host" shares the host's network.
+network = "denied"
+# "default" adds the lists below to the built-in OS baseline; "none" uses them
+# as the exact read and service sets, which is how to harden the sandbox.
+baseline = "default"
+# Extra OS paths a command may read. With baseline = "default" these are
+# additions; with "none" they are the whole read set.
+baseline-reads = []
+# Extra mach services a command may look up, with the same merge rule.
+mach-services = []
+# Extra credential paths to deny. The built-in denies always apply and cannot
+# be removed, because a config that could remove them would weaken the boundary.
+credential-denies = []
 ```
 
 Prefer pinning the image by digest (`image = "ubuntu@sha256:..."`): a tag can
 change under you, and the image is the sandbox's confinement boundary.
 
-Every backend owns its section: Docker accepts `image`, `memory-mb`, `cpus`,
-`pids-limit`, `cap-add` and `max-transfer-bytes`, and a key Docker does not
-define is rejected by name rather than ignored. Granting a capability widens
+Every backend owns its section. Docker accepts `image`, `memory-mb`, `cpus`,
+`pids-limit`, `cap-add` and `max-transfer-bytes`. Bubblewrap accepts `memory-mb`,
+`tasks`, `network` and `shell`. Seatbelt accepts `network`, `baseline`,
+`baseline-reads`, `mach-services` and `credential-denies`. A key a backend does
+not define is rejected by name rather than ignored. Granting a capability widens
 what code in the sandbox can do; add only the ones an image genuinely needs.
 `litterbox backends` reports what this machine can run, marks the selected
 backend, and explains anything that will not start.
