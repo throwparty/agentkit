@@ -245,9 +245,9 @@ mod tests {
         let host = host();
         assert_eq!(payload.state(&host), PayloadState::Live);
 
-        let mut paused = payload.clone();
-        paused.paused = true;
-        assert_eq!(paused.state(&host), PayloadState::Paused);
+        host.set_state(42, crate::backends::seatbelt::host::PidState::Stopped);
+        assert_eq!(payload.state(&host), PayloadState::Paused);
+        host.set_state(42, crate::backends::seatbelt::host::PidState::Running);
 
         host.set_state(42, crate::backends::seatbelt::host::PidState::Zombie);
         assert_eq!(payload.state(&host), PayloadState::Missing);

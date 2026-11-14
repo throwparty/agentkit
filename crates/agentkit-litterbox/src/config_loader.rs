@@ -377,11 +377,18 @@ fn read_config_file(path: &Path) -> Result<Option<String>, ConfigError> {
 
 /// Reject a configuration path reached through any symlinked component.
 fn reject_symlinked_components(path: &Path) -> Result<(), ConfigError> {
+    // macOS aliases its system directories: /var, /tmp and /etc are symlinks
+    // into /private. They are not a user-controlled indirection, so the guard
+    // skips them and still refuses every other symlinked component.
+    const SYSTEM_ALIASES: &[&str] = &["/var", "/tmp", "/etc"];
     let mut current = PathBuf::new();
     for component in path.components() {
         current.push(component);
         if let Ok(metadata) = fs::symlink_metadata(&current)
             && metadata.file_type().is_symlink()
+            && !SYSTEM_ALIASES
+                .iter()
+                .any(|alias| current == Path::new(alias))
         {
             return Err(ConfigError::ParseError(format!(
                 "{} is reached through a symlinked path component; use a regular file",
