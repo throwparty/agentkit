@@ -2,21 +2,23 @@
 
 ## Tasks
 
-### T-001: Add the backend skeleton, configuration and path rules
+### T-001: [x] Add the backend skeleton, configuration and path rules
 
 Create `src/backends/seatbelt/` with `mod.rs` holding `BACKEND = 'seatbelt'`, `config.rs` typing the five keys with `deny_unknown_fields`, `defaults.rs` holding the baseline, mach and credential tables, and `path.rs` expanding `~/`, normalising and validating paths. `baseline = 'default'` merges additions; `baseline = 'none'` uses the lists exactly.
+
 
 | Field | Value |
 |-------|-------|
 | Success Criteria | An unknown key fails as Misconfigured and names the key. `baseline = 'none'` emits no default read or mach rule. A relative path and a malformed service or tag fail as Misconfigured. `~/` expands with the real home from the password database, not `HOME`. A duplicate keeps its first occurrence. |
 | Complexity | 🟢 Low |
 | Effort | 3-5h |
-| Depends On | |
+| Depends On |  |
 | References | backend-registration,profile-baseline,fail-closed,platform-requirements |
 
 ### T-002: Render the profile and its parameter table
 
 Add `policy.rs` with the typed layers, the writer and parameter interning. Emit the fixed layer order from the plan, put every dynamic value in the parameter table as `p0..pN`, compute metadata ancestors as literals, and enforce the 60 KiB and 4096-parameter guards.
+
 
 | Field | Value |
 |-------|-------|
@@ -30,6 +32,7 @@ Add `policy.rs` with the typed layers, the writer and parameter interning. Emit 
 
 Add fixtures for the empty request, one read, two reads sharing an ancestor, a collapsed closure, the denied and host postures, and a loopback endpoint. Each fixture asserts the text with parameter names and the full parameter table.
 
+
 | Field | Value |
 |-------|-------|
 | Success Criteria | Each golden case fails when the text or the parameter table changes. A second test removes one invariant at a time, such as the root literal, the metadata rule or the last-position denies, and asserts the text changes. The credential denies are the final layer. The host posture emits no remote filter, and the loopback posture emits one per endpoint. |
@@ -41,6 +44,7 @@ Add fixtures for the empty request, one read, two reads sharing an ancestor, a c
 ### T-004: Implement the frame codec
 
 Add `protocol.rs` with the 12-byte header, the nine frame kinds, and encode and decode for Config, Exec, Stdout, Stderr, Exit, Error, Status and StatusReply. Check magic, version, kind and length before allocating.
+
 
 | Field | Value |
 |-------|-------|
@@ -54,6 +58,7 @@ Add `protocol.rs` with the 12-byte header, the nine frame kinds, and encode and 
 
 Add `host.rs` with the `Host` trait covering pid existence, state, start time, group, signal, socket connect, peer uid, real home, realpath, clock and `proc_pidinfo`. Implement `SystemHost` over libc and the file system, and `FakeHost` over a table.
 
+
 | Field | Value |
 |-------|-------|
 | Success Criteria | Every host read in the backend goes through the trait, and a test asserts the backend names no direct host call. `FakeHost` answers each method. `SystemHost` reports the holder start time from `proc_pidinfo(PROC_PIDTBSDINFO)` and a peer uid from `getpeereid`, failing closed when either call fails. |
@@ -65,6 +70,7 @@ Add `host.rs` with the `Host` trait covering pid existence, state, start time, g
 ### T-006: Validate and collapse contributed mounts
 
 Add `mounts.rs` rejecting a path that is not absolute, not resolvable, a socket, device or FIFO, the workspace or its ancestor, a protected root, the metadata or state directory, or a credential path. Collapse a step above 64 paths to its longest common ancestor, deduped, and return the ancestor chain for metadata.
+
 
 | Field | Value |
 |-------|-------|
@@ -78,6 +84,7 @@ Add `mounts.rs` rejecting a path that is not absolute, not resolvable, a socket,
 
 Add `environment.rs` folding contributions through `Contributions::environment_for(workspace)`, withholding a value with an absolute element outside the workspace and grants, creating `workspace/tmp`, and setting `HOME`, `TMPDIR` and `PWD`. Resolve the real home through `Host`, not `HOME`.
 
+
 | Field | Value |
 |-------|-------|
 | Success Criteria | A later step overrides an earlier one. A variable naming an ungranted path is removed and its name is recorded as removed. A workspace-rooted value is rebased. `HOME`, `TMPDIR` and `PWD` are set and recorded, and `PATH` is only what steps contributed. A sandbox with no steps has no `PATH`. `workspace/tmp` exists before the first command. |
@@ -89,6 +96,7 @@ Add `environment.rs` folding contributions through `Contributions::environment_f
 ### T-008: Add the record payload and its validation
 
 Add `payload.rs` with `PayloadV1`: version, helper path, holder pid and start time, socket path, both workspace paths, the post-collapse reads, collapsed step entries, provenance, posture, tag and paused. Refuse a higher version as unreadable and a lower or incomplete one as Unavailable with the delete-and-recreate remedy.
+
 
 | Field | Value |
 |-------|-------|
@@ -102,6 +110,7 @@ Add `payload.rs` with `PayloadV1`: version, helper path, holder pid and start ti
 
 Add `workspace.rs` copying the staged tree into the state directory with each component opened without following a link, refusing symlinks, devices and FIFOs. Implement upload and download through a directory descriptor under the shared transfer timeouts, preserving modes and symlink entries.
 
+
 | Field | Value |
 |-------|-------|
 | Success Criteria | A tree with a symlink, device or FIFO is refused and the path is named. A source path with spaces copies byte for byte. Upload writes only inside the workspace and download reads only from it. A download round trip preserves modes and symlinks. |
@@ -113,6 +122,7 @@ Add `workspace.rs` copying the staged tree into the state directory with each co
 ### T-010: Start the holder, render once and accept configuration
 
 Add the helper binary and its `--probe` and `--hold` modes. `--probe` applies `(version 1)(deny default)` with an empty parameter array. `--hold` calls `setsid`, binds the supplied 0600 socket in the user temp directory, opens `holder.log`, accepts one Config frame, renders through `policy.rs`, and replies Ready or a policy error.
+
 
 | Field | Value |
 |-------|-------|
@@ -126,6 +136,7 @@ Add the helper binary and its `--probe` and `--hold` modes. `--probe` applies `(
 
 Implement the poll loop: accept Exec frames, fork, confine the child with `sandbox_init_with_parameters` and exec with the configured environment and workspace, stream stdout and stderr, cap each stream at 1 MiB while draining, and return Exit or Error. Kill the child on client disconnect and serve at most 64 concurrent commands.
 
+
 | Field | Value |
 |-------|-------|
 | Success Criteria | A command's output and exit status round trip. A command that writes more than 1 MiB is truncated and flagged, and does not block. Apply, policy and exec failures return distinct error codes. Two concurrent commands complete without mixing their output. A client that disconnects does not leave the child running. |
@@ -137,6 +148,7 @@ Implement the poll loop: accept Exec frames, fork, confine the child with `sandb
 ### T-012: Implement create
 
 Assemble create: validate tag and real home, merge environment, validate and collapse mounts, create the state directory and workspace, generate the socket path, spawn the helper, wait for Ready, run sandbox steps through the shared runner, and write the payload. Refuse a duplicate as Conflict and declared ports as Unsupported.
+
 
 | Field | Value |
 |-------|-------|
@@ -150,6 +162,7 @@ Assemble create: validate tag and real home, merge environment, validate and col
 
 Add the backend exec path: validate the record, refuse while paused as Denied, connect, send Exec, decode frames, append up to the shared output cap, map errors, and convert output lossily to `Execution`.
 
+
 | Field | Value |
 |-------|-------|
 | Success Criteria | A command against a live sandbox returns its exit status and both streams. A paused sandbox refuses with Denied. A missing holder is NotFound; a start-time mismatch is Denied; a busy holder is a named failure. Output above the cap is truncated and reported, not buffered without bound. |
@@ -161,6 +174,7 @@ Add the backend exec path: validate the record, refuse while paused as Denied, c
 ### T-014: Implement pause, resume, delete and status
 
 Add the lifecycle facet: pause and resume signal the recorded group after checking pid, start time and zombie state; delete signals a matching or absent holder, refuses a recycled pid, removes the socket, log, workspace and state, and succeeds when the holder is gone; status proves the socket for an active holder.
+
 
 | Field | Value |
 |-------|-------|
@@ -174,6 +188,7 @@ Add the lifecycle facet: pause and resume signal the recorded group after checki
 
 Inspect reports the posture, workspace, provenance, status and no forwards, using Status only when the record is active. List rebuilds each payload under the state root for both scopes and reports a corrupt one. Capabilities report pause and resume available, limits and forwarding unsupported, and both contribution sorts available.
 
+
 | Field | Value |
 |-------|-------|
 | Success Criteria | Inspect reports Active, Paused, Missing and Error in the documented cases. A corrupt payload is reported, not dropped. Machine-wide listing covers every project beneath the state root. Capabilities name limits and forwarding as unsupported with a reason. |
@@ -185,6 +200,7 @@ Inspect reports the posture, workspace, provenance, status and no forwards, usin
 ### T-016: Implement readiness
 
 Report five checks: macOS, `dlsym` of `sandbox_init_with_parameters`, helper trust, probe exit, and a writable state-root parent. Each carries a state, reason and remedy. No check confines the caller or starts a holder.
+
 
 | Field | Value |
 |-------|-------|
@@ -198,6 +214,7 @@ Report five checks: macOS, `dlsym` of `sandbox_init_with_parameters`, helper tru
 
 Add the registry entry under `cfg(target_os = 'macos')` with the lifecycle facet and no limits or forwarding, a constructor that parses the section, and tests that the entry exists on macOS and is absent elsewhere. Keep DEFAULT as docker.
 
+
 | Field | Value |
 |-------|-------|
 | Success Criteria | `litterbox backends` lists seatbelt beside docker on macOS and marks the selected one. A project that does not list seatbelt is refused before create. The registry tests pass, and the two tests that use a name no backend has still pass. |
@@ -209,6 +226,7 @@ Add the registry entry under `cfg(target_os = 'macos')` with the lifecycle facet
 ### T-018: Map errors and diagnostics
 
 Map helper error codes, connect failures, record outcomes and config failures to contract errors, and distinguish a setup failure, an apply failure and a workload failure. Log the helper argv at debug with no environment value, and document the denial tag query.
+
 
 | Field | Value |
 |-------|-------|
@@ -222,6 +240,7 @@ Map helper error codes, connect failures, record outcomes and config failures to
 
 Extend the backends page and the configuration reference with seatbelt: the five keys and their defaults, the baseline modes, readiness, both postures, refused ports, no limits, no `PATH` without steps, and no toolchain knowledge. State that a sandbox with no steps runs only what the baseline permits.
 
+
 | Field | Value |
 |-------|-------|
 | Success Criteria | The backends page no longer says Docker is the only mechanism. The configuration reference names `network`, `baseline`, `baseline-reads`, `mach-services` and `credential-denies`. The documented reach matches inspection. The page explains the socket in the user temp directory and the holder log. |
@@ -233,6 +252,7 @@ Extend the backends page and the configuration reference with seatbelt: the five
 ### T-020: Declare the architecture rules
 
 Add an arch-lint scope for `src/backends/seatbelt/**` with deny edges to the orchestrator, the command line, MCP, persistence, SCM and provision preparation, and a negative fixture for each edge.
+
 
 | Field | Value |
 |-------|-------|
@@ -246,6 +266,7 @@ Add an arch-lint scope for `src/backends/seatbelt/**` with deny edges to the orc
 
 Write the unit tests over `FakeHost`, the renderer and the codec, and the ignored host suite. The host suite covers create with no steps, exact environment, write outside denied, credential read denied, a descendant confined, a 238-path contribution collapsing, pause and resume, a background command, delete, the `setsid` escape, a holder killed out of band, two concurrent commands, the status probe and the readiness probe.
 
+
 | Field | Value |
 |-------|-------|
 | Success Criteria | The unit suite runs without a sandbox. The host suite skips with the missing requirement named where Seatbelt is absent, and treats unavailable as failure on a dedicated runner. Every acceptance criterion in the spec maps to at least one test. No contributed value appears in a record, the state directory or a log. |
@@ -257,6 +278,7 @@ Write the unit tests over `FakeHost`, the renderer and the codec, and the ignore
 ### T-022: Add the contributed toolchain test
 
 Add an ignored host test that compiles a C file with the Xcode installation root and the licence plist contributed as read mounts, and a second run without them that fails with a named denial.
+
 
 | Field | Value |
 |-------|-------|
@@ -270,6 +292,7 @@ Add an ignored host test that compiles a C file with the Xcode installation root
 
 Add the macOS job or runner selection for the module and integration targets, with `paths:` triggers and unavailable treated as failure. Reuse `nix develop ./nix` on `aarch64-darwin`.
 
+
 | Field | Value |
 |-------|-------|
 | Success Criteria | The job selects `-p agentkit-litterbox --lib backends::seatbelt` and `--test seatbelt`. It runs on the triggers that touch the backend or the crate. A missing Seatbelt primitive fails the job rather than skipping it. Ubuntu keeps `cargo test --locked`. |
@@ -277,3 +300,4 @@ Add the macOS job or runner selection for the module and integration targets, wi
 | Effort | 2-3h |
 | Depends On | T-021 |
 | References | test-coverage,platform-requirements |
+

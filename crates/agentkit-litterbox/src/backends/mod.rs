@@ -8,6 +8,8 @@ pub(crate) mod bubblewrap;
 pub(crate) mod docker;
 pub(crate) mod environment;
 pub mod registry;
+#[cfg(target_os = "macos")]
+pub(crate) mod seatbelt;
 pub(crate) mod shared;
 pub(crate) mod transfer;
 
