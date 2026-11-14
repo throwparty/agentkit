@@ -1,6 +1,6 @@
 mod policy;
 
-use std::ffi::{c_char, CStr, CString};
+use std::ffi::{c_char, CStr, CString, OsString};
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -33,6 +33,8 @@ options:
   --connect <host:port>   egress grant (repeatable; localhost or * only)
   --tag <name>            sandbox identifier for denial attribution
   --dump-profile <path>   write the applied profile to a file
+  --env-file <path>       NUL-separated KEY=VALUE environment, applied instead
+                          of the built-in allowlist
   -h, --help              this text
 
 The command runs in its own session and process group: signal the group, not
@@ -47,6 +49,7 @@ struct Args {
     connects: Vec<String>,
     tag: String,
     dump_profile: Option<PathBuf>,
+    env_file: Option<PathBuf>,
     command: Vec<String>,
 }
 
@@ -57,6 +60,7 @@ fn parse() -> Result<Args, String> {
     let mut connects = Vec::new();
     let mut tag = "litterbox".to_string();
     let mut dump_profile = None;
+    let mut env_file = None;
     let mut command = Vec::new();
 
     let mut args = std::env::args().skip(1);
@@ -75,6 +79,9 @@ fn parse() -> Result<Args, String> {
             "--write" => writes.push(PathBuf::from(args.next().ok_or("--write needs a path")?)),
             "--connect" => connects.push(args.next().ok_or("--connect needs host:port")?),
             "--tag" => tag = args.next().ok_or("--tag needs a name")?,
+            "--env-file" => {
+                env_file = Some(PathBuf::from(args.next().ok_or("--env-file needs a path")?))
+            }
             "--dump-profile" => {
                 dump_profile = Some(PathBuf::from(
                     args.next().ok_or("--dump-profile needs a path")?,
@@ -95,6 +102,7 @@ fn parse() -> Result<Args, String> {
         connects,
         tag,
         dump_profile,
+        env_file,
         command,
     })
 }
@@ -116,12 +124,58 @@ fn apply(profile: &str) -> Result<(), String> {
     Err(message)
 }
 
-/// Rebuild the child environment rather than inheriting it: credentials in
-/// the parent's environment are not covered by path denies. HOME stays real so
-/// the credential denies are the only thing standing between the child and
-/// them; TMPDIR is redirected into the workspace, which is the only scratch
-/// area the profile grants.
-fn child_environment(workspace: &Path) -> Vec<(String, String)> {
+/// Read the environment the provider resolved: NUL-separated `KEY=VALUE`
+/// records, the encoding `env -0` writes and `/proc/self/environ` uses.
+///
+/// The values reach `execve` as the bytes they arrived as. An environment is a
+/// byte string rather than UTF-8, so decoding it here would substitute any byte
+/// the provider legitimately passed.
+fn read_env_file(path: &Path) -> Result<Vec<(OsString, OsString)>, String> {
+    use std::os::unix::ffi::OsStringExt;
+
+    if !path.is_absolute() {
+        return Err(format!("{} is not absolute", path.display()));
+    }
+    let bytes = std::fs::read(path).map_err(|err| format!("{}: {err}", path.display()))?;
+    let mut variables = Vec::new();
+    for record in bytes.split(|byte| *byte == 0) {
+        if record.is_empty() {
+            continue;
+        }
+        let Some(equals) = record.iter().position(|byte| *byte == b'=') else {
+            return Err(format!(
+                "{}: {} is not KEY=VALUE",
+                path.display(),
+                String::from_utf8_lossy(record)
+            ));
+        };
+        let (name, value) = (&record[..equals], &record[equals + 1..]);
+        let valid = !name.is_empty()
+            && (name[0].is_ascii_alphabetic() || name[0] == b'_')
+            && name
+                .iter()
+                .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'_');
+        if !valid {
+            return Err(format!(
+                "{}: {} is not a valid variable name",
+                path.display(),
+                String::from_utf8_lossy(name)
+            ));
+        }
+        variables.push((
+            OsString::from_vec(name.to_vec()),
+            OsString::from_vec(value.to_vec()),
+        ));
+    }
+    Ok(variables)
+}
+
+/// Rebuild the child environment rather than inheriting it: credentials in the
+/// parent's environment are not covered by path denies. HOME stays real so the
+/// credential denies are the only thing standing between the child and them;
+/// TMPDIR is redirected into the workspace, which is the only scratch area the
+/// profile grants.
+fn child_environment(workspace: &Path) -> Vec<(OsString, OsString)> {
     const FORWARD: &[&str] = &[
         "PATH",
         "HOME",
@@ -135,12 +189,12 @@ fn child_environment(workspace: &Path) -> Vec<(String, String)> {
     let mut environment = Vec::new();
     for name in FORWARD {
         if let Some(value) = std::env::var_os(name) {
-            environment.push((name.to_string(), value.to_string_lossy().into_owned()));
+            environment.push((OsString::from(name), value));
         }
     }
 
     let tmp = workspace.join("tmp");
-    environment.push(("TMPDIR".to_string(), tmp.to_string_lossy().into_owned()));
+    environment.push((OsString::from("TMPDIR"), tmp.into_os_string()));
     environment
 }
 
@@ -305,7 +359,16 @@ fn main() {
         std::process::exit(FAIL_CLOSED);
     }
 
-    let environment = child_environment(policy.workspace());
+    let environment = match &args.env_file {
+        Some(path) => match read_env_file(path) {
+            Ok(environment) => environment,
+            Err(err) => {
+                eprintln!("sandbox-custom: --env-file: {err}");
+                std::process::exit(USAGE);
+            }
+        },
+        None => child_environment(policy.workspace()),
+    };
     // The profile cannot revoke an open descriptor; close everything above
     // stdio before handing control to the command.
     // closefrom() is not in this SDK's libSystem; bound the sweep instead.
