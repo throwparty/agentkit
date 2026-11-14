@@ -106,7 +106,7 @@ Add `payload.rs` with `PayloadV1`: version, helper path, holder pid and start ti
 | Depends On | T-001,T-005 |
 | References | record-payload,stale-group,pid-reuse |
 
-### T-009: Materialise the workspace and transfer files
+### T-009: [x] Materialise the workspace and transfer files
 
 Add `workspace.rs` copying the staged tree into the state directory with each component opened without following a link, refusing symlinks, devices and FIFOs. Implement upload and download through a directory descriptor under the shared transfer timeouts, preserving modes and symlink entries.
 
@@ -197,7 +197,7 @@ Inspect reports the posture, workspace, provenance, status and no forwards, usin
 | Depends On | T-012,T-014 |
 | References | record-payload,stale-group,lifecycle-works,backends-listing |
 
-### T-016: Implement readiness
+### T-016: [x] Implement readiness
 
 Report five checks: macOS, `dlsym` of `sandbox_init_with_parameters`, helper trust, probe exit, and a writable state-root parent. Each carries a state, reason and remedy. No check confines the caller or starts a holder.
 
