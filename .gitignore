@@ -21,3 +21,6 @@ adrs/**/target/
 
 # The machine-owned local override is never committed
 .agentkit/litterbox/config.local.toml
+
+# Probe build artefacts
+/maps/**/evidence/build/
