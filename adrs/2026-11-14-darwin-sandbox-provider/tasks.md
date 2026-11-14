@@ -1,0 +1,279 @@
+# Darwin Seatbelt Provider Tasks
+
+## Tasks
+
+### T-001: Add the backend skeleton, configuration and path rules
+
+Create `src/backends/seatbelt/` with `mod.rs` holding `BACKEND = 'seatbelt'`, `config.rs` typing the five keys with `deny_unknown_fields`, `defaults.rs` holding the baseline, mach and credential tables, and `path.rs` expanding `~/`, normalising and validating paths. `baseline = 'default'` merges additions; `baseline = 'none'` uses the lists exactly.
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | An unknown key fails as Misconfigured and names the key. `baseline = 'none'` emits no default read or mach rule. A relative path and a malformed service or tag fail as Misconfigured. `~/` expands with the real home from the password database, not `HOME`. A duplicate keeps its first occurrence. |
+| Complexity | 🟢 Low |
+| Effort | 3-5h |
+| Depends On | |
+| References | backend-registration,profile-baseline,fail-closed,platform-requirements |
+
+### T-002: Render the profile and its parameter table
+
+Add `policy.rs` with the typed layers, the writer and parameter interning. Emit the fixed layer order from the plan, put every dynamic value in the parameter table as `p0..pN`, compute metadata ancestors as literals, and enforce the 60 KiB and 4096-parameter guards.
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | The writer emits the documented text byte for byte. No value is escaped, and every path, tag, service and endpoint appears only in the parameter table. The root literal is present in every profile. A profile with no `/nix` value contains no store path. The guards return `TooLarge` and `TooManyParameters` before any call to `sandbox_init_with_parameters`. |
+| Complexity | 🔴 High |
+| Effort | 8-12h |
+| Depends On | T-001 |
+| References | profile-baseline,credential-denies,egress-posture,golden-profiles |
+
+### T-003: Add golden profiles and their invariants
+
+Add fixtures for the empty request, one read, two reads sharing an ancestor, a collapsed closure, the denied and host postures, and a loopback endpoint. Each fixture asserts the text with parameter names and the full parameter table.
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | Each golden case fails when the text or the parameter table changes. A second test removes one invariant at a time, such as the root literal, the metadata rule or the last-position denies, and asserts the text changes. The credential denies are the final layer. The host posture emits no remote filter, and the loopback posture emits one per endpoint. |
+| Complexity | 🟡 Medium |
+| Effort | 3-4h |
+| Depends On | T-002 |
+| References | golden-profiles,profile-baseline,credential-denies,egress-postures |
+
+### T-004: Implement the frame codec
+
+Add `protocol.rs` with the 12-byte header, the nine frame kinds, and encode and decode for Config, Exec, Stdout, Stderr, Exit, Error, Status and StatusReply. Check magic, version, kind and length before allocating.
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | A round trip for every kind preserves the payload. A short header, bad magic, bad version, unknown kind and over-length frame each return a protocol error. Argc above 4096, more than 4096 environment entries and a string above 64 KiB are refused. The module names no `crate::` item. |
+| Complexity | 🟡 Medium |
+| Effort | 4-6h |
+| Depends On | T-001 |
+| References | helper-binary,exec-helper,fail-closed,profile-rejected |
+
+### T-005: Add the host seam
+
+Add `host.rs` with the `Host` trait covering pid existence, state, start time, group, signal, socket connect, peer uid, real home, realpath, clock and `proc_pidinfo`. Implement `SystemHost` over libc and the file system, and `FakeHost` over a table.
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | Every host read in the backend goes through the trait, and a test asserts the backend names no direct host call. `FakeHost` answers each method. `SystemHost` reports the holder start time from `proc_pidinfo(PROC_PIDTBSDINFO)` and a peer uid from `getpeereid`, failing closed when either call fails. |
+| Complexity | 🟡 Medium |
+| Effort | 3-4h |
+| Depends On | T-001 |
+| References | test-coverage,fail-closed,record-payload |
+
+### T-006: Validate and collapse contributed mounts
+
+Add `mounts.rs` rejecting a path that is not absolute, not resolvable, a socket, device or FIFO, the workspace or its ancestor, a protected root, the metadata or state directory, or a credential path. Collapse a step above 64 paths to its longest common ancestor, deduped, and return the ancestor chain for metadata.
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | A step with 64 paths stays as it is and 65 collapses. A common ancestor of `/` is refused, and so is a collapsed set above 64, naming the step and the count. A symlink that resolves outside the grant is refused and named. Per-step collapse leaves other steps unchanged. |
+| Complexity | 🟡 Medium |
+| Effort | 4-6h |
+| Depends On | T-001,T-005 |
+| References | mounts-collapse,credential-denies,symlinked-contribution,fail-closed |
+
+### T-007: Merge the environment and withhold ungranted values
+
+Add `environment.rs` folding contributions through `Contributions::environment_for(workspace)`, withholding a value with an absolute element outside the workspace and grants, creating `workspace/tmp`, and setting `HOME`, `TMPDIR` and `PWD`. Resolve the real home through `Host`, not `HOME`.
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | A later step overrides an earlier one. A variable naming an ungranted path is removed and its name is recorded as removed. A workspace-rooted value is rebased. `HOME`, `TMPDIR` and `PWD` are set and recorded, and `PATH` is only what steps contributed. A sandbox with no steps has no `PATH`. `workspace/tmp` exists before the first command. |
+| Complexity | 🟡 Medium |
+| Effort | 3-4h |
+| Depends On | T-001,T-005 |
+| References | environment-render,environment-withholding,environment-exact,standalone-sandbox,no-steps |
+
+### T-008: Add the record payload and its validation
+
+Add `payload.rs` with `PayloadV1`: version, helper path, holder pid and start time, socket path, both workspace paths, the post-collapse reads, collapsed step entries, provenance, posture, tag and paused. Refuse a higher version as unreadable and a lower or incomplete one as Unavailable with the delete-and-recreate remedy.
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | A round trip preserves every field. A higher version is unreadable; a lower version or a missing field is Unavailable. The file is 0600 in a 0700 directory. A record with no environment value exists nowhere in the payload. Validation reports a missing pid, a zombie, a start-time mismatch and a bad socket path. |
+| Complexity | 🟢 Low |
+| Effort | 2-3h |
+| Depends On | T-001,T-005 |
+| References | record-payload,stale-group,pid-reuse |
+
+### T-009: Materialise the workspace and transfer files
+
+Add `workspace.rs` copying the staged tree into the state directory with each component opened without following a link, refusing symlinks, devices and FIFOs. Implement upload and download through a directory descriptor under the shared transfer timeouts, preserving modes and symlink entries.
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | A tree with a symlink, device or FIFO is refused and the path is named. A source path with spaces copies byte for byte. Upload writes only inside the workspace and download reads only from it. A download round trip preserves modes and symlinks. |
+| Complexity | 🟡 Medium |
+| Effort | 4-6h |
+| Depends On | T-001,T-005 |
+| References | workspace-direct,symlinked-contribution,fail-closed |
+
+### T-010: Start the holder, render once and accept configuration
+
+Add the helper binary and its `--probe` and `--hold` modes. `--probe` applies `(version 1)(deny default)` with an empty parameter array. `--hold` calls `setsid`, binds the supplied 0600 socket in the user temp directory, opens `holder.log`, accepts one Config frame, renders through `policy.rs`, and replies Ready or a policy error.
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | The probe exits 0 on this host and reports the `sandbox_init_with_parameters` message on failure. A helper that cannot `setsid` or bind exits non-zero and create fails. A Config frame with an unresolvable path returns a policy error and no Ready. The helper links only libc and std. |
+| Complexity | 🟡 Medium |
+| Effort | 4-6h |
+| Depends On | T-002,T-004 |
+| References | helper-binary,readiness-checks,audit-surface,profile-rejected,fail-closed |
+
+### T-011: Execute commands through the holder
+
+Implement the poll loop: accept Exec frames, fork, confine the child with `sandbox_init_with_parameters` and exec with the configured environment and workspace, stream stdout and stderr, cap each stream at 1 MiB while draining, and return Exit or Error. Kill the child on client disconnect and serve at most 64 concurrent commands.
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | A command's output and exit status round trip. A command that writes more than 1 MiB is truncated and flagged, and does not block. Apply, policy and exec failures return distinct error codes. Two concurrent commands complete without mixing their output. A client that disconnects does not leave the child running. |
+| Complexity | 🔴 High |
+| Effort | 8-12h |
+| Depends On | T-010 |
+| References | exec-helper,cost,concurrent-commands,fail-closed,profile-rejected |
+
+### T-012: Implement create
+
+Assemble create: validate tag and real home, merge environment, validate and collapse mounts, create the state directory and workspace, generate the socket path, spawn the helper, wait for Ready, run sandbox steps through the shared runner, and write the payload. Refuse a duplicate as Conflict and declared ports as Unsupported.
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | A create with no steps returns a record and the holder is ready. A duplicate is Conflict before any process starts. A declared port is Unsupported and leaves no state directory. A failure after the state directory exists kills the holder and removes it. The payload records the collapsed entries and no environment value. |
+| Complexity | 🔴 High |
+| Effort | 6-8h |
+| Depends On | T-006,T-007,T-008,T-009,T-010 |
+| References | helper-binary,mounts-collapse,environment-render,record-payload,setup-diagnostics,fail-closed,standalone-sandbox,no-steps,closure-collapse |
+
+### T-013: Implement exec from the backend
+
+Add the backend exec path: validate the record, refuse while paused as Denied, connect, send Exec, decode frames, append up to the shared output cap, map errors, and convert output lossily to `Execution`.
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | A command against a live sandbox returns its exit status and both streams. A paused sandbox refuses with Denied. A missing holder is NotFound; a start-time mismatch is Denied; a busy holder is a named failure. Output above the cap is truncated and reported, not buffered without bound. |
+| Complexity | 🟡 Medium |
+| Effort | 4-6h |
+| Depends On | T-011,T-012 |
+| References | exec-helper,environment-exact,lifecycle-works,concurrent-commands |
+
+### T-014: Implement pause, resume, delete and status
+
+Add the lifecycle facet: pause and resume signal the recorded group after checking pid, start time and zombie state; delete signals a matching or absent holder, refuses a recycled pid, removes the socket, log, workspace and state, and succeeds when the holder is gone; status proves the socket for an active holder.
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | A command writing every 50ms stops after pause and continues after resume, and inspection reports the state. A background server whose shell exits is stopped and killed with the sandbox. A `setsid` child survives and stays confined. A recycled pid is never signalled. Delete after an out-of-band kill removes the state directory. Paused inspection does not wait on a stopped holder. |
+| Complexity | 🔴 High |
+| Effort | 5-7h |
+| Depends On | T-012 |
+| References | lifecycle-group,lifecycle-works,setsid-escape,stale-group,pid-reuse |
+
+### T-015: Implement inspect, list and capabilities
+
+Inspect reports the posture, workspace, provenance, status and no forwards, using Status only when the record is active. List rebuilds each payload under the state root for both scopes and reports a corrupt one. Capabilities report pause and resume available, limits and forwarding unsupported, and both contribution sorts available.
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | Inspect reports Active, Paused, Missing and Error in the documented cases. A corrupt payload is reported, not dropped. Machine-wide listing covers every project beneath the state root. Capabilities name limits and forwarding as unsupported with a reason. |
+| Complexity | 🟡 Medium |
+| Effort | 3-4h |
+| Depends On | T-012,T-014 |
+| References | record-payload,stale-group,lifecycle-works,backends-listing |
+
+### T-016: Implement readiness
+
+Report five checks: macOS, `dlsym` of `sandbox_init_with_parameters`, helper trust, probe exit, and a writable state-root parent. Each carries a state, reason and remedy. No check confines the caller or starts a holder.
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | On this host every check is available. A removed helper reports Unavailable and names it, and a helper that is group or world writable is refused. A probe whose profile is rejected reports the message. A missing symbol is Unavailable. Create refuses on any unavailable check. |
+| Complexity | 🟡 Medium |
+| Effort | 3-4h |
+| Depends On | T-005,T-010 |
+| References | readiness-checks,readiness-refuses,symbol-removed,platform-requirements |
+
+### T-017: Register the backend and construct it
+
+Add the registry entry under `cfg(target_os = 'macos')` with the lifecycle facet and no limits or forwarding, a constructor that parses the section, and tests that the entry exists on macOS and is absent elsewhere. Keep DEFAULT as docker.
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | `litterbox backends` lists seatbelt beside docker on macOS and marks the selected one. A project that does not list seatbelt is refused before create. The registry tests pass, and the two tests that use a name no backend has still pass. |
+| Complexity | 🟢 Low |
+| Effort | 2-3h |
+| Depends On | T-012,T-013,T-014,T-015,T-016 |
+| References | backend-registration,backends-listing,other-backends-unchanged,platform-requirements |
+
+### T-018: Map errors and diagnostics
+
+Map helper error codes, connect failures, record outcomes and config failures to contract errors, and distinguish a setup failure, an apply failure and a workload failure. Log the helper argv at debug with no environment value, and document the denial tag query.
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | Every row of the error mapping table has a test. A workload's own exit status is returned unchanged. An apply failure names the `sandbox_init_with_parameters` message; a policy failure is Misconfigured; an exec failure names the command. No log line or record holds a contributed value. |
+| Complexity | 🟡 Medium |
+| Effort | 2-3h |
+| Depends On | T-012,T-013 |
+| References | setup-diagnostics,denial-diagnostics,fail-closed,profile-rejected |
+
+### T-019: Document the backend
+
+Extend the backends page and the configuration reference with seatbelt: the five keys and their defaults, the baseline modes, readiness, both postures, refused ports, no limits, no `PATH` without steps, and no toolchain knowledge. State that a sandbox with no steps runs only what the baseline permits.
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | The backends page no longer says Docker is the only mechanism. The configuration reference names `network`, `baseline`, `baseline-reads`, `mach-services` and `credential-denies`. The documented reach matches inspection. The page explains the socket in the user temp directory and the holder log. |
+| Complexity | 🟢 Low |
+| Effort | 3-4h |
+| Depends On | T-017 |
+| References | backend-documentation,egress-postures,developer-directory,no-toolchain,backends-listing |
+
+### T-020: Declare the architecture rules
+
+Add an arch-lint scope for `src/backends/seatbelt/**` with deny edges to the orchestrator, the command line, MCP, persistence, SCM and provision preparation, and a negative fixture for each edge.
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | `arch-lint check` passes. Each new deny edge has a fixture that fails when the edge is removed. The helper binary target is outside the scope or has its own rule that keeps it free of the crate. |
+| Complexity | 🟢 Low |
+| Effort | 1-2h |
+| Depends On | T-017 |
+| References | audit-surface,fail-closed |
+
+### T-021: Cover the unit and host suites
+
+Write the unit tests over `FakeHost`, the renderer and the codec, and the ignored host suite. The host suite covers create with no steps, exact environment, write outside denied, credential read denied, a descendant confined, a 238-path contribution collapsing, pause and resume, a background command, delete, the `setsid` escape, a holder killed out of band, two concurrent commands, the status probe and the readiness probe.
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | The unit suite runs without a sandbox. The host suite skips with the missing requirement named where Seatbelt is absent, and treats unavailable as failure on a dedicated runner. Every acceptance criterion in the spec maps to at least one test. No contributed value appears in a record, the state directory or a log. |
+| Complexity | 🔴 High |
+| Effort | 10-14h |
+| Depends On | T-012,T-013,T-014,T-015,T-016,T-017 |
+| References | test-coverage,isolation-holds,closure-collapse,lifecycle-works,stale-group,concurrent-commands,standalone-sandbox,environment-exact,no-toolchain |
+
+### T-022: Add the contributed toolchain test
+
+Add an ignored host test that compiles a C file with the Xcode installation root and the licence plist contributed as read mounts, and a second run without them that fails with a named denial.
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | With both paths contributed the compile succeeds and the binary runs. Without them the command fails and the profile contains no developer path. A host without Xcode skips the test with the missing requirement named. The backend never runs `xcode-select`. |
+| Complexity | 🟡 Medium |
+| Effort | 2-3h |
+| Depends On | T-021 |
+| References | developer-directory,developer-directory-optional,xcode-licence,compiler-temp |
+
+### T-023: Select the tests in CI
+
+Add the macOS job or runner selection for the module and integration targets, with `paths:` triggers and unavailable treated as failure. Reuse `nix develop ./nix` on `aarch64-darwin`.
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | The job selects `-p agentkit-litterbox --lib backends::seatbelt` and `--test seatbelt`. It runs on the triggers that touch the backend or the crate. A missing Seatbelt primitive fails the job rather than skipping it. Ubuntu keeps `cargo test --locked`. |
+| Complexity | 🟢 Low |
+| Effort | 2-3h |
+| Depends On | T-021 |
+| References | test-coverage,platform-requirements |
