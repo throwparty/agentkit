@@ -93,7 +93,7 @@ Add `environment.rs` folding contributions through `Contributions::environment_f
 | Depends On | T-001,T-005 |
 | References | environment-render,environment-withholding,environment-exact,standalone-sandbox,no-steps |
 
-### T-008: Add the record payload and its validation
+### T-008: [x] Add the record payload and its validation
 
 Add `payload.rs` with `PayloadV1`: version, helper path, holder pid and start time, socket path, both workspace paths, the post-collapse reads, collapsed step entries, provenance, posture, tag and paused. Refuse a higher version as unreadable and a lower or incomplete one as Unavailable with the delete-and-recreate remedy.
 
