@@ -158,7 +158,7 @@ Assemble create: validate tag and real home, merge environment, validate and col
 | Depends On | T-006,T-007,T-008,T-009,T-010 |
 | References | helper-binary,mounts-collapse,environment-render,record-payload,setup-diagnostics,fail-closed,standalone-sandbox,no-steps,closure-collapse |
 
-### T-013: Implement exec from the backend
+### T-013: [x] Implement exec from the backend
 
 Add the backend exec path: validate the record, refuse while paused as Denied, connect, send Exec, decode frames, append up to the shared output cap, map errors, and convert output lossily to `Execution`.
 
