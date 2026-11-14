@@ -763,6 +763,12 @@ impl Backend for SeatbeltBackend {
         Box::pin(async move { self.create_sandbox(request) })
     }
 
+    fn shell(&self, _sandbox: &SandboxRecord) -> Result<Vec<String>, Error> {
+        // The baseline grants /bin and the tool layer needs the shell even when
+        // a devShell's PATH does not contain one.
+        Ok(vec!["/bin/sh".to_string(), "-c".to_string()])
+    }
+
     fn list<'a>(&'a self, scope: &'a Scope) -> BoxFuture<'a, Result<Vec<SandboxRecord>, Error>> {
         Box::pin(async move { Ok(self.list_sandboxes(scope)) })
     }
@@ -1213,6 +1219,17 @@ mod tests {
             .expect("exec");
         assert_eq!(execution.exit_code, 0, "{}", execution.stderr);
         assert!(execution.stdout.contains("usr"));
+        backend.delete(&record).await.expect("delete");
+        let _ = state;
+    }
+
+    #[tokio::test]
+    async fn the_tool_shell_is_absolute() {
+        let (backend, record, state) = sandbox("tool-shell").await;
+        assert_eq!(
+            backend.shell(&record).expect("shell"),
+            vec!["/bin/sh".to_string(), "-c".to_string()]
+        );
         backend.delete(&record).await.expect("delete");
         let _ = state;
     }
