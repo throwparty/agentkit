@@ -115,11 +115,15 @@ impl SeatbeltBackend {
             return Err(error);
         }
 
+        let real_home = self
+            .host
+            .real_home()
+            .map_err(|error| Error::failed(format!("cannot read the real home: {error}")))?;
         let context = mounts::Context {
             workspace: &workspace,
             state_dir: &state,
             metadata_dir: &self.metadata,
-            credential_denies: &self.settings.credential_denies,
+            home: &real_home,
         };
         let mounts = match mounts::from_steps(&request.provision, &context, self.host.as_ref()) {
             Ok(mounts) => mounts,
@@ -136,11 +140,6 @@ impl SeatbeltBackend {
                     return Err(error);
                 }
             };
-        let real_home = self
-            .host
-            .real_home()
-            .map_err(|error| Error::failed(format!("cannot read the real home: {error}")))?;
-
         let baseline_reads: Vec<PathBuf> = self
             .settings
             .baseline_reads
@@ -168,13 +167,6 @@ impl SeatbeltBackend {
                 .iter()
                 .map(|service| service.as_bytes().to_vec())
                 .collect(),
-            credential_denies: self
-                .settings
-                .credential_denies
-                .iter()
-                .map(|path| path_bytes(path))
-                .collect(),
-            real_home: path_bytes(&real_home),
         };
 
         let socket = socket_path()?;
@@ -911,7 +903,6 @@ mod tests {
                 .iter()
                 .map(|service| service.to_string())
                 .collect(),
-            credential_denies: Vec::new(),
         }
     }
 

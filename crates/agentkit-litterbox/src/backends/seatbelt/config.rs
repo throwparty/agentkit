@@ -1,9 +1,8 @@
 //! The Seatbelt backend's machine-owned configuration section.
 //!
-//! Five keys: `network`, `baseline`, `baseline-reads`, `mach-services` and
-//! `credential-denies`. The last three are additions. `baseline = 'none'`
-//! replaces the default read and service lists, and credential denies are
-//! always additive.
+//! Four keys: `network`, `baseline`, `baseline-reads` and `mach-services`. The
+//! last two are additions. `baseline = 'none'` replaces the default read and
+//! service lists.
 
 use std::path::{Path, PathBuf};
 
@@ -44,8 +43,6 @@ pub(crate) struct SeatbeltConfig {
     pub(crate) baseline_reads: Vec<String>,
     #[serde(rename = "mach-services", default)]
     pub(crate) mach_services: Vec<String>,
-    #[serde(rename = "credential-denies", default)]
-    pub(crate) credential_denies: Vec<String>,
 }
 
 /// The resolved section the backend uses.
@@ -55,7 +52,6 @@ pub(crate) struct Settings {
     pub(crate) baseline: BaselineSetting,
     pub(crate) baseline_reads: Vec<PathBuf>,
     pub(crate) mach_services: Vec<String>,
-    pub(crate) credential_denies: Vec<PathBuf>,
 }
 
 impl SeatbeltConfig {
@@ -115,25 +111,11 @@ impl SeatbeltConfig {
             }
         }
 
-        let mut credential_denies =
-            Vec::with_capacity(defaults::CREDENTIAL_DENIES.len() + self.credential_denies.len());
-        for value in defaults::CREDENTIAL_DENIES {
-            let deny = path::parse(value, home, "credential-denies")?;
-            push_unique(&mut credential_denies, deny);
-        }
-        for value in &self.credential_denies {
-            push_unique(
-                &mut credential_denies,
-                path::parse(value, home, "credential-denies")?,
-            );
-        }
-
         Ok(Settings {
             network,
             baseline,
             baseline_reads,
             mach_services,
-            credential_denies,
         })
     }
 }
@@ -173,11 +155,6 @@ mod tests {
         assert!(settings.baseline_reads.contains(&"/usr/bin".into()));
         assert!(!settings.baseline_reads.contains(&"/nix/store".into()));
         assert_eq!(settings.mach_services.len(), 12);
-        assert!(
-            settings
-                .credential_denies
-                .contains(&"/Users/tester/.ssh".into())
-        );
     }
 
     #[test]
@@ -185,8 +162,7 @@ mod tests {
         let settings = config(
             "baseline = 'none'\n\
              baseline-reads = ['/opt/toolchain']\n\
-             mach-services = ['com.apple.example']\n\
-             credential-denies = ['~/Library/Secret']",
+             mach-services = ['com.apple.example']",
         )
         .settings_with_home(Path::new(HOME))
         .expect("settings");
@@ -196,17 +172,14 @@ mod tests {
             vec![std::path::PathBuf::from("/opt/toolchain")]
         );
         assert_eq!(settings.mach_services, vec!["com.apple.example"]);
-        assert!(
-            settings
-                .credential_denies
-                .contains(&"/Users/tester/Library/Secret".into())
-        );
-        assert!(
-            settings
-                .credential_denies
-                .contains(&"/Users/tester/.ssh".into()),
-            "credential denies are always additive"
-        );
+    }
+
+    #[test]
+    fn credential_denies_are_no_longer_a_key() {
+        let section: toml::Value =
+            toml::from_str("credential-denies = ['~/.ssh']").expect("toml parses");
+        let error = SeatbeltConfig::from_section(&section).expect_err("unknown key");
+        assert!(error.to_string().contains("credential-denies"), "{error}");
     }
 
     #[test]

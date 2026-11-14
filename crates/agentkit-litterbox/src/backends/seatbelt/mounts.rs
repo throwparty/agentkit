@@ -48,7 +48,7 @@ pub(crate) struct Context<'a> {
     pub workspace: &'a Path,
     pub state_dir: &'a Path,
     pub metadata_dir: &'a Path,
-    pub credential_denies: &'a [PathBuf],
+    pub home: &'a Path,
 }
 
 /// Validate every step's mounts and collapse the ones above the limit.
@@ -60,16 +60,12 @@ pub(crate) fn from_steps(
     let workspace = canonical_or_raw(context.workspace, host);
     let state_dir = canonical_or_raw(context.state_dir, host);
     let metadata_dir = canonical_or_raw(context.metadata_dir, host);
-    let credential_denies: Vec<PathBuf> = context
-        .credential_denies
-        .iter()
-        .map(|path| canonical_or_raw(path, host))
-        .collect();
+    let home = canonical_or_raw(context.home, host);
     let context = Context {
         workspace: &workspace,
         state_dir: &state_dir,
         metadata_dir: &metadata_dir,
-        credential_denies: &credential_denies,
+        home: &home,
     };
 
     let mut mounts = Mounts::default();
@@ -170,16 +166,14 @@ fn validate(
     if resolved == context.workspace || context.workspace.starts_with(&resolved) {
         return Err(refuse(step, path, "is the workspace or an ancestor of it"));
     }
+    if resolved == context.home || resolved.starts_with(context.home) {
+        return Err(refuse(step, path, "is under the real home"));
+    }
     if overlaps(&resolved, context.state_dir) {
         return Err(refuse(step, path, "overlaps the backend state directory"));
     }
     if overlaps(&resolved, context.metadata_dir) {
         return Err(refuse(step, path, "overlaps the metadata directory"));
-    }
-    for deny in context.credential_denies {
-        if resolved == *deny || resolved.starts_with(deny) {
-            return Err(refuse(step, path, "is a credential path"));
-        }
     }
 
     Ok(resolved)
@@ -236,17 +230,12 @@ mod tests {
         }
     }
 
-    fn context<'a>(
-        workspace: &'a Path,
-        state: &'a Path,
-        metadata: &'a Path,
-        denies: &'a [PathBuf],
-    ) -> Context<'a> {
+    fn context<'a>(workspace: &'a Path, state: &'a Path, metadata: &'a Path) -> Context<'a> {
         Context {
             workspace,
             state_dir: state,
             metadata_dir: metadata,
-            credential_denies: denies,
+            home: Path::new("/Users/tester"),
         }
     }
 
@@ -266,7 +255,7 @@ mod tests {
         ];
         let mounts = from_steps(
             &steps,
-            &context(&workspace, &state, &metadata, &[]),
+            &context(&workspace, &state, &metadata),
             &SystemHost::new(),
         )
         .expect("mounts");
@@ -292,7 +281,7 @@ mod tests {
             .collect();
         let mounts = from_steps(
             &[step("limit", &at_limit)],
-            &context(&workspace, &state, &metadata, &[]),
+            &context(&workspace, &state, &metadata),
             &SystemHost::new(),
         )
         .expect("mounts");
@@ -304,7 +293,7 @@ mod tests {
             .collect();
         let mounts = from_steps(
             &[step("above", &above)],
-            &context(&workspace, &state, &metadata, &[]),
+            &context(&workspace, &state, &metadata),
             &SystemHost::new(),
         )
         .expect("mounts");
@@ -323,7 +312,7 @@ mod tests {
         for path in [&workspace, &state, &metadata] {
             std::fs::create_dir_all(path).expect("dir");
         }
-        let ctx = context(&workspace, &state, &metadata, &[]);
+        let ctx = context(&workspace, &state, &metadata);
         let host = SystemHost::new();
 
         for protected in ["/System/Library", "/usr/bin", "/Users"] {
@@ -343,7 +332,7 @@ mod tests {
     }
 
     #[test]
-    fn a_credential_workspace_ancestor_or_state_overlap_is_refused() {
+    fn a_contribution_under_the_real_home_is_refused() {
         let root = fixture();
         let workspace = root.path().join("ws");
         let state = root.path().join("state");
@@ -354,13 +343,32 @@ mod tests {
             std::fs::create_dir_all(path).expect("dir");
         }
         std::fs::write(ssh.join("id_ed25519"), b"secret").expect("credential file");
-        let denies = vec![ssh.canonicalize().expect("canonical")];
-        let ctx = context(&workspace, &state, &metadata, &denies);
-        let host = SystemHost::new();
+        let ctx = Context {
+            workspace: &workspace,
+            state_dir: &state,
+            metadata_dir: &metadata,
+            home: &home,
+        };
+        let error = from_steps(
+            &[step("cred", &[ssh.join("id_ed25519")])],
+            &ctx,
+            &SystemHost::new(),
+        )
+        .expect_err("real home");
+        assert!(error.to_string().contains("real home"), "{error}");
+    }
 
-        let error = from_steps(&[step("cred", &[ssh.join("id_ed25519")])], &ctx, &host)
-            .expect_err("credential");
-        assert!(error.to_string().contains("credential"), "{error}");
+    #[test]
+    fn a_workspace_ancestor_or_state_overlap_is_refused() {
+        let root = fixture();
+        let workspace = root.path().join("ws");
+        let state = root.path().join("state");
+        let metadata = root.path().join("meta");
+        for path in [&workspace, &state, &metadata] {
+            std::fs::create_dir_all(path).expect("dir");
+        }
+        let ctx = context(&workspace, &state, &metadata);
+        let host = SystemHost::new();
 
         let error = from_steps(
             &[step("ancestor", &[root.path().to_path_buf()])],
@@ -392,7 +400,7 @@ mod tests {
         for path in [&workspace, &state, &metadata] {
             std::fs::create_dir_all(path).expect("dir");
         }
-        let ctx = context(&workspace, &state, &metadata, &[]);
+        let ctx = context(&workspace, &state, &metadata);
         let host = SystemHost::new();
         let file = PathBuf::from("/Library/Preferences/com.apple.dt.Xcode.plist");
         if file.exists() {
@@ -420,7 +428,7 @@ mod tests {
         std::os::unix::fs::symlink("/Users", &link).expect("symlink");
         let error = from_steps(
             &[step("link", &[link])],
-            &context(&workspace, &state, &metadata, &[]),
+            &context(&workspace, &state, &metadata),
             &SystemHost::new(),
         )
         .expect_err("symlink target is protected");

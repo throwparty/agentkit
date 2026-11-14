@@ -16,8 +16,6 @@
   (literal (param "p5"))
   (literal (param "p6"))
   (literal (param "p2"))
-  (literal (param "p7"))
-  (literal (param "p8"))
 )
 (allow file-write*
   (literal "/dev/null")
@@ -25,5 +23,5 @@
 )
 (allow sysctl-read)
 (allow network-outbound
-  (remote ip (param "p9"))
+  (remote ip (param "p7"))
 )

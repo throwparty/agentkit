@@ -20,8 +20,6 @@
   (literal (param "p8"))
   (literal (param "p3"))
   (literal (param "p9"))
-  (literal (param "p10"))
-  (literal (param "p11"))
 )
 (allow file-write*
   (literal "/dev/null")
