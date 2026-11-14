@@ -18,3 +18,4 @@ pub(crate) mod path;
 pub(crate) mod payload;
 pub(crate) mod policy;
 pub(crate) mod protocol;
+pub(crate) mod workspace;
