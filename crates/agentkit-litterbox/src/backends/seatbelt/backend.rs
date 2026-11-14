@@ -897,15 +897,14 @@ mod tests {
         Settings {
             network: NetworkSetting::Denied,
             baseline: BaselineSetting::Default,
-            baseline_reads: vec![
-                PathBuf::from("/System/Library"),
-                PathBuf::from("/usr/bin"),
-                PathBuf::from("/usr/lib"),
-                PathBuf::from("/bin"),
-                PathBuf::from("/private/etc"),
-                PathBuf::from("/dev"),
-            ],
-            mach_services: Vec::new(),
+            baseline_reads: crate::backends::seatbelt::defaults::BASELINE_READS
+                .iter()
+                .map(PathBuf::from)
+                .collect(),
+            mach_services: crate::backends::seatbelt::defaults::MACH_SERVICES
+                .iter()
+                .map(|service| service.to_string())
+                .collect(),
             credential_denies: Vec::new(),
         }
     }
@@ -1121,6 +1120,88 @@ mod tests {
         assert_eq!(execution.stdout, "ok\n");
         backend.delete(&record).await.expect("delete");
         let _ = state;
+    }
+
+    #[ignore = "requires Xcode"]
+    #[tokio::test]
+    async fn a_contributed_toolchain_compiles_and_an_uncontributed_one_does_not() {
+        let xcode = std::path::PathBuf::from("/Applications/Xcode.app");
+        let licence = std::path::PathBuf::from("/Library/Preferences/com.apple.dt.Xcode.plist");
+        assert!(xcode.exists(), "this host has no Xcode installation");
+        assert!(licence.exists(), "this host has no Xcode licence state");
+
+        let step = crate::sandbox::contract::ResolvedStep {
+            identity: "toolchain".to_string(),
+            kind: "devshell".to_string(),
+            placement: crate::sandbox::contract::Placement::Host,
+            sandbox: None,
+            contributions: crate::sandbox::contract::Contributions {
+                environment: std::collections::BTreeMap::from([
+                    ("PATH".to_string(), "/usr/bin:/bin".to_string()),
+                    (
+                        "DEVELOPER_DIR".to_string(),
+                        "/Applications/Xcode.app/Contents/Developer".to_string(),
+                    ),
+                ]),
+                mounts: vec![xcode, licence],
+                ..crate::sandbox::contract::Contributions::default()
+            },
+        };
+        let (backend, record, state) = sandbox_with("toolchain", vec![step]).await;
+        let workspace = state.join("workspace");
+        std::fs::write(
+            workspace.join("hello.c"),
+            b"#include <stdio.h>\nint main(void){printf(\"built\\n\");return 0;}\n",
+        )
+        .expect("source");
+        let compile = backend
+            .exec(
+                &record,
+                &[
+                    "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang".to_string(),
+                    "-isysroot".to_string(),
+                    "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk".to_string(),
+                    "-o".to_string(),
+                    "hello".to_string(),
+                    "hello.c".to_string(),
+                ],
+            )
+            .await
+            .expect("compile");
+        assert_eq!(compile.exit_code, 0, "{}", compile.stderr);
+        let run = backend
+            .exec(
+                &record,
+                &[
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    "./hello".to_string(),
+                ],
+            )
+            .await
+            .expect("run");
+        assert_eq!(run.stdout, "built\n");
+        backend.delete(&record).await.expect("delete");
+        let _ = std::fs::remove_dir_all(&state);
+
+        let (backend, record, state) = sandbox("no-toolchain").await;
+        let workspace = state.join("workspace");
+        std::fs::write(workspace.join("hello.c"), b"int main(void){return 0;}\n").expect("source");
+        let compile = backend
+            .exec(
+                &record,
+                &[
+                    "/usr/bin/clang".to_string(),
+                    "-o".to_string(),
+                    "hello".to_string(),
+                    "hello.c".to_string(),
+                ],
+            )
+            .await
+            .expect("compile");
+        assert_ne!(compile.exit_code, 0);
+        backend.delete(&record).await.expect("delete");
+        let _ = std::fs::remove_dir_all(&state);
     }
 
     #[tokio::test]
