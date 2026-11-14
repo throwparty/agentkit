@@ -1,0 +1,43 @@
+flowchart TB
+  subgraph Surface["Shared sandbox surface · crates/agentkit-litterbox"]
+    SandboxSurface[Sandbox surface<br/>create, exec, pause, resume, destroy]
+    ResolvedEnv[Resolved environment<br/>values plus provenance]
+    ProxyEndpoint[Opaque proxy endpoint<br/>socket path or host and port]
+  end
+
+  subgraph Linux["Linux · bubblewrap holder"]
+    LinuxCapture[Host provider<br/>nix print-dev-env capture]
+    LinuxArgv[bwrap argv builder<br/>store and workspace binds]
+    LinuxHolder[Holder process<br/>pid, net, mount and user namespaces]
+    LinuxJoin[setns join<br/>one per command]
+    LinuxCgroup[systemd scope<br/>freeze, MemoryMax, TasksMax]
+    LinuxProxy[Host proxy<br/>reachable over a bind-mounted unix socket]
+    LinuxWorkspace[Workspace<br/>bind-mounted host directory]
+  end
+
+  subgraph Darwin["Darwin · per-command helper"]
+    DarwinCapture[Host provider<br/>nix print-dev-env capture]
+    DarwinHelper[litterbox-darwin-sandbox<br/>sandbox_init then exec]
+    DarwinProfile[SBPL renderer<br/>baseline, grants, invariants]
+    DarwinProxy[Host proxy<br/>reachable on a granted localhost port]
+    DarwinWorkspace[Workspace directory<br/>no namespaces, host pid and network]
+  end
+
+  SandboxSurface --> LinuxArgv
+  SandboxSurface --> DarwinHelper
+  ResolvedEnv --> LinuxArgv
+  ResolvedEnv --> DarwinHelper
+  ProxyEndpoint --> LinuxProxy
+  ProxyEndpoint --> DarwinProxy
+
+  LinuxCapture --> LinuxArgv
+  LinuxArgv --> LinuxHolder
+  LinuxHolder --> LinuxJoin
+  LinuxJoin --> LinuxWorkspace
+  LinuxCgroup -. freezes .-> LinuxJoin
+  LinuxProxy -. socket path .-> LinuxJoin
+
+  DarwinCapture --> DarwinHelper
+  DarwinProfile --> DarwinHelper
+  DarwinHelper --> DarwinWorkspace
+  DarwinProxy -. localhost port .-> DarwinHelper

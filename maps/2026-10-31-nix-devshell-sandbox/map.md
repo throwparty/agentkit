@@ -8,8 +8,8 @@ Created: 2026-10-31
 
 | Metric | Value |
 |--------|-------|
-| Tickets | 41 |
-| Answered | 41 |
+| Tickets | 55 |
+| Answered | 55 |
 | Open | 0 |
 | Probing | 0 |
 | Abandoned | 0 |
@@ -356,6 +356,121 @@ Created: 2026-10-31
 | Answer | Yes, but not in nsenter's order. The sandbox's namespaces are owned by its user namespace's parent, so the join enters that parent first, then ipc, net, pid, mnt, uts and cgroup, then the sandbox user namespace. Joining the sandbox user namespace first grants capabilities there and every later join fails with EPERM |
 | Evidence | [evidence/T-041.md](evidence/T-041.md) |
 
+### T-042: Does the contract define the environment of a sandbox with no provisioning step, and does the Linux backend already implement it?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Answer | Yes. An empty step list yields exactly HOME, TMPDIR and PWD with origin Default and no PATH: the backend does not invent a search path, so a mechanism stands alone and a devShell is optional |
+| Evidence | crates/agentkit-litterbox/src/backends/bubblewrap/environment.rs (no_step_means_no_path); crates/agentkit-litterbox/src/sandbox/contract.rs (Contributions::default) |
+
+### T-043: Can Seatbelt confine a sandbox whose only inputs are a workspace and a platform baseline, with no Nix store grant and no devShell contribution?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Answer | Yes. A deny-default profile with a platform baseline and the workspace confines /bin/sh and denies out-of-workspace reads and writes with no /nix grant; a Nix binary aborts on its ungranted store dylib. The root literal read rule is required: without it every exec dies with SIGABRT and no output |
+| Evidence | [evidence/T-043.md](evidence/T-043.md) |
+
+### T-044: Does a profile carrying the devShell closure's hundreds of read grants compile and apply inside the per-command cost budget?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Answer | No for the closure shape. 238 grants apply but cost about 43ms per command against 12ms for one, 1779 are rejected, and the 65535-byte profile limit is reached near 1010 grants; cost is superlinear before that. The backend must collapse mounts to a common ancestor rather than render one rule per path |
+| Evidence | [evidence/T-044.md](evidence/T-044.md) |
+
+### T-045: Can a later, unrelated process pause, resume and kill a sandbox from its recorded process group, and does a setsid child survive?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Answer | Yes. A later process stops, continues and kills the group after the launcher has exited. A setsid child survives the group kill, stays confined and is unaddressable by group, so the record needs the pgid plus a reuse check |
+| Evidence | [evidence/T-045.md](evidence/T-045.md) |
+
+### T-046: Is the Xcode developer directory a platform baseline path or a toolchain contribution, given that it can itself resolve into the Nix store?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Depends on | T-043 |
+| Answer | A toolchain contribution discovered at runtime, never a baseline constant. The grant unit is the Xcode installation root plus the licence plist and a writable user temp dir; xcode-select -p may name /Applications, CommandLineTools or a store path, and Contents/Developer alone fails on sibling frameworks |
+| Evidence | [evidence/T-046.md](evidence/T-046.md) |
+
+### T-047: Can the backend supply the contributed environment to the helper, so the helper has no allowlist of its own?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Answer | Yes. A transparent helper passes every contributed variable unchanged, while the prototype's allowlist drops five of eight, including RUSTFLAGS and a credential. Withholding values that name ungranted paths stays the backend's job |
+| Evidence | [evidence/T-047.md](evidence/T-047.md) |
+
+### T-048: Can readiness report whether Seatbelt applies without confining the calling process?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Answer | Yes, with dlsym plus a probe child. The symbol resolves but only applying a minimal profile proves the mechanism works, and a bad profile returns a message rather than an errno. The probe costs 7.6ms median and never confines the caller |
+| Evidence | [evidence/T-048.md](evidence/T-048.md) |
+
+### T-049: Is applying Seatbelt in a forked child of a threaded server safe, or does it mandate a separate helper binary?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Answer | Fork+apply survived 400 of 400 in a four-thread process with no hangs or crashes, but POSIX permits only async-signal-safe calls before exec and the profile is per-process. The helper is still mandated: applying in the server would confine the server, and the helper is not slower |
+| Evidence | [evidence/T-049.md](evidence/T-049.md) |
+
+### T-050: Does the Darwin provider's network posture admit the proxy endpoint T-021 established?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Answer | Not until the egress requirement was corrected. denied emits no outbound rule, so even a loopback proxy port is unreachable, and host grants every host. The renderer now supports the localhost-port rule and the proxy ADR must add the posture that uses it |
+| Evidence | \[evidence/T-021.md; adrs/2026-11-14-darwin-sandbox-provider/spec.toon (FR-012)\](evidence/T-021.md; adrs/2026-11-14-darwin-sandbox-provider/spec.toon (FR-012)) |
+
+### T-051: Can the bwrap backend expose the T-014 proxy socket through its existing contributed-mount path?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Answer | No. A contributed mount that holds a unix socket is refused because a read-only bind does not stop a connection, so the endpoint must be a backend-owned socket bind and a record entry added by the proxy ADR |
+| Evidence | adrs/2026-11-07-linux-bwrap-provider/spec.toon (FR-006); evidence/T-014.md |
+
+### T-052: Does a resident holder make a background command addressable after the shell that started it exits?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Answer | Yes. A child inherits the applied profile and stays in the holder's process group unless it calls setsid, so signalling the group reaches it after its own shell exits. T-045 proved inheritance and group signalling, and T-049 proved apply-before-exec in a forked child is safe |
+| Evidence | \[evidence/T-045.md; evidence/T-049.md\](evidence/T-045.md; evidence/T-049.md) |
+
+### T-053: Can a project supply Xcode itself as contributed read paths, so the backend needs no toolchain knowledge?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Answer | Yes. A compiler builds with the Xcode installation root and the licence plist as read mounts and needs no writable host path; cache warnings are non-fatal. The backend can drop Xcode awareness entirely |
+| Evidence | [evidence/T-053.md](evidence/T-053.md) |
+
+### T-054: Can SBPL name paths through sandbox_init_with_parameters instead of escaping them into the profile text?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Answer | Yes. Paths pass as parameter values, so awkward names need no escaping and the apply ceiling rises above 2600 paths. Cost at the 64-path collapse matches inline, so the renderer should parameterise paths; tag handling is not covered |
+| Evidence | [evidence/T-054.md](evidence/T-054.md) |
+
+### T-055: Do the deny message, mach lookup and network positions accept parameters?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Answer | Yes. A parameter works in the deny message, global-name and remote ip, so the tag, mach services and loopback endpoints travel out of band and the renderer needs no escaper; only NUL and charset validation remain |
+| Evidence | [evidence/T-055.md](evidence/T-055.md) |
+
 ## Decision
 
-Adopt bubblewrap on Linux and App Sandbox via the sandbox_init entry point on macOS. The entitlement API requires a signed bundle, so unsigned devShell binaries use the deprecated entry point; its longevity is a carried risk. Egress beyond loopback needs a proxy on both platforms, and the two platforms do not share a transport: macOS reaches it as loopback TCP on a granted port (T-021), Linux through a bind-mounted unix socket outside the network namespace (T-014), so the network facet is one endpoint per platform rather than one shape. On Linux the sandbox is a holder process (the pause-container shape, as Flatpak enter does it): bwrap runs a sleeping child in the pid, net, mount and user namespaces, and every command is a setns join from outside. That restores shared pid and network context, gives pause and resume a sandbox-level meaning through the holder's cgroup, and closes the setsid escape, because killing pid 1 kills the whole pid namespace. T-013 is proven unprivileged on the same uid. T-015 is answered: the devShell builds on aarch64-darwin. T-019 is answered: joined commands are assigned to the sandbox scope before exec, so freeze and limits cover every command; without cgroups, pause is a stop-and-rescan fixpoint that a one-pass sweep does not implement and that a same-uid peer can livelock, so cgroups are the primitive and enumeration is the fallback. On macOS there is nothing to hold open: the profile is a per-process property and commands already share the host's pids and network (T-020), so the backend is a per-command helper. Carried risks: a user manager without cgroup delegation makes the scope start fail and the caller selects the pid-namespace fallback, which still closes the setsid gap but cannot bound memory or task count; cgroup delegation is not a security boundary against a hostile same-uid workload. The destination is now proven on both platforms: the devShell environment is captured on the host by differential probe (T-011) and a devShell build runs inside the holder with no network and a read-only store (T-016). nix is deliberately unavailable inside the sandbox, because the daemon socket lets a workload write to the host store (T-018). On Linux egress is a host-side proxy reached over a bind-mounted unix socket, so the sandbox needs no route at all (T-014). The store view is the devShell's 238-path closure rather than the whole 57,534-path store, derived from Nix rather than discovered by failure, and the same test passes against it (T-022). T-017 is answered: a devShell build runs inside the macOS sandbox with the captured environment and needs no baseline addition, though the capture must be sanitised of build-sandbox scratch paths and NIX_BUILD_TOP must stay set for the clang wrapper. T-021 is answered: the macOS proxy is a loopback TCP listener on a granted port, because a unix socket is not reachable without AF_UNIX rules the profile does not emit. Still unproven: a devShell whose closure exceeds the toolchain closure. Revised on the store view: bind the realised closure by default after validating a multi-user, root-owned Nix installation, with the whole store as an explicit option for workloads that reach undeclared paths; the closure covers declared dependencies only, so the wide bind is the fallback.
+Adopt bubblewrap on Linux and App Sandbox via the sandbox_init entry point on macOS. The entitlement API requires a signed bundle, so unsigned devShell binaries use the deprecated entry point; its longevity is a carried risk. Egress beyond loopback needs a proxy on both platforms, and the two platforms do not share a transport: macOS reaches it as loopback TCP on a granted port (T-021), Linux through a bind-mounted unix socket outside the network namespace (T-014), so the network facet is one endpoint per platform rather than one shape. On Linux the sandbox is a holder process (the pause-container shape, as Flatpak enter does it): bwrap runs a sleeping child in the pid, net, mount and user namespaces, and every command is a setns join from outside. That restores shared pid and network context, gives pause and resume a sandbox-level meaning through the holder's cgroup, and closes the setsid escape, because killing pid 1 kills the whole pid namespace. T-013 is proven unprivileged on the same uid. T-015 is answered: the devShell builds on aarch64-darwin. T-019 is answered: joined commands are assigned to the sandbox scope before exec, so freeze and limits cover every command; without cgroups, pause is a stop-and-rescan fixpoint that a one-pass sweep does not implement and that a same-uid peer can livelock, so cgroups are the primitive and enumeration is the fallback. On macOS there is no namespace to hold open, but lifecycle still needs a process to hang a group on: one resident holder owns the sandbox session, every command is its child, and the profile is applied in each child. Commands already share the host's pids and network. Carried risks: a user manager without cgroup delegation makes the scope start fail and the caller selects the pid-namespace fallback, which still closes the setsid gap but cannot bound memory or task count; cgroup delegation is not a security boundary against a hostile same-uid workload. The destination is now proven on both platforms: the devShell environment is captured on the host by differential probe (T-011) and a devShell build runs inside the holder with no network and a read-only store (T-016). nix is deliberately unavailable inside the sandbox, because the daemon socket lets a workload write to the host store (T-018). On Linux egress is a host-side proxy reached over a bind-mounted unix socket, so the sandbox needs no route at all (T-014). The store view is the devShell's 238-path closure rather than the whole 57,534-path store, derived from Nix rather than discovered by failure, and the same test passes against it (T-022). T-017 is answered: a devShell build runs inside the macOS sandbox with the captured environment and needs no baseline addition, though the capture must be sanitised of build-sandbox scratch paths and NIX_BUILD_TOP must stay set for the clang wrapper. T-021 is answered: the macOS proxy is a loopback TCP listener on a granted port, because a unix socket is not reachable without AF_UNIX rules the profile does not emit. The two backends share only the sandbox surface, the resolved environment and an opaque proxy endpoint; their components differ and are drawn in architecture.mmd. Still unproven: a devShell whose closure exceeds the toolchain closure. Revised on the store view: bind the realised closure by default after validating a multi-user, root-owned Nix installation, with the whole store as an explicit option for workloads that reach undeclared paths; the closure covers declared dependencies only, so the wide bind is the fallback. Darwin production is charted and answered (T-043 to T-049). The mechanism works without Nix: a platform baseline plus the workspace confines a command and denies everything else, and a devShell is optional. It is not entitlement App Sandbox but the sandbox_init entry point, applied by a helper process that the backend execs, because the profile is per-process and the server must never confine itself; readiness is a symbol check plus the same helper applying a minimal profile. The helper is environment-transparent, so the backend owns withholding, rebasing and the HOME/TMPDIR/PWD triple exactly as the Linux backend does. Mounts cannot be rendered one rule per path: 238 grants cost about 43 ms per command and the serialised profile is rejected at 65535 bytes near 1010 grants, so the renderer collapses a contribution list to a common ancestor (for a devShell closure, /nix/store) rather than failing. Lifecycle is a resident holder: one supervisor per sandbox is the session and group leader, every command is its child, and pause, resume and delete signal the group, so a background server whose shell exited is covered; a setsid child still escapes. The backend knows no toolchain: a project that needs a compiler contributes the Xcode installation root and licence plist as read mounts (T-053), so there is no discovery, no writable host path and no toolchain key.
+
+ADR: `adrs/2026-11-14-darwin-sandbox-provider`
