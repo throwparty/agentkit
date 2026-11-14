@@ -210,7 +210,7 @@ Report five checks: macOS, `dlsym` of `sandbox_init_with_parameters`, helper tru
 | Depends On | T-005,T-010 |
 | References | readiness-checks,readiness-refuses,symbol-removed,platform-requirements |
 
-### T-017: Register the backend and construct it
+### T-017: [x] Register the backend and construct it
 
 Add the registry entry under `cfg(target_os = 'macos')` with the lifecycle facet and no limits or forwarding, a constructor that parses the section, and tests that the entry exists on macOS and is absent elsewhere. Keep DEFAULT as docker.
 

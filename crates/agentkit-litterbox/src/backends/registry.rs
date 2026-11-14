@@ -14,6 +14,8 @@ use crate::sandbox::selected::Selected;
 #[cfg(target_os = "linux")]
 use crate::backends::bubblewrap;
 use crate::backends::docker;
+#[cfg(target_os = "macos")]
+use crate::backends::seatbelt;
 
 /// A backend builds itself from its own section.
 type Constructor = fn(&toml::Value) -> Result<Selected, Error>;
@@ -26,7 +28,14 @@ const BACKENDS: &[(&str, Constructor)] = &[
 ];
 
 /// Every mechanism compiled into this binary, with its constructor.
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")]
+const BACKENDS: &[(&str, Constructor)] = &[
+    (docker::BACKEND, docker::construct::build),
+    (seatbelt::BACKEND, seatbelt::construct::build),
+];
+
+/// Every mechanism compiled into this binary, with its constructor.
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 const BACKENDS: &[(&str, Constructor)] = &[(docker::BACKEND, docker::construct::build)];
 
 /// The backend used when the user has not selected one.
