@@ -18,14 +18,25 @@ cargo build \
   --bin agentkit-litterbox
 export PATH="$PWD/target/debug:$PATH"
 
-if command -v fuser &>/dev/null; then
-  fuser -k 3812/tcp 2>/dev/null || true
-elif command -v lsof &>/dev/null; then
-  existing_pid=$(lsof -t -i:3812 2>/dev/null || true)
-  if [ -n "$existing_pid" ]; then
-    kill -9 "$existing_pid" 2>/dev/null || true
+# Kill whatever is listening on a port. lsof is preferred because it is present
+# on both macOS and Linux and takes the same arguments on each. fuser only
+# exists on macOS as the BSD tool, which has different flags and no idea what
+# "3812/tcp" means, so it is only used when it is the psmisc implementation.
+free_port() {
+  local port=$1
+  if command -v lsof &>/dev/null; then
+    pids=$(lsof -t -i "tcp:$port" 2>/dev/null || true)
+    if [ -n "$pids" ]; then
+      # Word splitting is intended: lsof may report several PIDs.
+      # shellcheck disable=SC2086
+      kill -9 $pids 2>/dev/null || true
+    fi
+  elif command -v fuser &>/dev/null && fuser --version 2>&1 | grep -qi psmisc; then
+    fuser -k "$port/tcp" >/dev/null 2>&1 || true
   fi
-fi
+}
+
+free_port 3812
 
 # The kill above is fire-and-forget: do not start our instance until 3812
 # is actually free, otherwise the readiness probe below can get a 200 from
@@ -38,7 +49,7 @@ for _ in $(seq 1 50); do
 done
 if (echo >/dev/tcp/127.0.0.1/3812) >/dev/null 2>&1; then
   echo "error: port 3812 is still occupied by another process." >&2
-  echo "error: free it (e.g. fuser -k 3812/tcp) and retry; refusing to launch opencode against a stale backend." >&2
+  echo "error: free it (e.g. lsof -t -i tcp:3812 | xargs kill) and retry; refusing to launch opencode against a stale backend." >&2
   exit 1
 fi
 
@@ -53,14 +64,7 @@ cleanup() {
     kill -TERM "$SWITCHBOARD_PID" 2>/dev/null || true
     wait "$SWITCHBOARD_PID" 2>/dev/null || true
   fi
-  if command -v fuser &>/dev/null; then
-    fuser -k 3812/tcp 2>/dev/null || true
-  elif command -v lsof &>/dev/null; then
-    existing_pid=$(lsof -t -i:3812 2>/dev/null || true)
-    if [ -n "$existing_pid" ]; then
-      kill -9 "$existing_pid" 2>/dev/null || true
-    fi
-  fi
+  free_port 3812
 }
 
 trap cleanup EXIT INT TERM
