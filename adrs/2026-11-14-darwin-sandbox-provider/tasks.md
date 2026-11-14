@@ -184,7 +184,7 @@ Add the lifecycle facet: pause and resume signal the recorded group after checki
 | Depends On | T-012 |
 | References | lifecycle-group,lifecycle-works,setsid-escape,stale-group,pid-reuse |
 
-### T-015: Implement inspect, list and capabilities
+### T-015: [x] Implement inspect, list and capabilities
 
 Inspect reports the posture, workspace, provenance, status and no forwards, using Status only when the record is active. List rebuilds each payload under the state root for both scopes and reports a corrupt one. Capabilities report pause and resume available, limits and forwarding unsupported, and both contribution sorts available.
 

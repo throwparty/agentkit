@@ -22,7 +22,7 @@ use crate::sandbox::contract::{
     SandboxRecord, Scope,
 };
 use crate::sandbox::facets::Lifecycle;
-use crate::sandbox::report::{Capability, Readiness, State};
+use crate::sandbox::report::{Capability, Check, Readiness, State};
 
 /// The Seatbelt backend, over a host seam.
 pub(crate) struct SeatbeltBackend {
@@ -233,6 +233,13 @@ impl SeatbeltBackend {
             paused: false,
         };
 
+        if let Err(error) = write_payload(&state, &payload) {
+            let _ = holder.signal(super::host::Signal::Kill);
+            let _ = fs::remove_dir_all(&state);
+            let _ = fs::remove_file(&payload.socket);
+            return Err(error);
+        }
+
         Ok(SandboxRecord {
             name: request.name.clone(),
             backend: BACKEND.to_string(),
@@ -358,6 +365,345 @@ impl SeatbeltBackend {
         }
     }
 
+    fn readiness_report(&self) -> Readiness {
+        let mut checks = vec![Check {
+            primitive: "macOS".to_string(),
+            state: State::Available,
+            reason: None,
+            remedy: None,
+            fallback: None,
+        }];
+
+        let symbol = std::ffi::CString::new("sandbox_init_with_parameters").expect("literal");
+        // SAFETY: the symbol name is NUL terminated and dlsym only looks it up.
+        let found = unsafe { libc::dlsym(libc::RTLD_DEFAULT, symbol.as_ptr()) };
+        checks.push(Check {
+            primitive: "sandbox_init_with_parameters".to_string(),
+            state: if found.is_null() {
+                State::Unavailable
+            } else {
+                State::Available
+            },
+            reason: found
+                .is_null()
+                .then(|| "the symbol is not exported by this macOS".to_string()),
+            remedy: found
+                .is_null()
+                .then(|| "use a macOS that still ships the sandbox entry point".to_string()),
+            fallback: None,
+        });
+
+        checks.push(self.helper_check());
+        checks.push(self.probe_check());
+        checks.push(self.state_root_check());
+
+        Readiness {
+            backend: BACKEND.to_string(),
+            checks,
+        }
+    }
+
+    fn helper_check(&self) -> Check {
+        let metadata = fs::metadata(&self.helper);
+        let mut state = State::Available;
+        let mut reason = None;
+        let mut remedy = None;
+        match metadata {
+            Ok(metadata) => {
+                use std::os::unix::fs::MetadataExt;
+
+                let mode = metadata.permissions().mode() & 0o777;
+                let owner = metadata.uid();
+                // SAFETY: geteuid has no arguments and cannot fail.
+                let effective = unsafe { libc::geteuid() };
+                if !metadata.is_file() {
+                    state = State::Unavailable;
+                    reason = Some("the helper is not a regular file".to_string());
+                    remedy = Some("reinstall litterbox".to_string());
+                } else if mode & 0o022 != 0 {
+                    state = State::Unavailable;
+                    reason = Some("the helper is group or world writable".to_string());
+                    remedy = Some("reinstall the helper with mode 0755".to_string());
+                } else if owner != 0 && owner != effective {
+                    state = State::Unavailable;
+                    reason = Some("the helper is owned by another user".to_string());
+                    remedy = Some("reinstall the helper as this user or root".to_string());
+                }
+            }
+            Err(error) => {
+                state = State::Unavailable;
+                reason = Some(format!(
+                    "the helper '{}' is not readable: {error}",
+                    self.helper.display()
+                ));
+                remedy = Some("install the helper beside litterbox".to_string());
+            }
+        }
+        Check {
+            primitive: "the Seatbelt helper".to_string(),
+            state,
+            reason,
+            remedy,
+            fallback: None,
+        }
+    }
+
+    fn probe_check(&self) -> Check {
+        let mut child = match std::process::Command::new(&self.helper)
+            .arg("--probe")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(error) => {
+                return Check {
+                    primitive: "the Seatbelt probe".to_string(),
+                    state: State::Unavailable,
+                    reason: Some(format!("the probe could not start: {error}")),
+                    remedy: Some("check the helper is executable".to_string()),
+                    fallback: None,
+                };
+            }
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) if status.success() => {
+                    return Check {
+                        primitive: "the Seatbelt probe".to_string(),
+                        state: State::Available,
+                        reason: None,
+                        remedy: None,
+                        fallback: None,
+                    };
+                }
+                Ok(Some(status)) => {
+                    let mut stderr = String::new();
+                    if let Some(mut pipe) = child.stderr.take() {
+                        use std::io::Read;
+                        let _ = pipe.read_to_string(&mut stderr);
+                    }
+                    return Check {
+                        primitive: "the Seatbelt probe".to_string(),
+                        state: State::Unavailable,
+                        reason: Some(format!("the probe exited {status}: {}", stderr.trim())),
+                        remedy: Some("the macOS sandbox facility is not usable".to_string()),
+                        fallback: None,
+                    };
+                }
+                Ok(None) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Ok(None) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Check {
+                        primitive: "the Seatbelt probe".to_string(),
+                        state: State::Unavailable,
+                        reason: Some("the probe did not finish within two seconds".to_string()),
+                        remedy: Some("the macOS sandbox facility is not usable".to_string()),
+                        fallback: None,
+                    };
+                }
+                Err(error) => {
+                    let _ = child.kill();
+                    return Check {
+                        primitive: "the Seatbelt probe".to_string(),
+                        state: State::Unavailable,
+                        reason: Some(format!("the probe could not be observed: {error}")),
+                        remedy: Some("the macOS sandbox facility is not usable".to_string()),
+                        fallback: None,
+                    };
+                }
+            }
+        }
+    }
+
+    fn state_root_check(&self) -> Check {
+        if let Some(parent) = self.state_root.parent() {
+            match fs::create_dir_all(parent) {
+                Ok(()) => {
+                    return Check {
+                        primitive: "the state root".to_string(),
+                        state: State::Available,
+                        reason: None,
+                        remedy: None,
+                        fallback: None,
+                    };
+                }
+                Err(error) => {
+                    return Check {
+                        primitive: "the state root".to_string(),
+                        state: State::Unavailable,
+                        reason: Some(format!(
+                            "the state root '{}' cannot be created: {error}",
+                            parent.display()
+                        )),
+                        remedy: Some("choose a writable data directory".to_string()),
+                        fallback: None,
+                    };
+                }
+            }
+        }
+        Check {
+            primitive: "the state root".to_string(),
+            state: State::Unavailable,
+            reason: Some("the state root has no parent".to_string()),
+            remedy: Some("choose a writable data directory".to_string()),
+            fallback: None,
+        }
+    }
+
+    fn inspect_sandbox(&self, record: &SandboxRecord) -> Result<Inspection, Error> {
+        let payload = PayloadV1::from_record(record)?;
+        let status = match payload.state(self.host.as_ref()) {
+            super::payload::PayloadState::Live => {
+                let holder = self.holder_for(record)?;
+                match holder.status() {
+                    Ok(()) => crate::sandbox::contract::SandboxStatus::Active,
+                    Err(error) => crate::sandbox::contract::SandboxStatus::Error {
+                        reason: error.to_string(),
+                    },
+                }
+            }
+            super::payload::PayloadState::Paused => crate::sandbox::contract::SandboxStatus::Paused,
+            super::payload::PayloadState::Missing => {
+                crate::sandbox::contract::SandboxStatus::Missing
+            }
+            super::payload::PayloadState::Foreign => {
+                crate::sandbox::contract::SandboxStatus::Error {
+                    reason: "the recorded holder is not the process at that pid".to_string(),
+                }
+            }
+            super::payload::PayloadState::Invalid(reason) => {
+                crate::sandbox::contract::SandboxStatus::Error { reason }
+            }
+        };
+        let egress = match payload.posture.as_str() {
+            "host" => crate::sandbox::report::EgressPosture::Direct,
+            _ => crate::sandbox::report::EgressPosture::Denied,
+        };
+        Ok(Inspection {
+            name: record.name.clone(),
+            backend: BACKEND.to_string(),
+            status,
+            egress,
+            workspace: payload.workspace_sandbox.to_string_lossy().into_owned(),
+            environment: payload.provenance.clone(),
+            forwards: Vec::new(),
+        })
+    }
+
+    fn list_sandboxes(&self, scope: &Scope) -> Vec<SandboxRecord> {
+        let projects = match scope {
+            Scope::Repository { project_slug } => {
+                vec![(project_slug.clone(), self.state_root.join(project_slug))]
+            }
+            Scope::Machine => match fs::read_dir(&self.state_root) {
+                Ok(entries) => entries
+                    .filter_map(Result::ok)
+                    .filter(|entry| entry.path().is_dir())
+                    .map(|entry| {
+                        (
+                            entry.file_name().to_string_lossy().into_owned(),
+                            entry.path(),
+                        )
+                    })
+                    .collect(),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+                Err(error) => {
+                    tracing::warn!(%error, "cannot list the seatbelt state root");
+                    Vec::new()
+                }
+            },
+        };
+
+        let mut records = Vec::new();
+        for (project, project_dir) in projects {
+            let Ok(entries) = fs::read_dir(&project_dir) else {
+                continue;
+            };
+            for entry in entries.filter_map(Result::ok) {
+                if !entry.path().is_dir() {
+                    continue;
+                }
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let payload_path = entry.path().join("payload.toml");
+                let Ok(text) = fs::read_to_string(&payload_path) else {
+                    tracing::warn!(sandbox = %name, "the payload file is missing");
+                    continue;
+                };
+                let Ok(value) = toml::from_str::<toml::Value>(&text) else {
+                    tracing::warn!(sandbox = %name, "the payload file is not TOML");
+                    continue;
+                };
+                let record = SandboxRecord {
+                    name: name.clone(),
+                    backend: BACKEND.to_string(),
+                    project_slug: project.clone(),
+                    data: value,
+                };
+                match PayloadV1::from_record(&record) {
+                    Ok(_) => records.push(record),
+                    Err(error) => {
+                        tracing::warn!(sandbox = %name, %error, "the payload is unreadable")
+                    }
+                }
+            }
+        }
+        records
+    }
+
+    fn upload_sandbox(
+        &self,
+        record: &SandboxRecord,
+        source: &Path,
+        destination: &str,
+    ) -> Result<(), Error> {
+        let payload = PayloadV1::from_record(record)?;
+        workspace::transfer_in(source, &payload.workspace_host, destination)
+    }
+
+    fn download_sandbox(
+        &self,
+        record: &SandboxRecord,
+        source: &str,
+        destination: &Path,
+    ) -> Result<(), Error> {
+        let payload = PayloadV1::from_record(record)?;
+        workspace::transfer_out(&payload.workspace_host, source, destination)
+    }
+
+    fn capability_report(&self) -> Vec<Capability> {
+        vec![
+            Capability {
+                operation: "pause and resume".to_string(),
+                state: State::Available,
+                reason: None,
+                remedy: None,
+                fallback: None,
+            },
+            Capability {
+                operation: "resource limits".to_string(),
+                state: State::Unavailable,
+                reason: Some("Seatbelt has no CPU, memory or task quota".to_string()),
+                remedy: Some("bound the workload from outside the sandbox".to_string()),
+                fallback: None,
+            },
+            Capability {
+                operation: "port forwarding".to_string(),
+                state: State::Unavailable,
+                reason: Some(
+                    "the profile emits neither network-bind nor network-inbound".to_string(),
+                ),
+                remedy: Some("use an egress proxy instead".to_string()),
+                fallback: None,
+            },
+        ]
+    }
+
     fn holder_for(&self, record: &SandboxRecord) -> Result<Holder, Error> {
         let payload = PayloadV1::from_record(record)?;
         match payload.state(self.host.as_ref()) {
@@ -417,8 +763,8 @@ impl Backend for SeatbeltBackend {
         Box::pin(async move { self.create_sandbox(request) })
     }
 
-    fn list<'a>(&'a self, _scope: &'a Scope) -> BoxFuture<'a, Result<Vec<SandboxRecord>, Error>> {
-        Box::pin(async { Ok(Vec::new()) })
+    fn list<'a>(&'a self, scope: &'a Scope) -> BoxFuture<'a, Result<Vec<SandboxRecord>, Error>> {
+        Box::pin(async move { Ok(self.list_sandboxes(scope)) })
     }
 
     fn exec<'a>(
@@ -431,52 +777,28 @@ impl Backend for SeatbeltBackend {
 
     fn upload<'a>(
         &'a self,
-        _sandbox: &'a SandboxRecord,
-        _source: &'a Path,
-        _destination: &'a str,
+        sandbox: &'a SandboxRecord,
+        source: &'a Path,
+        destination: &'a str,
     ) -> BoxFuture<'a, Result<(), Error>> {
-        Box::pin(async {
-            Err(Error::Unsupported {
-                operation: "upload".to_string(),
-                backend: BACKEND.to_string(),
-                primitive: "a materialised record".to_string(),
-                reason: "upload is not wired yet".to_string(),
-                remedy: "wait for the transfer task".to_string(),
-            })
-        })
+        Box::pin(async move { self.upload_sandbox(sandbox, source, destination) })
     }
 
     fn download<'a>(
         &'a self,
-        _sandbox: &'a SandboxRecord,
-        _source: &'a str,
-        _destination: &'a Path,
+        sandbox: &'a SandboxRecord,
+        source: &'a str,
+        destination: &'a Path,
         _selector: Option<std::sync::Arc<dyn crate::sandbox::contract::SnapshotSelector>>,
     ) -> BoxFuture<'a, Result<(), Error>> {
-        Box::pin(async {
-            Err(Error::Unsupported {
-                operation: "download".to_string(),
-                backend: BACKEND.to_string(),
-                primitive: "a materialised record".to_string(),
-                reason: "download is not wired yet".to_string(),
-                remedy: "wait for the transfer task".to_string(),
-            })
-        })
+        Box::pin(async move { self.download_sandbox(sandbox, source, destination) })
     }
 
     fn inspect<'a>(
         &'a self,
-        _sandbox: &'a SandboxRecord,
+        sandbox: &'a SandboxRecord,
     ) -> BoxFuture<'a, Result<Inspection, Error>> {
-        Box::pin(async {
-            Err(Error::Unsupported {
-                operation: "inspect".to_string(),
-                backend: BACKEND.to_string(),
-                primitive: "a materialised record".to_string(),
-                reason: "inspect is not wired yet".to_string(),
-                remedy: "wait for the inspection task".to_string(),
-            })
-        })
+        Box::pin(async move { self.inspect_sandbox(sandbox) })
     }
 
     fn delete<'a>(&'a self, sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>> {
@@ -484,16 +806,11 @@ impl Backend for SeatbeltBackend {
     }
 
     fn readiness<'a>(&'a self) -> BoxFuture<'a, Result<Readiness, Error>> {
-        Box::pin(async {
-            Ok(Readiness {
-                backend: BACKEND.to_string(),
-                checks: Vec::new(),
-            })
-        })
+        Box::pin(async { Ok(self.readiness_report()) })
     }
 
     fn capabilities(&self) -> BoxFuture<'_, Result<Vec<Capability>, Error>> {
-        Box::pin(async { Ok(Vec::new()) })
+        Box::pin(async { Ok(self.capability_report()) })
     }
 
     fn contribution_support(&self) -> Vec<ContributionSupport> {
@@ -514,6 +831,18 @@ impl Backend for SeatbeltBackend {
             },
         ]
     }
+}
+
+fn write_payload(state: &Path, payload: &PayloadV1) -> Result<(), Error> {
+    let value = payload.to_value()?;
+    let text = toml::to_string(&value)
+        .map_err(|error| Error::failed(format!("cannot serialise the payload: {error}")))?;
+    let path = state.join("payload.toml");
+    fs::write(&path, text)
+        .map_err(|error| Error::failed(format!("cannot write '{}': {error}", path.display())))?;
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+        .map_err(|error| Error::failed(format!("cannot protect '{}': {error}", path.display())))?;
+    Ok(())
 }
 
 fn helper_path() -> Result<PathBuf, Error> {
@@ -718,6 +1047,161 @@ mod tests {
         record.data = toml::Value::Table(Default::default());
         backend.delete(&record).await.expect("delete unreadable");
         assert!(!state.exists());
+    }
+
+    #[tokio::test]
+    async fn inspect_reports_active_paused_and_missing() {
+        let (backend, record, state) = sandbox("inspect").await;
+        let live = backend.inspect(&record).await.expect("inspect");
+        assert_eq!(live.status, crate::sandbox::contract::SandboxStatus::Active);
+        assert_eq!(live.backend, "seatbelt");
+        assert!(live.forwards.is_empty());
+
+        backend.pause(&record).await.expect("pause");
+        let paused = backend.inspect(&record).await.expect("inspect paused");
+        assert_eq!(
+            paused.status,
+            crate::sandbox::contract::SandboxStatus::Paused
+        );
+        backend.resume(&record).await.expect("resume");
+
+        let payload = payload(&record);
+        let host = SystemHost::new();
+        host.signal_group(
+            payload.holder_pid,
+            crate::backends::seatbelt::host::Signal::Kill,
+        )
+        .expect("kill");
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let missing = backend.inspect(&record).await.expect("inspect missing");
+        assert_eq!(
+            missing.status,
+            crate::sandbox::contract::SandboxStatus::Missing
+        );
+        let _ = std::fs::remove_dir_all(&state);
+    }
+
+    #[tokio::test]
+    async fn list_returns_records_and_reports_a_corrupt_payload() {
+        let (backend, record, state) = sandbox("list").await;
+        let repository = backend
+            .list(&crate::sandbox::contract::Scope::Repository {
+                project_slug: record.project_slug.clone(),
+            })
+            .await
+            .expect("list");
+        assert!(repository.iter().any(|entry| entry.name == record.name));
+
+        let machine = backend
+            .list(&crate::sandbox::contract::Scope::Machine)
+            .await
+            .expect("list machine");
+        assert!(machine.iter().any(|entry| entry.name == record.name));
+
+        std::fs::write(state.join("payload.toml"), "not toml").expect("corrupt");
+        let after = backend
+            .list(&crate::sandbox::contract::Scope::Machine)
+            .await
+            .expect("list corrupt");
+        assert!(!after
+            .iter()
+            .any(|entry| entry.name == record.name && entry.project_slug == record.project_slug));
+        let _ = std::fs::remove_dir_all(&state);
+    }
+
+    #[tokio::test]
+    async fn upload_and_download_round_trip() {
+        let (backend, record, state) = sandbox("transfer").await;
+        let host = tempfile::tempdir().expect("host");
+        let source = host.path().join("source");
+        std::fs::write(&source, b"payload").expect("source");
+        backend
+            .upload(&record, &source, "in/file")
+            .await
+            .expect("upload");
+        let destination = host.path().join("destination");
+        backend
+            .download(&record, "in/file", &destination, None)
+            .await
+            .expect("download");
+        assert_eq!(std::fs::read(&destination).expect("read"), b"payload");
+        let _ = std::fs::remove_dir_all(&state);
+    }
+
+    #[tokio::test]
+    async fn capabilities_name_the_unsupported_operations() {
+        let (backend, _record, state) = sandbox("capabilities").await;
+        let capabilities = backend.capabilities().await.expect("capabilities");
+        assert!(capabilities.iter().any(|entry| {
+            entry.operation == "pause and resume"
+                && entry.state == crate::sandbox::report::State::Available
+        }));
+        assert!(capabilities.iter().any(|entry| {
+            entry.operation == "resource limits"
+                && entry.state == crate::sandbox::report::State::Unavailable
+        }));
+        assert!(capabilities.iter().any(|entry| {
+            entry.operation == "port forwarding"
+                && entry.state == crate::sandbox::report::State::Unavailable
+        }));
+        let _ = std::fs::remove_dir_all(&state);
+    }
+
+    #[tokio::test]
+    async fn readiness_reports_the_five_checks() {
+        let helper = helper();
+        assert!(helper.exists(), "build the helper before this test");
+        let backend = SeatbeltBackend::with_helper(settings(), Arc::new(SystemHost::new()), helper);
+        let readiness = backend.readiness().await.expect("readiness");
+        assert_eq!(readiness.checks.len(), 5);
+        assert!(readiness.is_available(), "{:?}", readiness.checks);
+    }
+
+    #[tokio::test]
+    async fn a_missing_or_untrusted_helper_is_unavailable() {
+        let missing = SeatbeltBackend::with_helper(
+            settings(),
+            Arc::new(SystemHost::new()),
+            PathBuf::from("/does/not/exist/litterbox-seatbelt-helper"),
+        );
+        let readiness = missing.readiness().await.expect("readiness");
+        assert!(!readiness.is_available());
+        assert!(readiness.checks.iter().any(|check| {
+            check.primitive == "the Seatbelt helper"
+                && check.state == crate::sandbox::report::State::Unavailable
+        }));
+
+        let directory = tempfile::tempdir().expect("tempdir");
+        let untrusted = directory.path().join("helper");
+        std::fs::copy(helper(), &untrusted).expect("copy");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&untrusted, std::fs::Permissions::from_mode(0o777))
+                .expect("mode");
+        }
+        let backend =
+            SeatbeltBackend::with_helper(settings(), Arc::new(SystemHost::new()), untrusted);
+        let readiness = backend.readiness().await.expect("readiness");
+        assert!(readiness.checks.iter().any(|check| {
+            check.primitive == "the Seatbelt helper"
+                && check.state == crate::sandbox::report::State::Unavailable
+        }));
+    }
+
+    #[tokio::test]
+    async fn a_failing_probe_is_unavailable() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let probe = directory.path().join("helper");
+        std::fs::write(&probe, "#!/bin/sh\nexit 1\n").expect("script");
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&probe, std::fs::Permissions::from_mode(0o755)).expect("mode");
+        let backend = SeatbeltBackend::with_helper(settings(), Arc::new(SystemHost::new()), probe);
+        let readiness = backend.readiness().await.expect("readiness");
+        assert!(readiness.checks.iter().any(|check| {
+            check.primitive == "the Seatbelt probe"
+                && check.state == crate::sandbox::report::State::Unavailable
+        }));
     }
 
     #[tokio::test]
