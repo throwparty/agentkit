@@ -15,7 +15,7 @@ Create `src/backends/seatbelt/` with `mod.rs` holding `BACKEND = 'seatbelt'`, `c
 | Depends On |  |
 | References | backend-registration,profile-baseline,fail-closed,platform-requirements |
 
-### T-002: Render the profile and its parameter table
+### T-002: [x] Render the profile and its parameter table
 
 Add `policy.rs` with the typed layers, the writer and parameter interning. Emit the fixed layer order from the plan, put every dynamic value in the parameter table as `p0..pN`, compute metadata ancestors as literals, and enforce the 60 KiB and 4096-parameter guards.
 

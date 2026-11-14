@@ -109,18 +109,8 @@ pub(crate) fn normalise(path: &Path) -> PathBuf {
 
 /// Whether a value can name a sandbox in logs and the deny message.
 pub(crate) fn validate_tag(value: &str) -> Result<(), String> {
-    let valid = !value.is_empty()
-        && value.len() <= 64
-        && value.chars().all(|character| {
-            character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')
-        });
-    if valid {
-        Ok(())
-    } else {
-        Err(format!(
-            "'{value}' is not a valid sandbox tag; use 1 to 64 ASCII letters, digits, '.', '_' or '-'"
-        ))
-    }
+    super::policy::validate_tag(value)
+        .map_err(|reason| format!("'{value}' is not a valid sandbox tag; {reason}"))
 }
 
 fn invalid(key: &str, value: &str, reason: &str) -> Error {
