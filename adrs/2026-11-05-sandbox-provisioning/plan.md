@@ -32,7 +32,6 @@ src/
 └── cli.rs                doctor command
 ```
 
-
 ```mermaid
 flowchart TD
     subgraph project["Committed project file"]
@@ -122,13 +121,13 @@ Doing this before `create` means a backend is never called with a shape it canno
 ### Decisions and rejections
 
 1. `ProvisionStep` lives in the contract, not in `provision`, because the backend consumes it. The provision module depends on the contract; the contract imports nothing internal, as the existing lint rule requires.
-2. The resolver is a pure function, not a service. It holds no state, so the doctor and create cannot disagree about what the sequence is.
-3. `provision` is extracted from the backend's table rather than teaching every backend about it. One extraction point keeps `deny_unknown_fields` honest and means a new backend does not have to remember a special key.
-4. `[project] backends` is the election, not the presence of a `provision` key. This is the rejection of the earlier absent-versus-empty model: the supported set says which backends the project stands behind, and a sequence is only a list.
-5. The kind set is closed and compiled in. A runtime registry would hide what a binary can actually apply, and the capture ADR needs a compile-time match anyway.
-6. The resolver returns the contract's error type rather than a second taxonomy. The CLI and MCP already map those classes once, and a provisioning failure should not invent a third vocabulary.
-7. The doctor is a new command rather than a flag on `backends`. `backends` answers what the machine has; the doctor answers whether this project can run here, which needs the project's configuration and steps.
-8. No new dependency. The resolver is plain Rust over existing types. 9. Setup consent moves from the config key to the resolved command steps: a project with no command steps needs no consent, and a refusal names the step identity rather than a key and is classified `Denied`.
+1. The resolver is a pure function, not a service. It holds no state, so the doctor and create cannot disagree about what the sequence is.
+1. `provision` is extracted from the backend's table rather than teaching every backend about it. One extraction point keeps `deny_unknown_fields` honest and means a new backend does not have to remember a special key.
+1. `[project] backends` is the election, not the presence of a `provision` key. This is the rejection of the earlier absent-versus-empty model: the supported set says which backends the project stands behind, and a sequence is only a list.
+1. The kind set is closed and compiled in. A runtime registry would hide what a binary can actually apply, and the capture ADR needs a compile-time match anyway.
+1. The resolver returns the contract's error type rather than a second taxonomy. The CLI and MCP already map those classes once, and a provisioning failure should not invent a third vocabulary.
+1. The doctor is a new command rather than a flag on `backends`. `backends` answers what the machine has; the doctor answers whether this project can run here, which needs the project's configuration and steps.
+1. No new dependency. The resolver is plain Rust over existing types. 9. Setup consent moves from the config key to the resolved command steps: a project with no command steps needs no consent, and a refusal names the step identity rather than a key and is classified `Denied`.
 
 ## Technologies
 
@@ -151,13 +150,11 @@ The backend-facing provisioning value
 
 ProvisionStep with Command { identity, run }; ProvisionKind as the closed kind set; CreateRequest.provision replaces environment and setup_command; Backend::provision_support with ProvisionSupport { kind, state, reason, remedy }; EnvironmentSource deleted, Environment and Provenance retained.
 
-
 ### Configuration schema
 
 The project's supported set, definitions and sequences
 
-ProjectConfig.backends, ProjectFile.provision: Option<Vec<ProvisionStep>>, Config.backend_sequences: BTreeMap<String, Vec<String>>; merge rules make the local override replace all three wholesale.
-
+ProjectConfig.backends, ProjectFile.provision: Option\<Vec<ProvisionStep>>, Config.backend_sequences: BTreeMap\<String, Vec<String>>; merge rules make the local override replace all three wholesale.
 
 ### Configuration loader
 
@@ -165,13 +162,11 @@ Validation and the setup-command rejection
 
 Extracts provision from each backend table before the backend parses; validates identity shape and uniqueness, referenced identities, duplicate sequences, supported-set presence and empty-set-with-steps; rejects [project] setup-command with the replacement shown.
 
-
 ### Provision resolver
 
 One place that turns identities into typed steps
 
 src/provision/resolve.rs: takes Config, the selected backend name and its provision support; checks the supported set, resolves in order and checks kind support; `resolve` returns the steps or a contract error, and `preflight_steps` returns per-step outcomes; unit tests cover order, duplicates, unknown identities, unsupported kinds and unlisted backends.
-
 
 ### Orchestrator
 
@@ -179,20 +174,17 @@ Resolve before create
 
 Selects the backend, reads provision_support, resolves, enforces the setup consent on any resolved command step as Denied, naming the identity and both settings, builds CreateRequest with the resolved steps, and keeps the existing rollback path; the setup_command field is removed from the request construction.
 
-
 ### Docker backend
 
 The first consumer of the sequence
 
 provision_support reports Command as available; create walks the steps in order, runs each command with sh -c in the workspace, records provenance and rolls back on non-zero; capabilities report provision:command.
 
-
 ### Doctor command
 
 Preflight without mutation
 
-litterbox doctor [--json]: loads configuration, builds the selected backend, reports readiness, supported-set compatibility and each resolved step's state and remedy; never creates, writes or executes.
-
+litterbox doctor \[--json\]: loads configuration, builds the selected backend, reports readiness, supported-set compatibility and each resolved step's state and remedy; never creates, writes or executes.
 
 ### MCP surface
 
@@ -200,27 +192,23 @@ Unchanged names, structured failures
 
 No new tool; sandbox-create returns the contract error, whose fields already carry the backend, operation, reason and remedy; the error data payload gains the step identity and kind for provisioning failures.
 
-
 ### Test backend and conformance
 
 The gate for the resolver and every backend
 
 TestBackend reports [Command] and records the CreateRequest it receives; the conformance suite asserts list order, per-backend selection, an empty sequence and that no other backend's name or the supported set crosses the boundary.
 
-
 ### Architecture lint
 
 The resolver boundary, enforced
 
-New litterbox-provision scope for src/provision/**; deny backends, CLI and MCP importing it; allow the orchestrator; a negative fixture in hack/ proves a violating import fails.
-
+New litterbox-provision scope for src/provision/\*\*; deny backends, CLI and MCP importing it; allow the orchestrator; a negative fixture in hack/ proves a violating import fails.
 
 ### Documentation
 
 The configuration reference and generated surfaces
 
-Document [project] backends, [[provision]], the command kind, per-backend sequences and the setup-command replacement; regenerate the CLI and MCP references and add the doctor command.
-
+Document [project] backends, \[[provision]\], the command kind, per-backend sequences and the setup-command replacement; regenerate the CLI and MCP references and add the doctor command.
 
 ## Data Flow
 
@@ -230,7 +218,6 @@ Create: a CLI or MCP call reaches the orchestrator. The orchestrator selects the
 
 Doctor: `litterbox doctor` loads the same merged configuration, builds the selected backend without requiring it to be ready, asks for readiness and capabilities, resolves the steps through the same resolver, applies the same consent check and prints the selected backend, its checks, the supported set, the sequence and each step's state and remedy. It stops at the report: no branch, no workspace, no record, no command.
 
-
 ## Deployment
 
 One binary, no new dependencies. Docker remains the default backend and a project with no `[[provision]]` section behaves exactly as today: the default environment, no setup command, no supported-set requirement. The breaking change is `[project] setup-command`, which fails to load with a message naming a `command` step and the backend sequences; this is pre-1.0 and no migration is written. The repository's own configuration, if it carries the key, is updated in the same change.
@@ -238,4 +225,3 @@ One binary, no new dependencies. Docker remains the default backend and a projec
 MCP tool names, arguments and result shapes are unchanged; only the error data payload gains the step identity and kind. The CLI reference is regenerated with the doctor command, and the configuration reference gains the provisioning section.
 
 CI already runs `arch-lint check`; the new scope and deny rules land with it and the negative fixture runs beside the existing one. The Docker suite keeps its `LITTERBOX_DOCKER_TESTS` opt-in and its assertions; new tests cover the ordered sequence and the rollback. The resolver's tests are module-scoped and selected by package and target. The macOS job is unaffected: no backend is added here, and the `nix` kind is absent until `nix-devshell-env-capture`.
-

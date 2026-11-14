@@ -1,9 +1,8 @@
 # DevShell Environment
 
-**Status:** proposed  **Created:** 2026-11-07  **Author:** adrian
+**Status:** proposed **Created:** 2026-11-07 **Author:** adrian
 
-Litterbox provisions a sandbox from the project's `[[provision]]` steps (adrs/2026-11-05-sandbox-provisioning). Today the only kind is `command`, which runs inside the sandbox, and `CreateRequest` (crates/agentkit-litterbox/src/sandbox/contract.rs) carries no environment from the host and no store paths. A project that builds with Nix therefore has to run nix inside the sandbox, which the map excluded: with the daemon socket a confined command grew the host store and the daemon accepted builds outside the sandbox (maps/2026-10-31-nix-devshell-sandbox/evidence/T-018.md), and without it nix fails before it can evaluate anything. The same map established that a devShell can be entered on the host instead and its result applied to a sandbox: the environment a sanitised caller produces plus the shell hook's changes reach a bubblewrap holder intact (T-011, T-016), and the devShell's store closure is a sufficient set of paths to make visible (T-022). The contract as written has nowhere to carry either (T-023). This ADR adds a second step kind, `devshell`, that runs on the host and contributes two things a sandbox already understands: environment variables and read-only mounts. It also makes explicit what a step requires - on the host and inside the sandbox - so a mechanism whose dependencies are absent refuses before anything is created. There is no separate abstraction for what a step contributes beyond these two, and no shell state in the sandbox: entering the devShell produces an environment and a list of paths, and nothing else. Terminology is normative in crates/agentkit-litterbox/CONTEXT.md, upstream Nix terms are in .agentkit/tackle/prompts/nix/glossary.md, and the behaviours this specification relies on are verified in .agentkit/tackle/prompts/nix/PROMPT.md. Two questions decided the production shape, and the prototype settles both: a kind can live outside the contract's closed `ProvisionKind` for the cost of one parse site, and a backend needs contribution support rather than kind support. The answers, and what they refute, are recorded in `findings.md` beside this specification. This ADR specifies the design and produces a prototype that settles both against a real backend; it does not build the production implementation, which a follow-up ADR owns. 
-
+Litterbox provisions a sandbox from the project's `[[provision]]` steps (adrs/2026-11-05-sandbox-provisioning). Today the only kind is `command`, which runs inside the sandbox, and `CreateRequest` (crates/agentkit-litterbox/src/sandbox/contract.rs) carries no environment from the host and no store paths. A project that builds with Nix therefore has to run nix inside the sandbox, which the map excluded: with the daemon socket a confined command grew the host store and the daemon accepted builds outside the sandbox (maps/2026-10-31-nix-devshell-sandbox/evidence/T-018.md), and without it nix fails before it can evaluate anything. The same map established that a devShell can be entered on the host instead and its result applied to a sandbox: the environment a sanitised caller produces plus the shell hook's changes reach a bubblewrap holder intact (T-011, T-016), and the devShell's store closure is a sufficient set of paths to make visible (T-022). The contract as written has nowhere to carry either (T-023). This ADR adds a second step kind, `devshell`, that runs on the host and contributes two things a sandbox already understands: environment variables and read-only mounts. It also makes explicit what a step requires - on the host and inside the sandbox - so a mechanism whose dependencies are absent refuses before anything is created. There is no separate abstraction for what a step contributes beyond these two, and no shell state in the sandbox: entering the devShell produces an environment and a list of paths, and nothing else. Terminology is normative in crates/agentkit-litterbox/CONTEXT.md, upstream Nix terms are in .agentkit/tackle/prompts/nix/glossary.md, and the behaviours this specification relies on are verified in .agentkit/tackle/prompts/nix/PROMPT.md. Two questions decided the production shape, and the prototype settles both: a kind can live outside the contract's closed `ProvisionKind` for the cost of one parse site, and a backend needs contribution support rather than kind support. The answers, and what they refute, are recorded in `findings.md` beside this specification. This ADR specifies the design and produces a prototype that settles both against a real backend; it does not build the production implementation, which a follow-up ADR owns.
 
 ```mermaid
 flowchart TB
@@ -22,7 +21,6 @@ flowchart TB
     backend --> dk["Docker"]
 
 ```
-
 
 ## Problem
 
@@ -54,7 +52,6 @@ A project cannot express its devShell in configuration without either running ni
 - A Nix backend; a devShell is an environment, not a mechanism.
 - The production implementation; a follow-up ADR consumes the prototype and implements it. The prototype ships no production type.
 
-
 ## Functional Requirements
 
 ### FR-001: Kind: DevShell Step
@@ -84,7 +81,6 @@ A step declares what must exist for it to be applied, in two scopes. Host requir
 ### FR-005: Step: Host Placement
 
 A devshell step is a host step: the orchestrator runs it during create, after resolution and the requirement and consent checks and before the branch is created, so a failure leaves no branch, workspace or compute. It reads the project root, not the staged workspace, because the installable is relative to the checkout the user is in. It produces contributions; it runs no sandbox and needs no backend.
-
 
 ```mermaid
 sequenceDiagram
@@ -154,7 +150,7 @@ Contributions persist with the sandbox, so every later command in every process 
 
 ### FR-013: Core: Workspace Mapping
 
-The step records which environment values name the project root, such as CARGO_HOME, RUSTUP_HOME and the leading PATH entry, and the backend rewrites only those when it presents the workspace at a path other than the host's, as the contract requires. Store paths, including the NIX_ variables and toolchain paths, are never rewritten, because the store is mounted at its own path. A value naming a host path outside the store and the workspace is reported as a host path and never made visible.
+The step records which environment values name the project root, such as CARGO_HOME, RUSTUP_HOME and the leading PATH entry, and the backend rewrites only those when it presents the workspace at a path other than the host's, as the contract requires. Store paths, including the NIX\_ variables and toolchain paths, are never rewritten, because the store is mounted at its own path. A value naming a host path outside the store and the workspace is reported as a host path and never made visible.
 
 **Slug:** `workspace-mapping`
 
@@ -331,54 +327,63 @@ The prototype declares a step whose kind is not named in the contract, checks a 
 A shell hook that exits non-zero fails create as Failed with the step identity and bounded output and leaves no branch, workspace or compute; the doctor reports the same reason.
 
 **Slug:** `hook-fails`
+
 ### EC-002: Step: Hook Prints
 
 A shell hook that prints to stdout does not corrupt the environment, because records go to a file or spare descriptor; a test with a banner-printing hook asserts every record is a well-formed assignment.
 
 **Slug:** `hook-prints`
+
 ### EC-003: Step: Not A DevShell
 
 An installable that evaluates but produces no devShell environment, such as a package rather than a shell, fails as Misconfigured naming the installable and what it produced.
 
 **Slug:** `not-a-devshell`
+
 ### EC-004: Host: Flakes Disabled
 
 With flakes disabled in the host's Nix configuration, readiness and create fail as Unavailable naming the experimental feature and the setting that enables it.
 
 **Slug:** `flakes-disabled`
+
 ### EC-005: Core: Backend Cannot Mount
 
 A backend that cannot mount the closure refuses the request with its own limit, the contribution, the reason and the remedy, and the user can select the whole store view or a backend that can; no path is silently dropped.
 
 **Slug:** `backend-cannot-mount`
+
 ### EC-006: Core: Workspace Elsewhere
 
 When the workspace is presented at a path other than the project root, the recorded workspace-rooted values are rewritten and no store path is; a translation that would rewrite a store path is a defect and fails its test.
 
 **Slug:** `workspace-elsewhere`
+
 ### EC-007: Step: Shell Hook Execs A Shell
 
 A shell hook or a caller's shell rc that execs another shell changes what the hook sees before it returns; the step takes the environment that is left when the hook exits, and does not follow the exec. Recorded as a risk, not handled.
 
 **Slug:** `hook-execs-shell`
+
 ### EC-008: Host: Dirty Tree
 
 A dirty Git tree changes the flake source, so print-dev-env may write a source path to the store and the closure may differ from a clean checkout's. A create that fails after this leaves that store write behind, and the report does not claim otherwise.
 
 **Slug:** `dirty-tree`
+
 ### EC-009: Shared: Docker Selected
 
 With a devshell step in the project and Docker selected, create fails as Unsupported naming the backend, step and contribution and Docker is never called; the doctor reports the same.
 
 **Slug:** `docker-selected`
+
 ### EC-010: Step: DevShell Changed After Create
 
 A sandbox created before the flake changed keeps the contributions it was created with; creating again prepares them again and may differ, and inspection names the preparation's origin so the difference is visible.
 
 **Slug:** `devshell-changed`
+
 ### EC-011: Shared: Command Needs Shell State
 
 A command that relies on a devShell bash function fails as it would in a plain shell, because no shell state is carried; the doctor says the sandbox carries none, and the remedy is a command that does not depend on it or a future contribution that adds it deliberately.
 
 **Slug:** `command-needs-shell-state`
-

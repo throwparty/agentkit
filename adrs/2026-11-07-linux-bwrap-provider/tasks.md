@@ -6,32 +6,29 @@
 
 Move `run_steps`, the create budget, the transfer deadline and the output cap out of `backends/docker/backend.rs` into `backends/shared.rs` with `pub(crate)` visibility. Docker imports them and changes no behaviour. The provenance and failure types stay where they are.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | Docker's existing tests pass untouched. A unit test in `shared.rs` covers a step that exits non-zero and a step that times out, using the same failure types Docker already reports. No constant is duplicated. |
 | Complexity | 🟢 Low |
 | Effort | 2-3h |
-| Depends On |  |
+| Depends On | |
 | References | spawned-processes,docker-unchanged |
 
 ### T-002: [x] Add the backend module, its configuration and the registry entry
 
 Create `src/backends/bubblewrap/` with `mod.rs` holding the `BACKEND` constant and `construct::build`, and `config.rs` typing `memory-mb` and `tasks` with `deny_unknown_fields`. Add the registry entry behind `cfg(target_os = 'linux')` and keep `DEFAULT` as docker. Rename the two registry tests that use bubblewrap as the name of an absent backend.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | `litterbox backends` lists both backends and marks docker as selected. An unknown key in `[backends.bubblewrap]` fails as Misconfigured and names the key. A zero bound fails as Misconfigured. A test asserts the entry exists on Linux and is absent on a platform without it. The renamed registry tests pass. |
 | Complexity | 🟢 Low |
 | Effort | 3-4h |
-| Depends On |  |
+| Depends On | |
 | References | backend-registration,platform-requirements,docker-unchanged,backends-listing |
 
 ### T-003: [x] Add the host seam
 
 Define the `Host` trait covering the reads and writes the backend needs: a pid's existence, state, start time, uid, namespace inodes, environment and mount table; the scope's freeze, thaw, kill and limit files; binary resolution; and a clock. Implement `SystemHost` over `/proc`, cgroupfs and the file system, and `FakeHost` over a table for tests.
-
 
 | Field | Value |
 |-------|-------|
@@ -45,7 +42,6 @@ Define the `Host` trait covering the reads and writes the backend needs: a pid's
 
 Add `view.rs` with `Mount { sandbox_path, access }`, the ordered view, and the validation rules: absolute, not a protected root, the home, the metadata directory or the state directory, not a socket, device or FIFO, and no overlap with the workspace. Open each accepted path with `openat2` and `RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS`, and emit the descriptor as `/proc/self/fd/N`. Render the whole argv: seven namespaces, the nested-userns block, private root, proc, dev, tmpfs, home, and the mounts.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | The golden test asserts the exact vector for the empty view, for an environment with a two-path closure and a workspace, and for the degraded form without a scope. A test proves that removing any invariant changes the vector. A refused path names the rule it broke. The argv emits no `--setenv`, no `--clearenv`, and no parent-death flag. |
@@ -57,7 +53,6 @@ Add `view.rs` with `Mount { sandbox_path, access }`, the ordered view, and the v
 ### T-005: [x] Resolve the holder command
 
 Resolve the shell and the utility the holder runs from the host PATH, validate each the way bwrap is validated, and record the interpreter and libraries the host's loader reports for both. The sandbox's own userland is not the backend's to assume: a workload runs what its provisioning steps contribute.
-
 
 | Field | Value |
 |-------|-------|
@@ -71,7 +66,6 @@ Resolve the shell and the utility the holder runs from the host PATH, validate e
 
 Add `environment.rs` merging the resolved steps' contributions in order through `Contributions::environment_for`, applying the ungranted-path rule, then setting `HOME`, `TMPDIR` and `PWD`; `PATH` is whatever the steps contribute. Record withheld names in provenance as removed and the backend's own names as set.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | A value naming an ungranted host path withholds its variable and the name is reported as removed. A credential-shaped name whose value names a granted path is carried. The merged environment applies later steps over earlier ones. `HOME`, `TMPDIR` and `PWD` are present and recorded as set, and a contributed `PATH` is carried unchanged. No value is written to a file, an argv or a log line. |
@@ -83,7 +77,6 @@ Add `environment.rs` merging the resolved steps' contributions in order through 
 ### T-007: [x] Add the record payload
 
 Add `payload.rs` with `Payload` version 1: the payload version, both pids with start times, the seven inode numbers, the uid, the root device and inode, the mounts from host paths with their access, the host and sandbox workspace paths, the scope unit, the paused flag and the provenance. Fail on a higher version as unreadable and on a lower version or missing field as Unavailable.
-
 
 | Field | Value |
 |-------|-------|
@@ -97,7 +90,6 @@ Add `payload.rs` with `Payload` version 1: the payload version, both pids with s
 
 Add the single validation function that returns Absent, Forbidden, Editions or Live. Check the pid exists, is not a zombie, its uid and start time match, all seven inodes match through the descriptors that setns will receive, the root device and inode match, and every recorded host path appears with its recorded access while no host path outside the record is reachable. Map the outcome per operation: NotFound for a command, Missing for inspection and listing, already torn down for delete, Denied for a live mismatch, Unavailable for an edition mismatch.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | A fake host mutates one field at a time and each mutation produces the documented outcome. A dead pid produces Missing for inspect and success for delete. A record with a foreign uid produces Denied. The kernel mounts for proc, dev and tmpfs are not treated as host paths. |
@@ -109,7 +101,6 @@ Add the single validation function that returns Absent, Forbidden, Editions or L
 ### T-009: [x] Materialise the workspace and transfer into it
 
 Copy the staged temporary tree into `data_dir/litterbox/bubblewrap/<project-slug>/<sandbox-name>/workspace` without following a link. Implement upload and download through an `O_PATH` descriptor with `RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS`, copying a directory recursively, preserving modes and keeping symlinks as symlinks.
-
 
 | Field | Value |
 |-------|-------|
@@ -123,7 +114,6 @@ Copy the staged temporary tree into `data_dir/litterbox/bubblewrap/<project-slug
 
 Add `holder.rs` building the spawn: the rendered argv, all three standard streams null, a cleared environment carrying only the assembled sandbox environment, and `systemd-run --user --scope --unit` when a scope is available. Read the status document with a timeout, then poll the mount table until every recorded host path is present with its recorded access. Tear down by killing the sandbox pid, writing `cgroup.kill` when a scope exists, waiting for the namespace to empty and removing the state directory.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | A create against a fake host returns no sandbox when the status document is absent or malformed and reports the stage. A view that never completes fails within the budget and leaves no state directory. The large-closure host test creates a 1779-path view and reports how long the view took. The spawn is asserted to set all three streams to null. |
@@ -135,7 +125,6 @@ Add `holder.rs` building the spawn: the rendered argv, all three standard stream
 ### T-011: [x] Implement create in the backend
 
 Assemble create: refuse ports with Unsupported naming forwarding, refuse a duplicate name with Conflict before any process starts, run the sandbox steps through the shared runner under the shared budget, and write the payload once the view is ready. Record no sandbox on any refusal.
-
 
 | Field | Value |
 |-------|-------|
@@ -149,7 +138,6 @@ Assemble create: refuse ports with Unsupported naming forwarding, refuse a dupli
 
 Add `join.rs`: open the seven namespace descriptors and the root descriptor before joining, join the user namespace that owns the others through `NS_GET_USERNS`, then ipc, net, pid, mnt, uts and cgroup, then the sandbox's own user namespace, fork again, close descriptors above 2, chroot through the pinned root, chdir, set no-new-privileges, set uid and gid, clear capabilities, verify `/proc/self/ns` against the record, and exec with the environment read from the sandbox. Never call setgroups. Map the reserved statuses to named errors.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | The host suite runs a command whose own `/proc/self/ns/pid` equals the sandbox's and differs from the host's. A listener started with its streams redirected is reachable from a second command and not from the host. A join that cannot enter a namespace returns the reserved status as a named error, never as the command's exit status. getgroups is never called and setgroups is never written. |
@@ -161,7 +149,6 @@ Add `join.rs`: open the seven namespace descriptors and the root descriptor befo
 ### T-013: [x] Implement pause, resume and the scope
 
 Add the lifecycle facet: freeze through the scope and confirm by sampling cumulative CPU time until it settles, then thaw and report a failure if it does not. Record the paused state so inspection and a later process can report it. Without a scope, and only after acceptance, pause and resume use the stop-and-rescan loop over the pid namespace.
-
 
 | Field | Value |
 |-------|-------|
@@ -175,7 +162,6 @@ Add the lifecycle facet: freeze through the scope and confirm by sampling cumula
 
 Write `memory.max` and `pids.max` on the scope at create and in `set_limits`, reporting a failed write as a failure. Report the cgroup check as Degraded with a `Fallback` when there is no scope, and replace the facet-derived pause and limits capability entries with that state so the listing cannot offer a bound the host cannot apply.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | On a host without a scope, create is refused until `accept-degraded = true`, then succeeds. `set_limits` refuses at the facet level with Unsupported naming the cgroup requirement. `litterbox backends` reports pause and limits as degraded with their fallback. A failed write is reported, not swallowed. |
@@ -187,7 +173,6 @@ Write `memory.max` and `pids.max` on the scope at create and in `set_limits`, re
 ### T-015: [x] Implement readiness
 
 Report one check per requirement: the effective uid is not root, bwrap is present, canonical, root-owned, not group or world writable and at least 0.8.0, user namespaces are permitted, a scope is usable or Degraded with the fallback, a holder command resolves, and the shell resolves with its utilities beside it. Refuse create on any check that is not available except the cgroup one, which is gated behind acceptance.
-
 
 | Field | Value |
 |-------|-------|
@@ -201,7 +186,6 @@ Report one check per requirement: the effective uid is not root, bwrap is presen
 
 Rebuild each payload from the state directory for both scopes, report a corrupt entry rather than dropping it, and report another backend's records without failing. Inspect reports egress Denied, the workspace path, the recorded provenance and no forwards. Delete kills the sandbox pid, waits for the namespace to empty, removes the state directory, and succeeds when the sandbox is already gone or the record cannot be read.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | Machine-wide pause sees this backend's sandboxes. A sandbox whose holder died is still listed and reports Missing. A corrupt payload is reported. A machine holding records from both backends does not fail. Delete after an out-of-band kill succeeds and removes the state directory. A record refused by validation is still deletable. |
@@ -213,7 +197,6 @@ Rebuild each payload from the state directory for both scopes, report a corrupt 
 ### T-017: [x] Cover the suite: unit, host and conformance
 
 Write the unit tests over `FakeHost` and the renderer, the ignored host suite and the crate's conformance run. The host suite creates a sandbox, runs two commands, proves the shared pid and loopback context, kills a client and finds no defunct process, deletes the sandbox, and keeps the probes from T-033 to T-041 as regression checks. It also covers a recycled pid, a foreign holder with a writable root, a symlink planted in the workspace, and the isolation cases: a store write fails read-only, an ungranted host path is absent, an outbound connection has no route, and a granted tree holding a unix socket is refused at create.
-
 
 | Field | Value |
 |-------|-------|
@@ -227,7 +210,6 @@ Write the unit tests over `FakeHost` and the renderer, the ignored host suite an
 
 Add an arch-lint scope for `src/backends/bubblewrap/**` with deny edges to the orchestrator, the command line and MCP code, persistence, SCM and provision preparation, and a negative fixture for each edge. Document bubblewrap on the backends page and in the user configuration reference: its keys and units, its readiness output, what the degraded mode does not bound, and the ports refusal.
 
-
 | Field | Value |
 |-------|-------|
 | Success Criteria | `arch-lint check` passes and each new deny edge has a negative fixture that fails when the edge is removed. The backends page no longer says Docker is the only mechanism. The configuration reference names `memory-mb` and `tasks` with their units. The documented reach matches what inspection reports. |
@@ -235,4 +217,3 @@ Add an arch-lint scope for `src/backends/bubblewrap/**` with deny edges to the o
 | Effort | 3-4h |
 | Depends On | T-002 |
 | References | backend-documentation,fail-closed |
-

@@ -98,8 +98,10 @@ pub fn resolve(program: &str) -> Result<PathBuf, Failure> {
             return Ok(candidate);
         }
     }
-    Err(Failure::unavailable(program, format!("{program} is not on PATH"))
-        .with_remedy(format!("install {program} and put it on PATH")))
+    Err(
+        Failure::unavailable(program, format!("{program} is not on PATH"))
+            .with_remedy(format!("install {program} and put it on PATH")),
+    )
 }
 
 /// One finished host command, with both streams bounded.
@@ -293,9 +295,8 @@ pub struct Records {
 /// not an assignment, or whose name is not a process name, is recorded as
 /// rejected instead of entering the map.
 pub fn read_nul(path: &Path) -> Result<Records, Failure> {
-    let bytes = fs::read(path).map_err(|error| {
-        Failure::failed(format!("could not read {}: {error}", path.display()))
-    })?;
+    let bytes = fs::read(path)
+        .map_err(|error| Failure::failed(format!("could not read {}: {error}", path.display())))?;
     let mut values = BTreeMap::new();
     let mut rejected = Vec::new();
     for record in bytes.split(|byte| *byte == 0) {
@@ -326,13 +327,13 @@ pub fn private_dir(path: &Path) -> Result<(), Failure> {
     builder.mode(0o700);
     match builder.create(path) {
         Ok(()) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Err(Failure::misconfigured(
-            format!(
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            Err(Failure::misconfigured(format!(
                 "'{}' already exists, and the harness does not reuse a directory it did not create",
                 path.display()
-            ),
-        )
-        .with_remedy("remove it, or choose a path that does not exist")),
+            ))
+            .with_remedy("remove it, or choose a path that does not exist"))
+        }
         Err(error) => Err(Failure::failed(format!(
             "could not create {}: {error}",
             path.display()
@@ -346,7 +347,9 @@ pub fn write_nul_strings(path: &Path, values: impl Iterator<Item = String>) -> R
     for value in values {
         file.write_all(value.as_bytes())
             .and_then(|_| file.write_all(&[0]))
-            .map_err(|error| Failure::failed(format!("could not write {}: {error}", path.display())))?;
+            .map_err(|error| {
+                Failure::failed(format!("could not write {}: {error}", path.display()))
+            })?;
     }
     Ok(())
 }
@@ -378,10 +381,7 @@ mod tests {
     use std::os::unix::fs::{PermissionsExt, symlink};
 
     fn scratch(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "devshell-poc-util-{}-{name}",
-            std::process::id()
-        ))
+        std::env::temp_dir().join(format!("devshell-poc-util-{}-{name}", std::process::id()))
     }
 
     #[test]
@@ -428,7 +428,10 @@ mod tests {
         assert_ne!(home_of(&first), home_of(&second));
         let first_home = home_of(&first);
         drop(first);
-        assert!(!first_home.exists(), "the dropped caller removes its own home");
+        assert!(
+            !first_home.exists(),
+            "the dropped caller removes its own home"
+        );
         assert!(home_of(&second).exists(), "and not its neighbour's");
     }
 
@@ -512,7 +515,10 @@ mod tests {
 
     #[test]
     fn a_short_excerpt_is_verbatim() {
-        assert_eq!(excerpt(b"sh: nix: not found\n", false), "sh: nix: not found");
+        assert_eq!(
+            excerpt(b"sh: nix: not found\n", false),
+            "sh: nix: not found"
+        );
     }
 
     #[test]

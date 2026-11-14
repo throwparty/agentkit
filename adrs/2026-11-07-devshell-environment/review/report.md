@@ -5,6 +5,7 @@
 **Scope:** d6192bb4eafc0f6a00d6be62a1249606a21ce0dc..ea7c8ce31bc678294d62ace367b9548b008350e6
 
 **Files:**
+
 - `.gitignore`
 - `adrs/2026-11-07-devshell-environment/contributions.mmd`
 - `adrs/2026-11-07-devshell-environment/create-sequence.mmd`
@@ -39,7 +40,7 @@
 
 **Reference:** spec://adrs/2026-11-07-devshell-environment/spec.md, spec://adrs/2026-11-07-devshell-environment/tasks.md
 
----
+______________________________________________________________________
 
 ## Summary
 
@@ -53,7 +54,7 @@
 
 **Total:** 68 findings
 
----
+______________________________________________________________________
 
 ## Findings
 
@@ -69,7 +70,7 @@
 | Impact | A doctor run on an untrusted checkout performs evaluation and network egress, and a refused create has already written store paths; the no-mutation guarantee the spec asserts is false and cannot be tested as written. |
 | Recommendation | Separate evaluation from readiness, or restate FR-015 as no sandbox, workspace, branch or devShell realisation and enumerate the permitted store writes. |
 
----
+______________________________________________________________________
 
 ### host-readiness-flakes-unchecked
 
@@ -83,7 +84,7 @@
 | Impact | With flakes disabled the failure is attributed to the wrong requirement and the printed remedy also fails, so doctor and create cannot be distinguished by a caller or a test. |
 | Recommendation | Add the flakes check first, name the setting in its remedy, and cover EC-004 with a test. |
 
----
+______________________________________________________________________
 
 ### no-deadline-on-host-subprocesses
 
@@ -97,7 +98,7 @@
 | Impact | A blocking shellHook, a network-fetching flake or a wedged nix daemon hangs create indefinitely and silently, and nothing records which step was stuck. |
 | Recommendation | Give each host invocation a deadline and bounded capture, and report the primitive, the step and the elapsed budget on expiry. |
 
----
+______________________________________________________________________
 
 ### capture-path-shell-injection
 
@@ -111,7 +112,7 @@
 | Impact | Any --out path with a space, quote or metacharacter either breaks the redirect, producing a message that blames the project hook, or executes in the harness shell as the caller. |
 | Recommendation | Remove the sh -c string build; open the file and duplicate it onto fd 1, or pass the path as $1. |
 
----
+______________________________________________________________________
 
 ### caller-home-exposed-to-hook
 
@@ -125,7 +126,7 @@
 | Impact | A hostile devShell hook reads and exfiltrates user credentials and keys, so consent to evaluate a flake silently becomes consent to expose the home directory; this defeats the containment the sandbox exists for. |
 | Recommendation | Create a throwaway HOME per prepare, redirect XDG_CONFIG_HOME, XDG_CACHE_HOME and GIT_CONFIG_GLOBAL into it, and record the changed hook behaviour. |
 
----
+______________________________________________________________________
 
 ### contribution-filter-is-denylist
 
@@ -139,7 +140,7 @@
 | Impact | The project hook, or a compromised flake input, exports host secrets into the sandbox environment where a prompt-injected agent reads them and rewrites them into the workspace. |
 | Recommendation | Invert the filter to an allowlist derived from print-dev-env plus declared hook changes, and make the credential check a refusal rather than a print. |
 
----
+______________________________________________________________________
 
 ### environment-drops-empty-exported-vars
 
@@ -153,7 +154,7 @@
 | Impact | The prepared environment diverges from nix develop and direnv, for example under set -u, and the production ADR would consume a decision the prototype refutes with no test to catch either direction. |
 | Recommendation | Settle the policy, keep the exported-but-empty variables if T-029 stands, update the counts in findings.md, and pin the surviving name set with a fixture test. |
 
----
+______________________________________________________________________
 
 ### environment-rule-differs-from-t030
 
@@ -167,7 +168,7 @@
 | Impact | TMPDIR, TMP, TEMP and TEMPDIR are dropped rather than restored, NIX_BUILD_TOP survival is untested, and FR-006 contradicts T-030 so the follow-up cannot satisfy both. |
 | Recommendation | Implement the nix-direnv rule with tests, or amend FR-006 and mark T-030 as decided but not implemented. |
 
----
+______________________________________________________________________
 
 ### findings-open-decisions-stale
 
@@ -181,7 +182,7 @@
 | Impact | Two documents give opposite instructions on the same decision, and a reader who starts from the ADR as the workflow prescribes gets the superseded answer. |
 | Recommendation | Replace the open-questions section with the answered questions and their tickets, and reconcile spec.md, findings.md and HANDOVER.md. |
 
----
+______________________________________________________________________
 
 ### findings-missing-required-refutations
 
@@ -195,7 +196,7 @@
 | Impact | The follow-up cannot tell whether a dirty tree writes to the store, why path-info refused, or that no shell state crosses, all of which are load-bearing for FR-008 and FR-010. |
 | Recommendation | Record each with its command and excerpt, and state the shell-state result in the findings rather than only in Limits. |
 
----
+______________________________________________________________________
 
 ### prototype-step-never-parsed
 
@@ -209,7 +210,7 @@
 | Impact | The claim that a generic step survives a launcher rests on code reading rather than a run, and the harness never demonstrates the boundary it exists to test. |
 | Recommendation | Add a step file or CLI input that parses through parse_step and drives prepare and launch from the parsed step, then re-run the question. |
 
----
+______________________________________________________________________
 
 ### poc-only-parse-tests
 
@@ -223,7 +224,7 @@
 | Impact | Six of seven modules are untested, so every count, refusal, mount-set and environment claim rests on a single manual run. |
 | Recommendation | Add module tests over recorded fixtures for print-dev-env JSON, path-info output and env -0 bytes, and extract an argv-builder seam so launch is testable. |
 
----
+______________________________________________________________________
 
 ### poc-tests-not-in-ci
 
@@ -237,7 +238,7 @@
 | Impact | The only tests that exist are never executed, and toolchain, edition 2024 and dependency bumps break the crate silently. |
 | Recommendation | Add a workflow step or recipe running test and clippy in the PoC directory, plus a check that adrs stays excluded. |
 
----
+______________________________________________________________________
 
 ### contribution-filter-untested
 
@@ -251,7 +252,7 @@
 | Impact | The single behaviour this ADR specifies, what crosses into the sandbox, has no test, and it is exactly the policy still open between T-029 and T-030. |
 | Recommendation | Extract filter and baseline as pure functions and pin them with recorded print-dev-env and entered-environment fixtures. |
 
----
+______________________________________________________________________
 
 ### prepare-evaluates-flake-twice
 
@@ -265,7 +266,7 @@
 | Impact | Host preparation time roughly doubles, nix daemon load doubles, and the two evaluations can observe different store states. |
 | Recommendation | Return the parsed print-dev-env result from the check and pass it into prepare, timing the check phase separately. |
 
----
+______________________________________________________________________
 
 ### evaluation-env-inherited-by-nix-calls
 
@@ -274,12 +275,12 @@
 | Axis | security |
 | Severity | MEDIUM |
 | Location | `code://adrs/2026-11-07-devshell-environment/poc/prepare/src/prepare.rs:31` |
-| Observed | Every nix invocation except the devShell entry calls run_command with envs None, inheriting NIX_CONFIG, NIX_PATH, NIX_REMOTE, NIX_SSL_CERT_FILE, TMPDIR and GIT_*, while the entered shell runs under env -i with only HOME and PATH. Binaries resolve through PATH. |
+| Observed | Every nix invocation except the devShell entry calls run_command with envs None, inheriting NIX_CONFIG, NIX_PATH, NIX_REMOTE, NIX_SSL_CERT_FILE, TMPDIR and GIT\_\*, while the entered shell runs under env -i with only HOME and PATH. Binaries resolve through PATH. |
 | Expected | All nix calls run under the same env -i sanitiser as the entry, with binaries resolved to absolute paths, so the baseline is judged against the environment FR-006 describes. |
 | Impact | Caller nix configuration redirects what is evaluated and where it fetches from, a writable PATH entry substitutes nix or bwrap, and added versus overridden provenance can be wrong with no diagnostic. |
 | Recommendation | Use one sanitised spawn helper for every nix call, resolve binaries once to absolute paths, and record the nix configuration used in provenance. |
 
----
+______________________________________________________________________
 
 ### consent-gate-absent
 
@@ -293,7 +294,7 @@
 | Impact | Running the harness, or a production port of it, on a cloned repository executes that repository code with the user privileges without the mandated consent, so AC-006 rests on nothing. |
 | Recommendation | Port the consent predicate ahead of prepare in the follow-up and refuse remote installables outside allowed-projects, or record the omission in findings.md. |
 
----
+______________________________________________________________________
 
 ### installable-argv-injection
 
@@ -307,7 +308,7 @@
 | Impact | A project-controlled installable of --option substituters https://evil is parsed by nix as an option, changing evaluation sources or writing a profile to an attacker-chosen path. |
 | Recommendation | Reject references beginning with - and validate that the out variable starts with /nix/store. |
 
----
+______________________________________________________________________
 
 ### closure-members-unvalidated
 
@@ -321,7 +322,7 @@
 | Impact | The mount set is chosen by the project rather than by the closure rule AC-009 asserts, and a malformed line reaches bwrap as a relative or option-like bind. |
 | Recommendation | Validate and canonicalise every mount against the store prefix, reject non-store paths, and assert the count equals the query. |
 
----
+______________________________________________________________________
 
 ### closure-no-gc-root
 
@@ -335,7 +336,7 @@
 | Impact | A concurrent garbage collection makes bwrap fail on a missing path or leaves a running sandbox with part of its closure removed, and the failure is opaque rather than a refusal. |
 | Recommendation | Hold a per-sandbox GC root in the record and release it on delete. |
 
----
+______________________________________________________________________
 
 ### validity-check-toctou
 
@@ -349,7 +350,7 @@
 | Impact | A realised derivation means project build code and network access run under a path the ADR says must refuse, so Unavailable degrades silently into a build. |
 | Recommendation | Take a temporary GC root before the validity query, hold it through prepare, and re-query immediately before entering. |
 
----
+______________________________________________________________________
 
 ### launch-binds-outside-closure
 
@@ -363,7 +364,7 @@
 | Impact | The sandbox sees far more of the host than the contract describes, including nix configuration and possibly a nix executable under the system profile, so the verified absence of nix is false for a system-installed nix. |
 | Recommendation | Derive extra binds from an explicit tested allowlist, account for each in findings.md, and add a test that enumerates the real bwrap view. |
 
----
+______________________________________________________________________
 
 ### launch-workspace-unvalidated
 
@@ -377,7 +378,7 @@
 | Impact | A workspace of / from configuration, a symlink or a discovery bug binds the host root read-write over the read-only view, so sandboxed code can modify anything the user can. |
 | Recommendation | Canonicalise and validate the workspace before building argv and refuse anything that is not a strict descendant of an allowed root. |
 
----
+______________________________________________________________________
 
 ### launch-no-new-session
 
@@ -391,7 +392,7 @@
 | Impact | A sandboxed command pushes characters into the user terminal, the CVE-2017-5226 class, typing commands into the shell that launched the sandbox. |
 | Recommendation | Add --new-session beside --die-with-parent and record it in the launcher contract. |
 
----
+______________________________________________________________________
 
 ### out-dir-untrusted-input
 
@@ -405,7 +406,7 @@
 | Impact | Another local user pre-creates the directory or symlinks a capture file to inject an environment or mount list into a later launch, or to have the harness overwrite a victim file. |
 | Recommendation | Use a private temp directory with restrictive permissions, open captures with O_NOFOLLOW and O_EXCL, and refuse a pre-existing out directory. |
 
----
+______________________________________________________________________
 
 ### env-values-written-world-readable
 
@@ -419,7 +420,7 @@
 | Impact | Secrets a hook exported stay readable to other local users and persist in a scratch directory, which is the exposure NFR-005 forbids, and the launched environment is whatever that file holds at launch. |
 | Recommendation | Create the file 0600 with restrictive open options, keep the map in memory for launch, and unlink it on both success and failure. |
 
----
+______________________________________________________________________
 
 ### persisted-values-no-confidentiality
 
@@ -433,7 +434,7 @@
 | Impact | The one place the ADR puts secrets at rest is the one it does not constrain, so a backend that labels containers with its record publishes the devShell environment. |
 | Recommendation | Add a persistence confidentiality requirement beside NFR-005 and require backends to keep values out of labels and enumeration output. |
 
----
+______________________________________________________________________
 
 ### requirement-check-uses-different-view
 
@@ -447,7 +448,7 @@
 | Impact | The fail-closed path produces false refusals for paths the sandbox does provide, and half the requirement model is decorative. |
 | Recommendation | Build the view list in one place, pass it to both the check and bwrap, and check host requirements or drop the scope. |
 
----
+______________________________________________________________________
 
 ### requirement-refusal-unstructured
 
@@ -461,7 +462,7 @@
 | Impact | A caller cannot branch on the failure class or assert its fields, the backend is absent from the message, and AC-014 and NFR-003 cannot be tested. |
 | Recommendation | Return a structured refusal, split host and sandbox checkers over one Requirement type, and test both scopes plus the satisfied case. |
 
----
+______________________________________________________________________
 
 ### step-parse-errors-omit-identity-and-kind
 
@@ -475,7 +476,7 @@
 | Impact | A configuration error cannot be traced to the step that caused it, and the duplicate rule is unmodelled so the follow-up has no shape to copy. |
 | Recommendation | Include identity and concrete kind in every parse error and model the sequence and duplicate check, or record it as out of prototype scope. |
 
----
+______________________________________________________________________
 
 ### whole-store-flag-ignored
 
@@ -489,7 +490,7 @@
 | Impact | An operator asking for the whole-store fallback silently gets the narrower closure, which is the failure mode FR-007 and EC-005 exclude, and T-005's whole-store run is never exercised. |
 | Recommendation | Thread the flag into the closure call and print the store view beside the mount count, or refuse it explicitly. |
 
----
+______________________________________________________________________
 
 ### contributions-type-missing
 
@@ -503,7 +504,7 @@
 | Impact | The central claim, that the launcher never learns the kind and only sees contributions, is asserted over loose arguments rather than a type, so the follow-up has no demonstrated seam to copy and AC-002 cannot be verified. |
 | Recommendation | Introduce Contributions in model.rs, return it from prepare, and pass one value to launch and to requirement checks. |
 
----
+______________________________________________________________________
 
 ### poc-settings-enum-duplicates-kind
 
@@ -517,7 +518,7 @@
 | Impact | The evidence for moving away from a closed kind enum is measured against a harness that still encodes a closed set, so the conclusion is weaker than presented. |
 | Recommendation | Derive settings from kind by construction or record in findings.md that the harness keeps a closed settings enum and why. |
 
----
+______________________________________________________________________
 
 ### poc-arg-parser-swallows-unknown-flags
 
@@ -531,7 +532,7 @@
 | Impact | A mistyped, reordered or misplaced flag is silently ignored and the run proceeds with defaults, which is the class of silent approximation the fail-closed requirements forbid. |
 | Recommendation | Parse into a struct once, refuse unknown tokens, and add tests for both flag orders. |
 
----
+______________________________________________________________________
 
 ### adr-contributions-diagram-orphaned
 
@@ -545,7 +546,7 @@
 | Impact | Regenerating spec.md from spec.toon drops the flowchart, and editing spec.md leaves an orphan file that looks authoritative. |
 | Recommendation | Add the mermaid reference to spec.toon or delete contributions.mmd and keep the inline block as hand-authored. |
 
----
+______________________________________________________________________
 
 ### plan-retains-refuted-launcher-claim
 
@@ -559,7 +560,7 @@
 | Impact | The follow-up ADR reads the plan as the design of record and would build against a launcher contract that does not exist and a workload package that is not in the workspace. |
 | Recommendation | Amend the approach, technologies and launch sections and the diagram with the refutation, or annotate them as superseded by findings. |
 
----
+______________________________________________________________________
 
 ### no-closure-tests
 
@@ -573,7 +574,7 @@
 | Impact | The closure claim is a single manual measurement, and dedup, ordering and whole-store regressions go unnoticed. |
 | Recommendation | Unit-test the whole view and a fixture listing containing duplicates, asserting order and count. |
 
----
+______________________________________________________________________
 
 ### checks-output-path-untested
 
@@ -587,7 +588,7 @@
 | Impact | AC-005 is unverified, malformed JSON surfaces as a bare string, and the host check has no regression guard. |
 | Recommendation | Add serde fixtures and the absent-nix test, and assert each check's fields. |
 
----
+______________________________________________________________________
 
 ### no-banner-hook-test
 
@@ -601,7 +602,7 @@
 | Impact | The corruption class T-011 found is neither reproduced nor guarded, so a hook echoing LOG=x enters the environment. |
 | Recommendation | Validate names against the environment-name grammar and pin the behaviour with a banner fixture. |
 
----
+______________________________________________________________________
 
 ### model-tests-assert-substrings
 
@@ -615,7 +616,7 @@
 | Impact | The tests pass while the spec naming requirement is unmet, and the duplicate rule is neither modelled nor refused. |
 | Recommendation | Assert exact messages, change the code to name identity and kind, and add the missing cases. |
 
----
+______________________________________________________________________
 
 ### hook-failure-loses-exit-code-and-output
 
@@ -629,7 +630,7 @@
 | Impact | The most common failure is the least diagnosable, and a silent hook failure is indistinguishable from a harness defect. |
 | Recommendation | Carry the exit status, a bounded head and tail of output, the installable and the step identity into the failure. |
 
----
+______________________________________________________________________
 
 ### main-exit-code-collapsed
 
@@ -643,7 +644,7 @@
 | Impact | A missing nix, a denied consent and a broken hook are indistinguishable to a script, CI job or agent that must branch on the class. |
 | Recommendation | Return an error type carrying the class and map it to the exit code, keeping the prose as the reason. |
 
----
+______________________________________________________________________
 
 ### blocking-host-step-in-async-create
 
@@ -657,7 +658,7 @@
 | Impact | Every concurrent create holds an executor thread for the duration, serialising creates in a multi-request server and starving unrelated futures. |
 | Recommendation | State in the requirement that preparation runs on a blocking pool so the boundary is decided rather than inherited. |
 
----
+______________________________________________________________________
 
 ### spec-gives-host-steps-no-budget
 
@@ -671,7 +672,7 @@
 | Impact | The follow-up inherits an unbounded create path, so it either invents a timeout the spec does not test or ships without one. |
 | Recommendation | Add to FR-004 and FR-014 that host preparation counts against the create budget and that expiry is a named failure with a remedy. |
 
----
+______________________________________________________________________
 
 ### prepare-children-not-reaped-on-cancel
 
@@ -685,7 +686,7 @@
 | Impact | A cancelled create leaves an evaluation, and possibly a hook, running against the store and the checkout with no record that it exists. |
 | Recommendation | Spawn host invocations in their own process group, kill them from a guard when preparation does not complete, and name the kill in the reason. |
 
----
+______________________________________________________________________
 
 ### stale-prepared-state-read-as-current
 
@@ -699,7 +700,7 @@
 | Impact | A stale closure is mounted silently: the mounts belong to a different devShell and the count-versus-query check still passes because both come from the same stale file. |
 | Recommendation | Write a manifest atomically and validate it on read, and remove the directory when preparation fails. |
 
----
+______________________________________________________________________
 
 ### readiness-report-not-machine-readable
 
@@ -713,7 +714,7 @@
 | Impact | The doctor cannot be built from this, the report cannot be asserted or diffed, and the host step would be the only part of create emitting untraced prose. |
 | Recommendation | Give Check the fields the failure type carries and emit one serialisable report from both paths. |
 
----
+______________________________________________________________________
 
 ### real-backend-not-exercised
 
@@ -727,7 +728,7 @@
 | Impact | The backend boundary is not proven, only the mechanism, so surviving a real launcher does not establish that a contract backend can apply the contribution set. |
 | Recommendation | Exercise a backend create and exec path with the environment and mounts, or record explicitly that this half of AC-015 is refuted and must be re-proven. |
 
----
+______________________________________________________________________
 
 ### findings-missing-argv-size
 
@@ -741,7 +742,7 @@
 | Impact | The follow-up has no measured basis for a closure ceiling, and the first failure on a large closure is a raw exec error rather than a refusal naming the number exceeded. |
 | Recommendation | Record argv bytes for the closure case and the one-mount whole-store case, and refuse before launch when the limit is exceeded. |
 
----
+______________________________________________________________________
 
 ### documentation-not-updated
 
@@ -755,7 +756,7 @@
 | Impact | Users and the follow-up have no documented devshell configuration; the vocabulary exists only in CONTEXT.md. |
 | Recommendation | Document the devshell step and store view, add the terms to the nix prompt, or state that NFR-008 is deferred to the implementation ADR. |
 
----
+______________________________________________________________________
 
 ### findings-answers-lack-command-and-excerpt
 
@@ -769,7 +770,7 @@
 | Impact | The conclusions cannot be reproduced or audited by a reader, so T-008's success criteria are unmet. |
 | Recommendation | Add the search or nix commands and matching excerpts for the branch-site counts and the backend-report sites. |
 
----
+______________________________________________________________________
 
 ### environment-ac001-unverified
 
@@ -783,7 +784,7 @@
 | Impact | Two load-bearing environment acceptance criteria are unproven, a caller RUSTFLAGS regression goes unnoticed, and a leaked credential passes silently. |
 | Recommendation | Add the assertions and a fixture-secret test, and make a non-empty leaked list an error naming the variable and a remedy. |
 
----
+______________________________________________________________________
 
 ### spec-host-requirement-list-inconsistent
 
@@ -797,7 +798,7 @@
 | Impact | A reader cannot tell whether a host without bash should be refused, and the implemented check set matches neither wording. |
 | Recommendation | Decide whether bash is a host requirement, then align the diagram, FR-004, CONTEXT.md and the checks. |
 
----
+______________________________________________________________________
 
 ### requirement-prefix-check-unnormalised
 
@@ -811,7 +812,7 @@
 | Impact | A requirement the sandbox cannot meet is reported satisfied, so the command fails inside the sandbox instead of create refusing. |
 | Recommendation | Canonicalise both sides before comparing, and reject parent-traversal components. |
 
----
+______________________________________________________________________
 
 ### doctor-no-mutation-claim
 
@@ -825,7 +826,7 @@
 | Impact | A test asserting an unchanged store listing cannot hold alongside the required evaluation, so either the test is weakened or the claim is left untested. |
 | Recommendation | Restate FR-015 as no sandbox, workspace, branch or devShell realisation and enumerate the permitted store writes. |
 
----
+______________________________________________________________________
 
 ### poc-not-declared-standalone-workspace
 
@@ -839,7 +840,7 @@
 | Impact | Moving or copying the crate, or relaxing the exclude, produces the believes-it-is-in-a-workspace error, and the recorded intent lives nowhere in the crate. |
 | Recommendation | Add an empty workspace table with the standalone comment the sibling spikes use. |
 
----
+______________________________________________________________________
 
 ### poc-unused-serde-dependency
 
@@ -853,7 +854,7 @@
 | Impact | Five extra crates in the lock file and a declared dependency that misstates the harness surface, in the artefact the ADR cites as evidence. |
 | Recommendation | Drop the serde dependency. |
 
----
+______________________________________________________________________
 
 ### poc-lint-config-absent
 
@@ -867,7 +868,7 @@
 | Impact | The prototype escapes the repository warnings-deny policy, and it is the artefact the follow-up will be held to. |
 | Recommendation | Add the rust and clippy lint tables, or state in findings.md why the prototype is exempt. |
 
----
+______________________________________________________________________
 
 ### poc-closure-installable-ignored
 
@@ -881,7 +882,7 @@
 | Impact | The CLI contract contradicts the code in the artefact the reproduce block depends on, and the dead binding marks a seam the author knew was unused. |
 | Recommendation | Drop the flag from the closure arm or derive the output path from the installable. |
 
----
+______________________________________________________________________
 
 ### poc-host-check-positional-index
 
@@ -895,7 +896,7 @@
 | Impact | Inserting or reordering a check silently changes which one gates the rest. |
 | Recommendation | Bind the nix Check to a local and test the named value. |
 
----
+______________________________________________________________________
 
 ### poc-run-command-envs-unused
 
@@ -909,7 +910,7 @@
 | Impact | The shared helper advertises a capability nothing uses while the one place that needs it bypasses it, so the sanitisation logic exists twice in spirit. |
 | Recommendation | Remove the parameter, or add an environment-aware helper and use it for the devShell entry. |
 
----
+______________________________________________________________________
 
 ### poc-launch-hardcoded-host-paths
 
@@ -923,7 +924,7 @@
 | Impact | launch presents itself as kind-agnostic and reusable while embedding one distribution layout as unnamed literals, so a reader cannot tell what is essential to the view. |
 | Recommendation | Hoist the host-provided paths into named constants beside the workspace and note their provenance in findings.md. |
 
----
+______________________________________________________________________
 
 ### poc-model-settings-kind-field-unused
 
@@ -937,7 +938,7 @@
 | Impact | The harness reports the kind once and never uses it, so nothing downstream sees the kind is true by omission rather than by design. |
 | Recommendation | Have provenance write the kind, or delete the field and state the claim over Settings. |
 
----
+______________________________________________________________________
 
 ### branch-count-claim-unenforced
 
@@ -951,7 +952,7 @@
 | Impact | The conclusion that the kind costs one parse site rests on review alone and can drift without notice. |
 | Recommendation | State the count in findings.md and add a grep-based or arch-lint check on kind usage in the crate. |
 
----
+______________________________________________________________________
 
 ### findings-reproduce-host-specific
 
@@ -965,7 +966,7 @@
 | Impact | The documented reproduction fails on any other host, so the measurements cannot be re-derived or audited. |
 | Recommendation | Resolve bwrap at runtime and state the lock and offline caveat beside the documented commands. |
 
----
+______________________________________________________________________
 
 ### adr-plan-diagram-wrong-filename
 
@@ -979,7 +980,7 @@
 | Impact | One ADR out of twenty breaks the only diagram-naming convention the tree has. |
 | Recommendation | Rename the file and update the reference, keeping create-sequence.mmd as the genuine second diagram. |
 
----
+______________________________________________________________________
 
 ### tasks-completion-state-unmarked
 
@@ -993,7 +994,7 @@
 | Impact | Neither the tooling nor a human can tell from the ADR which tasks were executed and which were skipped. |
 | Recommendation | Mark the completed tasks and set the status to the state the map records. |
 
----
+______________________________________________________________________
 
 ### adr-readme-index-missing
 
@@ -1007,5 +1008,4 @@
 | Impact | The only directory-level entry point into the ADR log silently omits the newest work. |
 | Recommendation | Add this ADR under draft and backfill the missing siblings in the same pass. |
 
----
-
+______________________________________________________________________

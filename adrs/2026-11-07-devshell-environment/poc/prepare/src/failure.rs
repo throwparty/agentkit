@@ -179,11 +179,17 @@ mod tests {
             .with_exit(127)
             .with_output("sh: nix: not found");
         let rendered = failure.to_string();
-        assert!(rendered.starts_with("unavailable: no nix on PATH"), "{rendered}");
+        assert!(
+            rendered.starts_with("unavailable: no nix on PATH"),
+            "{rendered}"
+        );
         assert!(rendered.contains("step: dev (devshell)"), "{rendered}");
         assert!(rendered.contains("primitive: nix"), "{rendered}");
         assert!(rendered.contains("exit: 127"), "{rendered}");
-        assert!(rendered.contains("output: sh: nix: not found"), "{rendered}");
+        assert!(
+            rendered.contains("output: sh: nix: not found"),
+            "{rendered}"
+        );
         assert!(rendered.contains("remedy: install nix"), "{rendered}");
     }
 }

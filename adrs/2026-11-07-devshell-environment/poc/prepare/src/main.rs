@@ -8,7 +8,6 @@
 // would only add noise to every constructor and call site.
 #![allow(clippy::result_large_err)]
 
-
 mod checks;
 mod closure;
 mod failure;
@@ -17,7 +16,6 @@ mod model;
 mod prepare;
 mod requirements;
 mod util;
-
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -201,9 +199,8 @@ fn step_of(cli: &Cli) -> Result<Step, Failure> {
             let text = std::fs::read_to_string(path).map_err(|error| {
                 Failure::misconfigured(format!("could not read {}: {error}", path.display()))
             })?;
-            let table: toml::Table = toml::from_str(&text).map_err(|error| {
-                Failure::misconfigured(format!("{}: {error}", path.display()))
-            })?;
+            let table: toml::Table = toml::from_str(&text)
+                .map_err(|error| Failure::misconfigured(format!("{}: {error}", path.display())))?;
             tables.push(table);
         }
         // A sequence is parsed as a sequence, so the one-devshell-step rule is
@@ -334,10 +331,7 @@ fn parse_cli(args: impl Iterator<Item = String>) -> Result<Cli, Failure> {
     Ok(cli)
 }
 
-fn value(
-    args: &mut impl Iterator<Item = String>,
-    flag: &str,
-) -> Result<String, Failure> {
+fn value(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<String, Failure> {
     args.next()
         .ok_or_else(|| Failure::misconfigured(format!("{flag} requires a value")))
 }

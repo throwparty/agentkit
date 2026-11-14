@@ -1,13 +1,12 @@
 # Linux Bubblewrap Provider
 
-**Status:** implemented  **Created:** 2026-11-07  **Author:** adrian
+**Status:** implemented **Created:** 2026-11-07 **Author:** adrian
 
 The map at `maps/2026-10-31-nix-devshell-sandbox` chose bubblewrap for Linux and chose a holder process to keep the sandbox alive. Every fact this specification rests on is an answered ticket on that map, and each one has evidence beside it. T-003 answers whether bwrap can sandbox without root. It can, because it builds the sandbox from unprivileged user namespaces and needs no daemon. T-004 and T-016 answer whether a build works with the store bound read-only. It does, with an environment captured on the host. T-005 and T-012 answer what the sandbox can reach. The network namespace has loopback only, and each invocation gets its own pid and network context. T-013 answers whether a process can enter a live sandbox. It can, by setns, as the same uid and without privileges. That probe also established four details this ADR depends on. The pid to address is the child pid bwrap reports on `--json-status-fd`, not the pid the caller started. Killing pid 1 of the sandbox kills the whole pid namespace, including a command that called setsid. `setgroups` fails inside bwrap's user namespace, which is why `nsenter` needs `--preserve-credentials`. And the join should happen in the calling process, as Flatpak does it, not by running `nsenter`. Two kernel rules shape the join, and T-013 exercised both. setns into a pid namespace moves only the children created afterwards, never the process that called it. chroot does not close an inherited descriptor. T-024 answers whether the sandbox survives the command that started it. It does, with or without `--die-with-parent`, and the backend must detach its standard streams. T-019 answers how a pause covers commands that joined later. Each command is written into the sandbox's cgroup scope before it runs. cgroup freeze is the only atomic pause, and `cgroup.kill` is the atomic teardown. A single pass over the pid namespace leaks, because a process can fork between the scan and the signal. The stop-and-rescan loop is correct, but a peer running as the same uid can livelock it. Freeze and limits manage resources. They are not a boundary, because delegation lets a workload write its own cgroup.procs. T-009 and T-010 answer what a transient user scope gives. It gives freeze, thaw, MemoryMax and TasksMax, and no probe detects that a user manager is missing. T-022 answers whether the bind set can come from the closure. It can, and 238 paths ran the same test as the whole store. T-008 answers where user namespaces are available. NixOS and Fedora allow them. Ubuntu 24.04 blocks them until the AppArmor and clone sysctls are relaxed, and it ships bwrap 0.9.0, so the floor stays at 0.8.0 and the descriptor bind is a path bind of `/proc/self/fd/N`. T-018 answers whether nix can run inside the sandbox. It can, and it should not, so nix stays on the host. The contract this backend implements is `crates/agentkit-litterbox/src/sandbox/contract.rs`. The trait is `Backend` at line 547. The facets are at `src/sandbox/facets.rs:37-61`. `Contributions` is at line 169, `ResolvedStep` at 224, `CreateRequest` at 251 and `ContributionSupport` at 119. `Selected::standard_capabilities` at `src/sandbox/selected.rs:70` reports a facet as available, so a backend that degrades has to replace that entry. The environment capture is `src/provision/prepare/environment.rs`, and the closure is `src/provision/prepare/closure.rs`, which materialises whatever `nix path-info -r` printed against a store root the configuration chooses. Docker is the only production backend, at `src/backends/registry.rs:20`, and it reports no contribution support, at `src/backends/docker/backend.rs:723-725`. Nothing today can apply a devShell's environment or closure. Two registry tests use `bubblewrap` as the name of a backend that is not compiled in, and both have to move. The isolation prototype at `adrs/2026-10-31-linux-bwrap-sandbox/poc/` is the oracle for the view and the renderer, and its findings are in `adrs/2026-10-31-linux-bwrap-sandbox/findings.md`. That prototype validated every grant and refused protected roots, and this ADR keeps those rules rather than inventing new ones.
 
 ## Probed
 
 The questions this ADR would otherwise have carried as assumptions were probed on NixOS, kernel 7.2.15, bubblewrap 0.12.0, and the scripts and output are beside the map's evidence. T-033: the host's `sleep` takes a large integer duration and holds pid 1, so no GNU spelling is needed. T-034: a client killed while its command runs leaves no zombie, because the command is reparented outside the pid namespace and reaped there. T-035: 1779 individual binds reach a usable view in 4.2s and run a command, with one mount entry for each path. T-036: all seven namespace inodes stay identical across commands, so a record can check them. T-037: this host has cgroup v2, a user manager and a scope that starts. T-038: the cgroup namespace can be joined unprivileged, so a command shares all seven namespaces. T-039: the status document arrives long before the view is built, so create has to wait for the view rather than for the document. T-040: the last recorded mount appearing is the moment the view becomes usable. T-041: the namespaces are owned by the user namespace that is the parent of the sandbox's own, so the join enters that parent first and the sandbox's user namespace last.
-
 
 ```mermaid
 sequenceDiagram
@@ -44,7 +43,6 @@ sequenceDiagram
 
 ```
 
-
 ## Problem
 
 Litterbox can only sandbox through Docker. Docker reports no contribution support, so a project that declares a devshell step is refused before create, and the environment and closure that the capture produces have no consumer. A host without a Docker daemon has no mechanism at all, which is the case the map exists to reach. The contract has one implementation, so its contribution model, its lifecycle, its readiness report and its failure behaviour have only ever been exercised by tests. A second mechanism is also the first real test of the boundary. It has to validate every path it is given, because the existing backend receives paths from an image it builds itself. It also has to work for a project with no provisioning steps, where nothing contributes a shell, a PATH or any userland, and a command given to a tool still has to be evaluated.
@@ -73,7 +71,6 @@ Litterbox can only sandbox through Docker. Docker reports no contribution suppor
 - A survey of where cgroup v2 is available. Readiness reports what this host offers, and the degraded mode covers the rest.
 - A userland the backend supplies. What a sandbox can run is what its steps contribute; the backend owns only the command that holds the sandbox open.
 - Snapshot, command line and MCP work beyond what the contract already does, and the documentation the roadmap owns. Only this backend's configuration reference is in scope.
-
 
 ## Functional Requirements
 
@@ -352,69 +349,81 @@ A project whose store closure is far larger than the probe's 1779 paths creates 
 A host whose policy blocks unprivileged user namespaces, as Ubuntu 24.04's defaults do, reports the requirement Unavailable with the sysctl and AppArmor remedy and refuses create. Nothing runs unconfined, and the remedy does not suggest running as root.
 
 **Slug:** `user-namespaces-blocked`
+
 ### EC-002: Running as Root
 
 An effective uid of zero is refused by readiness, create and every command with a Misconfigured error. The same-uid model the join relies on does not hold for a root-owned sandbox, and a root-owned root is escapable in the classic way.
 
 **Slug:** `running-as-root`
+
 ### EC-003: No Cgroup Delegation
 
 Without a usable user scope the sandbox can still be created once the user accepts the degradation. Pause falls back to a loop that a workload running as the same uid can livelock. Memory and task count are unbounded, and a fork bomb inside the sandbox is charged to the caller's user slice rather than to the sandbox. The report says this in those words.
 
 **Slug:** `no-cgroup-delegation`
+
 ### EC-004: Untrusted Bwrap
 
 A bwrap that is not root-owned, or that is group or world writable, is skipped by name in favour of a later trusted candidate on the path. A path that holds only untrusted candidates is Unavailable and no bwrap runs. The binary that was validated is the binary that is executed, from the descriptor that was validated.
 
 **Slug:** `untrusted-bwrap`
+
 ### EC-005: Version Floor
 
 A bwrap below 0.8.0 is Unavailable and names the floor and the version it found. A version that lacks a flag the renderer must emit is Unavailable too. The renderer never drops a policy flag for an older binary, and the descriptor bind is written in the form the floor supports.
 
 **Slug:** `version-floor`
+
 ### EC-006: Missing Contributed Path
 
 A closure path that disappeared between prepare and create fails the create and names the path. The backend removes the sandbox and the state directory rather than returning a sandbox that is missing a store path.
 
 **Slug:** `missing-contributed-path`
+
 ### EC-007: Large Closure
 
 A closure larger than the prototype's 238 paths binds as far as the host allows. A mount failure fails the create and names the path and the store view, with the whole-store view as the remedy. No partial view is ever started.
 
 **Slug:** `large-closure`
+
 ### EC-008: Killed Client
 
 A command whose client is killed is reparented outside the pid namespace and reaped there, so no defunct process remains and the sandbox is not charged for it (T-034). The backend needs no reaper of its own, and delete kills the namespace as before.
 
 **Slug:** `killed-client`
+
 ### EC-009: Foreign Record
 
 A pid whose uid or start time differs from the record, or whose namespaces, root or mounts are not the ones recorded, is refused as Denied and never joined. The record is the only authority for what to enter. Ownership by project and backend is the orchestrator's check, which the backend cannot see and does not pretend to make.
 
 **Slug:** `foreign-record`
+
 ### EC-010: Concurrent Commands
 
 Two commands joined at once share the sandbox, and neither sees the other's output or exit status. A join reads the record and does not write it. Only pause, resume and delete write the record, and they write the whole record.
 
 **Slug:** `concurrent-commands`
+
 ### EC-011: Holder Crash
 
 A sandbox that exits on its own reports Missing, a command against it fails as NotFound, and delete succeeds. Its state directory is left for delete to remove rather than being reaped by a later command that happened to notice.
 
 **Slug:** `holder-crash`
+
 ### EC-012: Awkward Source Path
 
 A staged workspace whose host path holds spaces or non-ASCII characters copies byte for byte into the state directory, and every path the backend gives bwrap comes from the state root and the sandbox name. The source path never reaches the argv.
 
 **Slug:** `awkward-source-path`
+
 ### EC-013: Double Create
 
 A create that names a sandbox whose state directory exists, or whose recorded sandbox is alive, fails as Conflict before any process starts, and the existing sandbox and its record are left untouched.
 
 **Slug:** `double-create`
+
 ### EC-014: Paused Then Deleted
 
 A paused sandbox can be deleted. Teardown thaws or kills through the scope, which a frozen unit cannot do by itself, so delete does not depend on the sandbox being runnable.
 
 **Slug:** `paused-then-deleted`
-

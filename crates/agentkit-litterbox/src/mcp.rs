@@ -772,12 +772,7 @@ fn build_bash_script(
             .map(|argument| shell_word(argument))
             .collect::<Vec<_>>()
             .join(" ");
-        format!(
-            "timeout {}s {} {}",
-            timeout,
-            shell,
-            shell_escape(&command)
-        )
+        format!("timeout {}s {} {}", timeout, shell, shell_escape(&command))
     } else {
         command
     }
@@ -1344,8 +1339,10 @@ mod tests {
 
     #[test]
     fn a_mutation_reports_the_snapshot_failure_only_when_it_happens() {
-        let recorded =
-            serde_json::to_value(MutationResult { snapshot_error: None }).expect("serialises");
+        let recorded = serde_json::to_value(MutationResult {
+            snapshot_error: None,
+        })
+        .expect("serialises");
         assert_eq!(recorded, serde_json::json!({}));
 
         let failed = serde_json::to_value(MutationResult {

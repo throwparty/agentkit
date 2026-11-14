@@ -11,13 +11,13 @@ it.
 
 ## States
 
-| State     | Meaning                                                                 |
-| --------- | ----------------------------------------------------------------------- |
-| `active`  | The compute is running and accepts commands.                            |
+| State     | Meaning                                                                   |
+| --------- | ------------------------------------------------------------------------- |
+| `active`  | The compute is running and accepts commands.                              |
 | `paused`  | The compute exists but is frozen. It accepts no work until it is resumed. |
-| `missing` | The record and the branch exist; the compute has exited.                |
-| `unknown` | The backend could not be asked. `list` prints this with the reason.     |
-| `error`   | The backend was asked and reported a failure, with the reason.          |
+| `missing` | The record and the branch exist; the compute has exited.                  |
+| `unknown` | The backend could not be asked. `list` prints this with the reason.       |
+| `error`   | The backend was asked and reported a failure, with the reason.            |
 
 `active`, `paused` and `missing` are derived every time Litterbox looks: the
 record's process ids are checked against the running processes. Nothing is
@@ -56,20 +56,20 @@ without Litterbox being told. Nothing transitions out of `missing` today except
 
 ### Command line
 
-| Command  | `active`                         | `paused`                                  | `missing`                                |
-| -------- | -------------------------------- | ----------------------------------------- | ---------------------------------------- |
-| `list`   | reported as `active`             | reported as `paused`                      | reported as `missing`; the listing exits 0 |
-| `shell`  | runs the command                 | blocks until the sandbox is resumed       | exits 3, not found                       |
-| `pause`  | freezes the sandbox              | succeeds, changing nothing                | exits 3, not found                       |
-| `resume` | succeeds, changing nothing       | thaws the sandbox                         | exits 3, not found                       |
-| `delete` | refused without `--force`        | removes the record and the branch         | removes the record and the branch        |
+| Command  | `active`                   | `paused`                            | `missing`                                  |
+| -------- | -------------------------- | ----------------------------------- | ------------------------------------------ |
+| `list`   | reported as `active`       | reported as `paused`                | reported as `missing`; the listing exits 0 |
+| `shell`  | runs the command           | blocks until the sandbox is resumed | exits 3, not found                         |
+| `pause`  | freezes the sandbox        | succeeds, changing nothing          | exits 3, not found                         |
+| `resume` | succeeds, changing nothing | thaws the sandbox                   | exits 3, not found                         |
+| `delete` | refused without `--force`  | removes the record and the branch   | removes the record and the branch          |
 
 ### MCP
 
-| Tool                                                       | `active`            | `paused`                            | `missing`       |
-| ---------------------------------------------------------- | ------------------- | ----------------------------------- | --------------- |
-| `bash`, `read`, `write`, `patch`, `ls`, `glob`, `grep`     | runs                | blocks until the sandbox is resumed | `not found`     |
-| `sandbox-ports`                                            | the recorded ports  | the recorded ports                  | the recorded ports |
+| Tool                                                   | `active`           | `paused`                            | `missing`          |
+| ------------------------------------------------------ | ------------------ | ----------------------------------- | ------------------ |
+| `bash`, `read`, `write`, `patch`, `ls`, `glob`, `grep` | runs               | blocks until the sandbox is resumed | `not found`        |
+| `sandbox-ports`                                        | the recorded ports | the recorded ports                  | the recorded ports |
 
 `sandbox-create` is not an operation on an existing sandbox: it takes a new
 name, and any name already in use — `active`, `paused` or `missing` — is a
@@ -95,15 +95,15 @@ Litterbox classifies a failure by what it means, not by which backend or which
 state produced it. The command line's exit code and the MCP error class both
 come from that one classification.
 
-| Situation                                   | Class          | Command line | MCP                                   |
-| ------------------------------------------- | -------------- | ------------ | ------------------------------------- |
-| The name has no record                      | `not-found`    | exit 3       | `invalid_params`, `class: not-found`  |
-| The record exists but the compute has exited | `not-found`    | exit 3       | `invalid_params`, `class: not-found`  |
-| Creating a name that is already in use      | `conflict`     | exit 4       | `invalid_params`, `class: conflict`   |
-| The backend does not provide the operation  | `unsupported`  | exit 5       | `invalid_request`, `class: unsupported` |
-| Permission was refused                      | `denied`       | exit 6       | `invalid_request`, `class: denied`    |
-| The backend cannot run on this host         | `unavailable`  | exit 7       | `invalid_request`, `class: unavailable` |
-| The operation ran and failed                | `failed`       | exit 1       | `internal_error`, `class: failed`     |
+| Situation                                    | Class         | Command line | MCP                                     |
+| -------------------------------------------- | ------------- | ------------ | --------------------------------------- |
+| The name has no record                       | `not-found`   | exit 3       | `invalid_params`, `class: not-found`    |
+| The record exists but the compute has exited | `not-found`   | exit 3       | `invalid_params`, `class: not-found`    |
+| Creating a name that is already in use       | `conflict`    | exit 4       | `invalid_params`, `class: conflict`     |
+| The backend does not provide the operation   | `unsupported` | exit 5       | `invalid_request`, `class: unsupported` |
+| Permission was refused                       | `denied`      | exit 6       | `invalid_request`, `class: denied`      |
+| The backend cannot run on this host          | `unavailable` | exit 7       | `invalid_request`, `class: unavailable` |
+| The operation ran and failed                 | `failed`      | exit 1       | `internal_error`, `class: failed`       |
 
 Two cases are deliberately not errors:
 

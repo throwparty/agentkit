@@ -30,11 +30,7 @@ impl Check {
         }
     }
 
-    fn missing(
-        name: &'static str,
-        detail: impl Into<String>,
-        remedy: impl Into<String>,
-    ) -> Self {
+    fn missing(name: &'static str, detail: impl Into<String>, remedy: impl Into<String>) -> Self {
         Self {
             name,
             class: Class::Unavailable,
@@ -54,9 +50,10 @@ pub fn readiness(nix: &Path, caller: &Caller) -> Vec<Check> {
 
     let version = run(nix, &argv(&["--version"]), caller, None);
     let nix_check = match &version {
-        Ok(output) if output.success() => {
-            Check::holds("nix", String::from_utf8_lossy(&output.stdout).trim().to_string())
-        }
+        Ok(output) if output.success() => Check::holds(
+            "nix",
+            String::from_utf8_lossy(&output.stdout).trim().to_string(),
+        ),
         Ok(output) => Check::missing(
             "nix",
             output.stderr_excerpt(),
@@ -88,7 +85,10 @@ pub fn readiness(nix: &Path, caller: &Caller) -> Vec<Check> {
             } else {
                 Check::missing(
                     "flakes",
-                    format!("flakes are not in the experimental features: {}", shown.trim()),
+                    format!(
+                        "flakes are not in the experimental features: {}",
+                        shown.trim()
+                    ),
                     "set experimental-features = nix-command flakes in nix.conf",
                 )
             }
@@ -138,17 +138,17 @@ pub fn flakes_enabled(shown: &str) -> bool {
 
 /// The first failed check, as the failure create reports.
 pub fn refusal(checks: &[Check]) -> Option<Failure> {
-    checks
-        .iter()
-        .find(|check| !check.ok)
-        .map(|check| {
-            let mut failure = Failure::new(check.class, format!("{} is not ready: {}", check.name, check.detail))
-                .with_primitive(check.name);
-            if let Some(remedy) = &check.remedy {
-                failure = failure.with_remedy(remedy.clone());
-            }
-            failure
-        })
+    checks.iter().find(|check| !check.ok).map(|check| {
+        let mut failure = Failure::new(
+            check.class,
+            format!("{} is not ready: {}", check.name, check.detail),
+        )
+        .with_primitive(check.name);
+        if let Some(remedy) = &check.remedy {
+            failure = failure.with_remedy(remedy.clone());
+        }
+        failure
+    })
 }
 
 pub fn report(checks: &[Check]) -> String {
@@ -230,7 +230,10 @@ mod tests {
             Check::missing("flakes", "disabled", "enable them"),
         ];
         let rendered = report(&checks);
-        assert!(rendered.contains("ok       nix: nix (Nix) 2.34.9"), "{rendered}");
+        assert!(
+            rendered.contains("ok       nix: nix (Nix) 2.34.9"),
+            "{rendered}"
+        );
         assert!(rendered.contains("MISSING  flakes: disabled"), "{rendered}");
         assert!(rendered.contains("remedy: enable them"), "{rendered}");
     }
@@ -248,7 +251,8 @@ mod tests {
 
     #[test]
     fn the_output_path_is_read_from_the_out_variable() {
-        let json = br#"{"variables": {"out": {"type": "exported", "value": "/nix/store/abc-dev"}}}"#;
+        let json =
+            br#"{"variables": {"out": {"type": "exported", "value": "/nix/store/abc-dev"}}}"#;
         assert_eq!(output_path(json).as_deref(), Some("/nix/store/abc-dev"));
     }
 

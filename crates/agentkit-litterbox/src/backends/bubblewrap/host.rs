@@ -414,8 +414,8 @@ impl Host for SystemHost {
         static DIRECTORIES: std::sync::OnceLock<
             std::sync::Mutex<std::collections::HashMap<String, PathBuf>>,
         > = std::sync::OnceLock::new();
-        let cache = DIRECTORIES
-            .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+        let cache =
+            DIRECTORIES.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
         if let Some(known) = cache
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
@@ -631,9 +631,7 @@ impl Host for FakeHost {
         let mut members: Vec<u32> = self
             .namespaces
             .iter()
-            .filter(|(pid, namespaces)| {
-                namespaces.pid == inode && self.processes.contains_key(pid)
-            })
+            .filter(|(pid, namespaces)| namespaces.pid == inode && self.processes.contains_key(pid))
             .map(|(pid, _)| *pid)
             .collect();
         members.sort_unstable();
@@ -650,7 +648,12 @@ mod tests {
         // The payload keeps the inodes as an array, so the enum's numbering is
         // the record format. Nothing else may disagree with it.
         for (position, namespace) in Namespace::ALL.iter().enumerate() {
-            assert_eq!(namespace.index(), position, "{} is out of order", namespace.name());
+            assert_eq!(
+                namespace.index(),
+                position,
+                "{} is out of order",
+                namespace.name()
+            );
         }
         let inodes = NamespaceInodes {
             user: 1,

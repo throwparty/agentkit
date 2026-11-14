@@ -214,7 +214,9 @@ pub fn check_size(argv: &[OsString]) -> Result<usize, Failure> {
         return Err(Failure::unsupported(format!(
             "the mount set needs {size} bytes of argv, more than the {ARGV_LIMIT}-byte limit"
         ))
-        .with_remedy("select the whole store view, or use a backend that does not pass mounts as arguments"));
+        .with_remedy(
+            "select the whole store view, or use a backend that does not pass mounts as arguments",
+        ));
     }
     Ok(size)
 }
@@ -248,12 +250,7 @@ mod tests {
             .join("workspace");
         std::fs::create_dir_all(&workspace).expect("workspace");
         let workspace = workspace.canonicalize().expect("workspace resolves");
-        View::new(
-            reads.iter().map(PathBuf::from).collect(),
-            &workspace,
-            false,
-        )
-        .expect("a view")
+        View::new(reads.iter().map(PathBuf::from).collect(), &workspace, false).expect("a view")
     }
 
     fn bound(argv: &[OsString], path: &str) -> usize {
@@ -283,7 +280,10 @@ mod tests {
             .map(|arg| arg.to_string_lossy().to_string())
             .filter(|arg| arg == "/nix/store")
             .count();
-        assert_eq!(store_binds, 2, "one source and one destination for the root");
+        assert_eq!(
+            store_binds, 2,
+            "one source and one destination for the root"
+        );
         assert!(view.store_view().contains("whole"));
     }
 
@@ -299,7 +299,10 @@ mod tests {
     fn the_sandbox_gets_a_new_session() {
         let view = view(&["/nix/store/aaa-dev"]);
         let argv = argv(&view, &["true".to_string()]);
-        let argv: Vec<String> = argv.iter().map(|a| a.to_string_lossy().to_string()).collect();
+        let argv: Vec<String> = argv
+            .iter()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
         assert!(argv.iter().any(|arg| arg == "--new-session"));
         assert!(argv.iter().any(|arg| arg == "--die-with-parent"));
     }
@@ -356,7 +359,10 @@ mod tests {
     fn the_workspace_is_bound_read_write_and_is_the_working_directory() {
         let view = view(&["/nix/store/aaa-dev"]);
         let argv = argv(&view, &["true".to_string()]);
-        let argv: Vec<String> = argv.iter().map(|a| a.to_string_lossy().to_string()).collect();
+        let argv: Vec<String> = argv
+            .iter()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
         assert!(argv.windows(3).any(|window| window[0] == "--bind"));
         assert!(argv.iter().any(|arg| arg == "--chdir"));
     }
@@ -368,7 +374,11 @@ mod tests {
             .collect();
         let failure = check_size(&huge).unwrap_err();
         assert_eq!(failure.class, crate::failure::Class::Unsupported);
-        assert!(failure.reason.contains(&ARGV_LIMIT.to_string()), "{}", failure.reason);
+        assert!(
+            failure.reason.contains(&ARGV_LIMIT.to_string()),
+            "{}",
+            failure.reason
+        );
     }
 
     #[test]

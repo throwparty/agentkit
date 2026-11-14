@@ -159,8 +159,8 @@ pub fn prepare(
         .with_output(dev.stderr_excerpt())
         .with_remedy(format!("run nix print-dev-env {installable} on the host")));
     }
-    let baseline = baseline(&dev.stdout)
-        .map_err(|failure| failure.with_step(&step.identity, step.kind()))?;
+    let baseline =
+        baseline(&dev.stdout).map_err(|failure| failure.with_step(&step.identity, step.kind()))?;
     let output = output_path(&dev.stdout).ok_or_else(|| {
         Failure::misconfigured(format!(
             "step '{}': '{installable}' evaluates to something with no devShell environment",
@@ -357,10 +357,7 @@ pub fn contribute(entered: &Records, baseline: &Baseline) -> Contributed {
 }
 
 /// Refuse an environment that carries a route to the caller's credentials.
-fn refuse_credentials(
-    step: &Step,
-    environment: &BTreeMap<String, String>,
-) -> Result<(), Failure> {
+fn refuse_credentials(step: &Step, environment: &BTreeMap<String, String>) -> Result<(), Failure> {
     let leaked: Vec<&str> = CREDENTIALS
         .iter()
         .copied()
@@ -570,7 +567,11 @@ mod tests {
         environment.insert("SSH_AUTH_SOCK".to_string(), "/run/agent.sock".to_string());
         let failure = refuse_credentials(&step(), &environment).unwrap_err();
         assert_eq!(failure.class, Class::Unsupported);
-        assert!(failure.reason.contains("SSH_AUTH_SOCK"), "{}", failure.reason);
+        assert!(
+            failure.reason.contains("SSH_AUTH_SOCK"),
+            "{}",
+            failure.reason
+        );
         assert_eq!(failure.step.as_deref(), Some("dev"));
     }
 
@@ -597,8 +598,14 @@ mod tests {
     fn the_baseline_keeps_exported_names_whose_value_is_empty() {
         let json = br#"{"variables": {"PATH": {"type": "exported", "value": "/bin"}, "patches": {"type": "exported", "value": ""}, "shellHook": {"type": "var", "value": "echo"}}}"#;
         let baseline = baseline(json).expect("parses");
-        assert_eq!(baseline.exported.get("PATH").map(String::as_str), Some("/bin"));
-        assert_eq!(baseline.exported.get("patches").map(String::as_str), Some(""));
+        assert_eq!(
+            baseline.exported.get("PATH").map(String::as_str),
+            Some("/bin")
+        );
+        assert_eq!(
+            baseline.exported.get("patches").map(String::as_str),
+            Some("")
+        );
         assert!(!baseline.exported.contains_key("shellHook"));
     }
 
