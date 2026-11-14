@@ -80,7 +80,7 @@ Add `mounts.rs` rejecting a path that is not absolute, not resolvable, a socket,
 | Depends On | T-001,T-005 |
 | References | mounts-collapse,credential-denies,symlinked-contribution,fail-closed |
 
-### T-007: Merge the environment and withhold ungranted values
+### T-007: [x] Merge the environment and withhold ungranted values
 
 Add `environment.rs` folding contributions through `Contributions::environment_for(workspace)`, withholding a value with an absolute element outside the workspace and grants, creating `workspace/tmp`, and setting `HOME`, `TMPDIR` and `PWD`. Resolve the real home through `Host`, not `HOME`.
 
