@@ -275,7 +275,7 @@ Write the unit tests over `FakeHost`, the renderer and the codec, and the ignore
 | Depends On | T-012,T-013,T-014,T-015,T-016,T-017 |
 | References | test-coverage,isolation-holds,closure-collapse,lifecycle-works,stale-group,concurrent-commands,standalone-sandbox,environment-exact,no-toolchain |
 
-### T-022: Add the contributed toolchain test
+### T-022: [x] Add the contributed toolchain test
 
 Add an ignored host test that compiles a C file with the Xcode installation root and the licence plist contributed as read mounts, and a second run without them that fails with a named denial.
 

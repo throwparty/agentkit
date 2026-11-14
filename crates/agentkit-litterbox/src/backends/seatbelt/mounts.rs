@@ -141,11 +141,11 @@ fn validate(
         .realpath(path)
         .map_err(|error| refuse(step, path, &format!("cannot be resolved ({error})")))?;
 
-    match host.file_kind(&resolved) {
+    let kind = match host.file_kind(&resolved) {
         Ok(FileKind::Socket) => return Err(refuse(step, path, "is a socket")),
         Ok(FileKind::Fifo) => return Err(refuse(step, path, "is a FIFO")),
         Ok(FileKind::Device) => return Err(refuse(step, path, "is a device")),
-        Ok(FileKind::File | FileKind::Directory) => {}
+        Ok(kind @ (FileKind::File | FileKind::Directory)) => kind,
         Err(error) => {
             return Err(refuse(
                 step,
@@ -153,12 +153,17 @@ fn validate(
                 &format!("cannot be inspected ({error})"),
             ));
         }
-    }
+    };
 
     for root in PROTECTED_ROOTS {
         let root = Path::new(root);
         if resolved == root || (root != Path::new("/") && resolved.starts_with(root)) {
-            return Err(refuse(step, path, "is a protected root"));
+            // A specific system file may be contributed (a licence plist, for
+            // example); a directory under a protected root may not, and the
+            // home tree is refused at every depth.
+            if root == Path::new("/Users") || kind == FileKind::Directory {
+                return Err(refuse(step, path, "is a protected root"));
+            }
         }
     }
 
@@ -376,6 +381,30 @@ mod tests {
         )
         .expect_err("metadata");
         assert!(error.to_string().contains("metadata"), "{error}");
+    }
+
+    #[test]
+    fn a_specific_file_under_a_system_root_is_allowed_but_a_directory_is_not() {
+        let root = fixture();
+        let workspace = root.path().join("ws");
+        let state = root.path().join("state");
+        let metadata = root.path().join("meta");
+        for path in [&workspace, &state, &metadata] {
+            std::fs::create_dir_all(path).expect("dir");
+        }
+        let ctx = context(&workspace, &state, &metadata, &[]);
+        let host = SystemHost::new();
+        let file = PathBuf::from("/Library/Preferences/com.apple.dt.Xcode.plist");
+        if file.exists() {
+            from_steps(&[step("licence", &[file])], &ctx, &host).expect("system file");
+        }
+        let error = from_steps(
+            &[step("directory", &[PathBuf::from("/System/Library")])],
+            &ctx,
+            &host,
+        )
+        .expect_err("system directory");
+        assert!(error.to_string().contains("protected root"), "{error}");
     }
 
     #[test]
