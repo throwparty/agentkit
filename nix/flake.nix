@@ -251,16 +251,20 @@
           let
             lib = nixpkgs.lib;
             mkAgentkitBin =
-              bin:
+              bin: extraBins:
               let
                 qualifiedBin = "agentkit-${bin}";
+                names = [ qualifiedBin ] ++ extraBins;
+                nameFilter = lib.concatMapStringsSep " or " (
+                  name: ".target.name == \"${name}\""
+                ) names;
               in
               naersk'.buildPackage {
                 pname = qualifiedBin;
                 version = "0.1.0";
                 src = ../.;
                 copyBinsFilter = ''
-                  select(.reason == "compiler-artifact" and .executable != null and .profile.test == false and .target.name == "${qualifiedBin}")
+                  select(.reason == "compiler-artifact" and .executable != null and .profile.test == false and (${nameFilter}))
                 '';
                 nativeBuildInputs = with pkgs; [
                   pkg-config
@@ -281,10 +285,12 @@
               };
           in
           {
-            agentkit-lens = mkAgentkitBin "lens";
-            agentkit-litterbox = mkAgentkitBin "litterbox";
-            agentkit-switchboard = mkAgentkitBin "switchboard";
-            agentkit-tackle = mkAgentkitBin "tackle";
+            agentkit-lens = mkAgentkitBin "lens" [ ];
+            agentkit-litterbox = mkAgentkitBin "litterbox" (
+              lib.optionals pkgs.stdenv.isDarwin [ "litterbox-seatbelt-helper" ]
+            );
+            agentkit-switchboard = mkAgentkitBin "switchboard" [ ];
+            agentkit-tackle = mkAgentkitBin "tackle" [ ];
           };
         checks = {
           inherit (self.packages.${system})
