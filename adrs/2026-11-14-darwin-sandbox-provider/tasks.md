@@ -80,14 +80,14 @@ Add `mounts.rs` rejecting a path that is not absolute, not resolvable, a socket,
 | Depends On | T-001,T-005 |
 | References | mounts-collapse,allowlist-access,symlinked-contribution,fail-closed |
 
-### T-007: [x] Merge the environment and withhold ungranted values
+### T-007: [x] Merge the environment and judge ungranted values
 
-Add `environment.rs` folding contributions through `Contributions::environment_for(workspace)`, withholding a value with an absolute element outside the workspace and grants, creating `workspace/tmp`, and setting `HOME`, `TMPDIR` and `PWD`. Resolve the real home through `Host`, not `HOME`.
+Add `environment.rs` folding contributions through `Contributions::environment_for(workspace)`, judging each value with the shared path-list rule, creating `workspace/tmp`, and setting `HOME`, `TMPDIR` and `PWD`.
 
 
 | Field | Value |
 |-------|-------|
-| Success Criteria | A later step overrides an earlier one. A variable naming an ungranted path is removed and its name is recorded as removed. A workspace-rooted value is rebased. `HOME`, `TMPDIR` and `PWD` are set and recorded, and `PATH` is only what steps contributed. A sandbox with no steps has no `PATH`. `workspace/tmp` exists before the first command. |
+| Success Criteria | A later step overrides an earlier one. A path list drops only its ungranted elements; a value with none left is removed and its name is recorded as removed. A workspace-rooted value is rebased. `HOME`, `TMPDIR` and `PWD` are set and recorded, and `PATH` is only what steps contributed. A sandbox with no steps has no `PATH`. `workspace/tmp` exists before the first command. |
 | Complexity | 🟡 Medium |
 | Effort | 3-4h |
 | Depends On | T-001,T-005 |
@@ -95,7 +95,7 @@ Add `environment.rs` folding contributions through `Contributions::environment_f
 
 ### T-008: [x] Add the record payload and its validation
 
-Add `payload.rs` with `PayloadV1`: version, helper path, holder pid and start time, socket path, both workspace paths, the post-collapse reads, collapsed step entries, provenance, posture, tag and paused. Refuse a higher version as unreadable and a lower or incomplete one as Unavailable with the delete-and-recreate remedy.
+Add `payload.rs` with `Payload` (version 2): helper path, holder pid and start time, socket path, both workspace paths, the post-collapse reads, collapsed step entries, provenance, posture and tag. Refuse a higher version as unreadable and a lower or incomplete one as Unavailable with the delete-and-recreate remedy.
 
 
 | Field | Value |
@@ -108,12 +108,12 @@ Add `payload.rs` with `PayloadV1`: version, helper path, holder pid and start ti
 
 ### T-009: [x] Materialise the workspace and transfer files
 
-Add `workspace.rs` copying the staged tree into the state directory with each component opened without following a link, refusing symlinks, devices and FIFOs. Implement upload and download through a directory descriptor under the shared transfer timeouts, preserving modes and symlink entries.
+Add `workspace.rs` delegating to the shared transfer walk: the staged tree is copied keeping a symlink whose target stays inside it and refusing one that leaves, a device or a FIFO; upload and download walk descriptor by descriptor under the shared transfer deadlines, preserving modes and symlink entries.
 
 
 | Field | Value |
 |-------|-------|
-| Success Criteria | A tree with a symlink, device or FIFO is refused and the path is named. A source path with spaces copies byte for byte. Upload writes only inside the workspace and download reads only from it. A download round trip preserves modes and symlinks. |
+| Success Criteria | A staged in-tree symlink is kept, an escaping one is refused and named, and a device or FIFO is refused. A source path with spaces copies byte for byte. Upload writes only inside the workspace and download reads only from it. A download round trip preserves modes and symlinks. |
 | Complexity | 🟡 Medium |
 | Effort | 4-6h |
 | Depends On | T-001,T-005 |
@@ -147,12 +147,12 @@ Implement the poll loop: accept Exec frames, fork, confine the child with `sandb
 
 ### T-012: [x] Implement create
 
-Assemble create: validate tag and real home, merge environment, validate and collapse mounts, create the state directory and workspace, generate the socket path, spawn the helper, wait for Ready, run sandbox steps through the shared runner, and write the payload. Refuse a duplicate as Conflict and declared ports as Unsupported.
+Assemble create: gate on the readiness report, validate tag, resolve the real home, socket and baseline reads, merge environment, validate and collapse mounts, create the state directory and workspace, spawn the helper, wait for Ready, run sandbox steps through the shared runner, and write the payload. Refuse a duplicate as Conflict and declared ports as Unsupported.
 
 
 | Field | Value |
 |-------|-------|
-| Success Criteria | A create with no steps returns a record and the holder is ready. A duplicate is Conflict before any process starts. A declared port is Unsupported and leaves no state directory. A failure after the state directory exists kills the holder and removes it. The payload records the collapsed entries and no environment value. |
+| Success Criteria | A create with no steps returns a record and the holder is ready. A duplicate is Conflict before any process starts. A declared port is Unsupported and leaves no state directory. An unavailable readiness check refuses before the state directory exists. A failure after the state directory exists kills the holder and removes it. The payload records the collapsed entries and no environment value. |
 | Complexity | 🔴 High |
 | Effort | 6-8h |
 | Depends On | T-006,T-007,T-008,T-009,T-010 |
@@ -160,7 +160,7 @@ Assemble create: validate tag and real home, merge environment, validate and col
 
 ### T-013: [x] Implement exec from the backend
 
-Add the backend exec path: validate the record, refuse while paused as Denied, connect, send Exec, decode frames, append up to the shared output cap, map errors, and convert output lossily to `Execution`.
+Add the backend exec path: validate the record, refuse while the group is stopped as Denied, connect and send under the control deadline, decode frames unbounded, append up to the shared output cap, map errors, and convert output lossily to `Execution`.
 
 
 | Field | Value |
@@ -173,7 +173,7 @@ Add the backend exec path: validate the record, refuse while paused as Denied, c
 
 ### T-014: [x] Implement pause, resume, delete and status
 
-Add the lifecycle facet: pause and resume signal the recorded group after checking pid, start time and zombie state; delete signals a matching or absent holder, refuses a recycled pid, removes the socket, log, workspace and state, and succeeds when the holder is gone; status proves the socket for an active holder.
+Add the lifecycle facet: pause and resume signal the recorded group after checking pid, start time and zombie state; delete signals a matching or absent holder, waits up to two seconds for the leader to go, refuses a recycled pid, removes the socket, log, workspace and state, and succeeds when the holder is gone; status proves the socket for an active holder under a one-second deadline.
 
 
 | Field | Value |
@@ -186,12 +186,12 @@ Add the lifecycle facet: pause and resume signal the recorded group after checki
 
 ### T-015: [x] Implement inspect, list and capabilities
 
-Inspect reports the posture, workspace, provenance, status and no forwards, using Status only when the record is active. List rebuilds each payload under the state root for both scopes and reports a corrupt one. Capabilities report pause and resume available, limits and forwarding unsupported, and both contribution sorts available.
+Inspect reports the posture, workspace, provenance, status and no forwards, using Status only when the record is active and reporting Missing when the workspace is gone. List rebuilds each payload under the state root for both scopes, logs and skips an unreadable one, and the project listing reports it as corrupt. Capabilities report pause and resume available, limits and forwarding unsupported, and both contribution sorts available.
 
 
 | Field | Value |
 |-------|-------|
-| Success Criteria | Inspect reports Active, Paused, Missing and Error in the documented cases. A corrupt payload is reported, not dropped. Machine-wide listing covers every project beneath the state root. Capabilities name limits and forwarding as unsupported with a reason. |
+| Success Criteria | Inspect reports Active, Paused, Missing and Error in the documented cases. An unreadable payload is logged and skipped by the machine-wide list, and reported as corrupt by the project listing. Machine-wide listing covers every project beneath the state root. Capabilities name limits and forwarding as unsupported with a reason. |
 | Complexity | 🟡 Medium |
 | Effort | 3-4h |
 | Depends On | T-012,T-014 |
@@ -199,7 +199,7 @@ Inspect reports the posture, workspace, provenance, status and no forwards, usin
 
 ### T-016: [x] Implement readiness
 
-Report five checks: macOS, `dlsym` of `sandbox_init_with_parameters`, helper trust, probe exit, and a writable state-root parent. Each carries a state, reason and remedy. No check confines the caller or starts a holder.
+Report five checks: macOS, `dlsym` of `sandbox_init_with_parameters`, helper trust, probe exit, and a writable state-root parent. Each has a state, reason and remedy. No check confines the caller or starts a holder.
 
 
 | Field | Value |
