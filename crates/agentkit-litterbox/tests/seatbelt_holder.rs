@@ -55,6 +55,7 @@ fn config(workspace: &Path) -> Vec<u8> {
     for read in reads {
         payload.extend_from_slice(&string(read));
     }
+    payload.extend_from_slice(&0u16.to_le_bytes());
     payload.extend_from_slice(&1u16.to_le_bytes());
     payload.extend_from_slice(&string(workspace));
     payload.push(0);

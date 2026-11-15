@@ -189,6 +189,7 @@ impl SeatbeltBackend {
         let config = ConfigPayload {
             workspace: path_bytes(&workspace),
             reads: mounts.reads.iter().map(|path| path_bytes(path)).collect(),
+            literals: mounts.named.iter().map(|path| path_bytes(path)).collect(),
             writes: vec![path_bytes(&workspace)],
             posture: self.posture(),
             endpoints: Vec::new(),
@@ -1286,6 +1287,38 @@ mod tests {
         assert_eq!(execution.stdout, "ok\n");
         backend.delete(&record).await.expect("delete");
         let _ = state;
+    }
+
+    #[tokio::test]
+    async fn exec_through_a_contributed_symlink() {
+        let dir = tempfile::tempdir().expect("dir");
+        let link = dir.path().join("sh");
+        std::os::unix::fs::symlink("/bin/sh", &link).expect("symlink");
+        let step = crate::sandbox::contract::ResolvedStep {
+            identity: "link".to_string(),
+            kind: "devshell".to_string(),
+            placement: crate::sandbox::contract::Placement::Host,
+            sandbox: None,
+            contributions: crate::sandbox::contract::Contributions {
+                mounts: vec![link.clone()],
+                ..crate::sandbox::contract::Contributions::default()
+            },
+        };
+        let (backend, record, state, _cleanup) = sandbox_with("symlink-exec", vec![step]).await;
+        let execution = backend
+            .exec(
+                &record,
+                &[
+                    link.to_str().expect("utf8").to_string(),
+                    "-c".to_string(),
+                    "echo ok".to_string(),
+                ],
+            )
+            .await
+            .expect("exec through a contributed symlink");
+        assert_eq!(execution.exit_code, 0, "{}", execution.stderr);
+        backend.delete(&record).await.expect("delete");
+        let _ = std::fs::remove_dir_all(&state);
     }
 
     #[ignore = "requires Xcode"]

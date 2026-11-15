@@ -40,6 +40,10 @@ pub(crate) struct CollapsedStep {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Mounts {
     pub reads: Vec<PathBuf>,
+    /// The contributed paths as named, and each named ancestor, when they
+    /// differ from the resolved read. A symlink component has to be readable
+    /// for the sandbox to follow the path it was given.
+    pub named: Vec<PathBuf>,
     pub collapsed: Vec<CollapsedStep>,
 }
 
@@ -75,10 +79,20 @@ pub(crate) fn from_steps(
             continue;
         }
         let mut resolved = Vec::with_capacity(contributed.len());
+        let mut named = Vec::new();
         for path in contributed {
-            resolved.push(validate(path, step.identity(), &context, host)?);
+            let target = validate(path, step.identity(), &context, host)?;
+            if target != *path {
+                for ancestor in path.ancestors() {
+                    push_unique(&mut named, ancestor.to_path_buf());
+                }
+            }
+            resolved.push(target);
         }
 
+        for path in named {
+            push_unique(&mut mounts.named, path);
+        }
         if resolved.len() > MAX_PATHS {
             let ancestor = common_ancestor(&resolved);
             let ancestor =

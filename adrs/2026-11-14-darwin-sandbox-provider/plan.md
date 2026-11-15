@@ -127,7 +127,7 @@ The writer emits fixed layers in this order:
 
 1. `(version 1)` and `(deny default (with message (param 'p0')))`.
 2. `(allow process-exec)`, `(allow process-fork)`, `(allow process-info* (target same-sandbox))`, `(allow signal (target same-sandbox))`.
-3. Reads: `(literal '/')`, baseline subpaths, workspace subpath, grant subpaths.
+3. Reads: `(literal '/')`, baseline subpaths, workspace subpath, grant subpaths, and the named-path literals.
 4. Metadata: one `(allow file-read-metadata ...)` with every ancestor of every read and write path as `(literal (param 'pN'))`.
 5. Writes: `(literal '/dev/null')` and the workspace subpath.
 6. `(allow sysctl-read)`.
@@ -161,6 +161,7 @@ Config payload:
 ```text
 u32 workspace_len      bytes
 u16 read_count         [u32 len, bytes]*
+u16 literal_count      [u32 len, bytes]*
 u16 write_count        [u32 len, bytes]*
 u8  posture            0 denied, 1 host, 2 loopback
 if 2: u16 endpoint_count  [u32 len, bytes]*

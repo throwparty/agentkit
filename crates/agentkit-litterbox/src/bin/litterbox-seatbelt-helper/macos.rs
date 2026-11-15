@@ -795,6 +795,7 @@ fn prepare(config: protocol::ConfigPayload) -> Result<Holder, String> {
     let input = policy::ProfileInput {
         workspace: path(&config.workspace),
         reads: config.reads.iter().map(|value| path(value)).collect(),
+        literals: config.literals.iter().map(|value| path(value)).collect(),
         writes: config.writes.iter().map(|value| path(value)).collect(),
         posture,
         tag: String::from_utf8(config.tag).map_err(|_| "the tag is not UTF-8".to_string())?,
@@ -921,6 +922,7 @@ mod tests {
         let config = ConfigPayload {
             workspace: b"/private/tmp/lbx/ws".to_vec(),
             reads: vec![b"/private/tmp/lbx/read".to_vec()],
+            literals: Vec::new(),
             writes: vec![b"/private/tmp/lbx/ws".to_vec()],
             posture: WirePosture::Denied,
             endpoints: Vec::new(),
