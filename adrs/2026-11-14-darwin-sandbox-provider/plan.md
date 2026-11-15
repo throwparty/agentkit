@@ -17,7 +17,7 @@ Seatbelt is one backend module plus one helper binary. The helper is the prototy
 | D9 | Protocol | Versioned binary frames, one request per connection, 1 MiB frame cap. |
 | D10 | Holder | One per sandbox, unconfined, `setsid`, poll loop, 64 concurrent commands. |
 | D11 | Output | 1 MiB per stream, drain beyond, truncation flags, lossy UTF-8. |
-| D12 | Record | Payload version 1, no environment values. |
+| D12 | Record | Payload version 2, no environment values. |
 | D13 | Readiness | `dlsym` the parameters symbol, trust the helper, probe it, check the state root. |
 | D14 | Workspace | Copy into the state directory; transfers never follow a link. |
 | D15 | Toolchain | No knowledge of Xcode or any compiler; a project contributes the read paths. |
@@ -41,18 +41,18 @@ crates/agentkit-litterbox/
 │   ├── host.rs           Host trait, SystemHost, FakeHost
 │   ├── path.rs           expand, normalize, validate
 │   ├── mounts.rs         validate contribution, collapse, ancestors
-│   ├── environment.rs    merge, withhold, real home, HOME/TMPDIR/PWD
+│   ├── environment.rs    merge, judge, HOME/TMPDIR/PWD
 │   ├── policy.rs         ProfileInput, Profile, Rule, Filter, render
 │   ├── protocol.rs       Frame, encode, decode, limits
 │   ├── holder.rs         spawn, connect, config, exec, signal, status
-│   ├── payload.rs        PayloadV1 and validation
+│   ├── payload.rs        Payload and validation
 │   ├── readiness.rs      symbol, helper, probe, state root
 │   ├── workspace.rs      copy, upload, download
 │   └── backend.rs        Backend and Lifecycle
 ├── src/bin/litterbox-seatbelt-helper/
 │   ├── main.rs           the platform gate and the entry point
 │   └── macos.rs          --probe and --hold; includes policy.rs and protocol.rs by #[path]
-└── tests/seatbelt.rs     host suite
+└── tests/seatbelt_holder.rs  host suite
 ```
 
 `policy.rs` and `protocol.rs` are dependency-free. The library compiles them for tests and the helper includes them by path. Neither names a `crate::` item, so the helper links only `libc` and `std`.
@@ -170,7 +170,7 @@ u16 baseline_count     [u32 len, bytes]*
 u16 mach_count         [u32 len, bytes]*
 ```
 
-Exec payload: `u16 argc` then `[u32 len, bytes]*`. Stdout and Stderr carry raw bytes, at most 64 KiB each. Exit is `i32 exit_code` and `u8 flags`, where bit 0 marks truncated stdout and bit 1 truncated stderr. Error is `u8 code` and `u32 message_len` plus bytes, with code 1 apply, 2 policy, 3 exec, 4 protocol, 5 internal, 6 busy. Status and StatusReply are empty.
+Exec payload: `u16 argc` then `[u32 len, bytes]*`. Stdout and Stderr contain raw bytes, at most 64 KiB each. Exit is `i32 exit_code` and `u8 flags`, where bit 0 marks truncated stdout and bit 1 truncated stderr. Error is `u8 code` and `u32 message_len` plus bytes, with code 1 apply, 2 policy, 3 exec, 4 protocol, 5 internal, 6 busy. Status and StatusReply are empty.
 
 Limits: frame at most 1 MiB, argc at most 4096, environment at most 4096 entries, each string at most 64 KiB. One request per connection. The holder rejects a peer whose uid is not its own, read with `getpeereid`.
 
@@ -198,26 +198,26 @@ Output is buffered per stream up to 1 MiB and drained beyond that, setting the t
 Create:
 
 1. Validate the tag and resolve the real home for mount validation; either failure is `Misconfigured`.
-2. Merge contributions with `Contributions::environment_for(workspace)`, withhold values naming an absolute path outside the workspace and the grants, then set `HOME`, `TMPDIR`, `PWD`. `PATH` is only what the steps contributed.
+2. Merge contributions with `Contributions::environment_for(workspace)`, judge each value with the shared path-list rule (a list keeps its granted elements; a non-list is withheld only when it is one ungranted absolute path), then set `HOME`, `TMPDIR`, `PWD`. `PATH` is only what the steps contributed.
 3. Validate mounts and collapse a step above 64 paths to its longest common ancestor. Refuse an ancestor of `/` and a collapsed set still above 64.
 4. Build the state directory `data_dir/litterbox/seatbelt/<project>/<name>/` with `0700` and copy the staged workspace into `workspace/`.
 5. Generate a socket path in the user temp directory from 16 random bytes, mode 0600. Spawn the helper with a cleared environment, null stdin and stdout, stderr to `holder.log`, and `--hold <socket>`. Any failure after the state directory exists kills the holder and removes the directory.
 6. Poll `connect` for up to 5 seconds. A timeout kills the helper and returns `Unavailable` with the tail of the log.
 7. Send Config, read Ready or Error.
 8. Run sandbox steps through the shared runner.
-9. Write PayloadV1 and return the record.
+9. Write the payload and return the record.
 
 A duplicate name is `Conflict` before any process starts. Declared ports are `Unsupported`, naming `network-bind`.
 
-Exec reads the payload, validates the holder pid, start time and non-zombie state, and refuses with Denied while the record says paused. It then connects, sends Exec, and reads frames. Stdout and stderr append up to the shared `EXEC_OUTPUT_CAP`; Exit ends the exchange. A connect failure is `NotFound`; a start-time mismatch is `Denied`.
+Exec reads the payload, validates the holder pid, start time and non-zombie state, and refuses with Denied while the process group is stopped. It then connects, sends Exec, and reads frames. Stdout and stderr append up to the shared `EXEC_OUTPUT_CAP`; Exit ends the exchange. A connect failure is `NotFound`; a start-time mismatch is `Denied`.
 
-Pause and resume validate, then `kill(-pid, SIGSTOP)` or `SIGCONT`, set or clear `paused`, and rewrite the payload. Delete validates as far as possible. When the holder matches the record it sends `SIGKILL` to the group; when the holder pid is absent but the state directory exists it signals the recorded group and logs it as orphaned; a recycled pid with a different start time is not signalled. It waits up to 2 seconds, then removes the socket, log, workspace and state directory. A missing holder is success.
+Pause and resume validate, then `kill(-pid, SIGSTOP)` or `SIGCONT`; inspection reads the process state, so nothing is rewritten. Delete validates as far as possible. When the holder matches the record it sends `SIGKILL` to the group; when the holder pid is absent but the state directory exists it signals the recorded group and logs it as orphaned; a recycled pid with a different start time is not signalled. It waits up to 2 seconds, then removes the socket, log, workspace and state directory. A missing holder is success.
 
-Inspect reports Paused from the record without asking a stopped holder. When the record is active it sends Status with a one-second deadline; a live holder that does not answer is `Error`, not `Active`. List rebuilds each payload under the state root for both scopes and reports a corrupt entry instead of dropping it. Upload and download copy through descriptors opened without following links and under the shared upload and download timeouts. Create logs the helper argv at debug level with every environment value left out. Capabilities report pause and resume available, limits and forwarding unsupported, and both contribution sorts available.
+Inspect reports Paused from the process state without asking a stopped holder. When the record is active it sends Status with a one-second deadline; a live holder that does not answer is `Error`, not `Active`. List rebuilds each payload under the state root for both scopes and logs and skips a corrupt entry. Upload and download copy through descriptors opened without following links and under the shared upload and download timeouts. Create logs the helper path, socket and log at debug level, never an environment value. Capabilities report pause and resume available, limits and forwarding unsupported, and both contribution sorts available.
 
 ## Readiness
 
-Each check carries state, reason and remedy:
+Each check has a state, reason and remedy:
 
 1. macOS, satisfied at compile time.
 2. `dlsym(RTLD_DEFAULT, 'sandbox_init_with_parameters')` is non-null.
@@ -230,7 +230,7 @@ Config failures are `Misconfigured`, not readiness. Create refuses on any check 
 ## Record
 
 ```rust
-pub struct PayloadV1 {
+pub struct Payload {
     pub version: u32,
     pub helper: PathBuf,
     pub holder_pid: u32,
@@ -244,7 +244,6 @@ pub struct PayloadV1 {
     pub provenance: Provenance,
     pub posture: String,
     pub tag: String,
-    pub paused: bool,
 }
 ```
 
@@ -273,7 +272,7 @@ pub struct PayloadV1 {
 | Rust | Edition 2024 and the standard library for paths, processes, maps and threads. |
 | libc | fork, setsid, kill, waitpid, dlsym, getpeereid, getpwnam, realpath and proc_pidinfo. sandbox_init_with_parameters is declared extern. |
 | Seatbelt | The macOS kernel sandbox. The helper applies a deny-default SBPL profile from parameters and execs, so every descendant inherits confinement. |
-| Unix domain socket | The control channel at a recorded path in the user temp directory, mode 0600, carrying configuration, argv, output and status. |
+| Unix domain socket | The control channel at a recorded path in the user temp directory, mode 0600, for configuration, argv, output and status. |
 | tokio | The existing runtime. Holder spawn, connect and response reads run on blocking threads. |
 | serde and toml | The versioned record payload, refused when the version or a required field is wrong. |
 | arch-lint | A scope for the backend module with deny edges to the orchestrator, CLI, MCP, persistence, SCM and provision preparation. |
@@ -320,7 +319,7 @@ validate rejects a path that is not absolute, not resolvable, a socket, device o
 
 Merge, withhold and fix the three owned variables
 
-merge folds steps through Contributions::environment_for(workspace), withholds a variable whose value has an absolute element outside the workspace and the grants (split on :), creates workspace/tmp, then sets HOME=workspace, TMPDIR=workspace/tmp and PWD=workspace. PATH is only contributed. The real home is resolved through Host, not from HOME. Provenance records Set for the three and Removed for withheld names. Values are returned as a map and sent only over the socket.
+merge folds steps through Contributions::environment_for(workspace), judges each value with the shared path-list rule (granted elements kept, the rest dropped; a value with none left withheld), creates workspace/tmp, then sets HOME=workspace, TMPDIR=workspace/tmp and PWD=workspace. PATH is only contributed. The real home is resolved through Host, not from HOME. Provenance records Set for the three and Removed for withheld names. Values are returned as a map and sent only over the socket.
 
 
 ### policy.rs
@@ -355,7 +354,7 @@ spawn uses the socket path create generated, starts the helper with a cleared en
 
 Persist what a later process needs
 
-PayloadV1 with the fields in the architecture, toml through the metadata store. from_record refuses a higher version or a missing field as Unavailable with the delete-and-recreate remedy. write asserts 0600 on the file and 0700 on the directory. validate checks pid existence, start time, zombie state and socket path shape.
+Payload with the fields in the architecture, toml through the metadata store. from_record refuses a higher version or a missing field as Unavailable with the delete-and-recreate remedy. write asserts 0600 on the file and 0700 on the directory. validate checks pid existence, start time, zombie state and socket path shape.
 
 
 ### readiness.rs
@@ -369,7 +368,7 @@ Five checks: macOS, dlsym of sandbox_init_with_parameters, helper trust, probe e
 
 Materialise and transfer the workspace
 
-copy_from copies the staged directory into workspace/ with each component opened without following a link, refusing a symlink, device or FIFO. transfer_in and transfer_out resolve beneath an open directory descriptor. download copies recursively, preserves modes and keeps a symlink as a symlink. Every path given to the holder is built from the state root and the sandbox name.
+copy_from copies the staged directory into workspace/, keeping a symlink whose target stays inside the tree and refusing one that leaves it, a device or a FIFO. transfer_in and transfer_out resolve beneath an open directory descriptor. download copies recursively, preserves modes and keeps a symlink as a symlink. Every path given to the holder is built from the state root and the sandbox name.
 
 
 ### backend.rs
@@ -395,7 +394,7 @@ Add the registry entry under cfg(target_os = 'macos') with lifecycle only. Exten
 
 ## Data Flow
 
-Create resolves the sequence and prepares host steps before the branch exists, so the request arrives with contributions. The backend merges the environment, withholds values naming ungranted paths, validates and collapses mounts, resolves the real home, and creates the state directory and workspace. It spawns the helper with setsid, waits for the socket, sends Config with the resolved lists, environment and tag, and receives Ready. The helper renders the profile once and keeps it. The backend writes PayloadV1 and returns.
+Create resolves the sequence and prepares host steps before the branch exists, so the request arrives with contributions. The backend gates on readiness, merges the environment, validates and collapses mounts, resolves the real home, and creates the state directory and workspace. It spawns the helper with setsid, waits for the socket, sends Config with the resolved lists, environment and tag, and receives Ready. The helper renders the profile once and keeps it. The backend writes the payload and returns.
 
 A later exec reads the payload, checks the holder pid and start time, connects, sends argv, and receives stdout, stderr and exit frames. The holder forks, the child applies the profile and execs with the configured environment and workspace, and the holder drains both streams under the cap and returns the status.
 
