@@ -26,13 +26,43 @@ pub(crate) const UPLOAD_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 /// A snapshot copies the whole workspace, so this is the time a build output
 /// the snapshot keeps can take; the copy holds no runtime worker while it runs.
 ///
-/// Only the Linux mechanism downloads today; the deadline stays shared so a
-/// second downloading backend cannot choose a different one.
-#[cfg_attr(not(target_os = "linux"), expect(dead_code))]
 pub(crate) const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+
+/// How long a control exchange with a holder may take before it is abandoned.
+///
+/// This bounds a question about a sandbox, never the workload itself: a command
+/// is allowed to be silent for as long as it runs.
+#[cfg_attr(not(target_os = "macos"), expect(dead_code))]
+pub(crate) const CONTROL_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// How much output one provisioning step may buffer in the transport.
 pub(crate) const PROVISION_OUTPUT_CAP: usize = 16 * 1024;
+
+/// Run one blocking transfer off the runtime, bounded by a deadline.
+///
+/// The work itself cannot be cancelled; what is bounded is how long the caller
+/// waits for it.
+pub(crate) async fn transfer<F>(budget: Duration, work: F) -> Result<(), Error>
+where
+    F: FnOnce() -> Result<(), Error> + Send + 'static,
+{
+    let started = Instant::now();
+    let joined = tokio::task::spawn_blocking(work);
+    match tokio::time::timeout(budget, joined).await {
+        Ok(Ok(outcome)) => {
+            tracing::debug!(
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                "the transfer finished"
+            );
+            outcome
+        }
+        Ok(Err(error)) => Err(Error::failed(format!("the transfer task failed: {error}"))),
+        Err(_) => Err(Error::failed(format!(
+            "the transfer exceeded the {}s deadline",
+            budget.as_secs()
+        ))),
+    }
+}
 
 /// How much of each stream an executed command may buffer in the transport.
 ///
@@ -40,9 +70,6 @@ pub(crate) const PROVISION_OUTPUT_CAP: usize = 16 * 1024;
 /// without bound cannot exhaust the server's memory; this is how much of it is
 /// kept and returned.
 ///
-/// Only the Linux mechanism uses this cap today; Docker keeps its own larger
-/// one. The cap stays shared so the exec transports converge.
-#[cfg_attr(not(target_os = "linux"), expect(dead_code))]
 pub(crate) const EXEC_OUTPUT_CAP: usize = 1024 * 1024;
 
 /// How much of a failing command's output travels in an error message.

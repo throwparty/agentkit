@@ -6,8 +6,10 @@
 #[cfg(target_os = "linux")]
 pub(crate) mod bubblewrap;
 pub(crate) mod docker;
+pub(crate) mod environment;
 pub mod registry;
 pub(crate) mod shared;
+pub(crate) mod transfer;
 
 pub use registry::{
     BackendReport, DEFAULT, available_names, build, describe, introspect, readiness_is_usable,
