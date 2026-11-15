@@ -616,6 +616,23 @@ fn port(port: &crate::config::PortRequest) -> RequestedPort {
 ///
 /// A configured slug becomes a path component, so it is validated rather than
 /// trusted: a value the slug rules would change is refused, naming the setting.
+/// Attach this project's sandbox store to the current checkout as a remote.
+///
+/// Returns whether the remote was added; false means the name already points
+/// at the store.
+pub fn expose_store(store: &std::path::Path, name: &str) -> Result<bool, SandboxError> {
+    let mut repo = git2::Repository::discover(".")
+        .map_err(|source| SandboxError::Scm(crate::domain::ScmError::Open { source }))?;
+    crate::vcs_store::remote::install_remote_in(&mut repo, name, store)
+}
+
+/// The Git store that holds this project's sandbox branches.
+pub fn store_path(config: &Config) -> Result<std::path::PathBuf, SandboxError> {
+    Ok(crate::vcs_store::VcsStore::resolve_path(
+        &resolve_project_slug(config)?,
+    ))
+}
+
 pub fn resolve_project_slug(config: &Config) -> Result<String, SandboxError> {
     Ok(format!("{}-{}", base_slug(config)?, namespace_suffix()))
 }
