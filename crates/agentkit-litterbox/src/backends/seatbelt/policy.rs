@@ -35,6 +35,9 @@ pub(crate) struct ProfileInput {
     pub(crate) workspace: PathBuf,
     pub(crate) reads: Vec<PathBuf>,
     pub(crate) writes: Vec<PathBuf>,
+    /// Paths granted as literals, so a symlink a contribution names can be
+    /// resolved even though the grant itself is on its target.
+    pub(crate) literals: Vec<PathBuf>,
     pub(crate) posture: Posture,
     pub(crate) tag: String,
     pub(crate) baseline_reads: Vec<PathBuf>,
@@ -116,6 +119,16 @@ pub(crate) fn render(input: &ProfileInput) -> Result<RenderedProfile, RenderErro
         push_path(&mut reads, resolve(path)?);
     }
 
+    let mut literals = Vec::new();
+    for path in &input.literals {
+        if !path.is_absolute() {
+            return Err(RenderError::BadPath {
+                value: path.display().to_string(),
+            });
+        }
+        push_path(&mut literals, path.clone());
+    }
+
     let mut writes = Vec::new();
     push_path(&mut writes, workspace.clone());
     for path in &input.writes {
@@ -145,7 +158,7 @@ pub(crate) fn render(input: &ProfileInput) -> Result<RenderedProfile, RenderErro
     };
 
     let mut metadata = Vec::new();
-    for path in reads.iter().chain(writes.iter()) {
+    for path in reads.iter().chain(writes.iter()).chain(literals.iter()) {
         for ancestor in path.ancestors() {
             push_path(&mut metadata, ancestor.to_path_buf());
         }
@@ -167,6 +180,9 @@ pub(crate) fn render(input: &ProfileInput) -> Result<RenderedProfile, RenderErro
     let mut read_filters = vec!["(literal \"/\")".to_string()];
     for path in &reads {
         read_filters.push(subpath_filter(&mut parameters, path)?);
+    }
+    for path in &literals {
+        read_filters.push(literal_filter(&mut parameters, path)?);
     }
     write_block(&mut text, "(allow file-read*", &read_filters);
 
@@ -367,6 +383,7 @@ mod tests {
             workspace: workspace.to_path_buf(),
             reads: Vec::new(),
             writes: Vec::new(),
+            literals: Vec::new(),
             posture: Posture::Denied,
             tag: "demo".to_string(),
             baseline_reads: Vec::new(),
@@ -593,6 +610,7 @@ mod tests {
             workspace: PathBuf::from(format!("{FIXTURE_ROOT}/workspace")),
             reads: reads.iter().map(PathBuf::from).collect(),
             writes: Vec::new(),
+            literals: Vec::new(),
             posture,
             tag: "demo".to_string(),
             baseline_reads: Vec::new(),

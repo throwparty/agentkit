@@ -135,6 +135,7 @@ pub(crate) type Environment = Vec<(Vec<u8>, Vec<u8>)>;
 pub(crate) struct ConfigPayload {
     pub workspace: Vec<u8>,
     pub reads: Vec<Vec<u8>>,
+    pub literals: Vec<Vec<u8>>,
     pub writes: Vec<Vec<u8>>,
     pub posture: WirePosture,
     pub endpoints: Vec<Vec<u8>>,
@@ -222,6 +223,7 @@ impl Message {
             Kind::Config => {
                 let workspace = reader.string()?;
                 let reads = reader.strings_u16()?;
+                let literals = reader.strings_u16()?;
                 let writes = reader.strings_u16()?;
                 let posture = WirePosture::from_byte(reader.u8()?)?;
                 let endpoints = match posture {
@@ -235,6 +237,7 @@ impl Message {
                 Self::Config(Box::new(ConfigPayload {
                     workspace,
                     reads,
+                    literals,
                     writes,
                     posture,
                     endpoints,
@@ -270,6 +273,7 @@ impl Message {
             Self::Config(config) => {
                 writer.string(&config.workspace)?;
                 writer.strings_u16(&config.reads)?;
+                writer.strings_u16(&config.literals)?;
                 writer.strings_u16(&config.writes)?;
                 writer.u8(config.posture.to_byte());
                 if config.posture == WirePosture::Loopback {
@@ -591,6 +595,7 @@ mod tests {
         ConfigPayload {
             workspace: b"/private/tmp/ws".to_vec(),
             reads: vec![b"/private/tmp/read".to_vec()],
+            literals: Vec::new(),
             writes: vec![b"/private/tmp/ws".to_vec()],
             posture: WirePosture::Loopback,
             endpoints: vec![b"localhost:8765".to_vec()],
@@ -736,7 +741,7 @@ mod tests {
         posture_config.writes.clear();
         posture_config.endpoints.clear();
         posture_config.posture = WirePosture::Denied;
-        let posture_offset = 12 + 4 + posture_config.workspace.len() + 2 + 2;
+        let posture_offset = 12 + 4 + posture_config.workspace.len() + 2 + 2 + 2;
         let mut frame = Message::Config(Box::new(posture_config))
             .encode()
             .expect("encodes");
