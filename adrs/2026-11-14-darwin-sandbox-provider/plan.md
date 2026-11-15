@@ -9,7 +9,7 @@ Seatbelt is one backend module plus one helper binary. The helper is the prototy
 | D1 | SBPL source | In-house renderer. No maintained typed crate exists; nono was rejected for dependencies and gaps. |
 | D2 | Substitution | `sandbox_init_with_parameters` for every dynamic string: paths, tag, mach services, endpoints (T-054, T-055). |
 | D3 | Profile model | Ordered typed layers and one writer. Ordering is structural, not a comment. |
-| D4 | Configuration | Machine-owned section. `baseline = 'default'` adds to defaults; `baseline = 'none'` uses the lists exactly. Credential denies are always defaults plus additions. |
+| D4 | Configuration | Machine-owned section. `baseline = 'default'` adds to defaults; `baseline = 'none'` uses the lists exactly. Access is the allowlist, with no deny layer. |
 | D5 | Tag | The sandbox name, validated as `[A-Za-z0-9._-]{1,64}`, passed as a parameter. |
 | D6 | Mach services | Parameters; defaults plus machine additions, or exactly the list when the baseline is off. |
 | D7 | Network | Config is `denied` or `host`. The renderer also accepts loopback endpoints for the proxy ADR. Declared ports are refused. |
@@ -37,7 +37,7 @@ crates/agentkit-litterbox/
 ├── src/backends/seatbelt/
 │   ├── mod.rs            BACKEND = 'seatbelt'; construct::build
 │   ├── config.rs         SeatbeltConfig, Settings, defaults merge
-│   ├── defaults.rs       BASELINE_READS, MACH_SERVICES, CREDENTIAL_DENIES
+│   ├── defaults.rs       BASELINE_READS, MACH_SERVICES
 │   ├── host.rs           Host trait, SystemHost, FakeHost
 │   ├── path.rs           expand, normalize, validate
 │   ├── mounts.rs         validate contribution, collapse, ancestors
@@ -66,10 +66,8 @@ pub struct ProfileInput {
     pub writes: Vec<PathBuf>,
     pub posture: Posture,
     pub tag: String,
-    pub real_home: PathBuf,
     pub baseline_reads: Vec<PathBuf>,
     pub mach_services: Vec<String>,
-    pub credential_denies: Vec<PathBuf>,
 }
 
 pub enum Posture {
@@ -106,7 +104,6 @@ network = 'denied'
 baseline = 'default'
 baseline-reads = []
 mach-services = []
-credential-denies = []
 ```
 
 `SeatbeltConfig` uses `#[serde(deny_unknown_fields)]` and follows `DockerConfig`: `from_section` rejects `setup-command` with a pointer to the provision section, and `settings()` produces the resolved values.
@@ -114,8 +111,6 @@ credential-denies = []
 `network` is `denied` (default) or `host`. `baseline` is `default` (default) or `none`.
 
 With `baseline = 'default'`, `baseline-reads` and `mach-services` extend the defaults. With `baseline = 'none'`, the lists are the exact set and the defaults are not emitted. The structural rules stay in both modes: the root literal, process rules, metadata ancestors, workspace reads and writes, `/dev/null` and `sysctl-read`. A command in a `none` baseline sees only the workspace unless the lists say otherwise.
-
-`credential-denies` is add-only in both modes. The defaults below always apply, because a config that can remove them turns the invariant into a suggestion.
 
 Paths accept an absolute path or `~/`. A relative path is `Misconfigured`. `~/` expands with the real home from `getpwnam`, not `HOME`. Normalisation resolves `.` and `..` lexically. A configured path that fails `realpath` at create is `Misconfigured`, naming the key and the path. A default that is absent is skipped with a debug log. Duplicates keep the first occurrence.
 
@@ -125,7 +120,6 @@ Defaults:
 
 - Baseline reads: `/System/Library`, `/System/Applications`, `/Library/Frameworks`, `/usr/bin`, `/usr/lib`, `/usr/share`, `/usr/libexec`, `/bin`, `/sbin`, `/private/etc`, `/private/var/db/dyld`, `/private/var/select`, `/dev`.
 - Mach services: the twelve names from the prototype policy, starting `com.apple.system.logger` and ending `com.apple.SystemConfiguration.configd`.
-- Credential denies: the list in FR-013, rooted at the real home.
 
 ## Profile
 
@@ -134,18 +128,17 @@ The writer emits fixed layers in this order:
 1. `(version 1)` and `(deny default (with message (param 'p0')))`.
 2. `(allow process-exec)`, `(allow process-fork)`, `(allow process-info* (target same-sandbox))`, `(allow signal (target same-sandbox))`.
 3. Reads: `(literal '/')`, baseline subpaths, workspace subpath, grant subpaths.
-4. Metadata: one `(allow file-read-metadata ...)` with every ancestor of every read and denied path as `(literal (param 'pN'))`.
+4. Metadata: one `(allow file-read-metadata ...)` with every ancestor of every read and write path as `(literal (param 'pN'))`.
 5. Writes: `(literal '/dev/null')` and the workspace subpath.
 6. `(allow sysctl-read)`.
 7. Mach lookup: one `(global-name (param 'pN'))` per service.
 8. Network: nothing when denied; `(allow network-outbound)` when host; `(allow network-outbound (remote ip (param 'pN')))` per endpoint when loopback.
-9. Credential denies last: `(deny file-read* ...)`, `(deny file-write* ...)`, `(deny file-write-unlink ...)`, each over the deny subpaths.
 
 The root literal is always present and not configurable. T-043 measured that every exec dies with SIGABRT without it.
 
 Every dynamic value is interned by exact bytes. The first use assigns `p0`, `p1` and so on; a repeated value reuses its name. The renderer never escapes a value, because no value is in the text.
 
-The metadata ancestors are required. A global metadata rule lets a denied path be `stat`ed, and narrowing the rule to the grant subtree breaks resolution with ENOTDIR because the kernel stats each ancestor first.
+The metadata ancestors are required. A global metadata rule widens what a command may `stat` beyond its grants, and narrowing the rule to the grant subtree breaks resolution with ENOTDIR because the kernel stats each ancestor first.
 
 The writer checks the text against 60 KiB and the parameter table against 4096 entries. Either overflow returns `TooLarge` or `TooManyParameters`, reported as status 71 and mapped to `Misconfigured`. No profile reaches the entry point after a guard fails.
 
@@ -175,8 +168,6 @@ u32 tag_len            bytes
 u32 env_count          [u16 name_len, bytes, u32 value_len, bytes]*
 u16 baseline_count     [u32 len, bytes]*
 u16 mach_count         [u32 len, bytes]*
-u16 deny_count         [u32 len, bytes]*
-u32 home_len           bytes
 ```
 
 Exec payload: `u16 argc` then `[u32 len, bytes]*`. Stdout and Stderr carry raw bytes, at most 64 KiB each. Exit is `i32 exit_code` and `u8 flags`, where bit 0 marks truncated stdout and bit 1 truncated stderr. Error is `u8 code` and `u32 message_len` plus bytes, with code 1 apply, 2 policy, 3 exec, 4 protocol, 5 internal, 6 busy. Status and StatusReply are empty.
@@ -206,7 +197,7 @@ Output is buffered per stream up to 1 MiB and drained beyond that, setting the t
 
 Create:
 
-1. Validate the tag and resolve the real home from `getpwnam`; either failure is `Misconfigured`.
+1. Validate the tag and resolve the real home for mount validation; either failure is `Misconfigured`.
 2. Merge contributions with `Contributions::environment_for(workspace)`, withhold values naming an absolute path outside the workspace and the grants, then set `HOME`, `TMPDIR`, `PWD`. `PATH` is only what the steps contributed.
 3. Validate mounts and collapse a step above 64 paths to its longest common ancestor. Refuse an ancestor of `/` and a collapsed set still above 64.
 4. Build the state directory `data_dir/litterbox/seatbelt/<project>/<name>/` with `0700` and copy the staged workspace into `workspace/`.
@@ -294,14 +285,14 @@ pub struct PayloadV1 {
 
 Declare and resolve the machine-owned section
 
-SeatbeltConfig with deny_unknown_fields: network (denied default, host), baseline (default or none), baseline-reads, mach-services, credential-denies. from_section rejects setup-command with a pointer to [[provision]]. settings returns Settings with network, baseline mode, merged read and service lists, and deny additions. Each key failure is Misconfigured and names the key.
+SeatbeltConfig with deny_unknown_fields: network (denied default, host), baseline (default or none), baseline-reads, mach-services. from_section rejects setup-command with a pointer to [[provision]]. settings returns Settings with network, baseline mode and the merged read and service lists. Each key failure is Misconfigured and names the key.
 
 
 ### defaults.rs
 
-Hold the three default tables as data
+Hold the two default tables as data
 
-BASELINE_READS, MACH_SERVICES and CREDENTIAL_DENIES as &'static [&'static str]. The baseline excludes every developer path and /nix. The credential list is the FR-013 set, rooted at the real home at render time. One test asserts each table is non-empty and free of duplicates.
+BASELINE_READS and MACH_SERVICES as &'static [&'static str]. The baseline excludes every developer path and /nix. One test asserts each table is non-empty and free of duplicates.
 
 
 ### path.rs
@@ -322,7 +313,7 @@ Host declares pid_exists, pid_state, pid_start_time, pid_group, signal_group, co
 
 Validate contributions and collapse them
 
-validate rejects a path that is not absolute, not resolvable, a socket, device or FIFO, the workspace or an ancestor of it, a protected root, the metadata directory, the state directory, or a credential path. collapse replaces a step above 64 paths with the longest common ancestor by component comparison, deduped. It refuses a common ancestor of / and a collapsed set above 64, naming the step and count. ancestors returns the parent chain used by the metadata layer.
+validate rejects a path that is not absolute, not resolvable, a socket, device or FIFO, the workspace or an ancestor of it, a protected root, the real home, the metadata directory or the state directory. collapse replaces a step above 64 paths with the longest common ancestor by component comparison, deduped. It refuses a common ancestor of / and a collapsed set above 64, naming the step and count. ancestors returns the parent chain used by the metadata layer.
 
 
 ### environment.rs
@@ -392,14 +383,14 @@ Backend: create, list, exec, upload, download, inspect, delete, readiness, capab
 
 Cover the refusals as well as the happy path
 
-Unit: config defaults and merge, baseline none, add-only denies, unknown keys, path validation, collapse boundaries, metadata ancestors, parameter interning, golden profiles for both postures, guards, protocol round trip and malformed frames, payload versions, readiness states and error mapping. Host: create with no steps, exact environment, write outside denied, credential read denied, descendant confined, 238-path collapse, pause and resume, background command, delete, setsid escape, holder killed out of band, concurrent commands, status probe. Ignored: a C compile with contributed Xcode paths.
+Unit: config defaults and merge, baseline none, unknown keys, path validation, collapse boundaries, metadata ancestors, parameter interning, golden profiles for both postures, guards, protocol round trip and malformed frames, payload versions, readiness states and error mapping. Host: create with no steps, exact environment, write outside denied, credential read denied, descendant confined, 238-path collapse, pause and resume, background command, delete, setsid escape, holder killed out of band, concurrent commands, status probe. Ignored: a C compile with contributed Xcode paths.
 
 
 ### registry and docs
 
 Make it selectable and keep the rules honest
 
-Add the registry entry under cfg(target_os = 'macos') with lifecycle only. Extend docs/docs/user/litterbox/backends.mdx with readiness, postures, refused ports, no limits, no PATH without steps, baseline modes, and no toolchain knowledge. Extend reference/config.mdx with the five keys. Add an arch-lint scope and a negative fixture for each deny edge.
+Add the registry entry under cfg(target_os = 'macos') with lifecycle only. Extend docs/docs/user/litterbox/backends.mdx with readiness, postures, refused ports, no limits, no PATH without steps, baseline modes, and no toolchain knowledge. Extend reference/config.mdx with the four keys. Add an arch-lint scope and a negative fixture for each deny edge.
 
 
 ## Data Flow

@@ -4,7 +4,7 @@
 
 ### T-001: [x] Add the backend skeleton, configuration and path rules
 
-Create `src/backends/seatbelt/` with `mod.rs` holding `BACKEND = 'seatbelt'`, `config.rs` typing the five keys with `deny_unknown_fields`, `defaults.rs` holding the baseline, mach and credential tables, and `path.rs` expanding `~/`, normalising and validating paths. `baseline = 'default'` merges additions; `baseline = 'none'` uses the lists exactly.
+Create `src/backends/seatbelt/` with `mod.rs` holding `BACKEND = 'seatbelt'`, `config.rs` typing the four keys with `deny_unknown_fields`, `defaults.rs` holding the baseline and mach tables, and `path.rs` expanding `~/`, normalising and validating paths. `baseline = 'default'` merges additions; `baseline = 'none'` uses the lists exactly.
 
 
 | Field | Value |
@@ -26,7 +26,7 @@ Add `policy.rs` with the typed layers, the writer and parameter interning. Emit 
 | Complexity | 🔴 High |
 | Effort | 8-12h |
 | Depends On | T-001 |
-| References | profile-baseline,credential-denies,egress-posture,golden-profiles |
+| References | profile-baseline,allowlist-access,egress-posture,golden-profiles |
 
 ### T-003: [x] Add golden profiles and their invariants
 
@@ -35,11 +35,11 @@ Add fixtures for the empty request, one read, two reads sharing an ancestor, a c
 
 | Field | Value |
 |-------|-------|
-| Success Criteria | Each golden case fails when the text or the parameter table changes. A second test removes one invariant at a time, such as the root literal, the metadata rule or the last-position denies, and asserts the text changes. The credential denies are the final layer. The host posture emits no remote filter, and the loopback posture emits one per endpoint. |
+| Success Criteria | Each golden case fails when the text or the parameter table changes. A second test removes one invariant at a time, such as the root literal or the metadata rule, and asserts the text changes. No explicit deny rule appears. The host posture emits no remote filter, and the loopback posture emits one per endpoint. |
 | Complexity | 🟡 Medium |
 | Effort | 3-4h |
 | Depends On | T-002 |
-| References | golden-profiles,profile-baseline,credential-denies,egress-postures |
+| References | golden-profiles,profile-baseline,allowlist-access,egress-postures |
 
 ### T-004: [x] Implement the frame codec
 
@@ -69,7 +69,7 @@ Add `host.rs` with the `Host` trait covering pid existence, state, start time, g
 
 ### T-006: [x] Validate and collapse contributed mounts
 
-Add `mounts.rs` rejecting a path that is not absolute, not resolvable, a socket, device or FIFO, the workspace or its ancestor, a protected root, the metadata or state directory, or a credential path. Collapse a step above 64 paths to its longest common ancestor, deduped, and return the ancestor chain for metadata.
+Add `mounts.rs` rejecting a path that is not absolute, not resolvable, a socket, device or FIFO, the workspace or its ancestor, a protected root, the real home, the metadata directory or the state directory. Collapse a step above 64 paths to its longest common ancestor, deduped, and return the ancestor chain for metadata.
 
 
 | Field | Value |
@@ -78,7 +78,7 @@ Add `mounts.rs` rejecting a path that is not absolute, not resolvable, a socket,
 | Complexity | 🟡 Medium |
 | Effort | 4-6h |
 | Depends On | T-001,T-005 |
-| References | mounts-collapse,credential-denies,symlinked-contribution,fail-closed |
+| References | mounts-collapse,allowlist-access,symlinked-contribution,fail-closed |
 
 ### T-007: [x] Merge the environment and withhold ungranted values
 
@@ -238,12 +238,12 @@ Map helper error codes, connect failures, record outcomes and config failures to
 
 ### T-019: [x] Document the backend
 
-Extend the backends page and the configuration reference with seatbelt: the five keys and their defaults, the baseline modes, readiness, both postures, refused ports, no limits, no `PATH` without steps, and no toolchain knowledge. State that a sandbox with no steps runs only what the baseline permits.
+Extend the backends page and the configuration reference with seatbelt: the four keys and their defaults, the baseline modes, readiness, both postures, refused ports, no limits, no `PATH` without steps, and no toolchain knowledge. State that a sandbox with no steps runs only what the baseline permits.
 
 
 | Field | Value |
 |-------|-------|
-| Success Criteria | The backends page no longer says Docker is the only mechanism. The configuration reference names `network`, `baseline`, `baseline-reads`, `mach-services` and `credential-denies`. The documented reach matches inspection. The page explains the socket in the user temp directory and the holder log. |
+| Success Criteria | The backends page no longer says Docker is the only mechanism. The configuration reference names `network`, `baseline`, `baseline-reads` and `mach-services`. The documented reach matches inspection. The page explains the socket in the user temp directory and the holder log. |
 | Complexity | 🟢 Low |
 | Effort | 3-4h |
 | Depends On | T-017 |
