@@ -99,7 +99,6 @@ network = "denied"
 baseline = "default"
 baseline-reads = []
 mach-services = []
-credential-denies = []
 ```
 
 The default baseline is OS paths only: `/System/Library`, `/System/Applications`,
@@ -109,9 +108,11 @@ and `/dev`. It names no Nix store and no developer directory. `baseline = "none"
 lets you start from a narrower set and add what a workload needs, which is the
 way to harden the sandbox beyond the default.
 
-`credential-denies` adds paths to the always-on deny list. A machine can add a
-deny but cannot remove one: the defaults cover SSH keys, cloud and registry
-credentials, keychains and browser profiles.
+Access is an allowlist: the baseline, the workspace and the paths a provisioning
+step contributes. Since nothing else is read, there is no credential deny list to
+keep current. Contributions are validated first, and a step may not contribute a
+path under `/Users` or the current user's home, the workspace, or the backend's
+state.
 
 The backend has no resource limits and forwards no ports. A command that writes
 outside the workspace fails, and a command that needs a compiler gets one only
