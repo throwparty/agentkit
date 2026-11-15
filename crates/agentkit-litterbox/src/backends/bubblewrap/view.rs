@@ -664,7 +664,7 @@ mod tests {
         );
         assert!(
             !contains("--clearenv"),
-            "the spawn carries the environment, not a flag"
+            "the spawn sets the environment, not a flag"
         );
         assert!(contains("--proc") && contains("--dev") && contains("--tmpfs"));
         assert_eq!(

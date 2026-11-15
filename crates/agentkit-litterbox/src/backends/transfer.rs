@@ -57,7 +57,7 @@ pub(crate) fn transfer_in(
 
 /// Copy a sandbox path out to the host.
 ///
-/// A selector narrows the copy to the paths a snapshot carries; the walk asks
+/// A selector narrows the copy to the paths a snapshot includes; the walk asks
 /// it before reading anything, so a rejected path never reaches the host.
 pub(crate) fn transfer_out(
     root: &Path,

@@ -1,6 +1,6 @@
 //! The record a later process needs to address a sandbox.
 //!
-//! The payload carries no environment value and no profile text. It is stored
+//! The payload contains no environment value and no profile text. It is stored
 //! in `SandboxRecord.data`; the metadata store owns the file modes.
 
 use std::path::{Path, PathBuf};
