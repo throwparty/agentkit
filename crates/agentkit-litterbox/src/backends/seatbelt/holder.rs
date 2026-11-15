@@ -13,6 +13,9 @@ use super::BACKEND;
 use super::host::{ProcessStart, SharedHost, Signal};
 use super::protocol::{ConfigPayload, ErrorCode, Header, Message, ProtocolError};
 use crate::backends::shared::CONTROL_TIMEOUT;
+
+/// How long the holder may take to answer its configuration.
+const CONFIG_TIMEOUT: Duration = Duration::from_secs(5);
 use crate::sandbox::contract::{Error, Execution};
 
 /// How long create waits for the holder socket and Ready.
@@ -110,8 +113,19 @@ impl Holder {
         };
 
         let mut stream = stream;
-        send(&mut stream, &Message::Config(Box::new(config)))?;
-        let reply = receive(&mut stream)?;
+        let exchange = (|| {
+            set_deadline(&stream, CONFIG_TIMEOUT)?;
+            send(&mut stream, &Message::Config(Box::new(config)))?;
+            receive(&mut stream)
+        })();
+        let reply = match exchange {
+            Ok(reply) => reply,
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error);
+            }
+        };
         match reply {
             Message::Ready => {
                 // The server that created the holder owns the Child handle.
@@ -164,11 +178,19 @@ impl Holder {
             match receive(&mut stream)? {
                 Message::Stdout(bytes) => append_capped(&mut stdout, &bytes),
                 Message::Stderr(bytes) => append_capped(&mut stderr, &bytes),
-                Message::Exit { code, .. } => {
+                Message::Exit { code, flags } => {
+                    let mut out = String::from_utf8_lossy(&stdout).into_owned();
+                    let mut err = String::from_utf8_lossy(&stderr).into_owned();
+                    if flags.stdout_truncated {
+                        out.push_str("\n[truncated]");
+                    }
+                    if flags.stderr_truncated {
+                        err.push_str("\n[truncated]");
+                    }
                     return Ok(Execution {
                         exit_code: code,
-                        stdout: String::from_utf8_lossy(&stdout).into_owned(),
-                        stderr: String::from_utf8_lossy(&stderr).into_owned(),
+                        stdout: out,
+                        stderr: err,
                     });
                 }
                 Message::Error { code, message } => return Err(map_error(code, message)),
@@ -186,7 +208,7 @@ impl Holder {
         let mut stream = self.host.connect_socket(&self.socket).map_err(|error| {
             Error::failed(format!("the holder socket is not reachable: {error}"))
         })?;
-        set_deadline(&stream)?;
+        set_deadline(&stream, CONTROL_TIMEOUT)?;
         send(&mut stream, &Message::Status)?;
         match receive(&mut stream)? {
             Message::StatusReply => Ok(()),
@@ -206,10 +228,10 @@ impl Holder {
 }
 
 /// Bound one control exchange so a wedged holder cannot hang the caller.
-fn set_deadline(stream: &std::os::unix::net::UnixStream) -> Result<(), Error> {
+fn set_deadline(stream: &std::os::unix::net::UnixStream, timeout: Duration) -> Result<(), Error> {
     stream
-        .set_read_timeout(Some(CONTROL_TIMEOUT))
-        .and_then(|()| stream.set_write_timeout(Some(CONTROL_TIMEOUT)))
+        .set_read_timeout(Some(timeout))
+        .and_then(|()| stream.set_write_timeout(Some(timeout)))
         .map_err(|error| Error::failed(format!("cannot bound the holder exchange: {error}")))
 }
 
