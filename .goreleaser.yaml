@@ -20,6 +20,16 @@ builds:
       - --release
       - --package=agentkit-litterbox
     targets: *default_targets
+  - id: seatbelt-helper
+    binary: litterbox-seatbelt-helper
+    builder: rust
+    flags:
+      - --release
+      - --package=agentkit-litterbox
+      - --bin=litterbox-seatbelt-helper
+    targets:
+      - x86_64-apple-darwin
+      - aarch64-apple-darwin
   - id: tackle
     binary: agentkit-tackle
     builder: rust
