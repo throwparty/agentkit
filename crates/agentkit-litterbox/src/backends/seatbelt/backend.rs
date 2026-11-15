@@ -663,9 +663,10 @@ impl SeatbeltBackend {
         record: &SandboxRecord,
         source: &str,
         destination: &Path,
+        selector: Option<&dyn crate::sandbox::contract::SnapshotSelector>,
     ) -> Result<(), Error> {
         let payload = PayloadV1::from_record(record)?;
-        workspace::transfer_out(&payload.workspace_host, source, destination)
+        workspace::transfer_out(&payload.workspace_host, source, destination, selector)
     }
 
     fn capability_report(&self) -> Vec<Capability> {
@@ -787,9 +788,11 @@ impl Backend for SeatbeltBackend {
         sandbox: &'a SandboxRecord,
         source: &'a str,
         destination: &'a Path,
-        _selector: Option<std::sync::Arc<dyn crate::sandbox::contract::SnapshotSelector>>,
+        selector: Option<std::sync::Arc<dyn crate::sandbox::contract::SnapshotSelector>>,
     ) -> BoxFuture<'a, Result<(), Error>> {
-        Box::pin(async move { self.download_sandbox(sandbox, source, destination) })
+        Box::pin(
+            async move { self.download_sandbox(sandbox, source, destination, selector.as_deref()) },
+        )
     }
 
     fn inspect<'a>(
@@ -1383,6 +1386,25 @@ mod tests {
             .await
             .expect("download");
         assert_eq!(std::fs::read(&destination).expect("read"), b"payload");
+        let _ = std::fs::remove_dir_all(&state);
+    }
+
+    #[tokio::test]
+    async fn a_snapshot_downloads_the_workspace_from_its_sandbox_path() {
+        let (backend, record, state, _cleanup) = sandbox("snapshot-path").await;
+        let workspace = backend.inspect(&record).await.expect("inspect").workspace;
+        let host = payload(&record).workspace_host;
+        std::fs::write(host.join("RESULT.md"), b"report").expect("write");
+
+        let staging = tempfile::tempdir().expect("staging");
+        backend
+            .download(&record, &workspace, staging.path(), None)
+            .await
+            .expect("download");
+        assert_eq!(
+            std::fs::read(staging.path().join("RESULT.md")).expect("read"),
+            b"report"
+        );
         let _ = std::fs::remove_dir_all(&state);
     }
 
