@@ -724,7 +724,7 @@ fn resolve_program(
 ) -> Result<std::ffi::CString, String> {
     let name = program.to_bytes();
     if name.contains(&b'/') {
-        return Ok(program.clone());
+        return Ok(canonical(program));
     }
     let path = environment
         .iter()
@@ -746,13 +746,27 @@ fn resolve_program(
             std::ffi::CString::new(candidate).map_err(|_| "the PATH contains a NUL".to_string())?;
         // SAFETY: access only checks the path, and the candidate is NUL terminated.
         if unsafe { libc::access(candidate.as_ptr(), libc::X_OK) } == 0 {
-            return Ok(candidate);
+            return Ok(canonical(&candidate));
         }
     }
     Err(format!(
         "the command '{}' is not on PATH",
         String::from_utf8_lossy(name)
     ))
+}
+
+/// The real path of a program, so a symlink is resolved before the sandbox
+/// sees the exec: the profile grants the target, not the link.
+fn canonical(program: &std::ffi::CString) -> std::ffi::CString {
+    use std::os::unix::ffi::OsStrExt;
+
+    let path = std::path::Path::new(std::ffi::OsStr::from_bytes(program.to_bytes()));
+    match std::fs::canonicalize(path) {
+        Ok(path) => {
+            std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap_or_else(|_| program.clone())
+        }
+        Err(_) => program.clone(),
+    }
 }
 
 fn cstrings(values: &[Vec<u8>]) -> Result<Vec<std::ffi::CString>, String> {
