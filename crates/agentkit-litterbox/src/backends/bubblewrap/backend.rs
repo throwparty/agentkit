@@ -12,7 +12,7 @@ use super::payload::{Payload, RecordedMount, RecordedRoot};
 use super::view::{Boundaries, RenderOptions, Requested, View, WORKSPACE};
 use super::{environment, holder, join, lifecycle, readiness, validate, workspace};
 use crate::backends::shared::{
-    DOWNLOAD_TIMEOUT, EXEC_OUTPUT_CAP, PROVISION_OUTPUT_CAP, UPLOAD_TIMEOUT, run_steps,
+    DOWNLOAD_TIMEOUT, EXEC_OUTPUT_CAP, PROVISION_OUTPUT_CAP, UPLOAD_TIMEOUT, run_steps, transfer,
 };
 use crate::sandbox::contract::{
     Backend, ContributionSort, ContributionSupport, CreateRequest, Error, Execution, Forward,
@@ -333,32 +333,6 @@ impl BubblewrapBackend {
             }),
             validate::Verdict::Editions(error) => Err(error),
         }
-    }
-}
-
-/// Run one blocking transfer off the runtime, bounded by a deadline.
-///
-/// The work itself cannot be cancelled; what is bounded is how long the caller
-/// waits for it.
-async fn transfer<F>(budget: std::time::Duration, work: F) -> Result<(), Error>
-where
-    F: FnOnce() -> Result<(), Error> + Send + 'static,
-{
-    let started = std::time::Instant::now();
-    let joined = tokio::task::spawn_blocking(work);
-    match tokio::time::timeout(budget, joined).await {
-        Ok(Ok(outcome)) => {
-            tracing::debug!(
-                elapsed_ms = started.elapsed().as_millis() as u64,
-                "the transfer finished"
-            );
-            outcome
-        }
-        Ok(Err(error)) => Err(Error::failed(format!("the transfer task failed: {error}"))),
-        Err(_) => Err(Error::failed(format!(
-            "the transfer exceeded the {}s deadline",
-            budget.as_secs()
-        ))),
     }
 }
 

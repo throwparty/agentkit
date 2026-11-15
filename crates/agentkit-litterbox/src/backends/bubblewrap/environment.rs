@@ -5,14 +5,13 @@
 //! are added. Values live here and in the sandbox's own environment; nothing is
 //! written down.
 
-use std::collections::BTreeMap;
-use std::path::Path;
-
 use super::view::{HOME, WORKSPACE};
+use crate::backends::environment::{Verdict, verdict};
 use crate::sandbox::contract::{Error, ResolvedStep};
 use crate::sandbox::environment::{
     Change, Environment, Origin, Provenance, StepProvenance, Variable,
 };
+use std::collections::BTreeMap;
 
 /// The temporary directory inside the sandbox.
 const TMPDIR: &str = "/tmp";
@@ -53,7 +52,7 @@ pub fn merge(steps: &[ResolvedStep]) -> Result<Environment, Error> {
     let mut withheld = Vec::new();
     let mut trimmed = Vec::new();
     for (name, value) in &variables {
-        match verdict(name, value, &granted) {
+        match verdict(name, value, WORKSPACE, &granted) {
             Verdict::Keep => {}
             Verdict::Remove => withheld.push(name.clone()),
             Verdict::Trim(value) => trimmed.push((name.clone(), value)),
@@ -105,78 +104,6 @@ fn granted_paths(steps: &[ResolvedStep]) -> Vec<std::path::PathBuf> {
         }
     }
     paths
-}
-
-/// What the ungranted-path rule does with one variable's value.
-enum Verdict {
-    /// Every absolute element names something the sandbox can see.
-    Keep,
-    /// Some elements do not, and can be dropped without emptying the value.
-    Trim(String),
-    /// Nothing would remain.
-    Remove,
-}
-
-/// Whether a variable holds a `:`-separated list of paths.
-///
-/// Only these are read as lists. Every other value is a string whose meaning
-/// is its own, and splitting it would corrupt it: `https://example.com` is the
-/// obvious case, where `//example.com` is not a path at all.
-fn is_path_list(name: &str) -> bool {
-    const LISTS: [&str; 6] = [
-        "PATH",
-        "MANPATH",
-        "INFOPATH",
-        "PYTHONPATH",
-        "NODE_PATH",
-        "CLASSPATH",
-    ];
-    LISTS.contains(&name) || name.ends_with("_PATH")
-}
-
-/// Whether a sandbox resolves one path-like value.
-fn granted_element(value: &str, granted: &[std::path::PathBuf]) -> bool {
-    let element = Path::new(value);
-    element == Path::new(WORKSPACE)
-        || element.starts_with(WORKSPACE)
-        || granted
-            .iter()
-            .any(|path| element == path || element.starts_with(path))
-}
-
-/// Judge the value of the named variable.
-fn verdict(name: &str, value: &str, granted: &[std::path::PathBuf]) -> Verdict {
-    if !is_path_list(name) {
-        // A value that is one absolute path the sandbox cannot see names
-        // something absent, so the variable goes. Anything else is kept as it
-        // was written: the backend does not guess what a variable is for.
-        let absent = value.starts_with('/') && !granted_element(value, granted);
-        return if absent {
-            Verdict::Remove
-        } else {
-            Verdict::Keep
-        };
-    }
-
-    let elements: Vec<&str> = value.split(':').collect();
-    let absolute = elements
-        .iter()
-        .filter(|element| element.starts_with('/'))
-        .count();
-    if absolute == 0 {
-        return Verdict::Keep;
-    }
-    let kept: Vec<&str> = elements
-        .into_iter()
-        .filter(|element| !element.starts_with('/') || granted_element(element, granted))
-        .collect();
-    if kept.len() == value.split(':').count() {
-        return Verdict::Keep;
-    }
-    if kept.is_empty() {
-        return Verdict::Remove;
-    }
-    Verdict::Trim(kept.join(":"))
 }
 
 #[cfg(test)]
