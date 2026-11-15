@@ -95,6 +95,13 @@ enum Commands {
         json: bool,
     },
 
+    /// Add the Git remote that holds this project's sandbox branches
+    Remote {
+        /// Name for the remote
+        #[arg(default_value = "litterbox")]
+        name: String,
+    },
+
     /// Execute a command in a sandbox
     Shell {
         /// Name of the sandbox to run the command in
@@ -139,6 +146,7 @@ pub async fn run() -> ExitCode {
         Commands::Pause { name, all, machine } => handle_pause(backend, name, all, machine).await,
         Commands::Resume { name } => handle_resume(backend, name).await,
         Commands::Delete { name, force } => handle_delete(backend, name, force).await,
+        Commands::Remote { name } => handle_remote(backend, name),
         Commands::Shell { name, command } => handle_shell(backend, name, command).await,
         Commands::Backends { json } => handle_backends(backend, json).await,
         Commands::Doctor { json } => handle_doctor(backend, json).await,
@@ -187,6 +195,34 @@ async fn handle_stdio(backend: Option<String>) -> ExitCode {
     if let Err(error) = mcp::run_stdio(backend).await {
         return report(Error::failed(error.to_string()));
     }
+    ExitCode::from(0)
+}
+
+fn handle_remote(backend: Option<String>, name: String) -> ExitCode {
+    let config = match load_config(backend) {
+        Ok(config) => config,
+        Err(error) => return report(error),
+    };
+    let store = match crate::orchestrator::store_path(&config) {
+        Ok(store) => store,
+        Err(error) => return report(Error::from(error)),
+    };
+    if !store.is_dir() {
+        return report(Error::failed(format!(
+            "this project has no sandbox store at '{}' yet; create a sandbox first",
+            store.display()
+        )));
+    }
+    let added = match crate::orchestrator::expose_store(&store, &name) {
+        Ok(added) => added,
+        Err(error) => return report(Error::from(error)),
+    };
+    if added {
+        println!("added remote '{name}' -> '{}'", store.display());
+    } else {
+        println!("remote '{name}' already points at '{}'", store.display());
+    }
+    println!("git fetch {name} '+refs/heads/litterbox/*:refs/remotes/{name}/*'");
     ExitCode::from(0)
 }
 

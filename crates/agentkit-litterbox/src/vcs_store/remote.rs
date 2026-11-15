@@ -5,27 +5,38 @@ use crate::domain::SandboxError;
 const REMOTE_NAME: &str = "litterbox";
 
 pub fn install_remote(repo_path: &Path, bare_path: &Path) -> Result<(), SandboxError> {
-    let repo = git2::Repository::open(repo_path)
+    let mut repo = git2::Repository::open(repo_path)
         .map_err(|source| SandboxError::Scm(crate::domain::ScmError::Open { source }))?;
+    install_remote_in(&mut repo, REMOTE_NAME, bare_path).map(|_| ())
+}
 
-    let bare_url = bare_path_to_url(bare_path);
+/// Attach `bare_path` to an open repository as `name`.
+///
+/// Returns whether the remote was added. `Ok(false)` means the name already
+/// points at the same path; a name that points elsewhere is refused.
+pub fn install_remote_in(
+    repo: &mut git2::Repository,
+    name: &str,
+    bare_path: &Path,
+) -> Result<bool, SandboxError> {
+    let bare_url = bare_path_to_url(bare_path)?;
 
-    match repo.find_remote(REMOTE_NAME) {
+    match repo.find_remote(name) {
         Ok(remote) => {
             let existing = remote.url().unwrap_or("");
             if existing == bare_url {
-                Ok(())
+                Ok(false)
             } else {
                 Err(SandboxError::Config(format!(
-                    "litterbox remote already exists with URL '{existing}', cannot override with '{bare_url}'"
+                    "remote '{name}' already exists with URL '{existing}', cannot override with '{bare_url}'"
                 )))
             }
         }
         Err(e) if e.code() == git2::ErrorCode::NotFound => {
-            repo.remote(REMOTE_NAME, &bare_url).map_err(|source| {
+            repo.remote(name, &bare_url).map_err(|source| {
                 SandboxError::Scm(crate::domain::ScmError::BranchCreate { source })
             })?;
-            Ok(())
+            Ok(true)
         }
         Err(source) => Err(SandboxError::Scm(crate::domain::ScmError::Open { source })),
     }
@@ -44,13 +55,18 @@ pub fn remove_remote(repo_path: &Path) -> Result<(), SandboxError> {
     }
 }
 
-fn bare_path_to_url(bare_path: &Path) -> String {
+fn bare_path_to_url(bare_path: &Path) -> Result<String, SandboxError> {
     let canonical = if bare_path.is_absolute() {
         bare_path.to_path_buf()
     } else {
         std::env::current_dir().unwrap_or_default().join(bare_path)
     };
-    canonical.to_string_lossy().into_owned()
+    canonical.to_str().map(str::to_owned).ok_or_else(|| {
+        SandboxError::Config(format!(
+            "the sandbox store '{}' is not UTF-8",
+            canonical.display()
+        ))
+    })
 }
 
 #[cfg(test)]
@@ -98,6 +114,23 @@ mod tests {
         let remote = repo.find_remote("litterbox").expect("remote exists");
         let url = remote.url().expect("url");
         assert!(url.contains(bare_path.path().to_str().unwrap()));
+    }
+
+    #[test]
+    fn install_remote_in_accepts_another_name() {
+        let (tempdir, _repo) = init_repo();
+        let bare_path = TempDir::new().expect("bare dir");
+        let mut repo = Repository::open(tempdir.path()).expect("open repo");
+
+        assert!(install_remote_in(&mut repo, "sandboxes", bare_path.path()).expect("install"));
+        assert!(!install_remote_in(&mut repo, "sandboxes", bare_path.path()).expect("again"));
+        assert_eq!(
+            repo.find_remote("sandboxes")
+                .expect("remote")
+                .url()
+                .expect("url"),
+            bare_path.path().to_str().expect("utf8")
+        );
     }
 
     #[test]
