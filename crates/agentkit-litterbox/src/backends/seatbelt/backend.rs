@@ -9,14 +9,15 @@ use futures_util::future::BoxFuture;
 
 use super::BACKEND;
 use super::config::{NetworkSetting, Settings};
+use super::defaults;
 use super::holder::Holder;
 use super::host::SharedHost;
 use super::mounts;
-use super::payload::PayloadV1;
+use super::payload::Payload;
 use super::policy;
 use super::protocol::{ConfigPayload, WirePosture};
 use super::workspace;
-use crate::backends::shared;
+use crate::backends::shared::{self, DOWNLOAD_TIMEOUT, UPLOAD_TIMEOUT};
 use crate::sandbox::contract::{
     Backend, ContributionSort, ContributionSupport, CreateRequest, Error, Execution, Inspection,
     SandboxRecord, Scope,
@@ -86,6 +87,25 @@ impl SeatbeltBackend {
                 remedy: "remove the declared ports".to_string(),
             });
         }
+        let readiness = self.readiness_report();
+        if let Some(check) = readiness
+            .checks
+            .iter()
+            .find(|check| check.state != State::Available)
+        {
+            return Err(Error::Unavailable {
+                backend: BACKEND.to_string(),
+                reason: check
+                    .reason
+                    .clone()
+                    .unwrap_or_else(|| format!("{} is not available", check.primitive)),
+                remedy: check
+                    .remedy
+                    .clone()
+                    .unwrap_or_else(|| "resolve the readiness report".to_string()),
+            });
+        }
+
         policy::validate_tag(&request.name).map_err(|reason| Error::Misconfigured {
             message: format!(
                 "sandbox name '{}' is not a valid tag: {reason}",
@@ -98,6 +118,36 @@ impl SeatbeltBackend {
             return Err(Error::Conflict {
                 name: request.name.clone(),
             });
+        }
+        let real_home = self
+            .host
+            .real_home()
+            .map_err(|error| Error::failed(format!("cannot read the real home: {error}")))?;
+        let socket = socket_path()?;
+        let mut baseline_reads = Vec::new();
+        for path in &self.settings.baseline_reads {
+            match self.host.realpath(path) {
+                Ok(resolved) => baseline_reads.push(resolved),
+                Err(error)
+                    if defaults::BASELINE_READS
+                        .iter()
+                        .any(|default| Path::new(default) == path) =>
+                {
+                    tracing::debug!(
+                        path = %path.display(),
+                        %error,
+                        "skipping an absent default baseline path"
+                    );
+                }
+                Err(error) => {
+                    return Err(Error::Misconfigured {
+                        message: format!(
+                            "backends.seatbelt.baseline-reads entry '{}' cannot be resolved: {error}",
+                            path.display()
+                        ),
+                    });
+                }
+            }
         }
         fs::create_dir_all(&state).map_err(|error| {
             Error::failed(format!(
@@ -115,10 +165,6 @@ impl SeatbeltBackend {
             return Err(error);
         }
 
-        let real_home = self
-            .host
-            .real_home()
-            .map_err(|error| Error::failed(format!("cannot read the real home: {error}")))?;
         let context = mounts::Context {
             workspace: &workspace,
             state_dir: &state,
@@ -140,14 +186,6 @@ impl SeatbeltBackend {
                     return Err(error);
                 }
             };
-        let baseline_reads: Vec<PathBuf> = self
-            .settings
-            .baseline_reads
-            .iter()
-            .filter(|path| self.host.realpath(path).is_ok())
-            .cloned()
-            .collect();
-
         let config = ConfigPayload {
             workspace: path_bytes(&workspace),
             reads: mounts.reads.iter().map(|path| path_bytes(path)).collect(),
@@ -169,7 +207,6 @@ impl SeatbeltBackend {
                 .collect(),
         };
 
-        let socket = socket_path()?;
         let log = state.join("holder.log");
         let holder = match Holder::start(self.host.clone(), &self.helper, &socket, &log, config) {
             Ok(holder) => holder,
@@ -208,7 +245,7 @@ impl SeatbeltBackend {
             }
         }
 
-        let payload = PayloadV1 {
+        let payload = Payload {
             version: super::payload::VERSION,
             helper: self.helper.clone(),
             holder_pid: holder.pid,
@@ -222,7 +259,6 @@ impl SeatbeltBackend {
             provenance: environment.provenance,
             posture: self.posture_name().to_string(),
             tag: request.name.clone(),
-            paused: false,
         };
 
         if let Err(error) = write_payload(&state, &payload) {
@@ -241,7 +277,7 @@ impl SeatbeltBackend {
     }
 
     fn pause_sandbox(&self, record: &SandboxRecord) -> Result<(), Error> {
-        let payload = PayloadV1::from_record(record)?;
+        let payload = Payload::from_record(record)?;
         self.require_live(&payload, "pause")?;
         self.host
             .signal_group(payload.holder_pid, super::host::Signal::Stop)
@@ -250,7 +286,7 @@ impl SeatbeltBackend {
     }
 
     fn resume_sandbox(&self, record: &SandboxRecord) -> Result<(), Error> {
-        let payload = PayloadV1::from_record(record)?;
+        let payload = Payload::from_record(record)?;
         match payload.state(self.host.as_ref()) {
             super::payload::PayloadState::Paused => {}
             super::payload::PayloadState::Live => return Ok(()),
@@ -277,7 +313,7 @@ impl SeatbeltBackend {
 
     fn delete_sandbox(&self, record: &SandboxRecord) -> Result<(), Error> {
         let state = self.state_dir(&record.project_slug, &record.name);
-        let payload = PayloadV1::from_record(record).ok();
+        let payload = Payload::from_record(record).ok();
         if let Some(payload) = &payload {
             match payload.state(self.host.as_ref()) {
                 super::payload::PayloadState::Live | super::payload::PayloadState::Paused => {
@@ -307,12 +343,27 @@ impl SeatbeltBackend {
                 }
             }
             let _ = fs::remove_file(&payload.socket);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            while self.host.pid_exists(payload.holder_pid) && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            if self.host.pid_exists(payload.holder_pid) {
+                tracing::warn!(
+                    sandbox = %record.name,
+                    "the holder group did not stop within 2s; its state is being removed"
+                );
+            }
+        } else {
+            tracing::warn!(
+                sandbox = %record.name,
+                "the record is unreadable; any socket it named in the temp directory is not removed"
+            );
         }
         let _ = fs::remove_dir_all(state);
         Ok(())
     }
 
-    fn require_live(&self, payload: &PayloadV1, operation: &str) -> Result<(), Error> {
+    fn require_live(&self, payload: &Payload, operation: &str) -> Result<(), Error> {
         match payload.state(self.host.as_ref()) {
             super::payload::PayloadState::Live => Ok(()),
             super::payload::PayloadState::Paused => Ok(()),
@@ -329,7 +380,7 @@ impl SeatbeltBackend {
 
     fn wait_for(
         &self,
-        payload: &PayloadV1,
+        payload: &Payload,
         wanted: super::host::PidState,
         operation: &str,
     ) -> Result<(), Error> {
@@ -549,7 +600,7 @@ impl SeatbeltBackend {
     }
 
     fn inspect_sandbox(&self, record: &SandboxRecord) -> Result<Inspection, Error> {
-        let payload = PayloadV1::from_record(record)?;
+        let payload = Payload::from_record(record)?;
         let status = match payload.state(self.host.as_ref()) {
             super::payload::PayloadState::Live => {
                 let holder = self.holder_for(record)?;
@@ -576,6 +627,16 @@ impl SeatbeltBackend {
         let egress = match payload.posture.as_str() {
             "host" => crate::sandbox::report::EgressPosture::Direct,
             _ => crate::sandbox::report::EgressPosture::Denied,
+        };
+        let status = if matches!(
+            status,
+            crate::sandbox::contract::SandboxStatus::Active
+                | crate::sandbox::contract::SandboxStatus::Paused
+        ) && !payload.workspace_host.exists()
+        {
+            crate::sandbox::contract::SandboxStatus::Missing
+        } else {
+            status
         };
         Ok(Inspection {
             name: record.name.clone(),
@@ -637,7 +698,7 @@ impl SeatbeltBackend {
                     project_slug: project.clone(),
                     data: value,
                 };
-                match PayloadV1::from_record(&record) {
+                match Payload::from_record(&record) {
                     Ok(_) => records.push(record),
                     Err(error) => {
                         tracing::warn!(sandbox = %name, %error, "the payload is unreadable")
@@ -646,27 +707,6 @@ impl SeatbeltBackend {
             }
         }
         records
-    }
-
-    fn upload_sandbox(
-        &self,
-        record: &SandboxRecord,
-        source: &Path,
-        destination: &str,
-    ) -> Result<(), Error> {
-        let payload = PayloadV1::from_record(record)?;
-        workspace::transfer_in(source, &payload.workspace_host, destination)
-    }
-
-    fn download_sandbox(
-        &self,
-        record: &SandboxRecord,
-        source: &str,
-        destination: &Path,
-        selector: Option<&dyn crate::sandbox::contract::SnapshotSelector>,
-    ) -> Result<(), Error> {
-        let payload = PayloadV1::from_record(record)?;
-        workspace::transfer_out(&payload.workspace_host, source, destination, selector)
     }
 
     fn capability_report(&self) -> Vec<Capability> {
@@ -698,7 +738,7 @@ impl SeatbeltBackend {
     }
 
     fn holder_for(&self, record: &SandboxRecord) -> Result<Holder, Error> {
-        let payload = PayloadV1::from_record(record)?;
+        let payload = Payload::from_record(record)?;
         match payload.state(self.host.as_ref()) {
             super::payload::PayloadState::Live => {}
             super::payload::PayloadState::Paused => {
@@ -780,7 +820,19 @@ impl Backend for SeatbeltBackend {
         source: &'a Path,
         destination: &'a str,
     ) -> BoxFuture<'a, Result<(), Error>> {
-        Box::pin(async move { self.upload_sandbox(sandbox, source, destination) })
+        let payload = match Payload::from_record(sandbox) {
+            Ok(payload) => payload,
+            Err(error) => return Box::pin(async move { Err(error) }),
+        };
+        let source = source.to_path_buf();
+        let destination = destination.to_string();
+        Box::pin(async move {
+            let root = payload.workspace_host;
+            shared::transfer(UPLOAD_TIMEOUT, move || {
+                workspace::transfer_in(&source, &root, &destination)
+            })
+            .await
+        })
     }
 
     fn download<'a>(
@@ -790,9 +842,19 @@ impl Backend for SeatbeltBackend {
         destination: &'a Path,
         selector: Option<std::sync::Arc<dyn crate::sandbox::contract::SnapshotSelector>>,
     ) -> BoxFuture<'a, Result<(), Error>> {
-        Box::pin(
-            async move { self.download_sandbox(sandbox, source, destination, selector.as_deref()) },
-        )
+        let payload = match Payload::from_record(sandbox) {
+            Ok(payload) => payload,
+            Err(error) => return Box::pin(async move { Err(error) }),
+        };
+        let source = source.to_string();
+        let destination = destination.to_path_buf();
+        Box::pin(async move {
+            let root = payload.workspace_host;
+            shared::transfer(DOWNLOAD_TIMEOUT, move || {
+                workspace::transfer_out(&root, &source, &destination, selector.as_deref())
+            })
+            .await
+        })
     }
 
     fn inspect<'a>(
@@ -834,7 +896,7 @@ impl Backend for SeatbeltBackend {
     }
 }
 
-fn write_payload(state: &Path, payload: &PayloadV1) -> Result<(), Error> {
+fn write_payload(state: &Path, payload: &Payload) -> Result<(), Error> {
     let value = payload.to_value()?;
     let text = toml::to_string(&value)
         .map_err(|error| Error::failed(format!("cannot serialise the payload: {error}")))?;
@@ -987,8 +1049,80 @@ mod tests {
 
     fn payload(
         record: &crate::sandbox::contract::SandboxRecord,
-    ) -> crate::backends::seatbelt::payload::PayloadV1 {
-        crate::backends::seatbelt::payload::PayloadV1::from_record(record).expect("payload")
+    ) -> crate::backends::seatbelt::payload::Payload {
+        crate::backends::seatbelt::payload::Payload::from_record(record).expect("payload")
+    }
+
+    fn request(source: &Path, project: &str) -> CreateRequest {
+        CreateRequest {
+            name: "one".to_string(),
+            project_slug: project.to_string(),
+            workspace: Workspace {
+                source: source.to_path_buf(),
+            },
+            provision: Vec::new(),
+            forward_bind: "127.0.0.1".to_string(),
+            ports: Vec::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn create_refuses_when_readiness_fails() {
+        let helper = tempfile::tempdir().expect("helper");
+        let backend = SeatbeltBackend::with_helper(
+            settings(),
+            Arc::new(SystemHost::new()),
+            helper.path().to_path_buf(),
+        );
+        let source = tempfile::tempdir().expect("source");
+        let project = format!("test-{}-readiness", std::process::id());
+        let state = agentkit_common::data_dir("litterbox")
+            .join("seatbelt")
+            .join(&project);
+        let _ = std::fs::remove_dir_all(&state);
+
+        let error = backend
+            .create(&request(source.path(), &project))
+            .await
+            .expect_err("untrusted helper");
+        assert!(matches!(error, Error::Unavailable { .. }), "{error}");
+        assert!(!state.exists(), "create touched the state root");
+    }
+
+    #[tokio::test]
+    async fn create_refuses_an_unresolvable_configured_baseline() {
+        let helper = helper();
+        let mut settings = settings();
+        settings
+            .baseline_reads
+            .push(PathBuf::from("/lbx-no-such-baseline-read"));
+        let backend = SeatbeltBackend::with_helper(settings, Arc::new(SystemHost::new()), helper);
+        let source = tempfile::tempdir().expect("source");
+        let project = format!("test-{}-baseline", std::process::id());
+        let state = agentkit_common::data_dir("litterbox")
+            .join("seatbelt")
+            .join(&project);
+        let _ = std::fs::remove_dir_all(&state);
+
+        let error = backend
+            .create(&request(source.path(), &project))
+            .await
+            .expect_err("unresolvable baseline");
+        assert!(matches!(error, Error::Misconfigured { .. }), "{error}");
+        assert!(!state.exists(), "create touched the state root");
+    }
+
+    #[tokio::test]
+    async fn inspect_reports_a_missing_workspace() {
+        let (backend, record, _state, _cleanup) = sandbox("missing-workspace").await;
+        let workspace = payload(&record).workspace_host;
+        std::fs::remove_dir_all(&workspace).expect("remove workspace");
+        let inspection = backend.inspect(&record).await.expect("inspect");
+        assert_eq!(
+            inspection.status,
+            crate::sandbox::contract::SandboxStatus::Missing
+        );
+        backend.delete(&record).await.expect("delete");
     }
 
     #[tokio::test]
@@ -1377,15 +1511,18 @@ mod tests {
         let source = host.path().join("source");
         std::fs::write(&source, b"payload").expect("source");
         backend
-            .upload(&record, &source, "in/file")
+            .upload(&record, &source, "in")
             .await
             .expect("upload");
         let destination = host.path().join("destination");
         backend
-            .download(&record, "in/file", &destination, None)
+            .download(&record, "in", &destination, None)
             .await
             .expect("download");
-        assert_eq!(std::fs::read(&destination).expect("read"), b"payload");
+        assert_eq!(
+            std::fs::read(destination.join("in/source")).expect("read"),
+            b"payload"
+        );
         let _ = std::fs::remove_dir_all(&state);
     }
 
