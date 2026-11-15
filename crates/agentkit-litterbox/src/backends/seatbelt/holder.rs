@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use super::BACKEND;
 use super::host::{ProcessStart, SharedHost, Signal};
 use super::protocol::{ConfigPayload, ErrorCode, Header, Message, ProtocolError};
+use crate::backends::shared::CONTROL_TIMEOUT;
 use crate::sandbox::contract::{Error, Execution};
 
 /// How long create waits for the holder socket and Ready.
@@ -185,6 +186,7 @@ impl Holder {
         let mut stream = self.host.connect_socket(&self.socket).map_err(|error| {
             Error::failed(format!("the holder socket is not reachable: {error}"))
         })?;
+        set_deadline(&stream)?;
         send(&mut stream, &Message::Status)?;
         match receive(&mut stream)? {
             Message::StatusReply => Ok(()),
@@ -201,6 +203,14 @@ impl Holder {
             .signal_group(self.pid, signal)
             .map_err(|error| Error::failed(format!("cannot signal the holder: {error}")))
     }
+}
+
+/// Bound one control exchange so a wedged holder cannot hang the caller.
+fn set_deadline(stream: &std::os::unix::net::UnixStream) -> Result<(), Error> {
+    stream
+        .set_read_timeout(Some(CONTROL_TIMEOUT))
+        .and_then(|()| stream.set_write_timeout(Some(CONTROL_TIMEOUT)))
+        .map_err(|error| Error::failed(format!("cannot bound the holder exchange: {error}")))
 }
 
 fn wait_for_start(host: &SharedHost, pid: u32) -> Result<ProcessStart, Error> {
