@@ -178,14 +178,16 @@ impl SeatbeltBackend {
                 return Err(error);
             }
         };
-        let environment =
-            match super::environment::merge(&request.provision, &workspace, &mounts.reads) {
-                Ok(environment) => environment,
-                Err(error) => {
-                    let _ = fs::remove_dir_all(&state);
-                    return Err(error);
-                }
-            };
+        let mut granted = mounts.reads.clone();
+        granted.extend(baseline_reads.iter().cloned());
+        let environment = match super::environment::merge(&request.provision, &workspace, &granted)
+        {
+            Ok(environment) => environment,
+            Err(error) => {
+                let _ = fs::remove_dir_all(&state);
+                return Err(error);
+            }
+        };
         let config = ConfigPayload {
             workspace: path_bytes(&workspace),
             reads: mounts.reads.iter().map(|path| path_bytes(path)).collect(),
@@ -812,7 +814,16 @@ impl Backend for SeatbeltBackend {
         sandbox: &'a SandboxRecord,
         command: &'a [String],
     ) -> BoxFuture<'a, Result<Execution, Error>> {
-        Box::pin(async move { self.holder_for(sandbox)?.exec(command) })
+        let holder = match self.holder_for(sandbox) {
+            Ok(holder) => holder,
+            Err(error) => return Box::pin(async move { Err(error) }),
+        };
+        let command = command.to_vec();
+        Box::pin(async move {
+            tokio::task::spawn_blocking(move || holder.exec(&command))
+                .await
+                .map_err(|error| Error::failed(format!("the command task failed: {error}")))?
+        })
     }
 
     fn upload<'a>(
@@ -1287,6 +1298,62 @@ mod tests {
         assert_eq!(execution.stdout, "ok\n");
         backend.delete(&record).await.expect("delete");
         let _ = state;
+    }
+
+    #[tokio::test]
+    async fn a_baseline_directory_is_granted_to_the_environment() {
+        let step = crate::sandbox::contract::ResolvedStep {
+            identity: "path".to_string(),
+            kind: "devshell".to_string(),
+            placement: crate::sandbox::contract::Placement::Host,
+            sandbox: None,
+            contributions: crate::sandbox::contract::Contributions {
+                environment: std::collections::BTreeMap::from([(
+                    "PATH".to_string(),
+                    "/usr/bin:/bin".to_string(),
+                )]),
+                ..crate::sandbox::contract::Contributions::default()
+            },
+        };
+        let (backend, record, state, _cleanup) = sandbox_with("baseline-path", vec![step]).await;
+        let execution = backend
+            .exec(
+                &record,
+                &[
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    "echo $PATH".to_string(),
+                ],
+            )
+            .await
+            .expect("exec");
+        assert_eq!(execution.stdout.trim(), "/usr/bin:/bin");
+        backend.delete(&record).await.expect("delete");
+        let _ = std::fs::remove_dir_all(&state);
+    }
+
+    #[tokio::test]
+    async fn a_truncated_stream_is_marked() {
+        let (backend, record, state, _cleanup) = sandbox("truncated").await;
+        let execution = backend
+            .exec(
+                &record,
+                &[
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    "/usr/bin/yes 0123456789 | /usr/bin/head -c 2000000".to_string(),
+                ],
+            )
+            .await
+            .expect("exec");
+        assert_eq!(execution.exit_code, 0);
+        assert!(
+            execution.stdout.ends_with("[truncated]"),
+            "stdout was {} bytes",
+            execution.stdout.len()
+        );
+        backend.delete(&record).await.expect("delete");
+        let _ = std::fs::remove_dir_all(&state);
     }
 
     #[tokio::test]
