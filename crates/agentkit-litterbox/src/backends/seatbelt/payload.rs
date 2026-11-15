@@ -95,14 +95,16 @@ impl Payload {
             return PayloadState::Invalid("a recorded path is not absolute".to_string());
         }
 
-        match host.pid_state(self.holder_pid) {
-            Ok(PidState::Running) => {}
-            Ok(PidState::Stopped) => return PayloadState::Paused,
+        let paused = match host.pid_state(self.holder_pid) {
+            Ok(PidState::Running) => false,
+            Ok(PidState::Stopped) => true,
             Ok(PidState::Zombie | PidState::Gone) => return PayloadState::Missing,
             Err(error) => {
                 return PayloadState::Invalid(format!("the holder cannot be read: {error}"));
             }
-        }
+        };
+        // The identity is checked before the state: a reused pid that is
+        // stopped must not be reported as this sandbox's paused holder.
         match host.process_start(self.holder_pid) {
             Ok(start)
                 if start.secs == self.holder_start_secs
@@ -114,7 +116,11 @@ impl Payload {
                 ));
             }
         }
-        PayloadState::Live
+        if paused {
+            PayloadState::Paused
+        } else {
+            PayloadState::Live
+        }
     }
 
     /// The socket path as a path.
@@ -141,7 +147,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{Payload, PayloadState, VERSION};
-    use crate::backends::seatbelt::host::{FakeHost, ProcessStart};
+    use crate::backends::seatbelt::host::{FakeHost, PidState, ProcessStart};
     use crate::backends::seatbelt::mounts::CollapsedStep;
     use crate::sandbox::contract::{Error, SandboxRecord};
     use crate::sandbox::environment::{Origin, Provenance, Variable};
@@ -197,6 +203,25 @@ mod tests {
             },
         );
         host
+    }
+
+    #[test]
+    fn a_stopped_holder_is_paused_only_when_its_identity_matches() {
+        let payload = sample();
+        let host = host();
+        host.set_state(payload.holder_pid, PidState::Stopped);
+        assert_eq!(payload.state(&host), PayloadState::Paused);
+
+        let reused = FakeHost::new("/Users/tester");
+        reused.insert_process(
+            payload.holder_pid,
+            ProcessStart {
+                secs: 999,
+                micros: 0,
+            },
+        );
+        reused.set_state(payload.holder_pid, PidState::Stopped);
+        assert_eq!(payload.state(&reused), PayloadState::Foreign);
     }
 
     #[test]
