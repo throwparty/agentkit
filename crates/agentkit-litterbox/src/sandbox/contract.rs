@@ -281,6 +281,17 @@ impl ResolvedStep {
     }
 }
 
+/// Whether a create starts a new sandbox or repairs an existing one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CreateMode {
+    /// A new sandbox: the state directory must not exist.
+    #[default]
+    Fresh,
+    /// Repair an existing record: reuse the workspace when it is there.
+    ReuseExisting,
+}
+
 /// Everything a backend needs to create a sandbox.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct CreateRequest {
@@ -296,6 +307,8 @@ pub struct CreateRequest {
     pub forward_bind: String,
     /// Ports the project expects to be forwarded.
     pub ports: Vec<RequestedPort>,
+    /// Whether this is a fresh create or a repair of an existing record.
+    pub mode: CreateMode,
 }
 
 /// Which sandboxes an enumeration covers.
@@ -381,6 +394,28 @@ pub struct Inspection {
     pub environment: crate::sandbox::environment::Provenance,
     /// Ports forwarded to the host.
     pub forwards: Vec<Forward>,
+}
+
+/// What a backend removed when it tore a sandbox down.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct Teardown {
+    /// Whether the compute was known to be stopped.
+    pub compute_stopped: bool,
+    /// State paths the backend removed.
+    pub state_paths: Vec<PathBuf>,
+    /// Anything the caller should know, such as compute that could not be identified.
+    pub detail: Option<String>,
+}
+
+impl Teardown {
+    /// A teardown that removed nothing and stopped nothing.
+    pub fn unknown(detail: impl Into<String>) -> Self {
+        Self {
+            compute_stopped: false,
+            state_paths: Vec::new(),
+            detail: Some(detail.into()),
+        }
+    }
 }
 
 /// The class of a provisioning failure, independent of the surface.
@@ -507,6 +542,12 @@ pub enum Error {
     /// The sandbox already exists.
     #[error("sandbox '{name}' already exists")]
     Conflict {
+        /// The sandbox that was addressed.
+        name: String,
+    },
+    /// The sandbox exists but is paused.
+    #[error("sandbox '{name}' is paused; run `litterbox resume {name}` first")]
+    Paused {
         /// The sandbox that was addressed.
         name: String,
     },
@@ -648,7 +689,7 @@ pub trait Backend: Send + Sync {
         sandbox: &'a SandboxRecord,
     ) -> BoxFuture<'a, Result<Inspection, Error>>;
     /// Remove a sandbox and everything the backend created for it.
-    fn delete<'a>(&'a self, sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>>;
+    fn delete<'a>(&'a self, sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<Teardown, Error>>;
     /// Report whether this backend can run here, and why not when it cannot.
     fn readiness<'a>(&'a self) -> BoxFuture<'a, Result<crate::sandbox::report::Readiness, Error>>;
     /// Report which optional operations this backend provides.
@@ -724,8 +765,14 @@ mod tests {
             Box::pin(async { Err(Error::failed("stub")) })
         }
 
-        fn delete<'a>(&'a self, _sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>> {
-            Box::pin(async { Ok(()) })
+        fn delete<'a>(&'a self, _sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<super::Teardown, Error>> {
+            Box::pin(async {
+                Ok(super::Teardown {
+                    compute_stopped: true,
+                    state_paths: Vec::new(),
+                    detail: None,
+                })
+            })
         }
 
         fn readiness<'a>(

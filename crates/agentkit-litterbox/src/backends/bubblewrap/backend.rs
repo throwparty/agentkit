@@ -542,12 +542,17 @@ impl Backend for BubblewrapBackend {
         })
     }
 
-    fn delete<'a>(&'a self, sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>> {
+    fn delete<'a>(
+        &'a self,
+        sandbox: &'a SandboxRecord,
+    ) -> BoxFuture<'a, Result<crate::sandbox::contract::Teardown, Error>> {
         Box::pin(async move {
             // A record that cannot be read is still removable, so an edition
             // failure only means the process is not signalled. A record whose
             // live process does not match it is cleaned up without a signal:
             // the pid now belongs to something else.
+            let mut compute_stopped = false;
+            let mut detail = None;
             match validate::validate(sandbox, &*self.host) {
                 validate::Verdict::Live(data) => {
                     let holder = holder::Holder::from_payload(&data);
@@ -555,15 +560,20 @@ impl Backend for BubblewrapBackend {
                     // Tear down even when pid 1 is already gone: its namespace
                     // can outlive it, and the members are what keep the
                     // workspace open. The wait happens off the runtime.
-                    transfer(std::time::Duration::from_secs(30), move || {
+                    match transfer(std::time::Duration::from_secs(30), move || {
                         holder::teardown(&*host, &holder, std::time::Duration::from_secs(30))
                     })
-                    .await?;
+                    .await
+                    {
+                        Ok(()) => compute_stopped = true,
+                        Err(error) => detail = Some(error.to_string()),
+                    }
                 }
                 other => {
                     // Nothing is signalled, so nothing confirms the process is
                     // gone; the state is still removed, but the decision is
                     // recorded rather than taken silently.
+                    compute_stopped = matches!(&other, validate::Verdict::Absent);
                     let reason = match other {
                         validate::Verdict::Absent => "the sandbox process is gone".to_string(),
                         validate::Verdict::Forbidden { reason } => {
@@ -575,17 +585,25 @@ impl Backend for BubblewrapBackend {
                         validate::Verdict::Live(_) => unreachable!("handled above"),
                     };
                     tracing::warn!(sandbox = %sandbox.name, %reason, "deleting without a teardown");
+                    detail = Some(reason);
                 }
             }
             let directory = workspace::sandbox_directory(&sandbox.project_slug, &sandbox.name);
             match std::fs::remove_dir_all(&directory) {
-                Ok(()) => Ok(()),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                Err(error) => Err(Error::failed(format!(
-                    "{} could not be removed: {error}",
-                    directory.display()
-                ))),
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(Error::failed(format!(
+                        "{} could not be removed: {error}",
+                        directory.display()
+                    )));
+                }
             }
+            Ok(crate::sandbox::contract::Teardown {
+                compute_stopped,
+                state_paths: vec![directory],
+                detail,
+            })
         })
     }
 
