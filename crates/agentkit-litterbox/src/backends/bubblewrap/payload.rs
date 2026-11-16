@@ -58,6 +58,31 @@ pub struct RecordedRoot {
     pub inode: u64,
 }
 
+/// The pids a record names, readable without honouring the payload version.
+///
+/// This is used only to decide whether compute is absent. It is never fed to a
+/// join, a signal or a cgroup write.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+pub struct RecordedPids {
+    /// The sandbox's pid 1.
+    pub sandbox_pid: u32,
+    /// The sandbox process's start time.
+    pub sandbox_start: u64,
+    /// The launcher process.
+    #[serde(default)]
+    pub launcher_pid: u32,
+    /// The launcher's start time.
+    #[serde(default)]
+    pub launcher_start: u64,
+}
+
+impl RecordedPids {
+    /// Read the pids out of a record, whatever the payload version.
+    pub fn from_record(record: &SandboxRecord) -> Option<Self> {
+        record.data.clone().try_into().ok()
+    }
+}
+
 /// Everything the backend keeps about one sandbox.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Payload {
