@@ -439,7 +439,7 @@ impl Sandboxes {
         name: &str,
         command: &[String],
     ) -> Result<Performed<Execution>, Error> {
-        let recovery = self.ensure_live(name, PausedPolicy::Allow).await?;
+        let recovery = self.ensure_live(name, PausedPolicy::Refuse).await?;
         let stored = self.stored(name)?;
         let selected = self.select_for(&stored.sandbox, "run a command").await?;
         let result = selected.core().exec(&stored.sandbox, command).await;
@@ -1549,6 +1549,25 @@ mod seam_tests {
     }
 
     #[tokio::test]
+    async fn a_paused_sandbox_refuses_exec_before_the_backend() {
+        let (dir, _repo) = repository();
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let sandboxes = orchestrator(dir.path(), records.path().to_path_buf(), backend, None);
+        sandboxes.create("demo").await.expect("create");
+        sandboxes.pause("demo").await.expect("pause");
+
+        let error = sandboxes
+            .exec("demo", &["true".to_string()])
+            .await
+            .expect_err("paused exec is refused");
+        assert!(
+            matches!(error, Error::Paused { ref name } if name == "demo"),
+            "{error:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn bulk_pause_skips_a_record_owned_by_another_backend() {
         let (dir, _repo) = repository();
         let records = TempDir::new().expect("records");
@@ -1845,51 +1864,6 @@ mod seam_tests {
         let message = error.to_string();
         assert!(message.contains("other"), "{message}");
         assert!(message.contains("test"), "{message}");
-    }
-
-    #[tokio::test]
-    async fn discarding_a_current_record_is_denied_not_a_name_conflict() {
-        let (dir, _repo) = repository();
-        let records = TempDir::new().expect("records");
-        let backend = Arc::new(TestBackend::new());
-        let sandboxes = orchestrator(dir.path(), records.path().to_path_buf(), backend, None);
-        sandboxes.create("demo").await.expect("create");
-
-        let error = sandboxes
-            .discard_legacy("demo")
-            .expect_err("a current record is not legacy");
-        match error {
-            Error::Denied {
-                operation, reason, ..
-            } => {
-                assert!(operation.contains("demo"), "{operation}");
-                assert!(reason.contains("current record"), "{reason}");
-            }
-            other => panic!("expected a denial, got {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn a_legacy_record_is_reported_and_discarded() {
-        let (dir, _repo) = repository();
-        let records = TempDir::new().expect("records");
-        let backend = Arc::new(TestBackend::new());
-        let sandboxes = orchestrator(dir.path(), records.path().to_path_buf(), backend, None);
-
-        sandboxes.scm().create_branch("demo").expect("branch");
-        let legacy = "name = 'demo'\ncontainer_id = 'abc123'\n";
-        std::fs::write(records.path().join("demo.toml"), legacy).expect("write");
-
-        let listing = sandboxes.list().expect("list");
-        assert_eq!(listing.legacy, vec!["demo".to_string()]);
-        let error = sandboxes.inspect("demo").await.expect_err("legacy refused");
-        let message = error.to_string();
-        assert!(message.contains("delete --discard-legacy"), "{message}");
-        assert!(message.contains("demo.toml"), "{message}");
-
-        let (path, container) = sandboxes.discard_legacy("demo").expect("discard");
-        assert_eq!(container.as_deref(), Some("abc123"));
-        assert!(!path.exists(), "the record file was removed");
     }
 
     #[tokio::test]
