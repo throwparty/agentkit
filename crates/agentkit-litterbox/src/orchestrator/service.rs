@@ -9,7 +9,8 @@ use crate::backends;
 use crate::config::Config;
 use crate::domain::{SandboxError, ScmMode};
 use crate::metadata_store::{self, LoadedSandbox, StoredSandbox};
-use crate::orchestrator::outcome::Performed;
+use crate::orchestrator::lock;
+use crate::orchestrator::outcome::{Performed, Recovery};
 use crate::provision::StepOutcome;
 use crate::provision::kind::KindDescription;
 use crate::provision::prepare::{self, PrepareContext, PrepareError, SystemRunner};
@@ -19,30 +20,13 @@ use crate::sandbox::contract::{
     SandboxRecord, SandboxStatus, Workspace,
 };
 use crate::sandbox::selected::Selected;
-use crate::scm::{Scm, ThreadSafeScm, branch_name_for};
+use crate::scm::{Scm, ThreadSafeScm};
 use crate::vcs_store::VcsStore;
 
 /// How long host preparation may take before its commands are killed and
 /// reaped. Preparation runs before a backend's create budget starts, so it
 /// carries its own.
 const HOST_PREPARE_BUDGET: Duration = Duration::from_secs(30 * 60);
-
-/// A handle to the SCM holding a sandbox's branch.
-enum BranchScm<'a> {
-    /// The orchestrator's own handle, opened for the configured mode.
-    Held(&'a ThreadSafeScm),
-    /// A second handle, opened for the mode the record names.
-    Opened(ThreadSafeScm),
-}
-
-impl BranchScm<'_> {
-    fn scm(&self) -> &ThreadSafeScm {
-        match self {
-            Self::Held(scm) => scm,
-            Self::Opened(scm) => scm,
-        }
-    }
-}
 
 /// Sandboxes in one project, coordinated across SCM, a backend and the store.
 pub struct Sandboxes {
@@ -64,11 +48,21 @@ pub struct Listing {
     pub orphans: Vec<String>,
 }
 
+/// Whether an operation may proceed while the sandbox is paused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PausedPolicy {
+    /// The operation joins or otherwise runs work; refuse it.
+    Refuse,
+    /// The operation does not join; proceed.
+    Allow,
+}
+
 impl Sandboxes {
     /// Open the project the current directory belongs to.
     pub fn open(config: Config) -> Result<Self, SandboxError> {
         let project_slug = resolve_project_slug(&config)?;
-        let scm = open_scm(&config, &project_slug, configured_mode(&config))?;
+        let mode = config.git.snapshot_mode.unwrap_or_default();
+        let scm = open_scm(&config, &project_slug, mode)?;
 
         let records_dir = metadata_store::directory(&project_slug);
 
@@ -117,34 +111,109 @@ impl Sandboxes {
         &self.records_dir
     }
 
-    /// Create a sandbox: branch, workspace, compute and record, in that order.
-    ///
-    /// A branch that already exists is adopted rather than refused: the record
-    /// may outlive its compute, and the branch is the authoritative copy.
+    /// Create a sandbox, or repair one whose compute is missing.
     pub async fn create(&self, name: &str) -> Result<Performed<SandboxRecord>, Error> {
         let name = self.valid_name(name)?;
-        // Only an absent record means nothing is here to adopt: an unreadable
-        // record still names a sandbox this project owns, and must not be
-        // overwritten as if it had never existed.
-        let existing = match self.stored(&name) {
-            Ok(stored) => Some(stored),
-            Err(Error::NotFound { .. }) => None,
-            Err(error) => return Err(error),
-        };
-        let selected = match &existing {
-            Some(stored) => {
-                self.select_for(&stored.sandbox, "recreate the sandbox")
-                    .await?
+
+        if let Some(loaded) = metadata_store::load_sandbox_at(&self.records_dir, &name)? {
+            match loaded {
+                LoadedSandbox::Current(stored) => {
+                    let selected = self
+                        .select_for(&stored.sandbox, "create a sandbox")
+                        .await?;
+                    let inspection = selected.core().inspect(&stored.sandbox).await?;
+                    if inspection.status == SandboxStatus::Missing {
+                        let recovery = self.repair(&name, &stored, &selected).await?;
+                        let stored = self.stored(&name)?;
+                        return Ok(Performed::repaired(stored.sandbox, recovery));
+                    }
+                    return Err(Error::Conflict { name });
+                }
+                LoadedSandbox::Corrupt { path, reason } => {
+                    return Err(Error::failed(format!(
+                        "sandbox '{name}' has an unreadable record at {}: {reason}",
+                        path.display()
+                    )));
+                }
             }
-            None => self.selected_for_operation("create a sandbox").await?,
+        }
+
+        let selected = self.selected_for_operation("create a sandbox").await?;
+        let provision = self.resolve_provision(&name, &selected).await?;
+
+        tracing::info!(sandbox = %name, project = %self.project_slug, "creating the branch");
+        let branch_name = self.scm.create_branch(&name)?;
+        let staged = match self.stage_reference("HEAD") {
+            Ok(staged) => staged,
+            Err(error) => {
+                if let Err(cleanup) = self.scm.delete_branch(&name) {
+                    tracing::warn!(sandbox = %name, %cleanup, "the branch may remain after a failed create");
+                }
+                return Err(error);
+            }
         };
+
+        let request = CreateRequest {
+            name: name.to_string(),
+            project_slug: self.project_slug.clone(),
+            workspace: Workspace {
+                source: staged.path().to_path_buf(),
+            },
+            provision,
+            forward_bind: self.config.forwarding.bind.clone(),
+            ports: self.config.ports.iter().map(port).collect(),
+            mode: CreateMode::Fresh,
+        };
+
+        tracing::info!(
+            sandbox = %name,
+            backend = %selected.name(),
+            "creating the sandbox"
+        );
+        let record = match selected.core().create(&request).await {
+            Ok(record) => record,
+            Err(error) => {
+                if let Err(cleanup) = self.scm.delete_branch(&name) {
+                    tracing::warn!(sandbox = %name, %cleanup, "the branch may remain after a failed create");
+                }
+                return Err(error);
+            }
+        };
+
+        let stored = StoredSandbox {
+            sandbox: record.clone(),
+            branch_name,
+            remote: self.config.git.snapshot_mode == Some(ScmMode::Remote),
+        };
+
+        if let Err(error) =
+            metadata_store::store_sandbox_at(&self.records_dir, &stored.sandbox.name, &stored)
+        {
+            if let Err(cleanup) = selected.core().delete(&record).await {
+                tracing::warn!(sandbox = %name, %cleanup, "the compute may remain after a record-store failure");
+            }
+            if let Err(cleanup) = self.scm.delete_branch(&name) {
+                tracing::warn!(sandbox = %name, %cleanup, "the branch may remain after a record-store failure");
+            }
+            return Err(error);
+        }
+
+        Ok(Performed::fresh(record))
+    }
+
+    /// Resolve the provisioning sequence for a create or a repair.
+    async fn resolve_provision(
+        &self,
+        sandbox: &str,
+        selected: &Selected,
+    ) -> Result<Vec<ResolvedStep>, Error> {
         let support = selected.core().contribution_support();
         let outcomes =
             match crate::provision::preflight_steps(&self.config, selected.name(), &support) {
                 Ok(outcomes) => outcomes,
                 Err(error) => {
                     tracing::warn!(
-                        sandbox = %name,
+                        sandbox = %sandbox,
                         backend = %selected.name(),
                         class = %error.class().as_str(),
                         %error,
@@ -161,7 +230,7 @@ impl Sandboxes {
             let planned = match outcome {
                 StepOutcome::Resolved(planned) => planned,
                 StepOutcome::Failed(failure) => {
-                    log_refusal(&name, selected.name(), &failure);
+                    log_refusal(sandbox, selected.name(), &failure);
                     return Err(Error::Provisioning { failure });
                 }
             };
@@ -172,7 +241,7 @@ impl Sandboxes {
                 &planned.step,
                 planned.description.requires_consent,
             ) {
-                log_refusal(&name, selected.name(), &failure);
+                log_refusal(sandbox, selected.name(), &failure);
                 return Err(Error::Provisioning {
                     failure: Box::new(failure),
                 });
@@ -208,59 +277,57 @@ impl Sandboxes {
             });
         }
         tracing::info!(
-            sandbox = %name,
+            sandbox = %sandbox,
             backend = %selected.name(),
             steps = ?provision.iter().map(ResolvedStep::identity).collect::<Vec<_>>(),
             "resolved the provisioning sequence"
         );
+        Ok(provision)
+    }
 
-        let scm = self.branch_scm(existing.as_ref())?;
-        let adopting = scm
-            .scm()
-            .list_sandboxes()?
-            .iter()
-            .any(|candidate| candidate == &name);
+    /// Repair a missing sandbox through the backend's reuse mode.
+    async fn repair(
+        &self,
+        name: &str,
+        stored: &StoredSandbox,
+        selected: &Selected,
+    ) -> Result<Recovery, Error> {
+        let _lock = lock::acquire(&self.records_dir, name).await?;
 
-        let branch_name = if adopting {
-            // Replacing a live sandbox is not a recovery; only a record whose
-            // compute is gone may be re-created.
-            if let Some(stored) = &existing {
-                let inspection = selected.core().inspect(&stored.sandbox).await?;
-                if !matches!(inspection.status, SandboxStatus::Missing) {
-                    return Err(Error::Conflict { name: name.clone() });
-                }
-                // A backend may keep state beside the compute it lost, and
-                // refuse to create over it. Clearing that state is part of
-                // recovering a sandbox whose compute is gone; the branch, which
-                // is the authoritative copy, is untouched.
-                selected.core().delete(&stored.sandbox).await?;
+        let inspection = selected.core().inspect(&stored.sandbox).await?;
+        match inspection.status {
+            SandboxStatus::Active => {
+                return Ok(Recovery {
+                    sandbox: name.to_string(),
+                    from: SandboxStatus::Missing,
+                    action: "already repaired".to_string(),
+                    branch: stored.branch_name.clone(),
+                });
             }
-            let branch_name = branch_name_for(&name);
-            tracing::info!(sandbox = %name, %branch_name, "adopting the existing branch");
-            branch_name
-        } else {
-            tracing::info!(sandbox = %name, project = %self.project_slug, "creating the branch");
-            scm.scm().create_branch(&name)?
-        };
-
-        // A new sandbox starts from the host checkout's HEAD. An adopted
-        // sandbox starts from its branch, which is the authoritative copy of
-        // the work that outlived its compute.
-        let reference = if adopting {
-            branch_name.as_str()
-        } else {
-            "HEAD"
-        };
-        let staged = match Self::stage(scm.scm(), reference) {
-            Ok(staged) => staged,
-            Err(error) => {
-                if !adopting && let Err(cleanup) = scm.scm().delete_branch(&name) {
-                    tracing::warn!(sandbox = %name, %cleanup, "the branch may remain after a failed create");
-                }
-                return Err(error);
+            SandboxStatus::Paused => {
+                return Err(Error::Paused {
+                    name: name.to_string(),
+                });
             }
-        };
+            SandboxStatus::Missing => {}
+            other => {
+                return Err(Error::failed(format!(
+                    "sandbox '{name}' is not missing: {other:?}"
+                )));
+            }
+        }
 
+        let branches = self.scm.list_sandboxes()?;
+        if !branches.iter().any(|branch| branch == &stored.sandbox.name) {
+            return Err(Error::Unavailable {
+                backend: selected.name().to_string(),
+                reason: format!("sandbox '{name}' has no branch; its durable half is gone"),
+                remedy: format!("run `litterbox delete --force {name}` and create it again"),
+            });
+        }
+
+        let provision = self.resolve_provision(name, selected).await?;
+        let staged = self.stage_reference(&stored.branch_name)?;
         let request = CreateRequest {
             name: name.to_string(),
             project_slug: self.project_slug.clone(),
@@ -270,52 +337,63 @@ impl Sandboxes {
             provision,
             forward_bind: self.config.forwarding.bind.clone(),
             ports: self.config.ports.iter().map(port).collect(),
-            mode: CreateMode::Fresh,
+            mode: CreateMode::ReuseExisting,
         };
 
         tracing::info!(
             sandbox = %name,
             backend = %selected.name(),
-            "creating the sandbox"
+            branch = %stored.branch_name,
+            "repairing the sandbox"
         );
-        let record = match selected.core().create(&request).await {
-            Ok(record) => record,
-            Err(error) => {
-                if !adopting && let Err(cleanup) = scm.scm().delete_branch(&name) {
-                    tracing::warn!(sandbox = %name, %cleanup, "the branch may remain after a failed create");
-                }
-                return Err(error);
-            }
-        };
+        let record = selected.core().create(&request).await?;
 
-        let stored = StoredSandbox {
+        // The backend returns a fresh record; keep the branch pairing.
+        let updated = StoredSandbox {
             sandbox: record.clone(),
-            branch_name,
-            remote: existing
-                .as_ref()
-                .map(|stored| stored.remote)
-                .unwrap_or(configured_mode(&self.config) == ScmMode::Remote),
+            branch_name: stored.branch_name.clone(),
+            remote: stored.remote,
         };
+        metadata_store::store_sandbox_at(&self.records_dir, &updated.sandbox.name, &updated)?;
 
-        if let Err(error) =
-            metadata_store::store_sandbox_at(&self.records_dir, &stored.sandbox.name, &stored)
-        {
-            if let Err(cleanup) = selected.core().delete(&record).await {
-                tracing::warn!(sandbox = %name, %cleanup, "the compute may remain after a record-store failure");
-            }
-            if !adopting && let Err(cleanup) = scm.scm().delete_branch(&name) {
-                tracing::warn!(sandbox = %name, %cleanup, "the branch may remain after a record-store failure");
-            }
-            return Err(error);
-        }
-
-        Ok(Performed::fresh(record))
+        Ok(Recovery {
+            sandbox: name.to_string(),
+            from: SandboxStatus::Missing,
+            action: "created".to_string(),
+            branch: stored.branch_name.clone(),
+        })
     }
 
-    /// Delete a sandbox: compute first, then the branch.
-    ///
-    /// A branch that cannot be removed keeps the record, so a retry finishes
-    /// the job instead of orphaning the branch.
+    /// Establish whether a sandbox is live, refusing or repairing as needed.
+    pub async fn ensure_live(
+        &self,
+        name: &str,
+        policy: PausedPolicy,
+    ) -> Result<Option<Recovery>, Error> {
+        let stored = self.stored(name)?;
+        let selected = self
+            .select_for(&stored.sandbox, "use the sandbox")
+            .await?;
+        let inspection = selected.core().inspect(&stored.sandbox).await?;
+        match inspection.status {
+            SandboxStatus::Active => Ok(None),
+            SandboxStatus::Paused => match policy {
+                PausedPolicy::Refuse => Err(Error::Paused {
+                    name: name.to_string(),
+                }),
+                PausedPolicy::Allow => Ok(None),
+            },
+            SandboxStatus::Missing => Ok(Some(self.repair(name, &stored, &selected).await?)),
+            SandboxStatus::Unknown => Err(Error::Unavailable {
+                backend: selected.name().to_string(),
+                reason: format!("the backend could not report the status of '{name}'"),
+                remedy: "run `litterbox list` to see the backend's reason".to_string(),
+            }),
+            SandboxStatus::Error { reason } => Err(Error::failed(reason)),
+        }
+    }
+
+    /// Delete a sandbox: compute first, then the branch, each half idempotent.
     pub async fn delete(&self, name: &str) -> Result<(), Error> {
         let stored = match self.stored(name) {
             Ok(stored) => stored,
@@ -339,27 +417,13 @@ impl Sandboxes {
         tracing::info!(sandbox = %name, backend = %selected.name(), "deleting the sandbox");
         selected.core().delete(&stored.sandbox).await?;
 
-        // The branch lives in the repository the sandbox was created against,
-        // which the record names; the configured mode may have changed since.
-        let other = self.branch_scm(Some(&stored))?;
-        let scm = other.scm();
-        match scm.delete_branch(&stored.sandbox.name) {
-            Ok(()) => {}
-            // A branch that is already gone is not a failure: a retried delete
-            // must finish.
-            Err(crate::domain::SandboxError::SandboxNotFound { .. }) => {}
-            Err(error) => {
-                // Keep the record so the caller can retry. Removing it would
-                // leave a branch nothing points at.
-                return Err(Error::failed(format!(
-                    "the sandbox was removed but its branch '{}' was not: {error}",
-                    stored.branch_name
-                )));
-            }
+        // A branch that is already gone is not a failure.
+        if let Err(error) = self.scm.delete_branch(&stored.sandbox.name) {
+            tracing::warn!(sandbox = %name, %error, "the branch may remain after delete");
         }
 
         if stored.remote
-            && scm.list_sandboxes().is_ok_and(|left| left.is_empty())
+            && self.scm.list_sandboxes().is_ok_and(|left| left.is_empty())
             && let Err(error) = VcsStore::destroy_bare(&self.project_slug)
         {
             tracing::warn!(project = %self.project_slug, %error, "the bare clone may remain");
@@ -375,6 +439,7 @@ impl Sandboxes {
         name: &str,
         command: &[String],
     ) -> Result<Performed<Execution>, Error> {
+        let recovery = self.ensure_live(name, PausedPolicy::Allow).await?;
         let stored = self.stored(name)?;
         let selected = self.select_for(&stored.sandbox, "run a command").await?;
         let result = selected.core().exec(&stored.sandbox, command).await;
@@ -386,7 +451,7 @@ impl Sandboxes {
                 tracing::error!(sandbox = %name, %error, "command failed");
             }
         }
-        result.map(Performed::fresh)
+        result.map(|value| Performed { value, recovery })
     }
 
     /// Describe a sandbox.
@@ -427,7 +492,7 @@ impl Sandboxes {
         lifecycle.resume(&stored.sandbox).await
     }
 
-    /// Every sandbox in this project, current first.
+    /// Every sandbox in this project.
     pub fn list(&self) -> Result<Listing, Error> {
         let mut listing = Listing::default();
         for name in self.scm.list_sandboxes()? {
@@ -582,12 +647,8 @@ impl Sandboxes {
         backends::select_as(&self.config, operation).await
     }
 
-    /// Unpack a reference from `scm` into a temporary workspace.
-    ///
-    /// The handle is the caller's: an adopted sandbox may live in a repository
-    /// the orchestrator's own handle does not open.
-    fn stage(scm: &ThreadSafeScm, reference: &str) -> Result<TempDir, Error> {
-        let archive = scm.make_archive(reference)?;
+    fn stage_reference(&self, reference: &str) -> Result<TempDir, Error> {
+        let archive = self.scm.make_archive(reference)?;
         let tempdir = TempDir::new().map_err(SandboxError::Io)?;
         let mut archive = Archive::new(std::io::Cursor::new(archive));
         archive.unpack(tempdir.path()).map_err(SandboxError::Io)?;
@@ -976,15 +1037,6 @@ fn directory_slug() -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-/// The SCM mode this configuration selects.
-///
-/// Remote is the default, so an unset mode is not the same as direct. Records
-/// and branch operations must read the same answer or a sandbox created under
-/// the default is later looked for in the wrong repository.
-fn configured_mode(config: &Config) -> ScmMode {
-    config.git.snapshot_mode.unwrap_or_default()
-}
-
 fn open_scm(
     config: &Config,
     project_slug: &str,
@@ -1118,6 +1170,7 @@ impl Sandboxes {
         source: &std::path::Path,
         destination: &str,
     ) -> Result<Performed<()>, Error> {
+        let recovery = self.ensure_live(name, PausedPolicy::Allow).await?;
         let stored = self.stored(name)?;
         let selected = self
             .select_for(&stored.sandbox, "upload into the sandbox")
@@ -1126,7 +1179,7 @@ impl Sandboxes {
             .core()
             .upload(&stored.sandbox, source, destination)
             .await
-            .map(Performed::fresh)
+            .map(|value| Performed { value, recovery })
     }
 
     /// Copy a sandbox path out to the host.
@@ -1136,6 +1189,7 @@ impl Sandboxes {
         source: &str,
         destination: &std::path::Path,
     ) -> Result<Performed<()>, Error> {
+        let recovery = self.ensure_live(name, PausedPolicy::Allow).await?;
         let stored = self.stored(name)?;
         let selected = self
             .select_for(&stored.sandbox, "download from the sandbox")
@@ -1144,77 +1198,31 @@ impl Sandboxes {
             .core()
             .download(&stored.sandbox, source, destination, None)
             .await
-            .map(Performed::fresh)
+            .map(|value| Performed { value, recovery })
     }
 
     /// Download the workspace and commit it to the sandbox's snapshot branch.
     pub async fn snapshot(&self, name: &str, message: &str) -> Result<Performed<()>, Error> {
+        let recovery = self.ensure_live(name, PausedPolicy::Allow).await?;
         let stored = self.stored(name)?;
         let selected = self
             .select_for(&stored.sandbox, "snapshot the workspace")
             .await?;
 
-        let scm = self.scm_for(&stored)?;
-
         let staging = tempfile::tempdir()
             .map_err(|error| Error::failed(format!("could not create a staging dir: {error}")))?;
         let workspace = selected.core().inspect(&stored.sandbox).await?.workspace;
-
-        // The rules that decide what a snapshot carries live in the sandbox, so
-        // they are fetched first: the bulk transfer is then filtered by the
-        // rules in force, and the commit uses the same ones.
-        let rules = tempfile::tempdir()
-            .map_err(|error| Error::failed(format!("could not create a rules dir: {error}")))?;
         selected
             .core()
-            .download(
-                &stored.sandbox,
-                &workspace,
-                rules.path(),
-                Some(std::sync::Arc::new(crate::scm::IgnoreFiles)),
-            )
-            .await?;
-        let selector = scm
-            .snapshot_filter(rules.path())
-            .map_err(|error| Error::failed(error.to_string()))?;
-
-        selected
-            .core()
-            .download(
-                &stored.sandbox,
-                &workspace,
-                staging.path(),
-                Some(std::sync::Arc::new(selector)),
-            )
+            .download(&stored.sandbox, &workspace, staging.path(), None)
             .await?;
 
+        let scm = self.snapshot_scm(&stored)?;
         scm.commit_snapshot_from_staging(staging.path(), message)?;
-        Ok(Performed::fresh(()))
+        Ok(Performed { value: (), recovery })
     }
 
-    /// The SCM that holds this sandbox's branch.
-    ///
-    /// The orchestrator's own handle is correct while the record agrees with
-    /// the configured mode; otherwise the repository the record names is
-    /// opened, because the configured mode may have changed since.
-    fn branch_scm(&self, stored: Option<&StoredSandbox>) -> Result<BranchScm<'_>, Error> {
-        let Some(stored) = stored else {
-            return Ok(BranchScm::Held(&self.scm));
-        };
-        let configured = configured_mode(&self.config);
-        let stored_mode = if stored.remote {
-            ScmMode::Remote
-        } else {
-            ScmMode::Direct
-        };
-        if stored_mode == configured {
-            Ok(BranchScm::Held(&self.scm))
-        } else {
-            Ok(BranchScm::Opened(self.scm_for(stored)?))
-        }
-    }
-
-    fn scm_for(&self, stored: &StoredSandbox) -> Result<ThreadSafeScm, Error> {
+    fn snapshot_scm(&self, stored: &StoredSandbox) -> Result<ThreadSafeScm, Error> {
         match stored.remote {
             false => Ok(ThreadSafeScm::for_sandbox(
                 Path::new("."),
@@ -1272,7 +1280,6 @@ impl From<SandboxError> for Error {
 
 #[cfg(test)]
 mod seam_tests {
-    use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
@@ -1281,10 +1288,9 @@ mod seam_tests {
 
     use super::Sandboxes;
     use crate::config::Config;
-    use crate::domain::ScmMode;
     use crate::metadata_store::{self, StoredSandbox};
     use crate::sandbox::contract::{
-        Backend, Error, ProvisionStep, ProvisioningClass, ResolvedStep, SandboxRecord,
+        Error, ProvisionStep, ProvisioningClass, ResolvedStep, SandboxRecord,
     };
     use crate::sandbox::report::State;
     use crate::sandbox::selected::Selected;
@@ -1366,9 +1372,6 @@ mod seam_tests {
                 slug: Some("project".to_string()),
                 backends: Some(vec!["test".to_string()]),
             },
-            git: crate::config::GitConfig {
-                snapshot_mode: Some(ScmMode::Direct),
-            },
             provision_definitions: provision,
             backend_sequences,
             allow_project_setup,
@@ -1394,236 +1397,6 @@ mod seam_tests {
             branch_name: format!("litterbox/{name}"),
             remote: false,
         }
-    }
-
-    #[tokio::test]
-    async fn create_adopts_a_branch_left_without_a_record() {
-        let (dir, _repo) = repository();
-        let records = TempDir::new().expect("records");
-        let backend = Arc::new(TestBackend::new());
-        let sandboxes = orchestrator(dir.path(), records.path().to_path_buf(), backend, None);
-
-        let branch = sandboxes.scm().create_branch("demo").expect("branch");
-        sandboxes
-            .scm()
-            .set_snapshot_branch(branch.clone())
-            .expect("branch");
-        let staging = TempDir::new().expect("staging");
-        fs::write(staging.path().join("adopted.txt"), "kept").expect("write");
-        let snapshot = sandboxes
-            .scm()
-            .commit_snapshot_from_staging(staging.path(), "before the compute was lost")
-            .expect("commit")
-            .expect("oid");
-
-        sandboxes.create("demo").await.expect("adopted");
-
-        let repo = Repository::open(dir.path()).expect("reopen");
-        let tip = repo
-            .find_reference(&format!("refs/heads/{branch}"))
-            .expect("branch")
-            .target()
-            .expect("target");
-        assert_eq!(tip, snapshot, "the branch must be adopted, not recreated");
-    }
-
-    #[tokio::test]
-    async fn create_refuses_a_sandbox_that_is_still_live() {
-        let (dir, _repo) = repository();
-        let records = TempDir::new().expect("records");
-        let backend = Arc::new(TestBackend::new());
-        let sandboxes = orchestrator(dir.path(), records.path().to_path_buf(), backend, None);
-        sandboxes.create("demo").await.expect("create");
-
-        let error = sandboxes.create("demo").await.expect_err("conflict");
-        assert!(matches!(error, Error::Conflict { .. }), "{error}");
-    }
-
-    #[tokio::test]
-    async fn create_replaces_a_record_whose_compute_is_gone() {
-        let (dir, _repo) = repository();
-        let records = TempDir::new().expect("records");
-        let backend = Arc::new(TestBackend::new());
-        let sandboxes = orchestrator(
-            dir.path(),
-            records.path().to_path_buf(),
-            backend.clone(),
-            None,
-        );
-        let record = sandboxes.create("demo").await.expect("create");
-
-        // The compute goes away without the orchestrator: this is the accident
-        // the branch is meant to survive.
-        backend.delete(&record).await.expect("compute delete");
-
-        sandboxes
-            .create("demo")
-            .await
-            .expect("recreate from the branch");
-
-        // A backend may keep state beside the compute it lost and refuse to
-        // create over it, so recovery clears it first. The branch survives.
-        assert_eq!(
-            backend.deletes(),
-            vec!["demo".to_string(), "demo".to_string()],
-            "the lost instance is deleted before the sandbox is recreated"
-        );
-    }
-
-    #[tokio::test]
-    async fn create_refuses_an_unreadable_record() {
-        let (dir, _repo) = repository();
-        let records = TempDir::new().expect("records");
-        let backend = Arc::new(TestBackend::new());
-        let sandboxes = orchestrator(
-            dir.path(),
-            records.path().to_path_buf(),
-            backend.clone(),
-            None,
-        );
-        fs::write(records.path().join("demo.toml"), "not a record").expect("write");
-
-        let error = sandboxes.create("demo").await.expect_err("refused");
-        assert!(
-            error.to_string().contains("unreadable"),
-            "an unreadable record is not an absent one: {error}"
-        );
-        assert!(
-            backend.requests().is_empty(),
-            "nothing is created over a record that cannot be read"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_failed_create_keeps_an_adopted_branch() {
-        let (dir, _repo) = repository();
-        let records = TempDir::new().expect("records");
-        let backend = Arc::new(TestBackend::failing());
-        let sandboxes = orchestrator(dir.path(), records.path().to_path_buf(), backend, None);
-        sandboxes.scm().create_branch("demo").expect("branch");
-
-        sandboxes.create("demo").await.expect_err("create fails");
-
-        assert_eq!(
-            sandboxes.scm().list_sandboxes().expect("branches"),
-            vec!["demo"],
-            "a branch that was adopted must survive a failed create"
-        );
-    }
-
-    #[tokio::test]
-    async fn create_with_default_mode_records_remote_and_delete_removes_the_branch() {
-        let (dir, _repo) = repository();
-        let bare_parent = TempDir::new().expect("bare parent");
-        let bare_path = bare_parent.path().join("bare.git");
-        git2::build::RepoBuilder::new()
-            .bare(true)
-            .clone(dir.path().to_str().expect("host path"), &bare_path)
-            .expect("clone bare");
-        let host_path = dir.path().canonicalize().expect("host path");
-        let scm = ThreadSafeScm::open_with_mode_and_prefix(
-            &bare_path,
-            ScmMode::Remote,
-            None,
-            Some(host_path),
-        )
-        .expect("remote scm");
-
-        let records = TempDir::new().expect("records");
-        let project_slug = format!(
-            "test-remote-default-{}",
-            records
-                .path()
-                .file_name()
-                .expect("records name")
-                .to_string_lossy()
-        );
-        let config = Config {
-            git: crate::config::GitConfig {
-                snapshot_mode: None,
-            },
-            allow_project_setup: true,
-            ..Config::default()
-        };
-        let backend = Arc::new(TestBackend::new());
-        let sandboxes = Sandboxes::for_test(
-            config,
-            scm,
-            project_slug,
-            records.path().to_path_buf(),
-            selected(backend),
-        );
-
-        sandboxes.create("demo").await.expect("create");
-
-        assert!(
-            sandboxes.stored("demo").expect("record").remote,
-            "an unset snapshot-mode runs remote, so the record must say remote"
-        );
-        assert_eq!(
-            sandboxes.scm().list_sandboxes().expect("branches"),
-            vec!["demo"]
-        );
-
-        sandboxes.delete("demo").await.expect("delete");
-
-        assert!(sandboxes.stored("demo").is_err(), "the record is gone");
-        assert!(
-            sandboxes
-                .scm()
-                .list_sandboxes()
-                .expect("branches")
-                .is_empty(),
-            "delete must remove the branch from the repository the record names"
-        );
-    }
-
-    #[tokio::test]
-    async fn delete_removes_the_branch_and_the_record() {
-        let (dir, _repo) = repository();
-        let records = TempDir::new().expect("records");
-        let backend = Arc::new(TestBackend::new());
-        let sandboxes = orchestrator(dir.path(), records.path().to_path_buf(), backend, None);
-        sandboxes.create("demo").await.expect("create");
-
-        sandboxes.delete("demo").await.expect("delete");
-
-        assert!(sandboxes.stored("demo").is_err(), "the record is gone");
-        assert!(
-            sandboxes
-                .scm()
-                .list_sandboxes()
-                .expect("branches")
-                .is_empty()
-        );
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn a_branch_that_cannot_be_removed_keeps_the_record() {
-        use std::fs;
-        use std::os::unix::fs::PermissionsExt;
-
-        let (dir, _repo) = repository();
-        let records = TempDir::new().expect("records");
-        let backend = Arc::new(TestBackend::new());
-        let sandboxes = orchestrator(dir.path(), records.path().to_path_buf(), backend, None);
-        sandboxes.create("demo").await.expect("create");
-
-        let holders = dir.path().join(".git/refs/heads/litterbox");
-        fs::set_permissions(&holders, fs::Permissions::from_mode(0o555)).expect("chmod");
-
-        let error = sandboxes
-            .delete("demo")
-            .await
-            .expect_err("the branch failure is reported");
-        assert!(error.to_string().contains("litterbox/demo"), "{error}");
-        assert!(
-            sandboxes.stored("demo").is_ok(),
-            "the record survives so a retry can remove the branch"
-        );
-
-        fs::set_permissions(&holders, fs::Permissions::from_mode(0o755)).expect("chmod back");
     }
 
     #[tokio::test]
@@ -2075,24 +1848,48 @@ mod seam_tests {
     }
 
     #[tokio::test]
-    async fn a_record_without_a_sandbox_table_is_reported_corrupt_and_refused() {
+    async fn discarding_a_current_record_is_denied_not_a_name_conflict() {
+        let (dir, _repo) = repository();
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let sandboxes = orchestrator(dir.path(), records.path().to_path_buf(), backend, None);
+        sandboxes.create("demo").await.expect("create");
+
+        let error = sandboxes
+            .discard_legacy("demo")
+            .expect_err("a current record is not legacy");
+        match error {
+            Error::Denied {
+                operation, reason, ..
+            } => {
+                assert!(operation.contains("demo"), "{operation}");
+                assert!(reason.contains("current record"), "{reason}");
+            }
+            other => panic!("expected a denial, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_legacy_record_is_reported_and_discarded() {
         let (dir, _repo) = repository();
         let records = TempDir::new().expect("records");
         let backend = Arc::new(TestBackend::new());
         let sandboxes = orchestrator(dir.path(), records.path().to_path_buf(), backend, None);
 
         sandboxes.scm().create_branch("demo").expect("branch");
-        let old = "name = 'demo'\ncontainer_id = 'abc123'\n";
-        std::fs::write(records.path().join("demo.toml"), old).expect("write");
+        let legacy = "name = 'demo'\ncontainer_id = 'abc123'\n";
+        std::fs::write(records.path().join("demo.toml"), legacy).expect("write");
 
         let listing = sandboxes.list().expect("list");
-        assert_eq!(listing.corrupt.len(), 1, "{listing:?}");
-        assert!(listing.corrupt[0].contains("demo"), "{listing:?}");
-
-        let error = sandboxes.inspect("demo").await.expect_err("refused");
+        assert_eq!(listing.legacy, vec!["demo".to_string()]);
+        let error = sandboxes.inspect("demo").await.expect_err("legacy refused");
         let message = error.to_string();
-        assert!(message.contains("unreadable record"), "{message}");
+        assert!(message.contains("delete --discard-legacy"), "{message}");
         assert!(message.contains("demo.toml"), "{message}");
+
+        let (path, container) = sandboxes.discard_legacy("demo").expect("discard");
+        assert_eq!(container.as_deref(), Some("abc123"));
+        assert!(!path.exists(), "the record file was removed");
     }
 
     #[tokio::test]
