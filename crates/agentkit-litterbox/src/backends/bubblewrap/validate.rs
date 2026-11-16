@@ -7,8 +7,9 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
+use super::BACKEND;
 use super::host::{Host, NamespaceInodes};
-use super::payload::Payload;
+use super::payload::{Payload, RecordedPids};
 use super::view::WORKSPACE;
 use crate::sandbox::contract::{Error, SandboxRecord};
 
@@ -58,17 +59,40 @@ impl Verdict {
 
 /// Validate a record against the host.
 pub fn validate(record: &SandboxRecord, host: &dyn Host) -> Verdict {
-    let data = match Payload::from_record(record) {
-        Ok(data) => data,
-        Err(error) => return Verdict::Editions(error),
+    // Read the pids before the full payload so a record from an older release
+    // can still prove that its compute is gone. The probe is only for absence;
+    // it never authorises a join.
+    let Some(pids) = RecordedPids::from_record(record) else {
+        return Verdict::Editions(Error::Unavailable {
+            backend: BACKEND.to_string(),
+            reason: format!(
+                "sandbox '{}' has no readable pid, so its compute cannot be proven absent",
+                record.name
+            ),
+            remedy: "delete and recreate the sandbox".to_string(),
+        });
     };
 
-    let Some(process) = host.process(data.sandbox_pid) else {
+    let Some(process) = host.process(pids.sandbox_pid) else {
         return Verdict::Absent;
     };
     if process.state == super::host::ProcessState::Zombie {
         return Verdict::Absent;
     }
+    if process.start_time != pids.sandbox_start {
+        return Verdict::Forbidden {
+            reason: format!(
+                "sandbox '{}' pid {} was reused by another process",
+                record.name, pids.sandbox_pid
+            ),
+        };
+    }
+
+    let data = match Payload::from_record(record) {
+        Ok(data) => data,
+        Err(error) => return Verdict::Editions(error),
+    };
+
     if process.uid != data.uid {
         return Verdict::Forbidden {
             reason: format!(
@@ -396,6 +420,45 @@ mod tests {
         match validate(&record(&data), &host(&data)) {
             Verdict::Editions(Error::Failed { .. }) => {}
             other => panic!("expected an edition failure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_v1_record_with_a_dead_pid_is_absent() {
+        let mut data = data();
+        data.version = VERSION - 1;
+        assert!(
+            validate(&record(&data), &FakeHost::default()).is_absent(),
+            "the pids decide absence before the payload version"
+        );
+    }
+
+    #[test]
+    fn a_v1_record_with_a_live_pid_is_unsupported() {
+        let mut data = data();
+        data.version = VERSION - 1;
+        match validate(&record(&data), &host(&data)) {
+            Verdict::Editions(Error::Unavailable { .. }) => {}
+            other => panic!("expected an unavailable edition, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_record_without_a_readable_pid_is_unsupported() {
+        let data = data();
+        let mut value = toml::Value::try_from(&data).expect("payload");
+        if let Some(table) = value.as_table_mut() {
+            table.remove("sandbox_pid");
+        }
+        let record = SandboxRecord {
+            name: "demo".to_string(),
+            backend: "bubblewrap".to_string(),
+            project_slug: "project".to_string(),
+            data: value,
+        };
+        match validate(&record, &FakeHost::default()) {
+            Verdict::Editions(Error::Unavailable { .. }) => {}
+            other => panic!("expected an unavailable edition, got {other:?}"),
         }
     }
 
