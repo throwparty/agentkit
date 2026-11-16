@@ -440,7 +440,10 @@ impl Backend for TestBackend {
         })
     }
 
-    fn delete<'a>(&'a self, sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>> {
+    fn delete<'a>(
+        &'a self,
+        sandbox: &'a SandboxRecord,
+    ) -> BoxFuture<'a, Result<crate::sandbox::contract::Teardown, Error>> {
         Box::pin(async move {
             self.records
                 .lock()
@@ -462,7 +465,11 @@ impl Backend for TestBackend {
                 .lock()
                 .map_err(|_| Error::failed("test backend lock poisoned"))?
                 .remove(&sandbox.name);
-            Ok(())
+            Ok(crate::sandbox::contract::Teardown {
+                compute_stopped: true,
+                state_paths: Vec::new(),
+                detail: None,
+            })
         })
     }
 

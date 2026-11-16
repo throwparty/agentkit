@@ -19,7 +19,7 @@ use super::error::ComputeError;
 use super::naming::container_name_for_slug;
 use crate::backends::shared::{CREATE_BUDGET, PROVISION_OUTPUT_CAP, UPLOAD_TIMEOUT, run_steps};
 use crate::sandbox::contract::{
-    Backend, ContributionSupport, CreateRequest, Error, Execution, Forward, Inspection,
+    Backend, ContributionSupport, CreateMode, CreateRequest, Error, Execution, Forward, Inspection,
     ProvisioningClass, ProvisioningFailure, ResolvedStep, SandboxRecord, SandboxStatus, Scope,
 };
 use crate::sandbox::environment::{Change, Environment, Origin, Provenance, Variable};
@@ -329,6 +329,19 @@ impl Backend for DockerBackend {
         request: &'a CreateRequest,
     ) -> BoxFuture<'a, Result<SandboxRecord, Error>> {
         Box::pin(async move {
+            if request.mode == CreateMode::ReuseExisting {
+                return Err(Error::Unsupported {
+                    operation: format!("repair the sandbox '{}'", request.name),
+                    backend: BACKEND.to_string(),
+                    primitive: "a backend recovery path".to_string(),
+                    reason: "the Docker backend cannot recreate a container against an existing record"
+                        .to_string(),
+                    remedy: format!(
+                        "run `litterbox delete --force {}` and create it again",
+                        request.name
+                    ),
+                });
+            }
             if self.settings.image.is_empty() {
                 return Err(Error::Misconfigured {
                     message: "backends.docker.image is not set; set it in the user configuration \
@@ -573,12 +586,19 @@ impl Backend for DockerBackend {
         })
     }
 
-    fn delete<'a>(&'a self, sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>> {
+    fn delete<'a>(
+        &'a self,
+        sandbox: &'a SandboxRecord,
+    ) -> BoxFuture<'a, Result<crate::sandbox::contract::Teardown, Error>> {
         Box::pin(async move {
             let data = DockerData::from_record(sandbox)?;
             // `delete_container` already treats a missing container as success.
             self.compute.delete_container(&data.container).await?;
-            Ok(())
+            Ok(crate::sandbox::contract::Teardown {
+                compute_stopped: true,
+                state_paths: Vec::new(),
+                detail: Some(format!("container {}", data.container)),
+            })
         })
     }
 

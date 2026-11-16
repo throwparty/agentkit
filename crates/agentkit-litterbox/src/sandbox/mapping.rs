@@ -16,7 +16,8 @@ use super::contract::Error;
 pub enum FailureClass {
     /// The sandbox does not exist.
     NotFound,
-    /// The sandbox already exists.
+    /// The sandbox already exists, or exists in a state that conflicts with
+    /// the request.
     Conflict,
     /// The mechanism does not provide the operation.
     Unsupported,
@@ -76,7 +77,7 @@ impl Error {
     pub fn class(&self) -> FailureClass {
         match self {
             Self::NotFound { .. } => FailureClass::NotFound,
-            Self::Conflict { .. } => FailureClass::Conflict,
+            Self::Conflict { .. } | Self::Paused { .. } => FailureClass::Conflict,
             Self::Unsupported { .. } => FailureClass::Unsupported,
             Self::Denied { .. } => FailureClass::Denied,
             Self::Unavailable { .. } => FailureClass::Unavailable,

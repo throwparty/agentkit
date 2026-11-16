@@ -13,9 +13,9 @@ use crate::provision::StepOutcome;
 use crate::provision::kind::KindDescription;
 use crate::provision::prepare::{self, PrepareContext, PrepareError, SystemRunner};
 use crate::sandbox::contract::{
-    ContributionSupport, CreateRequest, Error, Execution, Forward, Inspection, ProvisionStep,
-    ProvisioningClass, ProvisioningFailure, RequestedPort, ResolvedStep, SandboxRecord,
-    SandboxStatus, Workspace,
+    ContributionSupport, CreateMode, CreateRequest, Error, Execution, Forward, Inspection,
+    ProvisionStep, ProvisioningClass, ProvisioningFailure, RequestedPort, ResolvedStep,
+    SandboxRecord, SandboxStatus, Workspace,
 };
 use crate::sandbox::selected::Selected;
 use crate::scm::{Scm, ThreadSafeScm, branch_name_for};
@@ -269,6 +269,7 @@ impl Sandboxes {
             provision,
             forward_bind: self.config.forwarding.bind.clone(),
             ports: self.config.ports.iter().map(port).collect(),
+            mode: CreateMode::Fresh,
         };
 
         tracing::info!(

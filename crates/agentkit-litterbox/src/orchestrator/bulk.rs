@@ -107,8 +107,17 @@ mod tests {
             Box::pin(async { Err(Error::failed("not used")) })
         }
 
-        fn delete<'a>(&'a self, _sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>> {
-            Box::pin(async { Ok(()) })
+        fn delete<'a>(
+            &'a self,
+            _sandbox: &'a SandboxRecord,
+        ) -> BoxFuture<'a, Result<crate::sandbox::contract::Teardown, Error>> {
+            Box::pin(async {
+                Ok(crate::sandbox::contract::Teardown {
+                    compute_stopped: true,
+                    state_paths: Vec::new(),
+                    detail: None,
+                })
+            })
         }
 
         fn readiness<'a>(
