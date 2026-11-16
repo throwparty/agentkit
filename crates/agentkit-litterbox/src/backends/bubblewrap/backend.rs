@@ -1186,7 +1186,7 @@ mod tests {
     use crate::backends::bubblewrap::payload::{Payload, RecordedMount, RecordedRoot, VERSION};
     use crate::sandbox::contract::{
         Backend, ContributionSort, CreateMode, CreateRequest, Error, RequestedPort, SandboxAction,
-        SandboxRecord, Workspace,
+        SandboxRecord, SandboxStatus, Workspace,
     };
     use crate::sandbox::contract::{Placement, ResolvedStep};
     use crate::sandbox::environment::{Origin, Provenance};
