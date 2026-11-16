@@ -1122,8 +1122,8 @@ mod tests {
     };
     use crate::backends::bubblewrap::payload::{Payload, RecordedMount, RecordedRoot, VERSION};
     use crate::sandbox::contract::{
-        Backend, ContributionSort, CreateRequest, Error, RequestedPort, SandboxAction,
-        SandboxRecord, SandboxStatus, Workspace,
+        Backend, ContributionSort, CreateMode, CreateRequest, Error, RequestedPort, SandboxAction,
+        SandboxRecord, Workspace,
     };
     use crate::sandbox::contract::{Placement, ResolvedStep};
     use crate::sandbox::environment::{Origin, Provenance};
@@ -1139,6 +1139,7 @@ mod tests {
             provision: Vec::new(),
             forward_bind: "127.0.0.1".to_string(),
             ports,
+            mode: CreateMode::Fresh,
         }
     }
 
@@ -1572,6 +1573,7 @@ mod tests {
             provision: vec![userland()],
             forward_bind: "127.0.0.1".to_string(),
             ports: Vec::new(),
+            mode: CreateMode::Fresh,
         }
     }
 

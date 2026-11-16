@@ -10,9 +10,9 @@ use std::sync::{Arc, Mutex};
 use futures_util::future::BoxFuture;
 
 use crate::sandbox::contract::{
-    Backend, ContributionSort, ContributionSupport, Contributions, CreateRequest, Error, Execution,
-    Inspection, Placement, ProvisioningClass, ProvisioningFailure, ResolvedStep, SandboxAction,
-    SandboxRecord, SandboxStatus, Scope, Workspace,
+    Backend, ContributionSort, ContributionSupport, Contributions, CreateMode, CreateRequest,
+    Error, Execution, Inspection, Placement, ProvisioningClass, ProvisioningFailure, ResolvedStep,
+    SandboxAction, SandboxRecord, SandboxStatus, Scope, Workspace,
 };
 use crate::sandbox::environment::{Origin, Provenance, StepProvenance};
 use crate::sandbox::facets::Lifecycle;
@@ -537,6 +537,7 @@ pub async fn exercise<S: Backend + ?Sized>(backend: &S) -> Result<(), Error> {
         provision: Vec::new(),
         forward_bind: "127.0.0.1".to_string(),
         ports: Vec::new(),
+        mode: CreateMode::Fresh,
     };
 
     let record = backend.create(&request).await?;
@@ -720,6 +721,7 @@ pub async fn exercise_provisioning<S: Backend + ?Sized>(backend: &S) -> Result<(
         ],
         forward_bind: "127.0.0.1".to_string(),
         ports: Vec::new(),
+        mode: CreateMode::Fresh,
     };
 
     let record = backend.create(&request).await?;
@@ -764,6 +766,7 @@ pub async fn exercise_lifecycle<S: Lifecycle + ?Sized>(backend: &S) -> Result<()
         provision: Vec::new(),
         forward_bind: "127.0.0.1".to_string(),
         ports: Vec::new(),
+        mode: CreateMode::Fresh,
     };
 
     let record = backend.create(&request).await?;
@@ -838,6 +841,7 @@ pub async fn exercise_failed_create_with<S: Backend + ?Sized>(
         provision,
         forward_bind: "127.0.0.1".to_string(),
         ports: Vec::new(),
+        mode: CreateMode::Fresh,
     };
 
     backend
@@ -867,8 +871,8 @@ mod tests {
         exercise_failed_create, exercise_lifecycle,
     };
     use crate::sandbox::contract::{
-        Backend, ContributionSort, CreateRequest, ResolvedStep, SandboxRecord, SandboxStatus,
-        Workspace,
+        Backend, ContributionSort, CreateMode, CreateRequest, ResolvedStep, SandboxRecord,
+        SandboxStatus, Workspace,
     };
     use crate::sandbox::report::State;
 
@@ -909,6 +913,7 @@ mod tests {
             provision,
             forward_bind: "127.0.0.1".to_string(),
             ports: Vec::new(),
+            mode: CreateMode::Fresh,
         }
     }
 

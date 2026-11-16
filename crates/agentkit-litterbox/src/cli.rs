@@ -400,10 +400,11 @@ async fn handle_shell(backend: Option<String>, name: String, command: Vec<String
         Err(error) => return report(error),
     };
 
-    let result = match sandboxes.exec(&name, &command).await {
+    let performed = match sandboxes.exec(&name, &command).await {
         Ok(result) => result,
         Err(error) => return report(error),
     };
+    let result = performed.value;
 
     if !result.stdout.is_empty() {
         print!("{}", result.stdout);

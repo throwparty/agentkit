@@ -131,7 +131,7 @@ impl SandboxServer {
         Parameters(args): Parameters<SandboxCreateArgs>,
     ) -> Result<CallToolResult, McpError> {
         let project = self.project()?;
-        let record = project.create(&args.name).await.map_err(map_contract)?;
+        let record = project.create(&args.name).await.map_err(map_contract)?.value;
         let inspection = project.inspect(&record.name).await.map_err(map_contract)?;
         let content = ContentBlock::json(inspection)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
@@ -797,7 +797,9 @@ async fn exec_in_sandbox<P: SandboxIo + ?Sized>(
     name: &str,
     command: &[String],
 ) -> Result<Execution, Error> {
-    io.exec(name, command).await
+    io.exec(name, command)
+        .await
+        .map(|performed| performed.value)
 }
 
 /// A script for the sandbox's own shell.
@@ -1068,6 +1070,7 @@ fn parse_grep_output(output: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::orchestrator::Performed;
     use futures_util::future::BoxFuture;
     use std::fs;
     use std::io::Write;
@@ -1254,7 +1257,7 @@ mod tests {
             &'a self,
             _name: &'a str,
             command: &'a [String],
-        ) -> BoxFuture<'a, Result<Execution, Error>> {
+        ) -> BoxFuture<'a, Result<Performed<Execution>, Error>> {
             self.commands
                 .lock()
                 .expect("commands lock")
@@ -1267,7 +1270,7 @@ mod tests {
                         name: "no more results".to_string(),
                     });
                 }
-                results_lock.remove(0)
+                results_lock.remove(0).map(Performed::fresh)
             })
         }
 
@@ -1276,8 +1279,8 @@ mod tests {
             _name: &'a str,
             _source: &'a Path,
             _destination: &'a str,
-        ) -> BoxFuture<'a, Result<(), Error>> {
-            Box::pin(async { Ok(()) })
+        ) -> BoxFuture<'a, Result<Performed<()>, Error>> {
+            Box::pin(async { Ok(Performed::fresh(())) })
         }
 
         fn download<'a>(
@@ -1285,8 +1288,8 @@ mod tests {
             _name: &'a str,
             _source: &'a str,
             _destination: &'a Path,
-        ) -> BoxFuture<'a, Result<(), Error>> {
-            Box::pin(async { Ok(()) })
+        ) -> BoxFuture<'a, Result<Performed<()>, Error>> {
+            Box::pin(async { Ok(Performed::fresh(())) })
         }
     }
 
@@ -1299,7 +1302,7 @@ mod tests {
             &'a self,
             _name: &'a str,
             command: &'a [String],
-        ) -> BoxFuture<'a, Result<Execution, Error>> {
+        ) -> BoxFuture<'a, Result<Performed<Execution>, Error>> {
             let result = self
                 .shell_result
                 .lock()
@@ -1314,7 +1317,7 @@ mod tests {
             let command = command.to_vec();
             Box::pin(async move {
                 *last_command.lock().expect("command lock") = Some(command);
-                result
+                result.map(Performed::fresh)
             })
         }
 
@@ -1323,8 +1326,8 @@ mod tests {
             _name: &'a str,
             _source: &'a Path,
             _destination: &'a str,
-        ) -> BoxFuture<'a, Result<(), Error>> {
-            Box::pin(async { Ok(()) })
+        ) -> BoxFuture<'a, Result<Performed<()>, Error>> {
+            Box::pin(async { Ok(Performed::fresh(())) })
         }
 
         fn download<'a>(
@@ -1332,8 +1335,8 @@ mod tests {
             _name: &'a str,
             _source: &'a str,
             _destination: &'a Path,
-        ) -> BoxFuture<'a, Result<(), Error>> {
-            Box::pin(async { Ok(()) })
+        ) -> BoxFuture<'a, Result<Performed<()>, Error>> {
+            Box::pin(async { Ok(Performed::fresh(())) })
         }
     }
 

@@ -925,8 +925,9 @@ mod tests {
     use crate::backends::docker::socket_available;
     use crate::backends::shared::{bounded_output, combined_output, command_failure};
     use crate::sandbox::contract::{
-        Contributions, CreateRequest, Error, Execution, Forward, Placement, ProvisioningClass,
-        RequestedPort, ResolvedStep, SandboxAction, SandboxRecord, Scope, Workspace,
+        Contributions, CreateMode, CreateRequest, Error, Execution, Forward, Placement,
+        ProvisioningClass, RequestedPort, ResolvedStep, SandboxAction, SandboxRecord, Scope,
+        Workspace,
     };
     use crate::sandbox::environment::{Origin, Provenance};
     use crate::sandbox::facets::{Limits, ResourceLimits};
@@ -944,6 +945,7 @@ mod tests {
             provision: Vec::new(),
             forward_bind: "127.0.0.1".to_string(),
             ports: Vec::new(),
+            mode: CreateMode::Fresh,
         }
     }
 
@@ -1397,6 +1399,7 @@ mod tests {
                 name: "web".to_string(),
                 target: 8080,
             }],
+            mode: CreateMode::Fresh,
         };
 
         let record = backend.create(&request).await?;
@@ -1468,6 +1471,7 @@ mod tests {
                 name: "web".to_string(),
                 target: 8080,
             }],
+            mode: CreateMode::Fresh,
         };
 
         let record = backend.create(&request).await?;
@@ -1541,6 +1545,7 @@ mod tests {
                 source: workspace.path().to_path_buf(),
             },
             ports: Vec::new(),
+            mode: CreateMode::Fresh,
         };
 
         let error = backend.create(&request).await.expect_err("create fails");
@@ -1588,6 +1593,7 @@ mod tests {
                 source: workspace.path().to_path_buf(),
             },
             ports: Vec::new(),
+            mode: CreateMode::Fresh,
         };
         let record = backend.create(&request).await?;
 

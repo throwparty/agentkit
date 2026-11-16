@@ -9,6 +9,7 @@ use crate::backends;
 use crate::config::Config;
 use crate::domain::{SandboxError, ScmMode};
 use crate::metadata_store::{self, LoadedSandbox, StoredSandbox};
+use crate::orchestrator::outcome::Performed;
 use crate::provision::StepOutcome;
 use crate::provision::kind::KindDescription;
 use crate::provision::prepare::{self, PrepareContext, PrepareError, SystemRunner};
@@ -120,7 +121,7 @@ impl Sandboxes {
     ///
     /// A branch that already exists is adopted rather than refused: the record
     /// may outlive its compute, and the branch is the authoritative copy.
-    pub async fn create(&self, name: &str) -> Result<SandboxRecord, Error> {
+    pub async fn create(&self, name: &str) -> Result<Performed<SandboxRecord>, Error> {
         let name = self.valid_name(name)?;
         // Only an absent record means nothing is here to adopt: an unreadable
         // record still names a sandbox this project owns, and must not be
@@ -308,7 +309,7 @@ impl Sandboxes {
             return Err(error);
         }
 
-        Ok(record)
+        Ok(Performed::fresh(record))
     }
 
     /// Delete a sandbox: compute first, then the branch.
@@ -369,7 +370,11 @@ impl Sandboxes {
     }
 
     /// Run a command in a sandbox.
-    pub async fn exec(&self, name: &str, command: &[String]) -> Result<Execution, Error> {
+    pub async fn exec(
+        &self,
+        name: &str,
+        command: &[String],
+    ) -> Result<Performed<Execution>, Error> {
         let stored = self.stored(name)?;
         let selected = self.select_for(&stored.sandbox, "run a command").await?;
         let result = selected.core().exec(&stored.sandbox, command).await;
@@ -381,7 +386,7 @@ impl Sandboxes {
                 tracing::error!(sandbox = %name, %error, "command failed");
             }
         }
-        result
+        result.map(Performed::fresh)
     }
 
     /// Describe a sandbox.
@@ -1015,7 +1020,7 @@ pub trait SandboxIo {
         &'a self,
         name: &'a str,
         command: &'a [String],
-    ) -> futures_util::future::BoxFuture<'a, Result<Execution, Error>>;
+    ) -> futures_util::future::BoxFuture<'a, Result<Performed<Execution>, Error>>;
 
     /// The program and leading arguments that evaluate a shell string in the
     /// sandbox.
@@ -1038,7 +1043,7 @@ pub trait SandboxIo {
         name: &'a str,
         source: &'a std::path::Path,
         destination: &'a str,
-    ) -> futures_util::future::BoxFuture<'a, Result<(), Error>>;
+    ) -> futures_util::future::BoxFuture<'a, Result<Performed<()>, Error>>;
 
     /// Copy a sandbox path out to the host.
     fn download<'a>(
@@ -1046,7 +1051,7 @@ pub trait SandboxIo {
         name: &'a str,
         source: &'a str,
         destination: &'a std::path::Path,
-    ) -> futures_util::future::BoxFuture<'a, Result<(), Error>>;
+    ) -> futures_util::future::BoxFuture<'a, Result<Performed<()>, Error>>;
 
     /// The path the sandbox sees its workspace at.
     fn workspace<'a>(
@@ -1060,7 +1065,7 @@ impl SandboxIo for Sandboxes {
         &'a self,
         name: &'a str,
         command: &'a [String],
-    ) -> futures_util::future::BoxFuture<'a, Result<Execution, Error>> {
+    ) -> futures_util::future::BoxFuture<'a, Result<Performed<Execution>, Error>> {
         Box::pin(Sandboxes::exec(self, name, command))
     }
 
@@ -1076,7 +1081,7 @@ impl SandboxIo for Sandboxes {
         name: &'a str,
         source: &'a std::path::Path,
         destination: &'a str,
-    ) -> futures_util::future::BoxFuture<'a, Result<(), Error>> {
+    ) -> futures_util::future::BoxFuture<'a, Result<Performed<()>, Error>> {
         Box::pin(Sandboxes::upload(self, name, source, destination))
     }
 
@@ -1085,7 +1090,7 @@ impl SandboxIo for Sandboxes {
         name: &'a str,
         source: &'a str,
         destination: &'a std::path::Path,
-    ) -> futures_util::future::BoxFuture<'a, Result<(), Error>> {
+    ) -> futures_util::future::BoxFuture<'a, Result<Performed<()>, Error>> {
         Box::pin(Sandboxes::download(self, name, source, destination))
     }
 
@@ -1112,7 +1117,7 @@ impl Sandboxes {
         name: &str,
         source: &std::path::Path,
         destination: &str,
-    ) -> Result<(), Error> {
+    ) -> Result<Performed<()>, Error> {
         let stored = self.stored(name)?;
         let selected = self
             .select_for(&stored.sandbox, "upload into the sandbox")
@@ -1121,6 +1126,7 @@ impl Sandboxes {
             .core()
             .upload(&stored.sandbox, source, destination)
             .await
+            .map(Performed::fresh)
     }
 
     /// Copy a sandbox path out to the host.
@@ -1129,7 +1135,7 @@ impl Sandboxes {
         name: &str,
         source: &str,
         destination: &std::path::Path,
-    ) -> Result<(), Error> {
+    ) -> Result<Performed<()>, Error> {
         let stored = self.stored(name)?;
         let selected = self
             .select_for(&stored.sandbox, "download from the sandbox")
@@ -1138,10 +1144,11 @@ impl Sandboxes {
             .core()
             .download(&stored.sandbox, source, destination, None)
             .await
+            .map(Performed::fresh)
     }
 
     /// Download the workspace and commit it to the sandbox's snapshot branch.
-    pub async fn snapshot(&self, name: &str, message: &str) -> Result<(), Error> {
+    pub async fn snapshot(&self, name: &str, message: &str) -> Result<Performed<()>, Error> {
         let stored = self.stored(name)?;
         let selected = self
             .select_for(&stored.sandbox, "snapshot the workspace")
@@ -1182,7 +1189,7 @@ impl Sandboxes {
             .await?;
 
         scm.commit_snapshot_from_staging(staging.path(), message)?;
-        Ok(())
+        Ok(Performed::fresh(()))
     }
 
     /// The SCM that holds this sandbox's branch.
@@ -1721,8 +1728,8 @@ mod seam_tests {
         let sandboxes = orchestrator(dir.path(), records.path().to_path_buf(), backend, None);
 
         let created = sandboxes.create("demo").await.expect("create");
-        assert_eq!(created.name, "demo");
-        assert_eq!(created.backend, "test");
+        assert_eq!(created.value.name, "demo");
+        assert_eq!(created.value.backend, "test");
 
         let stored = metadata_store::load_sandbox_at(records.path(), "demo")
             .expect("readable")
