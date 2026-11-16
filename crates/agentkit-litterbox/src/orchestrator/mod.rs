@@ -5,6 +5,7 @@
 //! branch exists.
 
 pub mod bulk;
+pub mod lock;
 pub mod machine;
 pub mod outcome;
 pub mod service;
