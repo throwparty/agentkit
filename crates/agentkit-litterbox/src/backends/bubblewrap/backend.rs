@@ -8,15 +8,15 @@ use futures_util::future::BoxFuture;
 
 use super::BACKEND;
 use super::host::{Host, SharedHost};
-use super::payload::{Payload, RecordedMount, RecordedRoot};
+use super::payload::{Payload, RecordedMount, RecordedPids, RecordedRoot};
 use super::view::{Boundaries, RenderOptions, Requested, View, WORKSPACE};
 use super::{environment, holder, join, lifecycle, readiness, validate, workspace};
 use crate::backends::shared::{
     DOWNLOAD_TIMEOUT, EXEC_OUTPUT_CAP, PROVISION_OUTPUT_CAP, UPLOAD_TIMEOUT, run_steps, transfer,
 };
 use crate::sandbox::contract::{
-    Backend, ContributionSort, ContributionSupport, CreateRequest, Error, Execution, Forward,
-    Inspection, ProvisioningClass, ProvisioningFailure, SandboxRecord, Scope,
+    Backend, ContributionSort, ContributionSupport, CreateMode, CreateRequest, Error, Execution,
+    Forward, Inspection, ProvisioningClass, ProvisioningFailure, SandboxRecord, Scope,
     forwarded_port_env_var,
 };
 use crate::sandbox::facets::{Lifecycle, Limits, ResourceLimits};
@@ -93,6 +93,8 @@ struct Creation<'a> {
     workspace: &'a Path,
     /// The ports the sandbox reaches on the host.
     forwards: &'a [crate::sandbox::contract::Forward],
+    /// Whether this attempt materialises the workspace or reuses one.
+    materialised: bool,
     /// Whether the sandbox is launched inside a user scope.
     scoped: bool,
     /// The holder, once one has started.
@@ -337,11 +339,20 @@ impl BubblewrapBackend {
 }
 
 /// Stop a half-started sandbox and remove its state.
-fn cleanup(host: &dyn Host, project: &str, name: &str, holder: Option<&holder::Holder>) {
+fn cleanup(
+    host: &dyn Host,
+    project: &str,
+    name: &str,
+    materialised: bool,
+    holder: Option<&holder::Holder>,
+) {
     if let Some(holder) = holder
         && let Err(error) = holder::teardown(host, holder, std::time::Duration::from_secs(10))
     {
         tracing::warn!(%error, "the sandbox did not stop after a failed create");
+    }
+    if !materialised {
+        return;
     }
     let directory = workspace::sandbox_directory(project, name);
     if let Err(error) = std::fs::remove_dir_all(&directory)
@@ -788,10 +799,45 @@ impl BubblewrapBackend {
         let forwards = Self::forwards(request, self.settings.network)?;
 
         let directory = workspace::sandbox_directory(&request.project_slug, &request.name);
-        if directory.exists() {
+        let reuse = request.mode == CreateMode::ReuseExisting;
+        if directory.exists() && !reuse {
             return Err(Error::Conflict {
                 name: request.name.clone(),
             });
+        }
+        if reuse && directory.exists() {
+            // The orchestrator has already reported this record missing, but a
+            // concurrent caller may have repaired it. Read only the pids; the
+            // full payload may be from an older release.
+            let payload_path = directory.join("payload.toml");
+            let readable = std::fs::read_to_string(&payload_path)
+                .ok()
+                .and_then(|text| toml::from_str::<RecordedPids>(&text).ok());
+            match readable {
+                Some(pids) => {
+                    if let Some(process) = self.host.process(pids.sandbox_pid)
+                        && process.state != super::host::ProcessState::Zombie
+                        && process.start_time == pids.sandbox_start
+                    {
+                        return Err(Error::Conflict {
+                            name: request.name.clone(),
+                        });
+                    }
+                }
+                None => {
+                    return Err(Error::Unavailable {
+                        backend: BACKEND.to_string(),
+                        reason: format!(
+                            "sandbox '{}' has no readable pid, so its compute cannot be proven absent",
+                            request.name
+                        ),
+                        remedy: format!(
+                            "run `litterbox delete --force {}` and create it again",
+                            request.name
+                        ),
+                    });
+                }
+            }
         }
 
         // Every check has to pass except the cgroup one, which the registry
@@ -889,6 +935,7 @@ impl BubblewrapBackend {
             }
         }
         let workspace = workspace::workspace_directory(&request.project_slug, &request.name);
+        let materialised = !workspace.is_dir();
         std::fs::create_dir_all(&workspace).map_err(|error| {
             Error::failed(format!("the state directory could not be created: {error}"))
         })?;
@@ -902,6 +949,7 @@ impl BubblewrapBackend {
                 environment: &environment,
                 workspace: &workspace,
                 forwards: &forwards,
+                materialised,
                 scoped,
                 started: &mut started,
             })
@@ -919,7 +967,7 @@ impl BubblewrapBackend {
                 let name = request.name.clone();
                 let held = started.clone();
                 let _ = tokio::task::spawn_blocking(move || {
-                    cleanup(&*host, &project, &name, held.as_ref());
+                    cleanup(&*host, &project, &name, materialised, held.as_ref());
                 })
                 .await;
                 tracing::warn!(sandbox = %request.name, %error, "the sandbox was not created");
@@ -937,15 +985,18 @@ impl BubblewrapBackend {
             environment,
             workspace,
             forwards,
+            materialised,
             scoped,
             started,
         } = creation;
-        transfer(std::time::Duration::from_secs(600), {
-            let staged = request.workspace.source.clone();
-            let destination = workspace.to_path_buf();
-            move || workspace::copy_from(&staged, &destination)
-        })
-        .await?;
+        if materialised {
+            transfer(std::time::Duration::from_secs(600), {
+                let staged = request.workspace.source.clone();
+                let destination = workspace.to_path_buf();
+                move || workspace::copy_from(&staged, &destination)
+            })
+            .await?;
+        }
         let view = self.build_view(request, holder_command, workspace)?;
         let holder_arguments = holder_command.arguments();
         let scope = if scoped {
@@ -1046,45 +1097,49 @@ impl BubblewrapBackend {
             forwards,
             holder_command,
         )?;
-        let last_step = Mutex::new(None);
-        let host = self.host.clone();
-        let sandbox_name = request.name.clone();
-        let payload_for_steps = data.clone();
-        let shell_for_steps = holder_command.clone();
-        let provision = run_steps(
-            BACKEND,
-            &sandbox_name,
-            &request.provision,
-            &last_step,
-            move |_identity, run| {
-                let host = host.clone();
-                let data = payload_for_steps.clone();
-                let command = shell_for_steps.run(run);
-                Box::pin(async move {
-                    tokio::task::spawn_blocking(move || {
-                        join::run(&*host, &data, &command, PROVISION_OUTPUT_CAP)
+        let steps = if materialised {
+            let last_step = Mutex::new(None);
+            let host = self.host.clone();
+            let sandbox_name = request.name.clone();
+            let payload_for_steps = data.clone();
+            let shell_for_steps = holder_command.clone();
+            let provision = run_steps(
+                BACKEND,
+                &sandbox_name,
+                &request.provision,
+                &last_step,
+                move |_identity, run| {
+                    let host = host.clone();
+                    let data = payload_for_steps.clone();
+                    let command = shell_for_steps.run(run);
+                    Box::pin(async move {
+                        tokio::task::spawn_blocking(move || {
+                            join::run(&*host, &data, &command, PROVISION_OUTPUT_CAP)
+                        })
+                        .await
+                        .map_err(|error| Error::failed(format!("the step task failed: {error}")))?
                     })
-                    .await
-                    .map_err(|error| Error::failed(format!("the step task failed: {error}")))?
-                })
-            },
-            |_step, error| error,
-        );
-        let steps = tokio::time::timeout(crate::backends::shared::CREATE_BUDGET, provision)
-            .await
-            .map_err(|_| Error::Provisioning {
-                failure: Box::new(ProvisioningFailure::new(
-                    ProvisioningClass::Failed,
-                    Some(BACKEND.to_string()),
-                    None,
-                    None,
-                    format!(
-                        "create exceeded the {}s provisioning budget",
-                        crate::backends::shared::CREATE_BUDGET.as_secs()
-                    ),
-                    "reduce the work the provisioning steps perform",
-                )),
-            })??;
+                },
+                |_step, error| error,
+            );
+            tokio::time::timeout(crate::backends::shared::CREATE_BUDGET, provision)
+                .await
+                .map_err(|_| Error::Provisioning {
+                    failure: Box::new(ProvisioningFailure::new(
+                        ProvisioningClass::Failed,
+                        Some(BACKEND.to_string()),
+                        None,
+                        None,
+                        format!(
+                            "create exceeded the {}s provisioning budget",
+                            crate::backends::shared::CREATE_BUDGET.as_secs()
+                        ),
+                        "reduce the work the provisioning steps perform",
+                    )),
+                })??
+        } else {
+            Vec::new()
+        };
 
         let mut data = data;
         data.environment.steps = steps;
@@ -1096,9 +1151,17 @@ impl BubblewrapBackend {
             .ok_or_else(|| Error::failed("the state directory has no parent"))?;
         let text = toml::to_string_pretty(&data)
             .map_err(|error| Error::failed(format!("the payload could not be written: {error}")))?;
-        std::fs::write(&payload_path, text).map_err(|error| {
+        let staging = payload_path.with_extension("toml.new");
+        std::fs::write(&staging, text).map_err(|error| {
             Error::failed(format!(
                 "{} could not be written: {error}",
+                staging.display()
+            ))
+        })?;
+        std::fs::rename(&staging, &payload_path).map_err(|error| {
+            let _ = std::fs::remove_file(&staging);
+            Error::failed(format!(
+                "{} could not be replaced: {error}",
                 payload_path.display()
             ))
         })?;
