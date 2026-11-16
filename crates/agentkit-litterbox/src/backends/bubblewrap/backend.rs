@@ -1666,6 +1666,33 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn an_unreadable_record_reports_compute_it_could_not_stop() {
+        use crate::sandbox::contract::SandboxRecord;
+
+        let backend = backend();
+        let record = SandboxRecord {
+            name: format!("unreadable-{}", std::process::id()),
+            backend: "bubblewrap".to_string(),
+            project_slug: "probe".to_string(),
+            data: toml::Value::Table(Default::default()),
+        };
+        let teardown = backend.delete(&record).await.expect("delete removes state");
+        assert!(
+            !teardown.compute_stopped,
+            "an unreadable payload cannot identify compute"
+        );
+        assert_eq!(teardown.state_paths.len(), 1);
+        assert!(
+            teardown
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("no readable pid")),
+            "{:?}",
+            teardown.detail
+        );
+    }
+
     /// Create a sandbox, or skip the test when this host cannot run one.
     ///
     /// The host suite is ignored by default but CI runs ignored tests too,
