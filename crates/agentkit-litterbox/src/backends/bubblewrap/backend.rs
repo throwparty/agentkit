@@ -1687,7 +1687,7 @@ mod tests {
             teardown
                 .detail
                 .as_deref()
-                .is_some_and(|detail| detail.contains("no readable pid")),
+                .is_some_and(|detail| detail.contains("no process is identified")),
             "{:?}",
             teardown.detail
         );
