@@ -2,7 +2,7 @@
 
 ## Tasks
 
-### T-001: Add paused, create-mode and teardown contract types
+### T-001: [x] Add paused, create-mode and teardown contract types
 
 Add `Error::Paused { name }` with a message naming `litterbox resume <name>` and map it to `FailureClass::Conflict`. Add `CreateMode { Fresh, ReuseExisting }` to `CreateRequest` and set `Fresh` in every existing constructor and fixture. Add `Teardown { compute_stopped, state_paths, detail }` and change `Backend::delete` to return it. Update Docker and TestBackend to compile with the new signatures, and update `sandbox/mapping.rs` documentation so conflict covers a taken name and a paused state.
 
@@ -15,7 +15,7 @@ Add `Error::Paused { name }` with a message naming `litterbox resume <name>` and
 | Depends On |  |
 | References | paused-class-parity,neutral-failure-classes,backward-compatibility |
 
-### T-002: Add the version-tolerant pid probe
+### T-002: [x] Add the version-tolerant pid probe
 
 Add a small `RecordedPids` value in `payload.rs` that reads only the launcher and sandbox pids and their start times, whatever the payload version. Change `validate` to probe those first: a gone pid is `Absent`; a live pid with an unsupported or unreadable payload is `Unavailable`, not `Missing`; a payload with no readable pid is `Unavailable`. Do not let the probe feed a join, a signal or a cgroup write.
 
@@ -28,7 +28,7 @@ Add a small `RecordedPids` value in `payload.rs` that reads only the launcher an
 | Depends On | T-001 |
 | References | no-payload-dependence,unreadable-payload-with-workspace,state-directory-corrupt |
 
-### T-003: Add orchestrator outcome and inspection types
+### T-003: [x] Add orchestrator outcome and inspection types
 
 Add `orchestrator/outcome.rs` with `Recovery`, `Performed<T>`, `InspectionReport` and `Deletion`. `InspectionReport` carries either an `Inspection` or a status-only report whose status is `SandboxStatus::Unknown` or `SandboxStatus::Error` with a reason. Change `create`, `exec`, `upload`, `download` and `snapshot` to return `Performed<T>`, and update `SandboxIo` and every call site so the crate compiles.
 
@@ -41,7 +41,7 @@ Add `orchestrator/outcome.rs` with `Recovery`, `Performed<T>`, `InspectionReport
 | Depends On | T-001 |
 | References | recovery-warning,unknown-status,neutral-failure-classes |
 
-### T-004: Serialise repair per sandbox
+### T-004: [x] Serialise repair per sandbox
 
 Add `orchestrator/lock.rs` with a per-project-per-name guard. It creates `<records_dir>/.locks`, takes an in-process async guard keyed by name, then takes `flock(LOCK_EX)` on `<name>.lock` in a blocking task. Hold the guard from the status re-check through the record write. Add a non-unix fallback that uses the in-process guard alone.
 
@@ -54,7 +54,7 @@ Add `orchestrator/lock.rs` with a per-project-per-name guard. It creates `<recor
 | Depends On | T-001 |
 | References | repair-serialised,atomic-repair,no-new-dependency,concurrent-calls,concurrent-repair-single-holder |
 
-### T-005: Split create and add the ensure-live gate
+### T-005: [x] Split create and add the ensure-live gate
 
 Split `create` into branch creation, provisioning resolution and compute creation. Add `Sandboxes::ensure_live(name, policy)` that loads the record, selects the owning backend, inspects, and returns active, refuses paused when the policy says so, repairs missing, or returns the backend failure. Repair takes the lock, re-inspects, confirms the branch through SCM, resolves provisioning, stages the sandbox branch as the fallback source, and calls create with `ReuseExisting`. Add the failure paths for a missing branch, a record without a branch, a backend that cannot be asked and a preparation refusal.
 
@@ -67,7 +67,7 @@ Split `create` into branch creation, provisioning resolution and compute creatio
 | Depends On | T-001,T-002,T-003,T-004 |
 | References | ensure-live-or-repair,repair-is-create,repair-preserves-workspace,repair-failure,branch-missing,record-without-branch,preparation-refuses-during-repair |
 
-### T-006: Implement bubblewrap reuse-mode create
+### T-006: [x] Implement bubblewrap reuse-mode create
 
 Teach `BubblewrapBackend::create` about `CreateMode`. `Fresh` keeps the current conflict and copy-from-source path. `ReuseExisting` checks liveness through the pid probe: absent proceeds, live is conflict, no readable pid is unavailable with the delete remedy. Reuse an existing workspace; otherwise create it from the request source and mark it as materialised. Build the view and environment from the resolved request, start the holder, wait for readiness, apply limits, run sandbox steps only when the workspace was materialised, overwrite stale status and diagnostic files, and write the payload atomically after readiness. On failure tear down the holder and remove only a workspace this attempt created.
 
@@ -80,7 +80,7 @@ Teach `BubblewrapBackend::create` about `CreateMode`. `Fresh` keeps the current 
 | Depends On | T-002,T-005 |
 | References | repair-preserves-workspace,repair-rebuilds-environment,workspace-missing,setup-after-workspace-rebuild,stale-state-files,repair-spawn-fails,unreadable-payload-with-workspace |
 
-### T-007: Report teardown facts from backend delete
+### T-007: [x] Report teardown facts from backend delete
 
 Return `Teardown` from bubblewrap delete with the state directory and whether compute was stopped. A readable payload tears down a live sandbox and reports true. An unreadable or unsupported payload reports false with the reason and still removes the state directory. Adapt Docker and TestBackend to return their own teardown facts without changing their delete behaviour.
 
@@ -93,7 +93,7 @@ Return `Teardown` from bubblewrap delete with the state directory and whether co
 | Depends On | T-001 |
 | References | delete-corrupt-record,corrupt-record-removable,unreadable-payload-delete-force |
 
-### T-008: Refuse paused commands before the join
+### T-008: [x] Refuse paused commands before the join
 
 In `Sandboxes::exec`, inspect before the join. A paused sandbox returns `Error::Paused` and never reaches the backend exec. Upload, download and snapshot use the allow policy and continue because they do not join. Pause, resume, list and forwards keep their paths. Add a test that a paused exec performs no join and returns immediately.
 
@@ -106,9 +106,9 @@ In `Sandboxes::exec`, inspect before the join. A paused sandbox returns `Error::
 | Depends On | T-001,T-003 |
 | References | paused-refusal,paused-returns-immediately,paused-host-side-operations,repair-while-paused |
 
-### T-009: Enumerate records first and report unknown
+### T-009: [x] Enumerate records first and report unknown
 
-Add `metadata_store::entries_in` that returns every `.toml` record, including corrupt and unreadable files. Change `Sandboxes::list` to fill current, legacy and corrupt records first, sort by name, then enumerate branches and add only names with no record as orphans. Record a branch enumeration failure instead of dropping records. Change `inspect_listing` to return `InspectionReport`: a backend selection failure is Unknown for every record, a per-record refusal is Error, and only a successful inspect is Inspected.
+Add `metadata_store::entries_in` that returns every `.toml` record, including corrupt and unreadable files. Change `Sandboxes::list` to fill current and corrupt records first, sort by name, then enumerate branches and add only names with no record as orphans. Record a branch enumeration failure instead of dropping records. Change `inspect_listing` to return `InspectionReport`: a backend selection failure is Unknown for every record, a per-record refusal is Error, and only a successful inspect is Inspected.
 
 
 | Field | Value |
@@ -119,9 +119,9 @@ Add `metadata_store::entries_in` that returns every `.toml` record, including co
 | Depends On | T-003 |
 | References | unknown-status,list-records-and-branches,list-shows-unpaired,list-without-backend,record-without-branch,orphan-branch,backend-unavailable |
 
-### T-010: Implement delete confirmation and corrupt removal
+### T-010: [x] Implement delete confirmation and corrupt removal
 
-Move the delete policy into `Sandboxes::delete(name, force)`. Inspect a current record: active, missing, unknown or error without force returns Denied with the record, workspace and branch names and the unmerged-work warning; paused keeps its current path. With force, delete compute, branch and record and return `Deletion`. A corrupt or unreadable record with force skips payload parsing, removes the record file and deterministic branch, calls the backend best-effort, and reports compute it could not stop. Keep `--discard-legacy` unchanged.
+Move the delete policy into `Sandboxes::delete(name, force)`. Inspect a current record: active, missing, unknown or error without force returns Denied with the record, workspace and branch names and the unmerged-work warning; paused keeps its current path. With force, delete compute, branch and record and return `Deletion`. A corrupt or unreadable record with force skips payload parsing, removes the record file and deterministic branch, calls the backend best-effort, and reports compute it could not stop.
 
 
 | Field | Value |
@@ -132,20 +132,20 @@ Move the delete policy into `Sandboxes::delete(name, force)`. Inspect a current 
 | Depends On | T-003,T-007 |
 | References | delete-missing-force,delete-corrupt-record,delete-missing-needs-force,corrupt-record-removable,corrupt-delete-without-force,unreadable-payload-delete-force,paused-delete |
 
-### T-011: Update the CLI surface
+### T-011: [x] Update the CLI surface
 
 Pass `force` to `Sandboxes::delete` and print the `Deletion` fields. Render the record-first listing and the three inspection reports. Print the recovery warning to stderr before normal output. Update the `delete --force` help to cover active, missing and undetermined records and the unmerged-work risk. Keep every existing command and exit class except the documented delete confirmation.
 
 
 | Field | Value |
 |-------|-------|
-| Success Criteria | `litterbox list` prints active, paused, missing, unknown, error, legacy, corrupt and orphan entries correctly. `litterbox shell` on a missing sandbox prints the warning and runs. `litterbox shell` on a paused sandbox exits 4. `litterbox delete` without force refuses missing and undetermined records with exit 6. No command is added. |
+| Success Criteria | `litterbox list` prints active, paused, missing, unknown, error, corrupt and orphan entries correctly. `litterbox shell` on a missing sandbox prints the warning and runs. `litterbox shell` on a paused sandbox exits 4. `litterbox delete` without force refuses missing and undetermined records with exit 6. No command is added. |
 | Complexity | 🟡 Medium |
 | Effort | 4-6h |
 | Depends On | T-008,T-009,T-010 |
 | References | paused-refusal,paused-class-parity,list-shows-unpaired,delete-missing-force,recovery-warning,no-new-surface,no-new-tool-or-verb |
 
-### T-012: Add MCP recovery blocks and paused error data
+### T-012: [x] Add MCP recovery blocks and paused error data
 
 Add a helper that appends `Recovery` as a second `ContentBlock::json` block. Make the command helpers return `Performed<T>` so a repair inside read, write, patch, ls, glob, grep or bash is not lost. Append the recovery block to those tools and to `sandbox-create` when the orchestrator reports it. Add `reason` and `remedy` to the paused error data. Keep the tool list and argument names unchanged.
 
@@ -158,7 +158,7 @@ Add a helper that appends `Recovery` as a second `ContentBlock::json` block. Mak
 | Depends On | T-003,T-008 |
 | References | paused-class-parity,recovery-warning,cli-mcp-class-parity,no-new-surface,no-new-tool-or-verb |
 
-### T-013: Wire create-on-missing through MCP
+### T-013: [x] Wire create-on-missing through MCP
 
 Make `sandbox-create` return `Performed<SandboxRecord>`. On a missing name it follows the repair path, returns the live inspection and carries the recovery block. On an active or paused name it returns conflict. On an orphan branch it returns conflict without adopting the branch.
 
@@ -171,7 +171,7 @@ Make `sandbox-create` return `Performed<SandboxRecord>`. On a missing name it fo
 | Depends On | T-005,T-012 |
 | References | create-on-missing,create-reports-recovery,create-active-or-paused,orphan-branch |
 
-### T-014: Adapt Docker and TestBackend
+### T-014: [x] Adapt Docker and TestBackend
 
 Docker reports `ReuseExisting` as Unsupported with the delete-then-create remedy and returns `Teardown` from delete. TestBackend gains a missing state, records the `CreateMode` it received, counts exec calls, supports resurrection through `ReuseExisting`, and returns `Teardown`. Update the conformance suite and every fixture for the new signatures.
 
@@ -184,7 +184,7 @@ Docker reports `ReuseExisting` as Unsupported with the delete-then-create remedy
 | Depends On | T-001,T-003,T-007 |
 | References | backward-compatibility,repair-failure,backend-unavailable |
 
-### T-015: Build the lifecycle matrix and incident regression tests
+### T-015: [x] Build the lifecycle matrix and incident regression tests
 
 Add table-driven tests for every cell of the CLI and MCP matrices: active, paused, missing, corrupt and orphan records against list, shell, pause, resume, delete, the command tools, sandbox-ports and sandbox-create. Add the incident fixture: a current record, a live branch, a state directory with a workspace, dead pids and a v1 payload. Add tests for a branch that is gone, a record without a branch, a preparation refusal, a stale status file, an unreadable-payload delete without force, and two concurrent repairs. Add an ignored host test that creates a real bubblewrap sandbox, kills it, runs a command, and checks the workspace survived.
 
@@ -197,7 +197,7 @@ Add table-driven tests for every cell of the CLI and MCP matrices: active, pause
 | Depends On | T-005,T-006,T-008,T-009,T-010,T-013,T-014 |
 | References | test-matrix,matrix-tests,workspace-tests-recovers,concurrent-repair-single-holder,paused-returns-immediately,list-shows-unpaired,unreadable-payload-with-workspace,workspace-missing,branch-missing,state-directory-corrupt,backend-unavailable,concurrent-calls,repair-spawn-fails,orphan-branch,record-without-branch,paused-host-side-operations,paused-delete,create-active-or-paused,corrupt-delete-without-force,preparation-refuses-during-repair,list-without-backend,repair-while-paused,stale-state-files,setup-after-workspace-rebuild,unreadable-payload-delete-force |
 
-### T-016: Update lifecycle docs and regenerate references
+### T-016: [x] Update lifecycle docs and regenerate references
 
 Update `lifecycle.mdx`: the state diagram, the CLI and MCP matrices, the failure-class table, the delete confirmation, corrupt removal and record-first listing. Mirror the operation tables and recovery prose in `src/docgen.rs`. Regenerate `reference/cli.mdx` and `reference/mcp.mdx` with the existing docgen commands. Add a docgen test that asserts the new rows and prose are present.
 
@@ -210,7 +210,7 @@ Update `lifecycle.mdx`: the state diagram, the CLI and MCP matrices, the failure
 | Depends On | T-011,T-012,T-013 |
 | References | lifecycle-documentation,generated-documentation,reference-regenerated |
 
-### T-017: Run final verification
+### T-017: [x] Run final verification
 
 Run `cargo test -p agentkit-litterbox` and `cargo clippy -p agentkit-litterbox --all-targets -- -D warnings`. Check the MCP tool list, the CLI command list and the generated reference pages for drift. Check that every spec slug appears in at least one task's refs.
 
