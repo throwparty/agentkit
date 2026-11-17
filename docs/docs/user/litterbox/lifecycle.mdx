@@ -49,8 +49,8 @@ A sandbox is created `active`. Pausing and resuming move it between `active` and
 `paused`, and both are safe to repeat: pausing an already-paused sandbox and
 resuming an already-active one do nothing. The compute can exit at any time — a
 reboot, a killed process, a full disk — and the sandbox becomes `missing`
-without Litterbox being told. Nothing transitions out of `missing` today except
-`delete`.
+without Litterbox being told. The next operation that needs live compute repairs
+it from the branch and workspace, and reports the repair.
 
 ## Operations by state
 
@@ -59,17 +59,18 @@ without Litterbox being told. Nothing transitions out of `missing` today except
 | Command  | `active`                   | `paused`                            | `missing`                                  |
 | -------- | -------------------------- | ----------------------------------- | ------------------------------------------ |
 | `list`   | reported as `active`       | reported as `paused`                | reported as `missing`; the listing exits 0 |
-| `shell`  | runs the command           | blocks until the sandbox is resumed | exits 3, not found                         |
+| `shell`  | runs the command           | exits 4, `conflict`, naming the resume command | repairs the sandbox, warns, then runs |
 | `pause`  | freezes the sandbox        | succeeds, changing nothing          | exits 3, not found                         |
 | `resume` | succeeds, changing nothing | thaws the sandbox                   | exits 3, not found                         |
-| `delete` | refused without `--force`  | removes the record and the branch   | removes the record and the branch          |
+| `delete` | refused without `--force`  | removes the record and the branch   | refused without `--force`; with it, removes record, workspace and branch |
 
 ### MCP
 
 | Tool                                                   | `active`           | `paused`                            | `missing`          |
 | ------------------------------------------------------ | ------------------ | ----------------------------------- | ------------------ |
-| `bash`, `read`, `write`, `patch`, `ls`, `glob`, `grep` | runs               | blocks until the sandbox is resumed | `not found`        |
+| `bash`, `read`, `write`, `patch`, `ls`, `glob`, `grep` | runs               | invalid params, `conflict`, naming the resume command | repairs, appends a recovery block, then runs |
 | `sandbox-ports`                                        | the recorded ports | the recorded ports                  | the recorded ports |
+| `sandbox-create`                                       | conflict           | conflict                            | repairs and reports the recovery |
 
 `sandbox-create` is not an operation on an existing sandbox: it takes a new
 name, and any name already in use — `active`, `paused` or `missing` — is a
@@ -77,17 +78,19 @@ conflict. `sandbox-ports` answers from the record, so the same ports come back
 whether or not the compute is alive; a backend that does not forward ports
 reports the operation as unsupported.
 
-:::warning Paused sandboxes accept no work
+:::warning Paused sandboxes are refused early
 
-A command sent to a paused sandbox joins its frozen cgroup, so it does not run
-and does not return until the sandbox is resumed. A `timeout` does not help,
-because the timer is frozen along with the command. Resume the sandbox first.
+A command sent to a paused sandbox is refused before any namespace is opened or
+joined. The command returns immediately with `conflict` and names the resume
+command. A `timeout` is irrelevant because nothing runs. Resume the sandbox
+first.
 
 :::
 
-The MCP surface has no tool to list, inspect, pause, resume or delete a
-sandbox. Those are command-line operations, which is why an agent that finds a
-missing sandbox can report it but cannot recover from it.
+The MCP surface still has no tool to list, inspect, pause, resume or delete a
+sandbox. Those are command-line operations. An agent that finds a missing
+sandbox now recovers it on the next command tool call, and sees the repair in a
+structured recovery block.
 
 ## When a client asks for the wrong thing
 
@@ -98,8 +101,9 @@ come from that one classification.
 | Situation                                    | Class         | Command line | MCP                                     |
 | -------------------------------------------- | ------------- | ------------ | --------------------------------------- |
 | The name has no record                       | `not-found`   | exit 3       | `invalid_params`, `class: not-found`    |
-| The record exists but the compute has exited | `not-found`   | exit 3       | `invalid_params`, `class: not-found`    |
+| The record exists but the compute has exited | `not-found`   | exit 3 (or a repair) | `invalid_params`, `class: not-found`    |
 | Creating a name that is already in use       | `conflict`    | exit 4       | `invalid_params`, `class: conflict`     |
+| A command addressed to a paused sandbox      | `conflict`    | exit 4       | `invalid_params`, `class: conflict`     |
 | The backend does not provide the operation   | `unsupported` | exit 5       | `invalid_request`, `class: unsupported` |
 | Permission was refused                       | `denied`      | exit 6       | `invalid_request`, `class: denied`      |
 | The backend cannot run on this host          | `unavailable` | exit 7       | `invalid_request`, `class: unavailable` |
@@ -109,19 +113,24 @@ Two cases are deliberately not errors:
 
 - **Inspecting a missing sandbox succeeds.** It reports `missing`, because that
   is the honest answer and it is what `list` shows.
-- **Deleting a missing sandbox succeeds.** The compute is already gone, so the
-  removal cannot lose anything. Deleting a sandbox that is already deleted is
-  also a success, so a retried teardown converges.
+- **A missing sandbox is repaired on the next operation.** The CLI warns on
+  stderr; MCP appends a structured recovery block. The branch is never deleted
+  by a repair.
+- **Deleting a missing sandbox requires `--force`.** The branch may hold
+  unmerged work. With `--force`, the record, workspace and branch are removed
+  and the command states exactly what it removed.
 
 ## Recovering a missing sandbox
 
-Today the only way out of `missing` is `litterbox delete`. That removes the
-record **and the branch**, so any work that was only on the branch is lost.
+A missing sandbox repairs itself on the next command, upload, download or
+snapshot. The repair reuses the workspace, keeps the branch, and starts new
+compute against the same name. If the workspace is gone, it is materialised
+from the branch and the sandbox's provisioning steps run again.
 
-Creating the same name again fails as a conflict, because the branch and the
-state directory are still there. There is no reconciliation path that respawns
-compute from an existing branch.
+If the branch is gone, repair refuses and names the next command:
+`litterbox delete --force <name>`, then create it again. A corrupt record is not
+guessed at; `litterbox delete --force <name>` removes it and reports any compute
+it could not stop.
 
-If a sandbox has gone missing and you want to keep its work, do not delete it.
-The branch is a normal branch: inspect it, merge or cherry-pick from it, and
-only then delete the sandbox.
+The branch remains the durable copy. It is a normal branch: inspect it, merge or
+cherry-pick from it, and only then delete the sandbox.

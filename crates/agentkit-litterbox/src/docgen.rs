@@ -20,19 +20,17 @@ pub fn cli_section() -> String {
          | Command | `active` | `paused` | `missing` |\n\
          | --- | --- | --- | --- |\n\
          | `list` | reported as `active` | reported as `paused` | reported as `missing`; the listing exits 0 |\n\
-         | `shell` | runs the command | blocks until the sandbox is resumed | exits 3, not found |\n\
+         | `shell` | runs the command | exits 4, `conflict`, and names the resume command | repairs the sandbox, warns on stderr, then runs the command |\n\
          | `pause` | freezes the sandbox | succeeds, changing nothing | exits 3, not found |\n\
          | `resume` | succeeds, changing nothing | thaws the sandbox | exits 3, not found |\n\
-         | `delete` | refused without `--force` | removes the record and the branch | removes the record and the branch |\n\
+         | `delete` | refused without `--force` | removes the record and the branch | refused without `--force`; with it, removes the record, workspace and branch |\n\
          \n\
          Creating a sandbox is only available over MCP. There is no `create` command.\n\
          \n\
-         :::warning Paused sandboxes accept no work\n\
-         \n\
-         A command sent to a paused sandbox joins its frozen cgroup, so it does not run and does\n\
-         not return until the sandbox is resumed. Resume the sandbox first.\n\
-         \n\
-         :::\n",
+         A missing sandbox is repaired on the next command that needs live compute. The\n\
+         repair reuses the workspace, keeps the branch, and is reported before the command's\n\
+         output. A paused sandbox is refused before any join, so the caller returns\n\
+         immediately instead of blocking.\n",
     );
     section.push_str(LINK);
     section
@@ -47,24 +45,18 @@ pub fn mcp_section() -> String {
         "\n### Tools\n\n\
          | Tool | `active` | `paused` | `missing` |\n\
          | --- | --- | --- | --- |\n\
-         | `bash`, `read`, `write`, `patch`, `ls`, `glob`, `grep` | runs | blocks until the sandbox is resumed | `not found` |\n\
+         | `bash`, `read`, `write`, `patch`, `ls`, `glob`, `grep` | runs | invalid params, `conflict`, naming the resume command | repairs the sandbox, appends a recovery block, then runs |\n\
          | `sandbox-ports` | the recorded ports | the recorded ports | the recorded ports |\n\
+         | `sandbox-create` | conflict | conflict | repairs the sandbox and reports the recovery |\n\
          \n\
-         `sandbox-create` is not an operation on an existing sandbox: it takes a new name, and any\n\
-         name already in use — `active`, `paused` or `missing` — is a conflict. `sandbox-ports`\n\
-         answers from the record, so the same ports come back whether or not the compute is alive;\n\
-         a backend that does not forward ports reports the operation as unsupported.\n\
+         `sandbox-create` on an active or paused name is a conflict. On a missing name it\n\
+         repairs the compute and reports the recovery. `sandbox-ports` answers from the\n\
+         record, so the same ports come back whether or not the compute is alive; a backend\n\
+         that does not forward ports reports the operation as unsupported.\n\
          \n\
-         :::warning Paused sandboxes accept no work\n\
-         \n\
-         A command sent to a paused sandbox joins its frozen cgroup, so it does not run and does\n\
-         not return until the sandbox is resumed. A `timeout` does not help, because the timer is\n\
-         frozen along with the command. Resume the sandbox first.\n\
-         \n\
-         :::\n\
-         \n\
-         No MCP tool lists, inspects, pauses, resumes or deletes a sandbox. An agent that finds a\n\
-         missing sandbox can report it, but cannot recover from it.\n",
+         A paused command is refused before any join, so the tool returns immediately. A\n\
+         repaired command's result carries the normal content plus a structured recovery\n\
+         block naming the sandbox, the state it came from and the branch.\n",
     );
     section.push_str(LINK);
     section
