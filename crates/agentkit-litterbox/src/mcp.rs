@@ -26,6 +26,7 @@ mod error;
 use crate::config_loader;
 use crate::orchestrator::SandboxIo;
 use crate::orchestrator::Sandboxes;
+use crate::orchestrator::outcome::{Performed, Recovery};
 use crate::sandbox::contract::{Error, Execution, Forward};
 
 use docs::TOOL_DOCS;
@@ -131,11 +132,12 @@ impl SandboxServer {
         Parameters(args): Parameters<SandboxCreateArgs>,
     ) -> Result<CallToolResult, McpError> {
         let project = self.project()?;
-        let record = project.create(&args.name).await.map_err(map_contract)?.value;
+        let performed = project.create(&args.name).await.map_err(map_contract)?;
+        let record = performed.value;
         let inspection = project.inspect(&record.name).await.map_err(map_contract)?;
         let content = ContentBlock::json(inspection)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
-        Ok(CallToolResult::success(vec![content]))
+        success_with_recovery(content, performed.recovery)
     }
 
     #[tool(
@@ -166,11 +168,13 @@ impl SandboxServer {
         Parameters(args): Parameters<ReadArgs>,
     ) -> Result<CallToolResult, McpError> {
         let project = self.project()?;
-        let content = read_in_sandbox(project, &args.sandbox, &args.path, args.offset, args.limit)
+        let performed = read_in_sandbox(project, &args.sandbox, &args.path, args.offset, args.limit)
             .await
             .map_err(ToolError::into_mcp)?;
-        let content = ContentBlock::text(content);
-        Ok(CallToolResult::success(vec![content]))
+        success_with_recovery(
+            ContentBlock::text(performed.value),
+            performed.recovery,
+        )
     }
 
     #[tool(name = "write", description = "Write a file into the sandbox")]
@@ -179,9 +183,10 @@ impl SandboxServer {
         Parameters(args): Parameters<WriteArgs>,
     ) -> Result<CallToolResult, McpError> {
         let project = self.project()?;
-        write_in_sandbox(project, &args.sandbox, &args.path, &args.content)
+        let performed = write_in_sandbox(project, &args.sandbox, &args.path, &args.content)
             .await
             .map_err(ToolError::into_mcp)?;
+        let recovery = performed.recovery;
         if let Err(error) = project
             .snapshot(
                 &args.sandbox,
@@ -193,9 +198,9 @@ impl SandboxServer {
             // write, or the caller will apply the edit twice. The result says
             // separately that the edit is not yet recorded.
             tracing::warn!(sandbox = %args.sandbox, %error, "the write landed but the snapshot failed");
-            return mutation_result(Some(error.to_string()));
+            return mutation_result(Some(error.to_string()), recovery);
         }
-        mutation_result(None)
+        mutation_result(None, recovery)
     }
 
     #[tool(
@@ -207,9 +212,10 @@ impl SandboxServer {
         Parameters(args): Parameters<PatchArgs>,
     ) -> Result<CallToolResult, McpError> {
         let project = self.project()?;
-        patch_in_sandbox(project, &args.sandbox, &args.path, &args.diff)
+        let performed = patch_in_sandbox(project, &args.sandbox, &args.path, &args.diff)
             .await
             .map_err(ToolError::into_mcp)?;
+        let recovery = performed.recovery;
         if let Err(error) = project
             .snapshot(
                 &args.sandbox,
@@ -220,9 +226,9 @@ impl SandboxServer {
             // The patch landed; see the write tool for why this is not an
             // error result.
             tracing::warn!(sandbox = %args.sandbox, %error, "the patch landed but the snapshot failed");
-            return mutation_result(Some(error.to_string()));
+            return mutation_result(Some(error.to_string()), recovery);
         }
-        mutation_result(None)
+        mutation_result(None, recovery)
     }
 
     #[tool(
@@ -234,7 +240,7 @@ impl SandboxServer {
         Parameters(args): Parameters<BashArgs>,
     ) -> Result<CallToolResult, McpError> {
         let project = self.project()?;
-        let result = bash_in_sandbox(
+        let performed = bash_in_sandbox(
             project,
             &args.sandbox,
             &args.command,
@@ -243,6 +249,8 @@ impl SandboxServer {
         )
         .await
         .map_err(ToolError::into_mcp)?;
+        let recovery = performed.recovery;
+        let result = performed.value;
         if let Err(error) = project
             .snapshot(&args.sandbox, &snapshot_message(&SnapshotTrigger::Bash))
             .await
@@ -251,19 +259,19 @@ impl SandboxServer {
         }
         let content = ContentBlock::json(result)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
-        Ok(CallToolResult::success(vec![content]))
+        success_with_recovery(content, recovery)
     }
 
     #[tool(name = "ls", description = "List directory entries")]
     async fn ls(&self, Parameters(args): Parameters<LsArgs>) -> Result<CallToolResult, McpError> {
         let recursive = args.recursive.unwrap_or(false);
         let project = self.project()?;
-        let entries = ls_in_sandbox(project, &args.sandbox, &args.path, recursive)
+        let performed = ls_in_sandbox(project, &args.sandbox, &args.path, recursive)
             .await
             .map_err(ToolError::into_mcp)?;
-        let content = ContentBlock::json(entries)
+        let content = ContentBlock::json(performed.value)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
-        Ok(CallToolResult::success(vec![content]))
+        success_with_recovery(content, performed.recovery)
     }
 
     #[tool(name = "glob", description = "Find files matching a glob pattern")]
@@ -272,12 +280,12 @@ impl SandboxServer {
         Parameters(args): Parameters<GlobArgs>,
     ) -> Result<CallToolResult, McpError> {
         let project = self.project()?;
-        let matches = glob_in_sandbox(project, &args.sandbox, &args.pattern, args.path.as_deref())
+        let performed = glob_in_sandbox(project, &args.sandbox, &args.pattern, args.path.as_deref())
             .await
             .map_err(ToolError::into_mcp)?;
-        let content = ContentBlock::json(matches)
+        let content = ContentBlock::json(performed.value)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
-        Ok(CallToolResult::success(vec![content]))
+        success_with_recovery(content, performed.recovery)
     }
 
     #[tool(name = "grep", description = "Search file contents for a pattern")]
@@ -286,7 +294,7 @@ impl SandboxServer {
         Parameters(args): Parameters<GrepArgs>,
     ) -> Result<CallToolResult, McpError> {
         let project = self.project()?;
-        let matches = grep_in_sandbox(
+        let performed = grep_in_sandbox(
             project,
             &args.sandbox,
             &args.pattern,
@@ -295,9 +303,9 @@ impl SandboxServer {
         )
         .await
         .map_err(ToolError::into_mcp)?;
-        let content = ContentBlock::json(matches)
+        let content = ContentBlock::json(performed.value)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
-        Ok(CallToolResult::success(vec![content]))
+        success_with_recovery(content, performed.recovery)
     }
 }
 
@@ -560,7 +568,7 @@ async fn ls_in_sandbox<P: SandboxIo + ?Sized>(
     name: &str,
     path: &str,
     recursive: bool,
-) -> Result<Vec<String>, ToolError> {
+) -> Result<Performed<Vec<String>>, ToolError> {
     let workspace = io
         .workspace(name)
         .await
@@ -572,13 +580,18 @@ async fn ls_in_sandbox<P: SandboxIo + ?Sized>(
         format!("ls -1A {}", shell_escape(&sandbox_path))
     };
     let command = script_argv(io, name, Tool::Ls, script).await?;
-    let result = exec_in_sandbox(io, name, &command)
+    let performed = exec_in_sandbox(io, name, &command)
         .await
         .map_err(|error| ToolError::sandbox(Tool::Ls, error))?;
+    let recovery = performed.recovery;
+    let result = performed.value;
     if result.exit_code != 0 {
         return Err(ToolError::classify(Tool::Ls, &sandbox_path, &result));
     }
-    Ok(parse_ls_output(&result.stdout, &sandbox_path, recursive))
+    Ok(Performed {
+        value: parse_ls_output(&result.stdout, &sandbox_path, recursive),
+        recovery,
+    })
 }
 
 fn parse_ls_output(output: &str, base: &str, recursive: bool) -> Vec<String> {
@@ -618,10 +631,34 @@ struct MutationResult {
     snapshot_error: Option<String>,
 }
 
-fn mutation_result(snapshot_error: Option<String>) -> Result<CallToolResult, McpError> {
+fn mutation_result(
+    snapshot_error: Option<String>,
+    recovery: Option<Recovery>,
+) -> Result<CallToolResult, McpError> {
     let content = ContentBlock::json(&MutationResult { snapshot_error })
         .map_err(|error| McpError::internal_error(error.to_string(), None))?;
-    Ok(CallToolResult::success(vec![content]))
+    let mut blocks = vec![content];
+    if let Some(recovery) = recovery {
+        blocks.push(
+            ContentBlock::json(recovery)
+                .map_err(|error| McpError::internal_error(error.to_string(), None))?,
+        );
+    }
+    Ok(CallToolResult::success(blocks))
+}
+
+fn success_with_recovery(
+    content: ContentBlock,
+    recovery: Option<Recovery>,
+) -> Result<CallToolResult, McpError> {
+    let mut blocks = vec![content];
+    if let Some(recovery) = recovery {
+        blocks.push(
+            ContentBlock::json(recovery)
+                .map_err(|error| McpError::internal_error(error.to_string(), None))?,
+        );
+    }
+    Ok(CallToolResult::success(blocks))
 }
 
 fn snapshot_message(trigger: &SnapshotTrigger) -> String {
@@ -645,7 +682,7 @@ async fn read_in_sandbox<P: SandboxIo + ?Sized>(
     path: &str,
     offset: Option<usize>,
     limit: Option<usize>,
-) -> Result<String, ToolError> {
+) -> Result<Performed<String>, ToolError> {
     let workspace = io
         .workspace(name)
         .await
@@ -658,13 +695,18 @@ async fn read_in_sandbox<P: SandboxIo + ?Sized>(
         format!("cat -- {}", shell_escape(&sandbox_path)),
     )
     .await?;
-    let result = exec_in_sandbox(io, name, &command)
+    let performed = exec_in_sandbox(io, name, &command)
         .await
         .map_err(|error| ToolError::sandbox(Tool::Read, error))?;
+    let recovery = performed.recovery;
+    let result = performed.value;
     if result.exit_code != 0 {
         return Err(ToolError::classify(Tool::Read, &sandbox_path, &result));
     }
-    Ok(slice_content(&result.stdout, offset, limit))
+    Ok(Performed {
+        value: slice_content(&result.stdout, offset, limit),
+        recovery,
+    })
 }
 
 #[allow(clippy::result_large_err)]
@@ -673,7 +715,7 @@ async fn write_in_sandbox<P: SandboxIo + ?Sized>(
     name: &str,
     path: &str,
     content: &str,
-) -> Result<(), ToolError> {
+) -> Result<Performed<()>, ToolError> {
     let workspace = io
         .workspace(name)
         .await
@@ -690,13 +732,15 @@ async fn write_in_sandbox<P: SandboxIo + ?Sized>(
         ),
     )
     .await?;
-    let result = exec_in_sandbox(io, name, &command)
+    let performed = exec_in_sandbox(io, name, &command)
         .await
         .map_err(|error| ToolError::sandbox(Tool::Write, error))?;
+    let recovery = performed.recovery;
+    let result = performed.value;
     if result.exit_code != 0 {
         return Err(ToolError::classify(Tool::Write, &sandbox_path, &result));
     }
-    Ok(())
+    Ok(Performed { value: (), recovery })
 }
 
 #[allow(clippy::result_large_err)]
@@ -705,11 +749,13 @@ async fn patch_in_sandbox<P: SandboxIo + ?Sized>(
     name: &str,
     path: &str,
     diff: &str,
-) -> Result<(), ToolError> {
+) -> Result<Performed<()>, ToolError> {
     // Read current file content
-    let original_content = read_in_sandbox(io, name, path, None, None)
+    let read = read_in_sandbox(io, name, path, None, None)
         .await
         .map_err(|error| ToolError::patch_read(path, error))?;
+    let mut recovery = read.recovery;
+    let original_content = read.value;
 
     // Parse and apply patch using diffy
     let patch = diffy::Patch::from_str(diff)
@@ -719,11 +765,14 @@ async fn patch_in_sandbox<P: SandboxIo + ?Sized>(
         .map_err(|error| ToolError::patch_apply(path, error.to_string()))?;
 
     // Write patched content back
-    write_in_sandbox(io, name, path, &patched_content)
+    let written = write_in_sandbox(io, name, path, &patched_content)
         .await
         .map_err(|error| ToolError::patch_write(path, error))?;
+    if recovery.is_none() {
+        recovery = written.recovery;
+    }
 
-    Ok(())
+    Ok(Performed { value: (), recovery })
 }
 
 #[allow(clippy::result_large_err)]
@@ -733,7 +782,7 @@ async fn bash_in_sandbox<P: SandboxIo + ?Sized>(
     command: &str,
     workdir: Option<&str>,
     timeout: Option<u64>,
-) -> Result<Execution, ToolError> {
+) -> Result<Performed<Execution>, ToolError> {
     let workspace = io
         .workspace(name)
         .await
@@ -796,10 +845,8 @@ async fn exec_in_sandbox<P: SandboxIo + ?Sized>(
     io: &P,
     name: &str,
     command: &[String],
-) -> Result<Execution, Error> {
-    io.exec(name, command)
-        .await
-        .map(|performed| performed.value)
+) -> Result<Performed<Execution>, Error> {
+    io.exec(name, command).await
 }
 
 /// A script for the sandbox's own shell.
@@ -937,7 +984,7 @@ async fn glob_in_sandbox<P: SandboxIo + ?Sized>(
     name: &str,
     pattern: &str,
     base_path: Option<&str>,
-) -> Result<Vec<String>, ToolError> {
+) -> Result<Performed<Vec<String>>, ToolError> {
     let workspace = io
         .workspace(name)
         .await
@@ -952,9 +999,11 @@ async fn glob_in_sandbox<P: SandboxIo + ?Sized>(
         format!("find {} -mindepth 1 -print", shell_escape(&base)),
     )
     .await?;
-    let result = exec_in_sandbox(io, name, &command)
+    let performed = exec_in_sandbox(io, name, &command)
         .await
         .map_err(|error| ToolError::sandbox(Tool::Glob, error))?;
+    let recovery = performed.recovery;
+    let result = performed.value;
     if result.exit_code != 0 {
         return Err(ToolError::classify(Tool::Glob, &base, &result));
     }
@@ -983,7 +1032,10 @@ async fn glob_in_sandbox<P: SandboxIo + ?Sized>(
     }
 
     entries.sort();
-    Ok(entries)
+    Ok(Performed {
+        value: entries,
+        recovery,
+    })
 }
 
 fn parse_find_output(output: &str) -> Vec<String> {
@@ -1010,7 +1062,7 @@ async fn grep_in_sandbox<P: SandboxIo + ?Sized>(
     pattern: &str,
     path: &str,
     include: Option<&str>,
-) -> Result<Vec<String>, ToolError> {
+) -> Result<Performed<Vec<String>>, ToolError> {
     let workspace = io
         .workspace(name)
         .await
@@ -1023,14 +1075,22 @@ async fn grep_in_sandbox<P: SandboxIo + ?Sized>(
         build_grep_command(pattern, &sandbox_path, include),
     )
     .await?;
-    let result = exec_in_sandbox(io, name, &command)
+    let performed = exec_in_sandbox(io, name, &command)
         .await
         .map_err(|error| ToolError::sandbox(Tool::Grep, error))?;
+    let recovery = performed.recovery;
+    let result = performed.value;
     if result.exit_code == 0 {
-        return Ok(parse_grep_output(&result.stdout));
+        return Ok(Performed {
+            value: parse_grep_output(&result.stdout),
+            recovery,
+        });
     }
     if result.exit_code == 1 && result.stderr.trim().is_empty() {
-        return Ok(Vec::new());
+        return Ok(Performed {
+            value: Vec::new(),
+            recovery,
+        });
     }
     Err(classify_grep_failure(&sandbox_path, pattern, &result))
 }
@@ -1501,7 +1561,7 @@ mod tests {
         let provider = TestProvider::new(Ok(result), Arc::clone(&last_command));
         let content = read_in_sandbox(&provider, "sandbox", "README.md", None, None)
             .await
-            .expect("read");
+            .expect("read").value;
 
         assert_eq!(content, "one\ntwo\n");
         let command = last_command.lock().expect("command lock");
@@ -1523,7 +1583,7 @@ mod tests {
         let provider = TestProvider::new(Ok(result), Arc::clone(&last_command));
         let content = read_in_sandbox(&provider, "sandbox", "README.md", Some(1), Some(1))
             .await
-            .expect("read");
+            .expect("read").value;
 
         assert_eq!(content, "two\n");
     }
@@ -1742,7 +1802,7 @@ mod tests {
         let provider = TestProvider::new(Ok(result), Arc::clone(&last_command));
         let entries = ls_in_sandbox(&provider, "sandbox", "dir", false)
             .await
-            .expect("list");
+            .expect("list").value;
 
         assert_eq!(entries, vec!["file.txt", "subdir"]);
         let command = last_command.lock().expect("command lock");
@@ -1762,7 +1822,7 @@ mod tests {
         let provider = TestProvider::new(Ok(result), Arc::clone(&last_command));
         let entries = ls_in_sandbox(&provider, "sandbox", "dir", true)
             .await
-            .expect("list");
+            .expect("list").value;
 
         assert_eq!(entries, vec!["file.txt", "subdir", "subdir/child.txt"]);
         let command = last_command.lock().expect("command lock");
@@ -1782,7 +1842,7 @@ mod tests {
         let provider = TestProvider::new(Ok(result), Arc::new(Mutex::new(None)));
         let entries = ls_in_sandbox(&provider, "sandbox", "empty", false)
             .await
-            .expect("list");
+            .expect("list").value;
 
         assert!(entries.is_empty());
     }
@@ -1838,7 +1898,7 @@ mod tests {
         let provider = TestProvider::new(Ok(result), Arc::clone(&last_command));
         let entries = glob_in_sandbox(&provider, "sandbox", "**/*.txt", Some("dir"))
             .await
-            .expect("glob");
+            .expect("glob").value;
 
         assert_eq!(entries, vec!["root.txt", "subdir/child.txt"]);
         let command = last_command.lock().expect("command lock");
@@ -1857,7 +1917,7 @@ mod tests {
         let provider = TestProvider::new(Ok(result), Arc::new(Mutex::new(None)));
         let entries = glob_in_sandbox(&provider, "sandbox", "*.md", None)
             .await
-            .expect("glob");
+            .expect("glob").value;
 
         assert!(entries.is_empty());
     }
@@ -1890,7 +1950,7 @@ mod tests {
         let provider = TestProvider::new(Ok(result), Arc::clone(&last_command));
         let entries = grep_in_sandbox(&provider, "sandbox", "hello", "dir", None)
             .await
-            .expect("grep");
+            .expect("grep").value;
 
         assert_eq!(
             entries,
@@ -1915,7 +1975,7 @@ mod tests {
         let provider = TestProvider::new(Ok(result), Arc::clone(&last_command));
         let entries = grep_in_sandbox(&provider, "sandbox", "hello", "dir", Some("*.rs"))
             .await
-            .expect("grep");
+            .expect("grep").value;
 
         assert_eq!(entries, vec!["/src/dir/main.rs:1:hello"]);
         let command = last_command.lock().expect("command lock");
@@ -1934,7 +1994,7 @@ mod tests {
         let provider = TestProvider::new(Ok(result), Arc::new(Mutex::new(None)));
         let entries = grep_in_sandbox(&provider, "sandbox", "hello", "dir", None)
             .await
-            .expect("grep");
+            .expect("grep").value;
 
         assert!(entries.is_empty());
     }
@@ -2069,7 +2129,7 @@ mod tests {
         let provider = TestProvider::new(Ok(result), Arc::clone(&last_command));
         let output = bash_in_sandbox(&provider, "sandbox", "echo ok", None, None)
             .await
-            .expect("bash");
+            .expect("bash").value;
 
         assert_eq!(output.stdout, "ok");
         let command = last_command.lock().expect("command lock");
@@ -2089,7 +2149,7 @@ mod tests {
         let provider = TestProvider::new(Ok(result), Arc::new(Mutex::new(None)));
         let output = bash_in_sandbox(&provider, "sandbox", "false", None, None)
             .await
-            .expect("bash");
+            .expect("bash").value;
 
         assert_eq!(output.exit_code, 2);
         assert_eq!(output.stderr, "fail");
