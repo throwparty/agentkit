@@ -184,6 +184,14 @@ impl TestBackend {
         self.requests.lock().expect("test backend lock").clone()
     }
 
+    /// Make a record's compute look gone without removing the record.
+    pub fn mark_missing(&self, name: &str) {
+        self.deleted
+            .lock()
+            .expect("test backend lock")
+            .insert(name.to_string());
+    }
+
     /// Every delete this backend performed, in order.
     pub fn deletes(&self) -> Vec<String> {
         self.delete_log.lock().expect("test backend lock").clone()
@@ -252,7 +260,17 @@ impl Backend for TestBackend {
                     .records
                     .lock()
                     .map_err(|_| Error::failed("test backend lock poisoned"))?;
-                if records.iter().any(|existing| existing.name == request.name) {
+                if let Some(existing) = records.iter().find(|existing| existing.name == request.name)
+                {
+                    if request.mode == CreateMode::ReuseExisting {
+                        let mut deleted = self
+                            .deleted
+                            .lock()
+                            .map_err(|_| Error::failed("test backend lock poisoned"))?;
+                        if deleted.remove(&request.name) {
+                            return Ok(existing.clone());
+                        }
+                    }
                     return Err(Error::Conflict {
                         name: request.name.clone(),
                     });
