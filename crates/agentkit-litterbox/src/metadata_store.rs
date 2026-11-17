@@ -65,6 +65,41 @@ pub fn load_sandbox_at(dir: &Path, name: &str) -> Result<Option<LoadedSandbox>, 
     load_sandbox_in(dir, name)
 }
 
+/// One record file in a directory, whether it loaded or not.
+#[derive(Debug)]
+pub struct RecordEntry {
+    /// The record's name, from its file name.
+    pub name: String,
+    /// What the file turned out to be.
+    pub loaded: Result<LoadedSandbox, Error>,
+}
+
+/// Every record file in a directory, including ones that cannot be read.
+pub fn entries_in(dir: &Path) -> Vec<RecordEntry> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+
+    entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let name = name.strip_suffix(".toml")?.to_string();
+            match load_sandbox_in(dir, &name) {
+                Ok(Some(loaded)) => Some(RecordEntry {
+                    name,
+                    loaded: Ok(loaded),
+                }),
+                Ok(None) => None,
+                Err(error) => Some(RecordEntry {
+                    name,
+                    loaded: Err(error),
+                }),
+            }
+        })
+        .collect()
+}
+
 /// Remove a record from an explicit directory.
 pub fn remove_sandbox_at(dir: &Path, name: &str) -> Result<(), Error> {
     remove_in(dir, name)

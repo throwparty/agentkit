@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -10,7 +11,7 @@ use crate::config::Config;
 use crate::domain::{SandboxError, ScmMode};
 use crate::metadata_store::{self, LoadedSandbox, StoredSandbox};
 use crate::orchestrator::lock;
-use crate::orchestrator::outcome::{Performed, Recovery};
+use crate::orchestrator::outcome::{Deletion, InspectionReport, Performed, Recovery};
 use crate::provision::StepOutcome;
 use crate::provision::kind::KindDescription;
 use crate::provision::prepare::{self, PrepareContext, PrepareError, SystemRunner};
@@ -46,6 +47,8 @@ pub struct Listing {
     pub corrupt: Vec<String>,
     /// Branches with no record: compute the orchestrator cannot address.
     pub orphans: Vec<String>,
+    /// Why branches could not be enumerated, when they could not.
+    pub branch_error: Option<String>,
 }
 
 /// Whether an operation may proceed while the sandbox is paused.
@@ -394,43 +397,126 @@ impl Sandboxes {
     }
 
     /// Delete a sandbox: compute first, then the branch, each half idempotent.
-    pub async fn delete(&self, name: &str) -> Result<(), Error> {
-        let stored = match self.stored(name) {
-            Ok(stored) => stored,
-            // No record: the branch may still exist from a crash before the
-            // record was written. Remove it; both halves already gone means a
-            // retried delete, which succeeds.
-            Err(Error::NotFound { name }) => {
-                let slug = self.valid_name(&name)?;
-                return match self.scm.delete_branch(&slug) {
-                    Ok(()) => Ok(()),
-                    Err(crate::domain::SandboxError::SandboxNotFound { .. }) => Ok(()),
-                    Err(error) => Err(error.into()),
+    pub async fn delete(&self, name: &str, force: bool) -> Result<Deletion, Error> {
+        let name = self.valid_name(name)?;
+
+        match metadata_store::load_sandbox_at(&self.records_dir, &name)? {
+            Some(LoadedSandbox::Current(stored)) => {
+                let selected = self
+                    .select_for(&stored.sandbox, "delete the sandbox")
+                    .await?;
+                let inspection = selected.core().inspect(&stored.sandbox).await;
+                let status = match inspection {
+                    Ok(inspection) => inspection.status,
+                    Err(error) => SandboxStatus::Error {
+                        reason: error.to_string(),
+                    },
                 };
+                if !matches!(status, SandboxStatus::Paused) && !force {
+                    let state = match &status {
+                        SandboxStatus::Active => "active",
+                        SandboxStatus::Missing => "missing",
+                        SandboxStatus::Unknown | SandboxStatus::Error { .. } => {
+                            "in a state that cannot be determined"
+                        }
+                        SandboxStatus::Paused => "paused",
+                    };
+                    return Err(Error::Denied {
+                        operation: format!("delete sandbox '{name}'"),
+                        reason: format!(
+                            "it is {state}; its branch '{}' may hold unmerged work. \
+                             Pass --force to delete the record, workspace and branch.",
+                            stored.branch_name
+                        ),
+                    });
+                }
+
+                tracing::info!(sandbox = %name, backend = %selected.name(), "deleting the sandbox");
+                let teardown = selected.core().delete(&stored.sandbox).await?;
+
+                // A branch that is already gone is not a failure.
+                if let Err(error) = self.scm.delete_branch(&stored.sandbox.name) {
+                    tracing::warn!(sandbox = %name, %error, "the branch may remain after delete");
+                }
+
+                if stored.remote
+                    && self.scm.list_sandboxes().is_ok_and(|left| left.is_empty())
+                    && let Err(error) = VcsStore::destroy_bare(&self.project_slug)
+                {
+                    tracing::warn!(project = %self.project_slug, %error, "the bare clone may remain");
+                }
+
+                metadata_store::remove_sandbox_at(&self.records_dir, &stored.sandbox.name)?;
+                Ok(Deletion {
+                    record_path: Some(self.records_dir.join(format!("{}.toml", stored.sandbox.name))),
+                    state_paths: teardown.state_paths,
+                    branch: stored.branch_name,
+                    compute_stopped: teardown.compute_stopped,
+                    detail: teardown.detail,
+                })
             }
-            Err(error) => return Err(error),
-        };
-        let selected = self
-            .select_for(&stored.sandbox, "delete the sandbox")
-            .await?;
-
-        tracing::info!(sandbox = %name, backend = %selected.name(), "deleting the sandbox");
-        selected.core().delete(&stored.sandbox).await?;
-
-        // A branch that is already gone is not a failure.
-        if let Err(error) = self.scm.delete_branch(&stored.sandbox.name) {
-            tracing::warn!(sandbox = %name, %error, "the branch may remain after delete");
+            Some(LoadedSandbox::Corrupt { path, reason }) => {
+                if !force {
+                    return Err(Error::Denied {
+                        operation: format!("delete sandbox '{name}'"),
+                        reason: "its record is unreadable, so its status and compute cannot be \
+                                 determined. Pass --force to remove the record, state directory \
+                                 and branch."
+                            .to_string(),
+                    });
+                }
+                metadata_store::remove_sandbox_at(&self.records_dir, &name)?;
+                let (teardown, selection_error) =
+                    match self.selected_for_operation("delete the sandbox").await {
+                        Ok(selected) => {
+                            let record = SandboxRecord {
+                                name: name.clone(),
+                                backend: selected.name().to_string(),
+                                project_slug: self.project_slug.clone(),
+                                data: toml::Value::Table(Default::default()),
+                            };
+                            match selected.core().delete(&record).await {
+                                Ok(teardown) => (teardown, None),
+                                Err(error) => (
+                                    crate::sandbox::contract::Teardown::unknown(error.to_string()),
+                                    Some(error.to_string()),
+                                ),
+                            }
+                        }
+                        Err(error) => (
+                            crate::sandbox::contract::Teardown::unknown(error.to_string()),
+                            Some(error.to_string()),
+                        ),
+                    };
+                if let Err(error) = self.scm.delete_branch(&name) {
+                    tracing::warn!(sandbox = %name, %error, "the branch may remain after delete");
+                }
+                Ok(Deletion {
+                    record_path: Some(path),
+                    state_paths: teardown.state_paths,
+                    branch: format!("litterbox/{name}"),
+                    compute_stopped: teardown.compute_stopped,
+                    detail: teardown.detail.or(selection_error).or(Some(reason)),
+                })
+            }
+            None => {
+                // No record: the branch may still exist from a crash before the
+                // record was written. Remove it; both halves already gone means a
+                // retried delete, which succeeds.
+                match self.scm.delete_branch(&name) {
+                    Ok(()) => {}
+                    Err(crate::domain::SandboxError::SandboxNotFound { .. }) => {}
+                    Err(error) => return Err(error.into()),
+                }
+                Ok(Deletion {
+                    record_path: None,
+                    state_paths: Vec::new(),
+                    branch: format!("litterbox/{name}"),
+                    compute_stopped: true,
+                    detail: None,
+                })
+            }
         }
-
-        if stored.remote
-            && self.scm.list_sandboxes().is_ok_and(|left| left.is_empty())
-            && let Err(error) = VcsStore::destroy_bare(&self.project_slug)
-        {
-            tracing::warn!(project = %self.project_slug, %error, "the bare clone may remain");
-        }
-
-        metadata_store::remove_sandbox_at(&self.records_dir, &stored.sandbox.name)?;
-        Ok(())
     }
 
     /// Run a command in a sandbox.
@@ -492,22 +578,40 @@ impl Sandboxes {
         lifecycle.resume(&stored.sandbox).await
     }
 
-    /// Every sandbox in this project.
+    /// Every sandbox in this project, records first.
     pub fn list(&self) -> Result<Listing, Error> {
         let mut listing = Listing::default();
-        for name in self.scm.list_sandboxes()? {
-            match metadata_store::load_sandbox_at(&self.records_dir, &name) {
-                Ok(Some(LoadedSandbox::Current(stored))) => listing.sandboxes.push(stored.sandbox),
-                Ok(Some(LoadedSandbox::Corrupt { path, reason })) => {
+        let mut seen = BTreeSet::new();
+
+        for entry in metadata_store::entries_in(&self.records_dir) {
+            seen.insert(entry.name.clone());
+            match entry.loaded {
+                Ok(LoadedSandbox::Current(stored)) => {
+                    listing.sandboxes.push(stored.sandbox);
+                }
+                Ok(LoadedSandbox::Corrupt { path, reason }) => {
                     listing
                         .corrupt
-                        .push(format!("{name}: {reason} ({})", path.display()));
+                        .push(format!("{}: {reason} ({})", entry.name, path.display()));
                 }
-                Ok(None) => listing.orphans.push(name),
-                Err(error) => listing.corrupt.push(format!("{name}: {error}")),
+                Err(error) => listing.corrupt.push(format!("{}: {error}", entry.name)),
             }
         }
 
+        match self.scm.list_sandboxes() {
+            Ok(branches) => {
+                for branch in branches {
+                    if !seen.contains(&branch) {
+                        listing.orphans.push(branch);
+                    }
+                }
+            }
+            Err(error) => listing.branch_error = Some(error.to_string()),
+        }
+
+        listing.sandboxes.sort_by(|left, right| left.name.cmp(&right.name));
+        listing.corrupt.sort();
+        listing.orphans.sort();
         Ok(listing)
     }
 
@@ -546,7 +650,7 @@ impl Sandboxes {
     }
 
     /// Inspect every sandbox in this project, constructing the backend once.
-    pub async fn inspect_all(&self) -> Result<Vec<(String, Result<Inspection, Error>)>, Error> {
+    pub async fn inspect_all(&self) -> Result<Vec<(String, InspectionReport)>, Error> {
         self.inspect_listing(self.list()?).await
     }
 
@@ -554,17 +658,33 @@ impl Sandboxes {
     pub async fn inspect_listing(
         &self,
         listing: Listing,
-    ) -> Result<Vec<(String, Result<Inspection, Error>)>, Error> {
+    ) -> Result<Vec<(String, InspectionReport)>, Error> {
         let selected = match self.selected_for_operation("list").await {
             Ok(selected) => selected,
             Err(error) => {
                 // The backend cannot be asked, but the records can still be
                 // reported: every sandbox is unknown for the same reason.
+                let backend = self
+                    .fixed
+                    .as_ref()
+                    .map(|selected| selected.name().to_string())
+                    .or_else(|| self.config.backend.clone())
+                    .unwrap_or_else(|| "selected backend".to_string());
                 let reason = error.to_string();
                 return Ok(listing
                     .sandboxes
                     .into_iter()
-                    .map(|record| (record.name, Err(Error::failed(reason.clone()))))
+                    .map(|record| {
+                        (
+                            record.name.clone(),
+                            InspectionReport::Status {
+                                name: record.name,
+                                backend: backend.clone(),
+                                status: SandboxStatus::Unknown,
+                                reason: reason.clone(),
+                            },
+                        )
+                    })
                     .collect());
             }
         };
@@ -572,10 +692,32 @@ impl Sandboxes {
             let selected = &selected;
             async move {
                 if let Err(error) = self.ensure_owned(&record, selected.name(), "list") {
-                    return (record.name.clone(), Err(error));
+                    return (
+                        record.name.clone(),
+                        InspectionReport::Status {
+                            name: record.name,
+                            backend: selected.name().to_string(),
+                            status: SandboxStatus::Error {
+                                reason: error.to_string(),
+                            },
+                            reason: error.to_string(),
+                        },
+                    );
                 }
-                let inspection = selected.core().inspect(&record).await;
-                (record.name, inspection)
+                match selected.core().inspect(&record).await {
+                    Ok(inspection) => (record.name, InspectionReport::Inspected(inspection)),
+                    Err(error) => (
+                        record.name.clone(),
+                        InspectionReport::Status {
+                            name: record.name,
+                            backend: selected.name().to_string(),
+                            status: SandboxStatus::Error {
+                                reason: error.to_string(),
+                            },
+                            reason: error.to_string(),
+                        },
+                    ),
+                }
             }
         }))
         .buffered(8)
@@ -1470,7 +1612,7 @@ mod seam_tests {
         let sandboxes = orchestrator(dir.path(), records.path().to_path_buf(), backend, None);
 
         sandboxes.scm().create_branch("orphan").expect("branch");
-        sandboxes.delete("orphan").await.expect("delete cleans up");
+        sandboxes.delete("orphan", false).await.expect("delete cleans up");
 
         let branches = sandboxes.scm().list_sandboxes().expect("branches");
         assert!(!branches.contains(&"orphan".to_string()), "{branches:?}");
@@ -1484,11 +1626,11 @@ mod seam_tests {
         let sandboxes = orchestrator(dir.path(), records.path().to_path_buf(), backend, None);
 
         sandboxes
-            .delete("nothing-here")
+            .delete("nothing-here", false)
             .await
             .expect("nothing left is not a failure");
         sandboxes
-            .delete("nothing-here")
+            .delete("nothing-here", false)
             .await
             .expect("a retried delete succeeds");
     }
@@ -1515,7 +1657,7 @@ mod seam_tests {
         let branches = sandboxes.scm().list_sandboxes().expect("branches");
         assert!(branches.contains(&"demo".to_string()), "{branches:?}");
 
-        sandboxes.delete("demo").await.expect("delete");
+        sandboxes.delete("demo", true).await.expect("delete");
         assert!(
             metadata_store::load_sandbox_at(records.path(), "demo")
                 .expect("readable")
@@ -1525,7 +1667,7 @@ mod seam_tests {
         let branches = sandboxes.scm().list_sandboxes().expect("branches");
         assert!(!branches.contains(&"demo".to_string()), "{branches:?}");
 
-        sandboxes.delete("demo").await.expect("a second delete");
+        sandboxes.delete("demo", true).await.expect("a second delete");
     }
 
     #[tokio::test]
@@ -1565,6 +1707,30 @@ mod seam_tests {
             matches!(error, Error::Paused { ref name } if name == "demo"),
             "{error:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn a_missing_sandbox_is_repaired_on_the_next_command() {
+        let (dir, _repo) = repository();
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let sandboxes = orchestrator(
+            dir.path(),
+            records.path().to_path_buf(),
+            backend.clone(),
+            None,
+        );
+        sandboxes.create("demo").await.expect("create");
+        backend.mark_missing("demo");
+
+        let performed = sandboxes
+            .exec("demo", &["true".to_string()])
+            .await
+            .expect("the command repairs the sandbox");
+        assert_eq!(performed.value.exit_code, 0);
+        let recovery = performed.recovery.expect("the repair is reported");
+        assert_eq!(recovery.sandbox, "demo");
+        assert_eq!(recovery.branch, "litterbox/demo");
     }
 
     #[tokio::test]
