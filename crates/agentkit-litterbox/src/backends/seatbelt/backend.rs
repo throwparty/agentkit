@@ -908,6 +908,25 @@ impl Backend for SeatbeltBackend {
         Box::pin(async move { self.delete_sandbox(sandbox) })
     }
 
+    fn stop<'a>(
+        &'a self,
+        sandbox: &'a SandboxRecord,
+    ) -> BoxFuture<'a, Result<Teardown, Error>> {
+        Box::pin(async move {
+            let payload = Payload::from_record(sandbox).ok();
+            if let Some(payload) = &payload {
+                let _ = self
+                    .host
+                    .signal_group(payload.holder_pid, super::host::Signal::Kill);
+            }
+            Ok(Teardown {
+                compute_stopped: payload.is_some(),
+                state_paths: Vec::new(),
+                detail: None,
+            })
+        })
+    }
+
     fn readiness<'a>(&'a self) -> BoxFuture<'a, Result<Readiness, Error>> {
         Box::pin(async { Ok(self.readiness_report()) })
     }

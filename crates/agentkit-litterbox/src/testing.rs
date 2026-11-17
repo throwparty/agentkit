@@ -491,6 +491,23 @@ impl Backend for TestBackend {
         })
     }
 
+    fn stop<'a>(
+        &'a self,
+        sandbox: &'a SandboxRecord,
+    ) -> BoxFuture<'a, Result<crate::sandbox::contract::Teardown, Error>> {
+        Box::pin(async move {
+            self.deleted
+                .lock()
+                .map_err(|_| Error::failed("test backend lock poisoned"))?
+                .insert(sandbox.name.clone());
+            Ok(crate::sandbox::contract::Teardown {
+                compute_stopped: true,
+                state_paths: Vec::new(),
+                detail: None,
+            })
+        })
+    }
+
     fn readiness<'a>(&'a self) -> BoxFuture<'a, Result<Readiness, Error>> {
         Box::pin(async {
             Ok(Readiness {

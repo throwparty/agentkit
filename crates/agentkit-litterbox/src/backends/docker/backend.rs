@@ -602,6 +602,21 @@ impl Backend for DockerBackend {
         })
     }
 
+    fn stop<'a>(
+        &'a self,
+        sandbox: &'a SandboxRecord,
+    ) -> BoxFuture<'a, Result<crate::sandbox::contract::Teardown, Error>> {
+        Box::pin(async move {
+            let data = DockerData::from_record(sandbox)?;
+            self.compute.delete_container(&data.container).await?;
+            Ok(crate::sandbox::contract::Teardown {
+                compute_stopped: true,
+                state_paths: Vec::new(),
+                detail: Some(format!("container {}", data.container)),
+            })
+        })
+    }
+
     fn readiness<'a>(&'a self) -> BoxFuture<'a, Result<Readiness, Error>> {
         Box::pin(async move {
             let daemon = match self.compute.ping().await {

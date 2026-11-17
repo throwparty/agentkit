@@ -120,6 +120,19 @@ mod tests {
             })
         }
 
+        fn stop<'a>(
+            &'a self,
+            _sandbox: &'a SandboxRecord,
+        ) -> BoxFuture<'a, Result<crate::sandbox::contract::Teardown, Error>> {
+            Box::pin(async {
+                Ok(crate::sandbox::contract::Teardown {
+                    compute_stopped: true,
+                    state_paths: Vec::new(),
+                    detail: None,
+                })
+            })
+        }
+
         fn readiness<'a>(
             &'a self,
         ) -> BoxFuture<'a, Result<crate::sandbox::report::Readiness, Error>> {
