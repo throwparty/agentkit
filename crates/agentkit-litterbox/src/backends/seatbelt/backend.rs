@@ -19,8 +19,8 @@ use super::protocol::{ConfigPayload, WirePosture};
 use super::workspace;
 use crate::backends::shared::{self, DOWNLOAD_TIMEOUT, UPLOAD_TIMEOUT};
 use crate::sandbox::contract::{
-    Backend, ContributionSort, ContributionSupport, CreateRequest, Error, Execution, Inspection,
-    SandboxRecord, Scope,
+    Backend, ContributionSort, ContributionSupport, CreateMode, CreateRequest, Error, Execution,
+    Inspection, SandboxRecord, Scope, Teardown,
 };
 use crate::sandbox::facets::Lifecycle;
 use crate::sandbox::report::{Capability, Check, Readiness, State};
@@ -77,6 +77,19 @@ impl SeatbeltBackend {
     }
 
     fn create_sandbox(&self, request: &CreateRequest) -> Result<SandboxRecord, Error> {
+        if request.mode == CreateMode::ReuseExisting {
+            return Err(Error::Unsupported {
+                operation: format!("repair the sandbox '{}'", request.name),
+                backend: BACKEND.to_string(),
+                primitive: "a backend recovery path".to_string(),
+                reason: "the Seatbelt backend cannot recreate a holder against an existing record"
+                    .to_string(),
+                remedy: format!(
+                    "run `litterbox delete --force {}` and create it again",
+                    request.name
+                ),
+            });
+        }
         if !request.ports.is_empty() {
             return Err(Error::Unsupported {
                 operation: "create".to_string(),
@@ -314,9 +327,11 @@ impl SeatbeltBackend {
         self.wait_for(&payload, super::host::PidState::Running, "resume")
     }
 
-    fn delete_sandbox(&self, record: &SandboxRecord) -> Result<(), Error> {
+    fn delete_sandbox(&self, record: &SandboxRecord) -> Result<Teardown, Error> {
         let state = self.state_dir(&record.project_slug, &record.name);
         let payload = Payload::from_record(record).ok();
+        let mut compute_stopped = false;
+        let mut detail = None;
         if let Some(payload) = &payload {
             match payload.state(self.host.as_ref()) {
                 super::payload::PayloadState::Live | super::payload::PayloadState::Paused => {
@@ -336,12 +351,14 @@ impl SeatbeltBackend {
                     );
                 }
                 super::payload::PayloadState::Foreign => {
+                    detail = Some("the recorded pid belongs to another process".to_string());
                     tracing::warn!(
                         sandbox = %record.name,
                         "the recorded pid now belongs to another process; it was not signalled"
                     );
                 }
                 super::payload::PayloadState::Invalid(reason) => {
+                    detail = Some(reason.clone());
                     tracing::warn!(sandbox = %record.name, %reason, "the record is not readable");
                 }
             }
@@ -355,15 +372,23 @@ impl SeatbeltBackend {
                     sandbox = %record.name,
                     "the holder group did not stop within 2s; its state is being removed"
                 );
+                detail = Some("the holder group did not stop within 2s".to_string());
+            } else {
+                compute_stopped = true;
             }
         } else {
+            detail = Some("the record is unreadable".to_string());
             tracing::warn!(
                 sandbox = %record.name,
                 "the record is unreadable; any socket it named in the temp directory is not removed"
             );
         }
-        let _ = fs::remove_dir_all(state);
-        Ok(())
+        let _ = fs::remove_dir_all(&state);
+        Ok(Teardown {
+            compute_stopped,
+            state_paths: vec![state],
+            detail,
+        })
     }
 
     fn require_live(&self, payload: &Payload, operation: &str) -> Result<(), Error> {
@@ -876,7 +901,10 @@ impl Backend for SeatbeltBackend {
         Box::pin(async move { self.inspect_sandbox(sandbox) })
     }
 
-    fn delete<'a>(&'a self, sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<(), Error>> {
+    fn delete<'a>(
+        &'a self,
+        sandbox: &'a SandboxRecord,
+    ) -> BoxFuture<'a, Result<Teardown, Error>> {
         Box::pin(async move { self.delete_sandbox(sandbox) })
     }
 
@@ -955,7 +983,7 @@ mod tests {
     use super::SeatbeltBackend;
     use crate::backends::seatbelt::config::{BaselineSetting, NetworkSetting, Settings};
     use crate::backends::seatbelt::host::{Host, SystemHost};
-    use crate::sandbox::contract::{Backend, CreateRequest, Error, Workspace};
+    use crate::sandbox::contract::{Backend, CreateMode, CreateRequest, Error, Workspace};
     use crate::sandbox::facets::Lifecycle;
 
     fn helper() -> PathBuf {
@@ -1048,6 +1076,7 @@ mod tests {
             provision,
             forward_bind: "127.0.0.1".to_string(),
             ports: Vec::new(),
+            mode: CreateMode::Fresh,
         };
         let record = backend.create(&request).await.expect("create");
         let payload = payload(&record);
@@ -1075,6 +1104,7 @@ mod tests {
             provision: Vec::new(),
             forward_bind: "127.0.0.1".to_string(),
             ports: Vec::new(),
+            mode: CreateMode::Fresh,
         }
     }
 
@@ -1750,6 +1780,7 @@ mod tests {
                 name: "http".to_string(),
                 target: 8080,
             }],
+            mode: CreateMode::Fresh,
         };
         assert!(matches!(
             backend.create(&ports).await,
@@ -1766,6 +1797,7 @@ mod tests {
             provision: Vec::new(),
             forward_bind: "127.0.0.1".to_string(),
             ports: Vec::new(),
+            mode: CreateMode::Fresh,
         };
         assert!(matches!(
             backend.create(&bad_tag).await,
@@ -1781,6 +1813,7 @@ mod tests {
             provision: Vec::new(),
             forward_bind: "127.0.0.1".to_string(),
             ports: Vec::new(),
+            mode: CreateMode::Fresh,
         };
         let record = backend.create(&request).await.expect("create");
         assert!(matches!(
@@ -1819,6 +1852,7 @@ mod tests {
             provision: Vec::new(),
             forward_bind: "127.0.0.1".to_string(),
             ports: Vec::new(),
+            mode: CreateMode::Fresh,
         };
         let record = backend.create(&request).await.expect("create");
         assert_eq!(record.backend, "seatbelt");
