@@ -690,6 +690,12 @@ pub trait Backend: Send + Sync {
     ) -> BoxFuture<'a, Result<Inspection, Error>>;
     /// Remove a sandbox and everything the backend created for it.
     fn delete<'a>(&'a self, sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<Teardown, Error>>;
+
+    /// Stop the sandbox's compute without removing its state or workspace.
+    ///
+    /// Used when a repair has started new compute but the record cannot be
+    /// persisted: the workspace must survive for the next attempt.
+    fn stop<'a>(&'a self, sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<Teardown, Error>>;
     /// Report whether this backend can run here, and why not when it cannot.
     fn readiness<'a>(&'a self) -> BoxFuture<'a, Result<crate::sandbox::report::Readiness, Error>>;
     /// Report which optional operations this backend provides.
@@ -766,6 +772,16 @@ mod tests {
         }
 
         fn delete<'a>(&'a self, _sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<super::Teardown, Error>> {
+            Box::pin(async {
+                Ok(super::Teardown {
+                    compute_stopped: true,
+                    state_paths: Vec::new(),
+                    detail: None,
+                })
+            })
+        }
+
+        fn stop<'a>(&'a self, _sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<super::Teardown, Error>> {
             Box::pin(async {
                 Ok(super::Teardown {
                     compute_stopped: true,

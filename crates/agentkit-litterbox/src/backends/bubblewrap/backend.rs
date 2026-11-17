@@ -344,6 +344,7 @@ fn cleanup(
     project: &str,
     name: &str,
     materialised: bool,
+    owns_directory: bool,
     holder: Option<&holder::Holder>,
 ) {
     if let Some(holder) = holder
@@ -351,14 +352,22 @@ fn cleanup(
     {
         tracing::warn!(%error, "the sandbox did not stop after a failed create");
     }
-    if !materialised {
-        return;
-    }
     let directory = workspace::sandbox_directory(project, name);
-    if let Err(error) = std::fs::remove_dir_all(&directory)
-        && error.kind() != std::io::ErrorKind::NotFound
-    {
-        tracing::warn!(%error, "the state directory could not be removed");
+    if owns_directory {
+        if let Err(error) = std::fs::remove_dir_all(&directory)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!(%error, "the state directory could not be removed");
+        }
+    } else if materialised {
+        // The state directory and its payload predate this attempt. Only the
+        // workspace this attempt created is ours to remove.
+        let workspace = workspace::workspace_directory(project, name);
+        if let Err(error) = std::fs::remove_dir_all(&workspace)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!(%error, "the workspace could not be removed");
+        }
     }
 }
 
@@ -367,8 +376,9 @@ impl Backend for BubblewrapBackend {
         // The sandbox mounts the shell it was created against; resolving the
         // configured shell now would name a binary this sandbox may not carry
         // after a settings change or an upgrade that moved the store path.
-        let data = Payload::from_record(sandbox)?;
-        if !data.shell.is_empty() {
+        if let Ok(data) = Payload::from_record(sandbox)
+            && !data.shell.is_empty()
+        {
             return Ok(data.shell);
         }
         tracing::warn!(
@@ -531,18 +541,35 @@ impl Backend for BubblewrapBackend {
                     forwards: data.forwards.clone(),
                 }),
                 validate::Verdict::Absent => {
-                    // The process is gone but the payload is still the record
-                    // of what the sandbox was, including its network posture.
-                    let data = Payload::from_record(sandbox)?;
-                    Ok(Inspection {
-                        name: sandbox.name.clone(),
-                        backend: BACKEND.to_string(),
-                        status: crate::sandbox::contract::SandboxStatus::Missing,
-                        egress: egress(data.network),
-                        workspace: data.workspace,
-                        environment: data.environment,
-                        forwards: data.forwards,
-                    })
+                    // The process is gone but the record is still the record of
+                    // what the sandbox was. A payload from an older release may
+                    // not carry the network posture; missing inspection must not
+                    // reject it, or repair can never start.
+                    match Payload::from_record(sandbox) {
+                        Ok(data) => Ok(Inspection {
+                            name: sandbox.name.clone(),
+                            backend: BACKEND.to_string(),
+                            status: crate::sandbox::contract::SandboxStatus::Missing,
+                            egress: egress(data.network),
+                            workspace: data.workspace,
+                            environment: data.environment,
+                            forwards: data.forwards,
+                        }),
+                        Err(_) => Ok(Inspection {
+                            name: sandbox.name.clone(),
+                            backend: BACKEND.to_string(),
+                            status: crate::sandbox::contract::SandboxStatus::Missing,
+                            egress: EgressPosture::Denied,
+                            workspace: WORKSPACE.to_string(),
+                            environment: crate::sandbox::environment::Provenance {
+                                origin: crate::sandbox::environment::Origin::Default,
+                                variables: Vec::new(),
+                                host_paths: Vec::new(),
+                                steps: Vec::new(),
+                            },
+                            forwards: Vec::new(),
+                        }),
+                    }
                 }
                 validate::Verdict::Forbidden { reason } => Err(Error::Denied {
                     operation: format!("inspect '{}'", sandbox.name),
@@ -562,9 +589,7 @@ impl Backend for BubblewrapBackend {
             // failure only means the process is not signalled. A record whose
             // live process does not match it is cleaned up without a signal:
             // the pid now belongs to something else.
-            let mut compute_stopped = false;
-            let mut detail = None;
-            match validate::validate(sandbox, &*self.host) {
+            let (compute_stopped, detail) = match validate::validate(sandbox, &*self.host) {
                 validate::Verdict::Live(data) => {
                     let holder = holder::Holder::from_payload(&data);
                     let host = self.host.clone();
@@ -576,15 +601,15 @@ impl Backend for BubblewrapBackend {
                     })
                     .await
                     {
-                        Ok(()) => compute_stopped = true,
-                        Err(error) => detail = Some(error.to_string()),
+                        Ok(()) => (true, None),
+                        Err(error) => return Err(error),
                     }
                 }
                 other => {
                     // Nothing is signalled, so nothing confirms the process is
                     // gone; the state is still removed, but the decision is
                     // recorded rather than taken silently.
-                    compute_stopped = matches!(&other, validate::Verdict::Absent);
+                    let stopped = matches!(&other, validate::Verdict::Absent);
                     let reason = match other {
                         validate::Verdict::Absent => "the sandbox process is gone".to_string(),
                         validate::Verdict::Forbidden { reason } => {
@@ -596,9 +621,9 @@ impl Backend for BubblewrapBackend {
                         validate::Verdict::Live(_) => unreachable!("handled above"),
                     };
                     tracing::warn!(sandbox = %sandbox.name, %reason, "deleting without a teardown");
-                    detail = Some(reason);
+                    (stopped, Some(reason))
                 }
-            }
+            };
             let directory = workspace::sandbox_directory(&sandbox.project_slug, &sandbox.name);
             match std::fs::remove_dir_all(&directory) {
                 Ok(()) => {}
@@ -613,6 +638,36 @@ impl Backend for BubblewrapBackend {
             Ok(crate::sandbox::contract::Teardown {
                 compute_stopped,
                 state_paths: vec![directory],
+                detail,
+            })
+        })
+    }
+
+    fn stop<'a>(
+        &'a self,
+        sandbox: &'a SandboxRecord,
+    ) -> BoxFuture<'a, Result<crate::sandbox::contract::Teardown, Error>> {
+        Box::pin(async move {
+            let (compute_stopped, detail) = match validate::validate(sandbox, &*self.host) {
+                validate::Verdict::Live(data) => {
+                    let holder = holder::Holder::from_payload(&data);
+                    let host = self.host.clone();
+                    match transfer(std::time::Duration::from_secs(30), move || {
+                        holder::teardown(&*host, &holder, std::time::Duration::from_secs(30))
+                    })
+                    .await
+                    {
+                        Ok(()) => (true, None),
+                        Err(error) => return Err(error),
+                    }
+                }
+                validate::Verdict::Absent => (true, None),
+                validate::Verdict::Forbidden { reason } => (false, Some(reason)),
+                validate::Verdict::Editions(error) => (false, Some(error.to_string())),
+            };
+            Ok(crate::sandbox::contract::Teardown {
+                compute_stopped,
+                state_paths: Vec::new(),
                 detail,
             })
         })
@@ -935,6 +990,7 @@ impl BubblewrapBackend {
             }
         }
         let workspace = workspace::workspace_directory(&request.project_slug, &request.name);
+        let owns_directory = !workspace::sandbox_directory(&request.project_slug, &request.name).exists();
         let materialised = !workspace.is_dir();
         std::fs::create_dir_all(&workspace).map_err(|error| {
             Error::failed(format!("the state directory could not be created: {error}"))
@@ -967,7 +1023,14 @@ impl BubblewrapBackend {
                 let name = request.name.clone();
                 let held = started.clone();
                 let _ = tokio::task::spawn_blocking(move || {
-                    cleanup(&*host, &project, &name, materialised, held.as_ref());
+                    cleanup(
+                        &*host,
+                        &project,
+                        &name,
+                        materialised,
+                        owns_directory,
+                        held.as_ref(),
+                    );
                 })
                 .await;
                 tracing::warn!(sandbox = %request.name, %error, "the sandbox was not created");
@@ -1324,14 +1387,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn inspection_refuses_an_unreadable_payload() {
+    async fn inspection_reports_an_unreadable_dead_payload_as_missing() {
         let mut data = payload(Network::Denied);
         data.version = VERSION - 1;
-        let error = backend()
+        let inspection = backend()
             .inspect(&record(data))
             .await
-            .expect_err("inspection refuses");
-        assert!(matches!(error, Error::Unavailable { .. }), "{error:?}");
+            .expect("inspection reports missing");
+        assert_eq!(inspection.status, SandboxStatus::Missing);
     }
 
     #[tokio::test]
