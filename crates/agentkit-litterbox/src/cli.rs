@@ -4,7 +4,9 @@ use crate::backends;
 use crate::config::Config;
 use crate::config_loader;
 use crate::mcp;
-use crate::orchestrator::{HostReport, PlannedStep, Preflight, Sandboxes, preflight_host};
+use crate::orchestrator::{
+    HostReport, InspectionReport, PlannedStep, Preflight, Sandboxes, preflight_host,
+};
 use crate::sandbox::contract::{
     ContributionSupport, Error, ProvisioningClass, SandboxStatus, StoreView,
 };
@@ -75,7 +77,8 @@ enum Commands {
         /// Name of the sandbox to delete
         name: String,
 
-        /// Delete even if the sandbox is active
+        /// Delete even if the sandbox is active or missing. A missing
+        /// sandbox's branch may hold unmerged work.
         #[arg(short, long)]
         force: bool,
     },
@@ -248,6 +251,10 @@ async fn handle_list(backend: Option<String>) -> ExitCode {
         println!("{entry}");
         failed = true;
     }
+    if let Some(error) = &listing.branch_error {
+        println!("branches: {error}");
+        failed = true;
+    }
     for name in &listing.orphans {
         println!(
             "{name} orphan; the branch has no record, so the compute it was paired with \
@@ -258,9 +265,9 @@ async fn handle_list(backend: Option<String>) -> ExitCode {
         Ok(inspections) => inspections,
         Err(error) => return report(error),
     };
-    for (name, inspection) in inspections {
-        match inspection {
-            Ok(inspection) => {
+    for (name, report) in inspections {
+        match report {
+            InspectionReport::Inspected(inspection) => {
                 println!(
                     "{} {} {}",
                     name,
@@ -271,9 +278,14 @@ async fn handle_list(backend: Option<String>) -> ExitCode {
                     failed = true;
                 }
             }
-            Err(error) => {
-                println!("{name} unknown {error}");
-                failed = true;
+            InspectionReport::Status { status, reason, .. } => {
+                match &status {
+                    SandboxStatus::Unknown => println!("{name} unknown {reason}"),
+                    _ => println!("{name} {}", status_label(&status)),
+                }
+                if listing_failed(&status) {
+                    failed = true;
+                }
             }
         }
     }
@@ -368,22 +380,31 @@ async fn handle_delete(backend: Option<String>, name: String, force: bool) -> Ex
         Err(error) => return report(error),
     };
 
-    match sandboxes.status(&name).await {
-        Ok(SandboxStatus::Active) if !force => {
-            return report(Error::Denied {
-                operation: format!("delete sandbox '{name}'"),
-                reason: "it is active; pass --force to delete it".to_string(),
-            });
-        }
-        // Any other state, including a record this release cannot read, is
-        // deletable: deleting is how a sandbox whose record went bad is
-        // cleaned up.
-        Ok(_) | Err(_) => {}
-    }
-
-    match sandboxes.delete(&name).await {
-        Ok(()) => {
-            println!("Deleted {name}");
+    match sandboxes.delete(&name, force).await {
+        Ok(deletion) => {
+            print!("Deleted {name}");
+            if let Some(path) = &deletion.record_path {
+                print!("; removed record {}", path.display());
+            }
+            if !deletion.state_paths.is_empty() {
+                print!(
+                    "; removed state {}",
+                    deletion
+                        .state_paths
+                        .iter()
+                        .map(|path| path.display().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+            print!("; removed branch {}", deletion.branch);
+            if !deletion.compute_stopped {
+                print!("; compute could not be stopped");
+            }
+            if let Some(detail) = &deletion.detail {
+                print!(" ({detail})");
+            }
+            println!();
             ExitCode::from(0)
         }
         Err(error) => report(error),
@@ -404,6 +425,12 @@ async fn handle_shell(backend: Option<String>, name: String, command: Vec<String
         Ok(result) => result,
         Err(error) => return report(error),
     };
+    if let Some(recovery) = &performed.recovery {
+        eprintln!(
+            "warning: sandbox '{}' was recreated from '{}' on branch '{}'",
+            recovery.sandbox, recovery.action, recovery.branch
+        );
+    }
     let result = performed.value;
 
     if !result.stdout.is_empty() {
