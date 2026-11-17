@@ -1,6 +1,6 @@
 # Sandbox Lifecycle Consistency and Recovery
 
-**Status:** draft  **Created:** 2026-11-09  **Author:** adrian
+**Status:** implemented  **Created:** 2026-11-09  **Author:** adrian
 
 Litterbox pairs a name, a Git branch and a unit of compute. The branch is durable, the compute is not, and today nothing reconciles the two. The contract already declares `SandboxStatus::Unknown` but never constructs it (`crates/agentkit-litterbox/src/sandbox/contract.rs`), and the provider contract's FR-014 requires enumeration to report a sandbox as unknown when the backend cannot be asked (`adrs/2026-11-03-sandbox-provider-contract/spec.md`). The lifecycle page documents a `missing` state that only `delete` can leave (`docs/docs/user/litterbox/lifecycle.mdx`), and the generated reference repeats that prose from `crates/agentkit-litterbox/src/docgen.rs`. The orchestrator's `create` creates the branch before asking the backend (`src/orchestrator/service.rs`), so an existing branch returns `SandboxExists`, mapped to `Conflict`, and the backend is never reached; a missing name therefore cannot be recreated through either surface. `exec` performs no paused check before the join, so a command addressed to a paused sandbox can block until resume; a timeout inside the sandbox cannot fire while it is frozen. `list` enumerates branches rather than records, so a record whose branch is gone is invisible and a branch with no record is reported as an orphan. `stored()` returns a failure for a corrupt record and `delete` tolerates only `NotFound`, so a corrupt record cannot be removed by any command. The incident that motivates this specification is the `workspace-tests` sandbox under `data_dir/litterbox/bubblewrap/agentkit-02853408/`: the record, branch and workspace exist, both recorded pids are gone, and the payload is version 1 while the current release writes version 2. A repair that depends on reading that payload therefore cannot recover it. The existing ADR `2026-10-31-linux-bwrap-lifecycle` covers cgroup pause and resume, not lifecycle reconciliation; `2026-11-03-sandbox-provider-contract` covers status vocabulary, not recovery; `2026-11-07-linux-bwrap-provider` covers validation outcomes, not reconciliation. No existing ADR covers this topic.
 
@@ -98,7 +98,7 @@ The paused refusal is one contract error variant mapped once to a failure class.
 
 ### FR-011: List Records And Branches
 
-`list` enumerates metadata records first and branches second. Every record is reported, including a record whose branch is gone; such a record remains addressable and its repair refuses with the remedy from FR-006. Every branch not represented by a current, legacy or corrupt record is still reported as an orphan. A record paired with an orphan branch is reported once. Output is sorted by name for stable tests. Legacy and corrupt records keep their existing sections. A record whose compute is active is reported even if its branch is gone.
+`list` enumerates metadata records first and branches second. Every record is reported, including a record whose branch is gone; such a record remains addressable and its repair refuses with the remedy from FR-006. Every branch not represented by a current or corrupt record is still reported as an orphan. A record paired with an orphan branch is reported once. Output is sorted by name for stable tests. A record whose compute is active is reported even if its branch is gone.
 
 **Slug:** `list-records-and-branches`
 
@@ -110,7 +110,7 @@ The paused refusal is one contract error variant mapped once to a failure class.
 
 ### FR-013: Delete Corrupt Record
 
-`delete --force` removes a corrupt current record without parsing its payload. It removes the record file, the branch derived from the sandbox name, and the backend state directory for that project and name. If the backend cannot identify compute because the payload is unreadable, the output says compute could not be stopped and names the sandbox. `--discard-legacy` remains the legacy-only path and is not broadened. A corrupt record is never repaired or adopted.
+`delete --force` removes a corrupt current record without parsing its payload. It removes the record file, the branch derived from the sandbox name, and the backend state directory for that project and name. If the backend cannot identify compute because the payload is unreadable, the output says compute could not be stopped and names the sandbox. A corrupt record is never repaired or adopted.
 
 **Slug:** `delete-corrupt-record`
 
