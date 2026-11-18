@@ -1,0 +1,42 @@
+Done importing changes from the underlying Git repo.
+Working copy  (@) now at: umzvoyos 75ba172b (empty) (no description set)
+Parent commit (@-)      : zqsqport c69a3d3d main | seed
+Added 1 files, modified 0 files, removed 0 files
+Initialized repo in "bridge"
+Created workspace in "../ws"
+Working copy  (@) now at: nopyvpov c63b74c9 (empty) (no description set)
+Parent commit (@-)      : zqsqport c69a3d3d main | seed
+Added 1 files, modified 0 files, removed 0 files
+=== workspace layout ===
+.
+..
+.jj
+README.md
+=== bubblewrap: bind the workspace, tmpfs over .jj ===
+bwrap=/nix/store/zri6pfys37ih88s5yckr47khz5zw1rzk-bubblewrap-0.12.0/bin/bwrap
+top:
+.
+..
+.jj
+README.md
+.jj:
+.
+..
+EMPTY
+README_PRESENT
+bwrap exit=0
+=== docker: bind the workspace, empty dir over .jj ===
+image=busybox:latest
+top:
+.
+..
+.jj
+README.md
+.jj:
+.
+..
+EMPTY
+README_PRESENT
+docker exit=0
+=== seatbelt ===
+unprobed: macOS-only; this host is Linux

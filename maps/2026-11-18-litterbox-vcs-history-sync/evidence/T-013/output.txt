@@ -1,0 +1,194 @@
+=== modules ===
+crates/agentkit-litterbox/src/backends/environment.rs
+crates/agentkit-litterbox/src/backends/mod.rs
+crates/agentkit-litterbox/src/backends/registry.rs
+crates/agentkit-litterbox/src/backends/shared.rs
+crates/agentkit-litterbox/src/backends/transfer.rs
+crates/agentkit-litterbox/src/cli.rs
+crates/agentkit-litterbox/src/config_loader.rs
+crates/agentkit-litterbox/src/config.rs
+crates/agentkit-litterbox/src/docgen.rs
+crates/agentkit-litterbox/src/domain/mod.rs
+crates/agentkit-litterbox/src/lib.rs
+crates/agentkit-litterbox/src/main.rs
+crates/agentkit-litterbox/src/mcp/docs.rs
+crates/agentkit-litterbox/src/mcp/error.rs
+crates/agentkit-litterbox/src/mcp.rs
+crates/agentkit-litterbox/src/metadata_store.rs
+crates/agentkit-litterbox/src/orchestrator/bulk.rs
+crates/agentkit-litterbox/src/orchestrator/lock.rs
+crates/agentkit-litterbox/src/orchestrator/machine.rs
+crates/agentkit-litterbox/src/orchestrator/mod.rs
+crates/agentkit-litterbox/src/orchestrator/outcome.rs
+crates/agentkit-litterbox/src/orchestrator/service.rs
+crates/agentkit-litterbox/src/provision/mod.rs
+crates/agentkit-litterbox/src/provision/resolve.rs
+crates/agentkit-litterbox/src/sandbox/contract.rs
+crates/agentkit-litterbox/src/sandbox/environment.rs
+crates/agentkit-litterbox/src/sandbox/facets.rs
+crates/agentkit-litterbox/src/sandbox/mapping.rs
+crates/agentkit-litterbox/src/sandbox/mod.rs
+crates/agentkit-litterbox/src/sandbox/report.rs
+crates/agentkit-litterbox/src/sandbox/selected.rs
+crates/agentkit-litterbox/src/scm/mod.rs
+crates/agentkit-litterbox/src/testing.rs
+crates/agentkit-litterbox/src/vcs_store/mod.rs
+crates/agentkit-litterbox/src/vcs_store/path.rs
+crates/agentkit-litterbox/src/vcs_store/remote.rs
+=== line counts ===
+  38534 total
+   2276 crates/agentkit-litterbox/src/mcp.rs
+   2270 crates/agentkit-litterbox/src/orchestrator/service.rs
+   2136 crates/agentkit-litterbox/src/backends/bubblewrap/backend.rs
+   1901 crates/agentkit-litterbox/src/backends/seatbelt/backend.rs
+   1777 crates/agentkit-litterbox/src/scm/mod.rs
+   1660 crates/agentkit-litterbox/src/backends/docker/backend.rs
+   1572 crates/agentkit-litterbox/src/cli.rs
+   1539 crates/agentkit-litterbox/src/config_loader.rs
+   1498 crates/agentkit-litterbox/src/backends/docker/compute.rs
+   1148 crates/agentkit-litterbox/src/backends/bubblewrap/holder.rs
+   1146 crates/agentkit-litterbox/src/testing.rs
+   1076 crates/agentkit-litterbox/src/config.rs
+    963 crates/agentkit-litterbox/src/sandbox/contract.rs
+    953 crates/agentkit-litterbox/src/bin/litterbox-seatbelt-helper/macos.rs
+    827 crates/agentkit-litterbox/src/backends/bubblewrap/join.rs
+    766 crates/agentkit-litterbox/src/backends/seatbelt/protocol.rs
+    755 crates/agentkit-litterbox/src/backends/seatbelt/policy.rs
+    751 crates/agentkit-litterbox/src/backends/transfer.rs
+    732 crates/agentkit-litterbox/src/backends/bubblewrap/host.rs
+    692 crates/agentkit-litterbox/src/backends/bubblewrap/view.rs
+    672 crates/agentkit-litterbox/src/provision/resolve.rs
+    539 crates/agentkit-litterbox/src/backends/registry.rs
+    481 crates/agentkit-litterbox/src/provision/prepare/mod.rs
+    470 crates/agentkit-litterbox/src/backends/bubblewrap/validate.rs
+    467 crates/agentkit-litterbox/src/vcs_store/mod.rs
+    464 crates/agentkit-litterbox/src/backends/seatbelt/mounts.rs
+    434 crates/agentkit-litterbox/src/provision/prepare/environment.rs
+    408 crates/agentkit-litterbox/src/backends/seatbelt/host.rs
+    370 crates/agentkit-litterbox/src/backends/bubblewrap/payload.rs
+=== crate modules ===
+pub mod backends;
+pub mod cli;
+pub mod config;
+pub mod config_loader;
+pub mod docgen;
+pub mod domain;
+pub mod mcp;
+pub mod metadata_store;
+pub mod orchestrator;
+pub mod provision;
+pub mod sandbox;
+pub mod scm;
+#[cfg(test)]
+pub mod testing;
+pub mod vcs_store;
+=== Git-specific references outside scm/vcs_store ===
+crates/agentkit-litterbox/src/orchestrator/service.rs:11:use crate::domain::{SandboxError, ScmMode};
+crates/agentkit-litterbox/src/orchestrator/service.rs:24:use crate::scm::{Scm, ThreadSafeScm};
+crates/agentkit-litterbox/src/orchestrator/service.rs:25:use crate::vcs_store::VcsStore;
+crates/agentkit-litterbox/src/orchestrator/service.rs:35:    scm: ThreadSafeScm,
+crates/agentkit-litterbox/src/orchestrator/service.rs:87:        scm: ThreadSafeScm,
+crates/agentkit-litterbox/src/orchestrator/service.rs:103:    pub fn scm(&self) -> &ThreadSafeScm {
+crates/agentkit-litterbox/src/orchestrator/service.rs:189:            remote: self.scm.mode() == ScmMode::Remote,
+crates/agentkit-litterbox/src/orchestrator/service.rs:499:                    && let Err(error) = VcsStore::destroy_bare(&self.project_slug)
+crates/agentkit-litterbox/src/orchestrator/service.rs:853:    fn stage(scm: &ThreadSafeScm, reference: &str) -> Result<TempDir, Error> {
+crates/agentkit-litterbox/src/orchestrator/service.rs:854:        let archive = scm.make_archive(reference)?;
+crates/agentkit-litterbox/src/orchestrator/service.rs:865:        operation: impl FnOnce(&ThreadSafeScm) -> Result<T, Error>,
+crates/agentkit-litterbox/src/orchestrator/service.rs:871:        let bare = VcsStore::clone_bare(host, &self.project_slug)?;
+crates/agentkit-litterbox/src/orchestrator/service.rs:873:        let scm = ThreadSafeScm::open_with_mode_and_prefix(
+crates/agentkit-litterbox/src/orchestrator/service.rs:875:            ScmMode::Remote,
+crates/agentkit-litterbox/src/orchestrator/service.rs:915:    let mut repo = git2::Repository::discover(".")
+crates/agentkit-litterbox/src/orchestrator/service.rs:922:    Ok(crate::vcs_store::VcsStore::resolve_path(
+crates/agentkit-litterbox/src/orchestrator/service.rs:1267:    mode: ScmMode,
+crates/agentkit-litterbox/src/orchestrator/service.rs:1268:) -> Result<ThreadSafeScm, SandboxError> {
+crates/agentkit-litterbox/src/orchestrator/service.rs:1272:        ScmMode::Direct => {
+crates/agentkit-litterbox/src/orchestrator/service.rs:1273:            ThreadSafeScm::open_with_mode_and_prefix(host, mode, config.project.slug.clone(), None)
+crates/agentkit-litterbox/src/orchestrator/service.rs:1275:        ScmMode::Remote => {
+crates/agentkit-litterbox/src/orchestrator/service.rs:1276:            let bare: PathBuf = VcsStore::clone_bare(host, project_slug)?;
+crates/agentkit-litterbox/src/orchestrator/service.rs:1277:            VcsStore::install_remote(host, &bare)?;
+crates/agentkit-litterbox/src/orchestrator/service.rs:1279:            ThreadSafeScm::open_with_mode_and_prefix(
+crates/agentkit-litterbox/src/orchestrator/service.rs:1457:        scm.commit_snapshot_from_staging(staging.path(), message)?;
+crates/agentkit-litterbox/src/orchestrator/service.rs:1461:    fn snapshot_scm(&self, stored: &StoredSandbox) -> Result<ThreadSafeScm, Error> {
+crates/agentkit-litterbox/src/orchestrator/service.rs:1463:            false => Ok(ThreadSafeScm::for_sandbox(
+crates/agentkit-litterbox/src/orchestrator/service.rs:1470:                let bare = VcsStore::clone_bare(host, &self.project_slug)?;
+crates/agentkit-litterbox/src/orchestrator/service.rs:1472:                let scm = ThreadSafeScm::open_with_mode_and_prefix(
+crates/agentkit-litterbox/src/orchestrator/service.rs:1474:                    ScmMode::Remote,
+crates/agentkit-litterbox/src/orchestrator/service.rs:1522:    use git2::{IndexAddOption, Repository, Signature};
+crates/agentkit-litterbox/src/orchestrator/service.rs:1533:    use crate::scm::{Scm, ThreadSafeScm};
+crates/agentkit-litterbox/src/orchestrator/service.rs:1595:        let scm = ThreadSafeScm::open(dir).expect("scm");
+crates/agentkit-litterbox/src/orchestrator/service.rs:1852:        let scm = ThreadSafeScm::open(dir.path()).expect("scm");
+crates/agentkit-litterbox/src/orchestrator/service.rs:1915:        let scm = ThreadSafeScm::open(dir.path()).expect("scm");
+crates/agentkit-litterbox/src/orchestrator/service.rs:1972:            let scm = ThreadSafeScm::open(dir.path()).expect("scm");
+crates/agentkit-litterbox/src/orchestrator/service.rs:2019:        let scm = ThreadSafeScm::open(dir.path()).expect("scm");
+crates/agentkit-litterbox/src/orchestrator/service.rs:2134:        let scm = ThreadSafeScm::open(dir.path()).expect("scm");
+=== orchestrator service functions ===
+65:    pub fn open(config: Config) -> Result<Self, SandboxError> {
+85:    pub fn for_test(
+103:    pub fn scm(&self) -> &ThreadSafeScm {
+108:    pub fn project_slug(&self) -> &str {
+113:    pub fn records_dir(&self) -> &Path {
+118:    pub async fn create(&self, name: &str) -> Result<Performed<SandboxRecord>, Error> {
+208:    async fn resolve_provision(
+292:    async fn repair(&self, name: &str, selected: &Selected) -> Result<Recovery, Error> {
+381:    pub async fn ensure_live(
+413:    pub async fn delete(&self, name: &str, force: bool) -> Result<Deletion, Error> {
+580:    pub async fn exec(
+601:    pub async fn inspect(&self, name: &str) -> Result<Inspection, Error> {
+610:    pub async fn workspace(&self, name: &str) -> Result<String, Error> {
+616:    pub async fn shell(&self, name: &str) -> Result<Vec<String>, Error> {
+623:    pub async fn pause(&self, name: &str) -> Result<(), Error> {
+631:    pub async fn resume(&self, name: &str) -> Result<(), Error> {
+639:    pub fn list(&self) -> Result<Listing, Error> {
+676:    pub async fn pause_listed(&self) -> Result<crate::orchestrator::PauseSummary, Error> {
+705:    pub async fn status(&self, name: &str) -> Result<SandboxStatus, Error> {
+710:    pub async fn inspect_all(&self) -> Result<Vec<(String, InspectionReport)>, Error> {
+715:    pub async fn inspect_listing(
+787:    fn stored(&self, name: &str) -> Result<StoredSandbox, Error> {
+802:    fn ensure_owned(
+829:    async fn select_for(&self, record: &SandboxRecord, operation: &str) -> Result<Selected, Error> {
+840:    async fn selected_for_operation(&self, operation: &str) -> Result<Selected, Error> {
+849:    fn stage_reference(&self, reference: &str) -> Result<TempDir, Error> {
+853:    fn stage(scm: &ThreadSafeScm, reference: &str) -> Result<TempDir, Error> {
+862:    fn with_branch_scm<T>(
+883:fn unsupported(
+899:fn port(port: &crate::config::PortRequest) -> RequestedPort {
+914:pub fn expose_store(store: &std::path::Path, name: &str) -> Result<bool, SandboxError> {
+921:pub fn store_path(config: &Config) -> Result<std::path::PathBuf, SandboxError> {
+927:pub fn resolve_project_slug(config: &Config) -> Result<String, SandboxError> {
+941:fn step_refusal(
+962:fn failure_of(backend: &str, step: &ProvisionStep, error: PrepareError) -> ProvisioningFailure {
+974:fn preparation_failure(backend: &str, step: &ProvisionStep, error: PrepareError) -> Error {
+981:fn log_refusal(sandbox: &str, backend: &str, failure: &ProvisioningFailure) {
+1024:pub fn preflight(
+1104:pub async fn preflight_host(
+1215:fn base_slug(config: &Config) -> Result<String, SandboxError> {
+1237:fn namespace_suffix() -> String {
+1254:fn directory_slug() -> String {
+1264:fn open_scm(
+1295:    fn exec<'a>(
+1306:    fn shell<'a>(
+1317:    fn upload<'a>(
+1325:    fn download<'a>(
+1333:    fn workspace<'a>(
+1340:    fn exec<'a>(
+1348:    fn shell<'a>(
+1355:    fn upload<'a>(
+1364:    fn download<'a>(
+1373:    fn workspace<'a>(
+1383:    pub async fn forwards(&self, name: &str) -> Result<Vec<Forward>, Error> {
+1391:    pub async fn upload(
+1410:    pub async fn download(
+1429:    pub async fn snapshot(&self, name: &str, message: &str) -> Result<Performed<()>, Error> {
+1461:    fn snapshot_scm(&self, stored: &StoredSandbox) -> Result<ThreadSafeScm, Error> {
+1484:    fn valid_name(&self, name: &str) -> Result<String, Error> {
+1494:    fn from(error: SandboxError) -> Self {
+=== mcp tool handlers ===
+126:    #[tool(
+143:    #[tool(
+165:    #[tool(name = "read", description = "Read a file from the sandbox")]
+180:    #[tool(name = "write", description = "Write a file into the sandbox")]
+206:    #[tool(
+234:    #[tool(
+265:    #[tool(name = "ls", description = "List directory entries")]
+277:    #[tool(name = "glob", description = "Find files matching a glob pattern")]
+291:    #[tool(name = "grep", description = "Search file contents for a pattern")]
