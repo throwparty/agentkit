@@ -1,0 +1,32 @@
+conflicted=b26668476f69e8561bf863ba45ef5e18497af419
+--- note on the conflicted commit ---
+state=conflicted merge=1 base=bfee7a6116da2564c9983ca7bf0d23e54dd35c08 ours=42b6701a9a689facf5a161f0b06e5a5dd2ee9530 theirs=71747063856aaef7533e67d28c62d30f49ea9c83
+--- notes list ---
+1a57b5a8625e7ec573797cbbe8dddbf7aa878e5f b26668476f69e8561bf863ba45ef5e18497af419
+--- a descendant of the conflicted commit ---
+child=7e8832c04eedbf707dbade90ad10eb59b78d89c0
+--- grandchild ---
+grandchild=6fd5ed057aeaf682c0586223b9c66bfe2a826908
+--- walk ancestors of the grandchild and check for the note ---
+conflicted ancestor: b26668476f69e8561bf863ba45ef5e18497af419
+state=conflicted merge=1 base=bfee7a6116da2564c9983ca7bf0d23e54dd35c08 ours=42b6701a9a689facf5a161f0b06e5a5dd2ee9530 theirs=71747063856aaef7533e67d28c62d30f49ea9c83
+--- normal clone does not fetch the notes ref ---
+Note: switching to '6fd5ed057aeaf682c0586223b9c66bfe2a826908'.
+
+You are in 'detached HEAD' state. You can look around, make experimental
+changes and commit them, and you can discard any commits you make in this
+state without impacting any branches by switching back to a branch.
+
+If you want to create a new branch to retain commits you create, you may
+do so (now or later) by using -c with the switch command. Example:
+
+  git switch -c <new-branch-name>
+
+Or undo this operation with:
+
+  git switch -
+
+Turn off this advice by setting config variable advice.detachedHead to false
+
+--- explicit notes refspec fetch ---
+state=conflicted merge=1 base=bfee7a6116da2564c9983ca7bf0d23e54dd35c08 ours=42b6701a9a689facf5a161f0b06e5a5dd2ee9530 theirs=71747063856aaef7533e67d28c62d30f49ea9c83

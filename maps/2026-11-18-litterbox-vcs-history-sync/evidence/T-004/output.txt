@@ -1,0 +1,36 @@
+merge-tree status=1
+merge-tree tree=afacf6e70cfdbe2f9787e8f32afa2243430cec66
+--- merge-tree output ---
+afacf6e70cfdbe2f9787e8f32afa2243430cec66
+100644 0154299b6bf52859024d6b99ca4502c0269c5953 1	file.txt
+100644 36c99981dcdd0c67f58e2c5541803f4072cfe6cc 2	file.txt
+100644 7ef9274764d1669d38c523053e482a12928a05cd 3	file.txt
+
+Auto-merging file.txt
+CONFLICT (content): Merge conflict in file.txt
+--- tree ---
+100644 blob e4915786855e5384c1fdcabad2ff78a11048c3c0	file.txt
+--- file.txt from the tree ---
+<<<<<<< 14f556b4e221274c843e00112c9490b5717b55e5
+apple
+grapefruit
+orange
+=======
+APPLE
+GRAPE
+ORANGE
+>>>>>>> be46a7b3a5bc0b0636aa0038dda2ae5ef08a6976
+commit-tree commit=afe08abb9569931e7a25a6549b3042929b2f154a
+--- commit ---
+tree afacf6e70cfdbe2f9787e8f32afa2243430cec66
+parent 14f556b4e221274c843e00112c9490b5717b55e5
+parent be46a7b3a5bc0b0636aa0038dda2ae5ef08a6976
+author probe <probe@example.com> 1795044456 +0000
+committer probe <probe@example.com> 1795044456 +0000
+
+conflicted merge
+--- log ---
+* be46a7b theirs
+| * 14f556b ours
+|/  
+* 07127fe base
