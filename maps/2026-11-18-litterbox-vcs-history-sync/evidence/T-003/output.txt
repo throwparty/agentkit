@@ -1,0 +1,108 @@
+Done importing changes from the underlying Git repo.
+Initialized repo in "."
+--- bookmarks ---
+main: lmrvnnun fd55b53d base
+ours: mtpwsrxx a2d341e9 ours
+theirs: oyostlps cb6e1010 theirs
+--- merge ours and theirs ---
+Working copy  (@) now at: nunwwquw 6ced6d40 (conflict) (empty) merge
+Parent commit (@-)      : mtpwsrxx a2d341e9 ours | ours
+Parent commit (@-)      : oyostlps cb6e1010 theirs | theirs
+Added 0 files, modified 1 files, removed 0 files
+Warning: There are unresolved conflicts at these paths:
+file.txt    2-sided conflict
+--- status after the merge ---
+The working copy has no changes.
+Working copy  (@) : nunwwquw 6ced6d40 (conflict) (empty) merge
+Parent commit (@-): mtpwsrxx a2d341e9 ours | ours
+Parent commit (@-): oyostlps cb6e1010 theirs | theirs
+Warning: There are unresolved conflicts at these paths:
+file.txt    2-sided conflict
+--- log after the merge ---
+@    nunwwquw luke@carrier.family 2026-11-18 23:35:01 6ced6d40 (conflict) (no sig)
+├─╮  (empty) merge
+│ ○  oyostlps probe@example.com 2026-11-18 23:35:00 theirs cb6e1010 unknown
+│ │  theirs
+○ │  mtpwsrxx probe@example.com 2026-11-18 23:35:00 ours a2d341e9 unknown
+├─╯  ours
+○  lmrvnnun probe@example.com 2026-11-18 23:35:00 main fd55b53d unknown
+│  base
+◆  zzzzzzzz root() 00000000
+--- resolve --list ---
+file.txt    2-sided conflict
+--- materialised conflict ---
+<<<<<<< conflict 1 of 1
+%%%%%%% diff from: lmrvnnun fd55b53d "base"
+\\\\\\\        to: mtpwsrxx a2d341e9 "ours"
+ apple
+-grape
++grapefruit
+ orange
++++++++ oyostlps cb6e1010 "theirs"
+APPLE
+GRAPE
+ORANGE
+>>>>>>> conflict 1 of 1 ends
+--- sides: base -> ours ---
+diff --git a/file.txt b/file.txt
+index 0154299b6b..36c99981dc 100644
+--- a/file.txt
++++ b/file.txt
+@@ -1,3 +1,3 @@ apple
+ apple
+-grape
++grapefruit
+ orange
+--- sides: base -> theirs ---
+diff --git a/file.txt b/file.txt
+index 0154299b6b..7ef9274764 100644
+--- a/file.txt
++++ b/file.txt
+@@ -1,3 +1,3 @@ APPLE
+-apple
+-grape
+-orange
++APPLE
++GRAPE
++ORANGE
+--- edit the marker file and snapshot ---
+Working copy changes:
+M file.txt
+Working copy  (@) : nunwwquw 253c0711 merge
+Parent commit (@-): mtpwsrxx a2d341e9 ours | ours
+Parent commit (@-): oyostlps cb6e1010 theirs | theirs
+--- log after editing ---
+@    nunwwquw luke@carrier.family 2026-11-18 23:35:02 253c0711 (no sig)
+├─╮  merge
+│ ○  oyostlps probe@example.com 2026-11-18 23:35:00 theirs cb6e1010 unknown
+│ │  theirs
+○ │  mtpwsrxx probe@example.com 2026-11-18 23:35:00 ours a2d341e9 unknown
+├─╯  ours
+○  lmrvnnun probe@example.com 2026-11-18 23:35:00 main fd55b53d unknown
+│  base
+◆  zzzzzzzz root() 00000000
+--- resolve --list after editing ---
+Error: No conflicts found at this revision
+--- squash the resolution into the merge commit ---
+error: the argument '--message <MESSAGE>' cannot be used with '--use-destination-message'
+
+Usage: jj squash --message <MESSAGE> [FILESETS]...
+
+For more information, try '--help'.
+Working copy changes:
+M file.txt
+Working copy  (@) : nunwwquw 253c0711 merge
+Parent commit (@-): mtpwsrxx a2d341e9 ours | ours
+Parent commit (@-): oyostlps cb6e1010 theirs | theirs
+--- log after squash ---
+@    nunwwquw luke@carrier.family 2026-11-18 23:35:02 253c0711 (no sig)
+├─╮  merge
+│ ○  oyostlps probe@example.com 2026-11-18 23:35:00 theirs cb6e1010 unknown
+│ │  theirs
+○ │  mtpwsrxx probe@example.com 2026-11-18 23:35:00 ours a2d341e9 unknown
+├─╯  ours
+○  lmrvnnun probe@example.com 2026-11-18 23:35:00 main fd55b53d unknown
+│  base
+◆  zzzzzzzz root() 00000000
+--- resolve --list after squash ---
+Error: No conflicts found at this revision

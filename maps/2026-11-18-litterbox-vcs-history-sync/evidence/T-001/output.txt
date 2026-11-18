@@ -1,0 +1,81 @@
+--- create the jj bridge backed by the bare Git repo ---
+Done importing changes from the underlying Git repo.
+Working copy  (@) now at: lrxmqrtw ff58ad0f (empty) (no description set)
+Parent commit (@-)      : xpkwxqtt c9c8ab29 main | seed
+Added 1 files, modified 0 files, removed 0 files
+Initialized repo in "bridge"
+--- bridge workspace list ---
+default (current): . lrxmqrtw ff58ad0f (empty) (no description set)
+--- add two sandbox workspaces ---
+Created workspace in "../ws1"
+Working copy  (@) now at: tlpvmxrn e034a7db (empty) (no description set)
+Parent commit (@-)      : xpkwxqtt c9c8ab29 main | seed
+Added 1 files, modified 0 files, removed 0 files
+Created workspace in "../ws2"
+Working copy  (@) now at: otuqpnqt 3934ba2d (empty) (no description set)
+Parent commit (@-)      : xpkwxqtt c9c8ab29 main | seed
+Added 1 files, modified 0 files, removed 0 files
+default (current): . lrxmqrtw ff58ad0f (empty) (no description set)
+sandbox-1: ../ws1 tlpvmxrn e034a7db (empty) (no description set)
+sandbox-2: ../ws2 otuqpnqt 3934ba2d (empty) (no description set)
+--- change in ws1 ---
+Working copy  (@) now at: mvnpwlmk c1316789 (empty) (no description set)
+Parent commit (@-)      : tlpvmxrn cdc1eb56 ws1 change
+--- change in ws2 ---
+Working copy  (@) now at: prtwntvy c59c429a (empty) (no description set)
+Parent commit (@-)      : otuqpnqt 5c2983d5 ws2 change
+--- jj log from the bridge ---
+@  lrxmqrtw luke@carrier.family 2026-11-18 23:32:10 default@ ff58ad0f (no sig)
+│  (empty) (no description set)
+│ ○  prtwntvy luke@carrier.family 2026-11-18 23:32:11 sandbox-2@ c59c429a (no sig)
+│ │  (empty) (no description set)
+│ ○  otuqpnqt luke@carrier.family 2026-11-18 23:32:11 5c2983d5 (no sig)
+├─╯  ws2 change
+│ ○  mvnpwlmk luke@carrier.family 2026-11-18 23:32:11 sandbox-1@ c1316789 (no sig)
+│ │  (empty) (no description set)
+│ ○  tlpvmxrn luke@carrier.family 2026-11-18 23:32:11 cdc1eb56 (no sig)
+├─╯  ws1 change
+○  xpkwxqtt probe@example.com 2026-11-18 23:32:10 main c9c8ab29 unknown
+│  seed
+◆  zzzzzzzz root() 00000000
+--- bare Git refs before bookmarks and export ---
+c9c8ab299843a4bf1b9081ffff4ea5056694cf54 commit	refs/heads/main
+019f4a52cb81f4b81a39a7137aa2ad4a960baf2e commit	refs/jj/keep/019f4a52cb81f4b81a39a7137aa2ad4a960baf2e
+30620bb16c5981794e38e0a9de09bb2459cd8415 commit	refs/jj/keep/30620bb16c5981794e38e0a9de09bb2459cd8415
+3934ba2d32824e04f76aadbccde386055bdbca99 commit	refs/jj/keep/3934ba2d32824e04f76aadbccde386055bdbca99
+5c2983d588a3201e7e7e7a289ce57a49b042d0fc commit	refs/jj/keep/5c2983d588a3201e7e7e7a289ce57a49b042d0fc
+b7ef25e5ed5973b6ec0eaec2bc1e74f76f4681fd commit	refs/jj/keep/b7ef25e5ed5973b6ec0eaec2bc1e74f76f4681fd
+c03246b68737dd88c5d2f5e796dfddf4c2b353ff commit	refs/jj/keep/c03246b68737dd88c5d2f5e796dfddf4c2b353ff
+c13167890c95590ecf9e0972c2e605dc16269d8e commit	refs/jj/keep/c13167890c95590ecf9e0972c2e605dc16269d8e
+c59c429ac7271a065730e4ed326fb227d48b70d8 commit	refs/jj/keep/c59c429ac7271a065730e4ed326fb227d48b70d8
+c9c8ab299843a4bf1b9081ffff4ea5056694cf54 commit	refs/jj/keep/c9c8ab299843a4bf1b9081ffff4ea5056694cf54
+cdc1eb56f667ca96ea2ccaf7980377a49a3bcc56 commit	refs/jj/keep/cdc1eb56f667ca96ea2ccaf7980377a49a3bcc56
+cf222e63a3159b4d7781ea60ee9cf7ab6c87fd45 commit	refs/jj/keep/cf222e63a3159b4d7781ea60ee9cf7ab6c87fd45
+e034a7db63b88f37dd96bbd6213d3977c193f244 commit	refs/jj/keep/e034a7db63b88f37dd96bbd6213d3977c193f244
+ff58ad0f97adf4d7df0005e213fde3186360dfba commit	refs/jj/keep/ff58ad0f97adf4d7df0005e213fde3186360dfba
+--- create bookmarks for the sandbox changes ---
+Created 1 bookmarks pointing to tlpvmxrn cdc1eb56 litterbox/sandbox-1 | ws1 change
+Created 1 bookmarks pointing to otuqpnqt 5c2983d5 litterbox/sandbox-2 | ws2 change
+--- jj git export ---
+--- bare Git refs after bookmarks and export ---
+cdc1eb56f667ca96ea2ccaf7980377a49a3bcc56 commit	refs/heads/litterbox/sandbox-1
+5c2983d588a3201e7e7e7a289ce57a49b042d0fc commit	refs/heads/litterbox/sandbox-2
+c9c8ab299843a4bf1b9081ffff4ea5056694cf54 commit	refs/heads/main
+019f4a52cb81f4b81a39a7137aa2ad4a960baf2e commit	refs/jj/keep/019f4a52cb81f4b81a39a7137aa2ad4a960baf2e
+30620bb16c5981794e38e0a9de09bb2459cd8415 commit	refs/jj/keep/30620bb16c5981794e38e0a9de09bb2459cd8415
+3934ba2d32824e04f76aadbccde386055bdbca99 commit	refs/jj/keep/3934ba2d32824e04f76aadbccde386055bdbca99
+5c2983d588a3201e7e7e7a289ce57a49b042d0fc commit	refs/jj/keep/5c2983d588a3201e7e7e7a289ce57a49b042d0fc
+b7ef25e5ed5973b6ec0eaec2bc1e74f76f4681fd commit	refs/jj/keep/b7ef25e5ed5973b6ec0eaec2bc1e74f76f4681fd
+c03246b68737dd88c5d2f5e796dfddf4c2b353ff commit	refs/jj/keep/c03246b68737dd88c5d2f5e796dfddf4c2b353ff
+c13167890c95590ecf9e0972c2e605dc16269d8e commit	refs/jj/keep/c13167890c95590ecf9e0972c2e605dc16269d8e
+c59c429ac7271a065730e4ed326fb227d48b70d8 commit	refs/jj/keep/c59c429ac7271a065730e4ed326fb227d48b70d8
+c9c8ab299843a4bf1b9081ffff4ea5056694cf54 commit	refs/jj/keep/c9c8ab299843a4bf1b9081ffff4ea5056694cf54
+cdc1eb56f667ca96ea2ccaf7980377a49a3bcc56 commit	refs/jj/keep/cdc1eb56f667ca96ea2ccaf7980377a49a3bcc56
+cf222e63a3159b4d7781ea60ee9cf7ab6c87fd45 commit	refs/jj/keep/cf222e63a3159b4d7781ea60ee9cf7ab6c87fd45
+e034a7db63b88f37dd96bbd6213d3977c193f244 commit	refs/jj/keep/e034a7db63b88f37dd96bbd6213d3977c193f244
+ff58ad0f97adf4d7df0005e213fde3186360dfba commit	refs/jj/keep/ff58ad0f97adf4d7df0005e213fde3186360dfba
+--- bridge directory ---
+.
+..
+.jj
+README.md

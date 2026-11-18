@@ -1,0 +1,195 @@
+=== pinned version ===
+3727:name = "rmcp"
+3728-version = "3.9.0"
+3729-source = "registry+https://github.com/rust-lang/crates.io-index"
+3730-checksum = "d24a7e92f4bcaa36b97fa93c4fa7ca8f3e669eced949345b3462dba333c7f909"
+=== source ===
+.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmcp-3.9.0
+=== CallToolResult ===
+4139:pub struct CallToolResult {
+4140-    /// Result type discriminator (SEP-2322). Required by the [spec schema]
+4141-    /// for servers implementing protocol version `2026-07-28`, but optional
+4142-    /// here because this type also models results from older protocol
+4143-    /// versions, which do not carry the field: `None` means absent on the
+4144-    /// wire, and per the spec "the client MUST treat the absent field as
+4145-    /// `"complete"`". Constructors default to `Some(ResultType::COMPLETE)`;
+4146-    /// the server handler clears the field when responding to peers that
+4147-    /// negotiated an older version.
+4148-    ///
+4149-    /// [spec schema]: https://github.com/modelcontextprotocol/modelcontextprotocol/blob/271ecc9accafdd9b83a3c869fa67c22953b2af80/schema/2026-07-28/schema.ts#L219-L235
+4150-    #[serde(default, skip_serializing_if = "Option::is_none")]
+4151-    pub result_type: Option<ResultType>,
+4152-    /// The content returned by the tool (text, images, etc.)
+4153-    #[serde(default)]
+4154-    pub content: Vec<ContentBlock>,
+4155-    /// An optional JSON value that represents the structured result of the tool call.
+4156-    /// It can be any JSON value, including `null`; an explicit `null` is kept
+4157-    /// distinct from an absent field.
+4158-    #[serde(skip_serializing_if = "Option::is_none")]
+4159-    pub structured_content: Option<Value>,
+4160-    /// Whether this result represents an error condition
+4161-    #[serde(skip_serializing_if = "Option::is_none")]
+4162-    pub is_error: Option<bool>,
+4163-    /// Optional protocol-level metadata for this result
+4164-    #[serde(rename = "_meta", skip_serializing_if = "Option::is_none")]
+4165-    pub meta: Option<MetaObject>,
+4166-}
+4167-
+4168-// Custom Deserialize implementation that:
+4169-// 1. Defaults `content` to `[]` when the field is missing (lenient per Postel's law)
+4170-// 2. Requires at least one known field to be present, so that `CallToolResult` doesn't
+4171-//    greedily match arbitrary JSON objects when used inside `#[serde(untagged)]` enums
+4172-//    (e.g. `ServerResult`), which would shadow `CustomResult`. `_meta` doesn't count,
+4173-//    since any result type may carry it.
+4174-// 3. Rejects non-`complete` result types so other `ServerResult` variants can match.
+4175-// 4. Keeps a present `"structuredContent": null` as `Some(Value::Null)`, distinct
+4176-//    from an absent field, since structured content can be any JSON value.
+4177-impl<'de> Deserialize<'de> for CallToolResult {
+4178-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+4179-    where
+=== structured_content occurrences ===
+4159:    pub structured_content: Option<Value>,
+4175:// 4. Keeps a present `"structuredContent": null` as `Some(Value::Null)`, distinct
+4189:            structured_content: Option<Value>,
+4208:            && helper.structured_content.is_none()
+4213:                 (content, structuredContent, or isError)",
+4220:            structured_content: helper.structured_content,
+4232:            structured_content: None,
+4245:            structured_content: None,
+4303:            structured_content: None,
+4326:            structured_content: Some(value),
+4353:            structured_content: Some(value),
+4365:    /// Convert the `structured_content` part of response into a certain type.
+4375:        let raw_text = match (self.structured_content, &self.content.first()) {
+=== ContentBlock variants ===
+=== success constructor ===
+4241:    pub fn success(content: Vec<ContentBlock>) -> Self {
+4242-        CallToolResult {
+4243-            result_type: Some(ResultType::COMPLETE),
+4244-            content,
+4245-            structured_content: None,
+4246-            is_error: Some(false),
+4247-            meta: None,
+4248-        }
+4249-    }
+4250-
+4251-    /// Create a tool-level error result with caller-visible content.
+4252-    ///
+4253-    /// # When to use this vs `Err(ErrorData)`
+4254-    ///
+4255-    /// MCP distinguishes two failure modes for a `call_tool` invocation, and
+4256-    /// the right one to use depends on **whose problem it is**:
+=== ContentBlock definition ===
+.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rmcp-3.9.0/src/model/content.rs:259:pub enum ContentBlock {
+259:pub enum ContentBlock {
+260-    Text(TextContent),
+261-    Image(ImageContent),
+262-    Audio(AudioContent),
+263-    Resource(EmbeddedResource),
+264-    ResourceLink(super::resource::Resource),
+265-}
+266-
+267-impl ContentBlock {
+268-    pub fn json<S: Serialize>(json: S) -> Result<Self, crate::ErrorData> {
+269-        let json = serde_json::to_string(&json).map_err(|e| {
+270-            crate::ErrorData::internal_error(
+271-                "fail to serialize response to json",
+272-                Some(json!(
+273-                    {"reason": e.to_string()}
+274-                )),
+275-            )
+276-        })?;
+277-        Ok(ContentBlock::text(json))
+278-    }
+279-
+280-    pub fn text(text: impl Into<String>) -> Self {
+281-        ContentBlock::Text(TextContent::new(text))
+282-    }
+283-
+284-    pub fn image(data: impl Into<String>, mime_type: impl Into<String>) -> Self {
+285-        ContentBlock::Image(ImageContent::new(data, mime_type))
+286-    }
+287-
+288-    pub fn audio(data: impl Into<String>, mime_type: impl Into<String>) -> Self {
+289-        ContentBlock::Audio(AudioContent::new(data, mime_type))
+290-    }
+291-
+292-    pub fn resource(resource: ResourceContents) -> Self {
+293-        ContentBlock::Resource(EmbeddedResource::new(resource))
+294-    }
+295-
+296-    pub fn embedded_text(uri: impl Into<String>, content: impl Into<String>) -> Self {
+297-        ContentBlock::Resource(EmbeddedResource::new(
+298-            ResourceContents::TextResourceContents {
+299-                uri: uri.into(),
+300-                mime_type: Some("text/plain".to_string()),
+301-                text: content.into(),
+302-                meta: None,
+303-            },
+304-        ))
+=== structured constructors ===
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use rmcp::model::CallToolResult;
+    /// use serde_json::json;
+    ///
+    /// let result = CallToolResult::structured(json!({
+    ///     "temperature": 22.5,
+    ///     "humidity": 65,
+    ///     "description": "Partly cloudy"
+    /// }));
+    /// ```
+    pub fn structured(value: Value) -> Self {
+        CallToolResult {
+            result_type: Some(ResultType::COMPLETE),
+            content: vec![ContentBlock::text(value.to_string())],
+            structured_content: Some(value),
+            is_error: Some(false),
+            meta: None,
+        }
+    }
+    /// Create an error tool result with structured content
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use rmcp::model::CallToolResult;
+    /// use serde_json::json;
+    ///
+    /// let result = CallToolResult::structured_error(json!({
+    ///     "error_code": "INVALID_INPUT",
+    ///     "message": "Temperature value out of range",
+    ///     "details": {
+    ///         "min": -50,
+    ///         "max": 50,
+    ///         "provided": 100
+    ///     }
+    /// }));
+    /// ```
+    pub fn structured_error(value: Value) -> Self {
+        CallToolResult {
+            result_type: Some(ResultType::COMPLETE),
+            content: vec![ContentBlock::text(value.to_string())],
+            structured_content: Some(value),
+            is_error: Some(true),
+            meta: None,
+        }
+    }
+
+    /// Set the metadata on this result
+    pub fn with_meta(mut self, meta: Option<MetaObject>) -> Self {
+=== ContentBlock::json ===
+268:    pub fn json<S: Serialize>(json: S) -> Result<Self, crate::ErrorData> {
+269-        let json = serde_json::to_string(&json).map_err(|e| {
+270-            crate::ErrorData::internal_error(
+271-                "fail to serialize response to json",
+272-                Some(json!(
+273-                    {"reason": e.to_string()}
+274-                )),
+275-            )
+276-        })?;
+277-        Ok(ContentBlock::text(json))
+278-    }
+279-
+280-    pub fn text(text: impl Into<String>) -> Self {
