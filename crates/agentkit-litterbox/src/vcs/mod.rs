@@ -8,6 +8,7 @@
 mod capabilities;
 mod conflict;
 mod error;
+pub mod git_common;
 mod types;
 
 pub use capabilities::{BindingSupport, Capabilities, ConflictModel, ExportSupport};

@@ -6,6 +6,8 @@ use std::sync::Mutex;
 use git2::{BranchType, ObjectType, Repository};
 
 use crate::domain::{SandboxError, ScmError, ScmMode, slugify};
+use crate::vcs::git_common::archive;
+pub use crate::vcs::git_common::{IgnoreFiles, SnapshotFilter, branch_name_for};
 
 /// How many times a snapshot may rebuild its commit while another moves the ref.
 const MAX_SNAPSHOT_ATTEMPTS: usize = 8;
@@ -91,17 +93,6 @@ impl GitScm {
             .map_err(|source| SandboxError::Scm(ScmError::BranchCreate { source }))
     }
 
-    fn tree_from_reference_in<'a>(
-        repo: &'a Repository,
-        reference: &str,
-    ) -> Result<git2::Tree<'a>, SandboxError> {
-        let obj = repo
-            .revparse_single(reference)
-            .map_err(|source| SandboxError::Scm(ScmError::Archive { source }))?;
-        obj.peel_to_tree()
-            .map_err(|source| SandboxError::Scm(ScmError::Archive { source }))
-    }
-
     fn signature(&self) -> Result<git2::Signature<'_>, SandboxError> {
         self.repo
             .signature()
@@ -137,71 +128,6 @@ impl GitScm {
             Err(error) if error.code() == git2::ErrorCode::NotFound => Ok(None),
             Err(source) => Err(SandboxError::Scm(ScmError::Reference { source })),
         }
-    }
-
-    fn append_tree(
-        repo: &Repository,
-        builder: &mut tar::Builder<Vec<u8>>,
-        tree: &git2::Tree<'_>,
-        base: &Path,
-    ) -> Result<(), SandboxError> {
-        for entry in tree.iter() {
-            Self::append_entry(repo, builder, base, &entry)?;
-        }
-
-        Ok(())
-    }
-
-    fn append_entry(
-        repo: &Repository,
-        builder: &mut tar::Builder<Vec<u8>>,
-        base: &Path,
-        entry: &git2::TreeEntry<'_>,
-    ) -> Result<(), SandboxError> {
-        let name = entry
-            .name()
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid path"))?;
-        let path = base.join(PathBuf::from(name));
-
-        match entry.kind() {
-            Some(ObjectType::Tree) => {
-                let subtree = entry
-                    .to_object(repo)
-                    .map_err(|source| SandboxError::Scm(ScmError::Archive { source }))?
-                    .peel_to_tree()
-                    .map_err(|source| SandboxError::Scm(ScmError::Archive { source }))?;
-                Self::append_tree(repo, builder, &subtree, &path)
-            }
-            Some(ObjectType::Blob) => Self::append_blob(repo, builder, &path, entry),
-            _ => Ok(()),
-        }
-    }
-
-    fn append_blob(
-        repo: &Repository,
-        builder: &mut tar::Builder<Vec<u8>>,
-        path: &Path,
-        entry: &git2::TreeEntry<'_>,
-    ) -> Result<(), SandboxError> {
-        let blob = entry
-            .to_object(repo)
-            .map_err(|source| SandboxError::Scm(ScmError::Archive { source }))?
-            .peel_to_blob()
-            .map_err(|source| SandboxError::Scm(ScmError::Archive { source }))?;
-
-        let mut header = tar::Header::new_gnu();
-        let mode = match entry.filemode() {
-            0 => 0o644,
-            value => value as u32,
-        };
-        let size = u64::try_from(blob.size())
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "blob too large"))?;
-        header.set_size(size);
-        header.set_mode(mode);
-        header.set_cksum();
-
-        builder.append_data(&mut header, path, blob.content())?;
-        Ok(())
     }
 }
 
@@ -383,10 +309,10 @@ impl Scm for GitScm {
             }
             ScmMode::Direct => &self.repo,
         };
-        let tree = Self::tree_from_reference_in(repo, reference)?;
+        let tree = archive::tree_from_reference(repo, reference)?;
         let mut builder = tar::Builder::new(Vec::new());
 
-        Self::append_tree(repo, &mut builder, &tree, Path::new(""))?;
+        archive::append_tree(repo, &mut builder, &tree, Path::new(""))?;
 
         builder.into_inner().map_err(SandboxError::Io)
     }
@@ -674,155 +600,6 @@ impl GitScm {
 
         Ok(())
     }
-}
-
-/// What a snapshot tracks, decided the way `git add -A` decides it: a path the
-/// snapshot's parent already records is tracked, and the sandbox's ignore rules
-/// apply only to everything else.
-pub struct SnapshotFilter {
-    /// The checkout libgit2 evaluates rules against. Kept alive because it owns
-    /// the directory the sandbox's rule files are mirrored into.
-    _rules: tempfile::TempDir,
-    checkout: Mutex<Repository>,
-    tracked: HashSet<PathBuf>,
-    tracked_dirs: HashSet<PathBuf>,
-}
-
-impl SnapshotFilter {
-    fn open(
-        rules_root: &Path,
-        tracked: HashSet<PathBuf>,
-        tracked_dirs: HashSet<PathBuf>,
-    ) -> Result<Self, SandboxError> {
-        let rules = tempfile::tempdir().map_err(SandboxError::Io)?;
-        let checkout = Repository::init(rules.path())
-            .map_err(|source| SandboxError::Scm(ScmError::Open { source }))?;
-
-        // libgit2 answers ignore questions about a checkout, so the sandbox's
-        // own ignore files are mirrored into this one at the same paths: a
-        // nested rule keeps meaning what it means inside the sandbox.
-        mirror_ignore_files(rules_root, rules.path())?;
-
-        // A repository's own exclude file applies from its root.
-        if let Ok(contents) = fs::read(rules_root.join(".git").join("info").join("exclude")) {
-            let target = checkout.path().join("info").join("exclude");
-            fs::write(target, contents).map_err(SandboxError::Io)?;
-        }
-
-        Ok(Self {
-            _rules: rules,
-            checkout: Mutex::new(checkout),
-            tracked,
-            tracked_dirs,
-        })
-    }
-
-    fn skips_file(&self, relative: &Path) -> Result<bool, SandboxError> {
-        if self.tracked.contains(relative) {
-            return Ok(false);
-        }
-        self.ignored(relative)
-    }
-
-    /// A directory is skipped only when the snapshot's parent records nothing
-    /// beneath it.
-    fn skips_dir(&self, relative: &Path) -> Result<bool, SandboxError> {
-        if self.tracked_dirs.contains(relative) {
-            return Ok(false);
-        }
-        // The staging tree is not the checkout, so libgit2 cannot stat the
-        // directory to learn it is one; the trailing separator says so.
-        let mut probe = relative.as_os_str().to_owned();
-        probe.push("/");
-        self.ignored(Path::new(&probe))
-    }
-
-    fn ignored(&self, relative: &Path) -> Result<bool, SandboxError> {
-        let checkout = self
-            .checkout
-            .lock()
-            .map_err(|_| SandboxError::Config("Mutex poisoned".to_string()))?;
-        checkout
-            .status_should_ignore(relative)
-            .map_err(|source| SandboxError::Scm(ScmError::Status { source }))
-    }
-}
-
-/// Copy a tree's ignore files into a checkout, leaving everything else behind.
-///
-/// `from` is a tree the sandbox produced; `to` is the scratch checkout libgit2
-/// reads rules from. Only the rule files are needed, so nothing else is copied
-/// and no rule changes meaning: `.gitignore` governs the directory it sits in.
-fn mirror_ignore_files(from: &Path, to: &Path) -> Result<(), SandboxError> {
-    let entries = match fs::read_dir(from) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(SandboxError::Io(error)),
-    };
-
-    for entry in entries {
-        let entry = entry.map_err(SandboxError::Io)?;
-        let name = entry.file_name();
-        if name == ".git" {
-            continue;
-        }
-        // `file_type` does not follow a link, so a linked directory is left
-        // alone rather than walked in circles.
-        if entry.file_type().map_err(SandboxError::Io)?.is_dir() {
-            mirror_ignore_files(&entry.path(), &to.join(&name))?;
-        } else if name == ".gitignore" {
-            fs::create_dir_all(to).map_err(SandboxError::Io)?;
-            fs::copy(entry.path(), to.join(&name)).map_err(SandboxError::Io)?;
-        }
-    }
-
-    Ok(())
-}
-
-impl crate::sandbox::contract::SnapshotSelector for SnapshotFilter {
-    fn selects(
-        &self,
-        relative: &Path,
-        is_dir: bool,
-    ) -> Result<bool, crate::sandbox::contract::Error> {
-        let skips = if is_dir {
-            self.skips_dir(relative)
-        } else {
-            self.skips_file(relative)
-        };
-        skips
-            .map(|skips| !skips)
-            .map_err(|error| crate::sandbox::contract::Error::failed(error.to_string()))
-    }
-}
-
-/// Selects the ignore files a snapshot's rules are read from.
-///
-/// A snapshot has to know the sandbox's own rules before it decides what to
-/// transfer, so the transfer runs twice: once for these files, and once for
-/// everything else under the rules they describe.
-pub struct IgnoreFiles;
-
-impl crate::sandbox::contract::SnapshotSelector for IgnoreFiles {
-    fn selects(
-        &self,
-        relative: &Path,
-        is_dir: bool,
-    ) -> Result<bool, crate::sandbox::contract::Error> {
-        // A directory is kept so the walk reaches the rules nested inside it.
-        if is_dir {
-            return Ok(true);
-        }
-        Ok(relative
-            .file_name()
-            .is_some_and(|name| name == ".gitignore")
-            || relative == Path::new(".git/info/exclude"))
-    }
-}
-
-/// The branch a sandbox's snapshots live on.
-pub fn branch_name_for(slug: &str) -> String {
-    format!("litterbox/{}", slug)
 }
 
 fn repo_prefix_from_path(path: &Path) -> String {

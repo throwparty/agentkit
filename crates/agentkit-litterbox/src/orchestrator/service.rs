@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
-use tar::Archive;
 use tempfile::TempDir;
 
 use crate::backends;
@@ -846,8 +845,7 @@ impl Sandboxes {
     fn stage(scm: &ThreadSafeScm, reference: &str) -> Result<TempDir, Error> {
         let archive = scm.make_archive(reference)?;
         let tempdir = TempDir::new().map_err(SandboxError::Io)?;
-        let mut archive = Archive::new(std::io::Cursor::new(archive));
-        archive.unpack(tempdir.path()).map_err(SandboxError::Io)?;
+        crate::vcs::git_common::archive::unpack(&archive, tempdir.path())?;
         Ok(tempdir)
     }
 
