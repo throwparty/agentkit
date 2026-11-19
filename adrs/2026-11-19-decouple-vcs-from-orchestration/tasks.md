@@ -15,7 +15,7 @@ Add `src/vcs/{mod,types,capabilities,conflict,error}.rs`: `BranchName`, `Revisio
 | Depends On |  |
 | References | vcs-contract,object-safe,open-for-extension,unimplemented-operation,binding-is-configured,signature-types |
 
-### T-002: Git common module
+### T-002: [x] Git common module
 
 Add `src/vcs/git_common/{ignore,filter,archive,unpack,naming}.rs`. Move `IgnoreFiles`, `SnapshotFilter`, `branch_name_for`, the archive builder and `git2::Tree` walk, and the tar unpack loop out of `scm` and the orchestrator, keeping the `SnapshotSelector` implementations and the path confinement. It may use `git2`. Make `scm` and the orchestrator delegate temporarily so behaviour is unchanged. Add no binding or masking code.
 
