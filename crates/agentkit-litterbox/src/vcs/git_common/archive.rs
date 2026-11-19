@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 
 use git2::{ObjectType, Repository};
 
-use crate::domain::{SandboxError, ScmError};
+use super::GitError;
+use crate::domain::SandboxError;
 
 /// The tree a reference points at.
 pub fn tree_from_reference<'a>(
@@ -13,9 +14,9 @@ pub fn tree_from_reference<'a>(
 ) -> Result<git2::Tree<'a>, SandboxError> {
     let obj = repo
         .revparse_single(reference)
-        .map_err(|source| SandboxError::Scm(ScmError::Archive { source }))?;
+        .map_err(|source| SandboxError::from(GitError::Archive { source }))?;
     obj.peel_to_tree()
-        .map_err(|source| SandboxError::Scm(ScmError::Archive { source }))
+        .map_err(|source| SandboxError::from(GitError::Archive { source }))
 }
 
 /// Append every entry of `tree` to `builder`, under `base`.
@@ -47,9 +48,9 @@ fn append_entry(
         Some(ObjectType::Tree) => {
             let subtree = entry
                 .to_object(repo)
-                .map_err(|source| SandboxError::Scm(ScmError::Archive { source }))?
+                .map_err(|source| SandboxError::from(GitError::Archive { source }))?
                 .peel_to_tree()
-                .map_err(|source| SandboxError::Scm(ScmError::Archive { source }))?;
+                .map_err(|source| SandboxError::from(GitError::Archive { source }))?;
             append_tree(repo, builder, &subtree, &path)
         }
         Some(ObjectType::Blob) => append_blob(repo, builder, &path, entry),
@@ -65,9 +66,9 @@ fn append_blob(
 ) -> Result<(), SandboxError> {
     let blob = entry
         .to_object(repo)
-        .map_err(|source| SandboxError::Scm(ScmError::Archive { source }))?
+        .map_err(|source| SandboxError::from(GitError::Archive { source }))?
         .peel_to_blob()
-        .map_err(|source| SandboxError::Scm(ScmError::Archive { source }))?;
+        .map_err(|source| SandboxError::from(GitError::Archive { source }))?;
 
     let mut header = tar::Header::new_gnu();
     let mode = match entry.filemode() {

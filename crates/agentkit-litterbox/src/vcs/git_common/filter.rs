@@ -7,7 +7,8 @@ use std::sync::Mutex;
 
 use git2::Repository;
 
-use crate::domain::{SandboxError, ScmError};
+use super::GitError;
+use crate::domain::SandboxError;
 
 /// What a snapshot tracks, decided the way `git add -A` decides it: a path the
 /// snapshot's parent already records is tracked, and the sandbox's ignore rules
@@ -30,7 +31,7 @@ impl SnapshotFilter {
     ) -> Result<Self, SandboxError> {
         let rules = tempfile::tempdir().map_err(SandboxError::Io)?;
         let checkout = Repository::init(rules.path())
-            .map_err(|source| SandboxError::Scm(ScmError::Open { source }))?;
+            .map_err(|source| SandboxError::from(GitError::Open { source }))?;
 
         // libgit2 answers ignore questions about a checkout, so the sandbox's
         // own ignore files are mirrored into this one at the same paths: a
@@ -78,7 +79,7 @@ impl SnapshotFilter {
             .map_err(|_| SandboxError::Config("Mutex poisoned".to_string()))?;
         checkout
             .status_should_ignore(relative)
-            .map_err(|source| SandboxError::Scm(ScmError::Status { source }))
+            .map_err(|source| SandboxError::from(GitError::Status { source }))
     }
 }
 
