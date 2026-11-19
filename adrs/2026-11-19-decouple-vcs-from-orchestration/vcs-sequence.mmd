@@ -1,0 +1,36 @@
+sequenceDiagram
+  participant S as cli / mcp
+  participant C as compose
+  participant G as vcs::git
+  participant O as orchestrator
+  participant B as compute backend
+
+  S->>C: open(config)
+  C->>G: GitVcs::open(GitVcsConfig)
+  G->>G: clone bare store and install remote (remote mode)
+  C->>O: Sandboxes::with_vcs(Arc<dyn Vcs>, remote)
+
+  S->>O: create(name)
+  O->>G: prepare(name)
+  G-->>O: Prepared { workspace, base }
+  O->>G: materialise(workspace, base, staging)
+  O->>B: create(staging source)
+  B-->>O: record
+  O->>G: delete_branch(name) on failure only
+  O-->>S: Performed(record)
+
+  S->>O: snapshot(name, message)
+  O->>B: download (pass 1)
+  O->>G: snapshot_filter(staging)
+  O->>B: download (pass 2, filtered)
+  O->>G: snapshot(workspace, staging, message)
+  G-->>O: Revision
+
+  S->>O: list()
+  O->>G: sandboxes()
+  G-->>O: branch slugs
+
+  S->>O: remote(name)
+  O->>G: state_path()
+  O->>G: expose(name)
+  G-->>O: added?
