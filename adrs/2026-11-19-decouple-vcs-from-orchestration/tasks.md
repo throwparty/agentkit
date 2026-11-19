@@ -80,7 +80,7 @@ Replace `Sandboxes.scm` with `vcs: Arc<dyn Vcs>` and `remote: bool`. Rewrite cre
 | Depends On | T-003,T-004,T-005 |
 | References | orchestrator-port,existing-operations,mode-and-record,orchestrator-neutral,behaviour-parity,moved-git-tests |
 
-### T-007: Compose and surfaces
+### T-007: [x] Compose and surfaces
 
 Add `src/compose.rs` with `open(config)`: compute the project slug, read `config.git.snapshot_mode` (default Remote), build `GitVcsConfig`, construct `GitVcs`, and return `Sandboxes::with_vcs(config, Arc::new(git), remote)`. Point `mcp.rs` and `cli.rs::project` at it. Replace the free-function calls in `handle_remote` with `Sandboxes::expose_remote`. Delete `Sandboxes::open` and the temporary `expose_store` and `store_path` wrappers.
 
