@@ -121,9 +121,7 @@ impl Sandboxes {
         if let Some(loaded) = metadata_store::load_sandbox_at(&self.records_dir, &name)? {
             match loaded {
                 LoadedSandbox::Current(stored) => {
-                    let selected = self
-                        .select_for(&stored.sandbox, "create a sandbox")
-                        .await?;
+                    let selected = self.select_for(&stored.sandbox, "create a sandbox").await?;
                     let inspection = selected.core().inspect(&stored.sandbox).await?;
                     if inspection.status == SandboxStatus::Missing {
                         let recovery = self.repair(&name, &selected).await?;
@@ -384,9 +382,7 @@ impl Sandboxes {
         policy: PausedPolicy,
     ) -> Result<Option<Recovery>, Error> {
         let stored = self.stored(name)?;
-        let selected = self
-            .select_for(&stored.sandbox, "use the sandbox")
-            .await?;
+        let selected = self.select_for(&stored.sandbox, "use the sandbox").await?;
         let inspection = selected.core().inspect(&stored.sandbox).await?;
         match inspection.status {
             SandboxStatus::Active => Ok(None),
@@ -415,10 +411,7 @@ impl Sandboxes {
 
         match metadata_store::load_sandbox_at(&self.records_dir, &name)? {
             Some(LoadedSandbox::Current(stored)) => {
-                let selected = match self
-                    .select_for(&stored.sandbox, "delete the sandbox")
-                    .await
-                {
+                let selected = match self.select_for(&stored.sandbox, "delete the sandbox").await {
                     Ok(selected) => selected,
                     Err(error) => {
                         if !force {
@@ -435,10 +428,7 @@ impl Sandboxes {
                             Err(Error::NotFound { .. }) => {}
                             Err(error) => return Err(error),
                         }
-                        metadata_store::remove_sandbox_at(
-                            &self.records_dir,
-                            &stored.sandbox.name,
-                        )?;
+                        metadata_store::remove_sandbox_at(&self.records_dir, &stored.sandbox.name)?;
                         return Ok(Deletion {
                             record_path: Some(
                                 self.records_dir
@@ -447,9 +437,7 @@ impl Sandboxes {
                             state_paths: Vec::new(),
                             branch: stored.branch_name,
                             compute_stopped: false,
-                            detail: Some(format!(
-                                "the backend could not be asked: {error}"
-                            )),
+                            detail: Some(format!("the backend could not be asked: {error}")),
                         });
                     }
                 };
@@ -484,9 +472,9 @@ impl Sandboxes {
 
                 // A branch that is already gone is not a failure. Any other
                 // branch error keeps the record so the delete can be retried.
-                match self.with_branch_scm(&stored, |scm| {
-                    Ok(scm.delete_branch(&stored.sandbox.name)?)
-                }) {
+                match self
+                    .with_branch_scm(&stored, |scm| Ok(scm.delete_branch(&stored.sandbox.name)?))
+                {
                     Ok(()) => {}
                     Err(Error::NotFound { .. }) => {}
                     Err(error) => return Err(error),
@@ -503,7 +491,10 @@ impl Sandboxes {
 
                 metadata_store::remove_sandbox_at(&self.records_dir, &stored.sandbox.name)?;
                 Ok(Deletion {
-                    record_path: Some(self.records_dir.join(format!("{}.toml", stored.sandbox.name))),
+                    record_path: Some(
+                        self.records_dir
+                            .join(format!("{}.toml", stored.sandbox.name)),
+                    ),
                     state_paths: teardown.state_paths,
                     branch: stored.branch_name,
                     compute_stopped: teardown.compute_stopped,
@@ -666,7 +657,9 @@ impl Sandboxes {
             Err(error) => listing.branch_error = Some(error.to_string()),
         }
 
-        listing.sandboxes.sort_by(|left, right| left.name.cmp(&right.name));
+        listing
+            .sandboxes
+            .sort_by(|left, right| left.name.cmp(&right.name));
         listing.corrupt.sort();
         listing.orphans.sort();
         Ok(listing)
@@ -870,12 +863,8 @@ impl Sandboxes {
         let host = Path::new(".");
         let bare = VcsStore::clone_bare(host, &self.project_slug)?;
         let host_abs = host.canonicalize().unwrap_or_else(|_| host.to_path_buf());
-        let scm = ThreadSafeScm::open_with_mode_and_prefix(
-            &bare,
-            ScmMode::Remote,
-            None,
-            Some(host_abs),
-        )?;
+        let scm =
+            ThreadSafeScm::open_with_mode_and_prefix(&bare, ScmMode::Remote, None, Some(host_abs))?;
         operation(&scm)
     }
 }
@@ -1455,7 +1444,10 @@ impl Sandboxes {
             .await?;
 
         scm.commit_snapshot_from_staging(staging.path(), message)?;
-        Ok(Performed { value: (), recovery })
+        Ok(Performed {
+            value: (),
+            recovery,
+        })
     }
 
     fn snapshot_scm(&self, stored: &StoredSandbox) -> Result<ThreadSafeScm, Error> {
@@ -1706,7 +1698,10 @@ mod seam_tests {
         let sandboxes = orchestrator(dir.path(), records.path().to_path_buf(), backend, None);
 
         sandboxes.scm().create_branch("orphan").expect("branch");
-        sandboxes.delete("orphan", false).await.expect("delete cleans up");
+        sandboxes
+            .delete("orphan", false)
+            .await
+            .expect("delete cleans up");
 
         let branches = sandboxes.scm().list_sandboxes().expect("branches");
         assert!(!branches.contains(&"orphan".to_string()), "{branches:?}");
@@ -1761,7 +1756,10 @@ mod seam_tests {
         let branches = sandboxes.scm().list_sandboxes().expect("branches");
         assert!(!branches.contains(&"demo".to_string()), "{branches:?}");
 
-        sandboxes.delete("demo", true).await.expect("a second delete");
+        sandboxes
+            .delete("demo", true)
+            .await
+            .expect("a second delete");
     }
 
     #[tokio::test]

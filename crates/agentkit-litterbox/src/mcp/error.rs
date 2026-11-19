@@ -46,9 +46,7 @@ pub(super) fn map_contract(error: Error) -> McpError {
     let mut data = serde_json::json!({ "class": error.class().as_str() });
     if let Error::Paused { name } = &error {
         data["reason"] = serde_json::Value::String(format!("sandbox '{name}' is paused"));
-        data["remedy"] = serde_json::Value::String(format!(
-            "run `litterbox resume {name}` first"
-        ));
+        data["remedy"] = serde_json::Value::String(format!("run `litterbox resume {name}` first"));
     }
     if let Some(failure) = error.provisioning_failure() {
         if let Some(backend) = &failure.backend {

@@ -771,7 +771,10 @@ mod tests {
             Box::pin(async { Err(Error::failed("stub")) })
         }
 
-        fn delete<'a>(&'a self, _sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<super::Teardown, Error>> {
+        fn delete<'a>(
+            &'a self,
+            _sandbox: &'a SandboxRecord,
+        ) -> BoxFuture<'a, Result<super::Teardown, Error>> {
             Box::pin(async {
                 Ok(super::Teardown {
                     compute_stopped: true,
@@ -781,7 +784,10 @@ mod tests {
             })
         }
 
-        fn stop<'a>(&'a self, _sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<super::Teardown, Error>> {
+        fn stop<'a>(
+            &'a self,
+            _sandbox: &'a SandboxRecord,
+        ) -> BoxFuture<'a, Result<super::Teardown, Error>> {
             Box::pin(async {
                 Ok(super::Teardown {
                     compute_stopped: true,
