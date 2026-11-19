@@ -93,9 +93,9 @@ Add `src/compose.rs` with `open(config)`: compute the project slug, read `config
 | Depends On | T-006 |
 | References | composition-root,single-construction,binding-is-configured,mode-and-record |
 
-### T-008: Arch-lint boundary
+### T-008: [x] Arch-lint boundary
 
-Add scopes `litterbox-vcs`, `litterbox-vcs-git-common`, `litterbox-vcs-git` and `litterbox-compose`; remove `litterbox-scm` and `litterbox-vcs-store` and replace them in every deny list. Add allow-lists: `vcs` to contract; `git-common` to contract and vcs; `git` to vcs, git-common and contract; `compose` to vcs, git, orchestrator, config, shared and contract. Add the deny rules for the orchestrator, git-common, CLI and MCP, vcs and the contract-facing modules. `src/vcs/*.rs` stays non-recursive.
+Add scopes `litterbox-vcs`, `litterbox-vcs-git-common`, `litterbox-vcs-git` and `litterbox-compose`; remove `litterbox-scm` and `litterbox-vcs-store` and replace them in every deny list. Add allow-lists: `vcs` to contract; `git-common` to contract and vcs; `git` to vcs, git-common and contract; `compose` to vcs, git, orchestrator, config, shared and contract. Add the deny rules for the orchestrator, git-common, CLI and MCP, vcs and the contract-facing modules. `litterbox-vcs` excludes the two subdirectories.
 
 
 | Field | Value |

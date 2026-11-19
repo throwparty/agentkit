@@ -42,6 +42,37 @@ from = "litterbox-backend-seatbelt-helper"
 to = ["litterbox-backend-seatbelt"]
 doc = "adrs/2026-11-14-darwin-sandbox-provider"
 
+[[allow-dep]]
+from = "litterbox-vcs"
+to = ["litterbox-contract"]
+doc = "adrs/2026-11-19-decouple-vcs-from-orchestration"
+
+[[allow-dep]]
+from = "litterbox-vcs-git-common"
+to = ["litterbox-contract", "litterbox-shared", "litterbox-vcs"]
+doc = "adrs/2026-11-19-decouple-vcs-from-orchestration"
+
+[[allow-dep]]
+from = "litterbox-vcs-git"
+to = [
+  "litterbox-contract",
+  "litterbox-shared",
+  "litterbox-vcs",
+  "litterbox-vcs-git-common"
+]
+doc = "adrs/2026-11-19-decouple-vcs-from-orchestration"
+
+[[allow-dep]]
+from = "litterbox-compose"
+to = [
+  "litterbox-config",
+  "litterbox-orchestrator",
+  "litterbox-shared",
+  "litterbox-vcs",
+  "litterbox-vcs-git"
+]
+doc = "adrs/2026-11-19-decouple-vcs-from-orchestration"
+
 [[deny-scope-dep]]
 from = "acp-v1"
 to = ["acp-v2"]
@@ -69,8 +100,9 @@ to = [
   "litterbox-cli",
   "litterbox-mcp",
   "litterbox-config",
-  "litterbox-scm",
-  "litterbox-vcs-store",
+  "litterbox-vcs",
+  "litterbox-vcs-git-common",
+  "litterbox-vcs-git",
   "litterbox-shared",
   "litterbox-provision",
   "litterbox-kinds",
@@ -87,8 +119,9 @@ to = [
   "litterbox-cli",
   "litterbox-mcp",
   "litterbox-config",
-  "litterbox-scm",
-  "litterbox-vcs-store",
+  "litterbox-vcs",
+  "litterbox-vcs-git-common",
+  "litterbox-vcs-git",
   "litterbox-shared",
   "litterbox-provision",
   "litterbox-kinds",
@@ -105,8 +138,9 @@ to = [
   "litterbox-cli",
   "litterbox-mcp",
   "litterbox-config",
-  "litterbox-scm",
-  "litterbox-vcs-store",
+  "litterbox-vcs",
+  "litterbox-vcs-git-common",
+  "litterbox-vcs-git",
   "litterbox-provision",
   "litterbox-kinds",
   "litterbox-prepare"
@@ -122,8 +156,9 @@ to = [
   "litterbox-cli",
   "litterbox-mcp",
   "litterbox-config",
-  "litterbox-scm",
-  "litterbox-vcs-store",
+  "litterbox-vcs",
+  "litterbox-vcs-git-common",
+  "litterbox-vcs-git",
   "litterbox-provision",
   "litterbox-kinds",
   "litterbox-prepare",
@@ -139,8 +174,9 @@ to = [
   "litterbox-persistence",
   "litterbox-cli",
   "litterbox-mcp",
-  "litterbox-scm",
-  "litterbox-vcs-store",
+  "litterbox-vcs",
+  "litterbox-vcs-git-common",
+  "litterbox-vcs-git",
   "litterbox-provision",
   "litterbox-kinds",
   "litterbox-prepare"
@@ -153,8 +189,9 @@ to = [
   "litterbox-backend-docker",
   "litterbox-backend-bubblewrap",
   "litterbox-backend-seatbelt",
-  "litterbox-scm",
-  "litterbox-vcs-store",
+  "litterbox-vcs",
+  "litterbox-vcs-git-common",
+  "litterbox-vcs-git",
   "litterbox-provision",
   "litterbox-kinds",
   "litterbox-prepare"
@@ -167,8 +204,9 @@ to = [
   "litterbox-backend-docker",
   "litterbox-backend-bubblewrap",
   "litterbox-backend-seatbelt",
-  "litterbox-scm",
-  "litterbox-vcs-store",
+  "litterbox-vcs",
+  "litterbox-vcs-git-common",
+  "litterbox-vcs-git",
   "litterbox-provision",
   "litterbox-kinds",
   "litterbox-prepare"
@@ -184,8 +222,9 @@ to = [
   "litterbox-persistence",
   "litterbox-cli",
   "litterbox-mcp",
-  "litterbox-scm",
-  "litterbox-vcs-store",
+  "litterbox-vcs",
+  "litterbox-vcs-git-common",
+  "litterbox-vcs-git",
   "litterbox-provision",
   "litterbox-prepare"
 ]
@@ -202,8 +241,9 @@ to = [
   "litterbox-cli",
   "litterbox-mcp",
   "litterbox-config",
-  "litterbox-scm",
-  "litterbox-vcs-store",
+  "litterbox-vcs",
+  "litterbox-vcs-git-common",
+  "litterbox-vcs-git",
   "litterbox-shared",
   "litterbox-kinds",
   "litterbox-prepare"
@@ -212,8 +252,31 @@ message = "persistence depends on the contract's record types only."
 
 [[deny-scope-dep]]
 from = "litterbox-orchestrator"
-to = ["litterbox-backend-docker", "litterbox-backend-bubblewrap"]
-message = "the orchestrator selects a backend through the registry; it does not name a mechanism."
+to = [
+  "litterbox-backend-docker",
+  "litterbox-backend-bubblewrap",
+  "litterbox-vcs-git-common",
+  "litterbox-vcs-git"
+]
+message = "the orchestrator selects a backend through the registry and a VCS through the contract; it does not name a mechanism."
+
+[[deny-scope-dep]]
+from = "litterbox-vcs"
+to = [
+  "litterbox-backend-docker",
+  "litterbox-backend-bubblewrap",
+  "litterbox-backend-seatbelt",
+  "litterbox-registry",
+  "litterbox-orchestrator",
+  "litterbox-vcs-git",
+  "litterbox-vcs-git-common"
+]
+message = "the contract imports no mechanism and no backend; backends import the contract, never the reverse."
+
+[[deny-scope-dep]]
+from = "litterbox-vcs-git-common"
+to = ["litterbox-vcs-git"]
+message = "the Git common module is a storage primitive; the Git backend imports it, never the reverse."
 
 [[deny-scope-dep]]
 from = "litterbox-provision"
@@ -226,8 +289,9 @@ to = [
   "litterbox-persistence",
   "litterbox-cli",
   "litterbox-mcp",
-  "litterbox-scm",
-  "litterbox-vcs-store",
+  "litterbox-vcs",
+  "litterbox-vcs-git-common",
+  "litterbox-vcs-git",
   "litterbox-shared",
   "litterbox-prepare"
 ]
@@ -245,8 +309,9 @@ to = [
   "litterbox-cli",
   "litterbox-mcp",
   "litterbox-config",
-  "litterbox-scm",
-  "litterbox-vcs-store",
+  "litterbox-vcs",
+  "litterbox-vcs-git-common",
+  "litterbox-vcs-git",
   "litterbox-shared",
   "litterbox-provision",
   "litterbox-prepare"
@@ -265,8 +330,9 @@ to = [
   "litterbox-cli",
   "litterbox-mcp",
   "litterbox-config",
-  "litterbox-scm",
-  "litterbox-vcs-store",
+  "litterbox-vcs",
+  "litterbox-vcs-git-common",
+  "litterbox-vcs-git",
   "litterbox-shared",
   "litterbox-provision"
 ]
@@ -378,12 +444,24 @@ paths = [
 ]
 
 [[scopes]]
-name = "litterbox-scm"
-paths = ["crates/agentkit-litterbox/src/scm/**"]
+name = "litterbox-vcs"
+paths = ["crates/agentkit-litterbox/src/vcs/*.rs"]
+exclude = [
+  "crates/agentkit-litterbox/src/vcs/git_common/**",
+  "crates/agentkit-litterbox/src/vcs/git/**"
+]
 
 [[scopes]]
-name = "litterbox-vcs-store"
-paths = ["crates/agentkit-litterbox/src/vcs_store/**"]
+name = "litterbox-vcs-git-common"
+paths = ["crates/agentkit-litterbox/src/vcs/git_common/**"]
+
+[[scopes]]
+name = "litterbox-vcs-git"
+paths = ["crates/agentkit-litterbox/src/vcs/git/**"]
+
+[[scopes]]
+name = "litterbox-compose"
+paths = ["crates/agentkit-litterbox/src/compose.rs"]
 
 [[scopes]]
 name = "litterbox-shared"

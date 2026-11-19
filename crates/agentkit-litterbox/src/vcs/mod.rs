@@ -127,6 +127,18 @@ mod tests {
 
     struct Stub;
 
+    struct SelectAll;
+
+    impl SnapshotSelector for SelectAll {
+        fn selects(
+            &self,
+            _relative: &Path,
+            _is_dir: bool,
+        ) -> Result<bool, crate::sandbox::contract::Error> {
+            Ok(true)
+        }
+    }
+
     impl Vcs for Stub {
         fn capabilities(&self) -> Capabilities {
             Capabilities {
@@ -163,7 +175,7 @@ mod tests {
         }
 
         fn ignore_files(&self) -> Arc<dyn SnapshotSelector> {
-            Arc::new(crate::vcs::git_common::IgnoreFiles)
+            Arc::new(SelectAll)
         }
 
         fn snapshot(
