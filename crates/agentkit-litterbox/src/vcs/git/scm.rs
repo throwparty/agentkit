@@ -1,13 +1,18 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use git2::{BranchType, ObjectType, Repository};
 
 use crate::domain::{SandboxError, ScmError, ScmMode, slugify};
+use crate::sandbox::contract::SnapshotSelector;
 use crate::vcs::git_common::archive;
-pub use crate::vcs::git_common::{IgnoreFiles, SnapshotFilter, branch_name_for};
+pub use crate::vcs::git_common::{SnapshotFilter, branch_name_for};
+use crate::vcs::{
+    BindingSupport, Capabilities, Conflict, ConflictModel, ConflictSides, Error as VcsError,
+    ExportSupport, HistoryPolicy, Merge, Prepared, RestoreMode, Revision, TreeId, Vcs, Workspace,
+};
 
 /// How many times a snapshot may rebuild its commit while another moves the ref.
 const MAX_SNAPSHOT_ATTEMPTS: usize = 8;
@@ -131,16 +136,28 @@ impl GitScm {
     }
 }
 
-pub struct ThreadSafeScm {
+pub struct GitVcs {
     inner: Mutex<GitScm>,
     prefix_override: Option<String>,
+    /// The project slug the bare store is named after, when known.
+    store_slug: Option<String>,
 }
 
-impl ThreadSafeScm {
+/// The old name, kept while the orchestrator still imports it.
+pub type ThreadSafeScm = GitVcs;
+
+impl GitVcs {
+    /// Record the project slug used for the bare store.
+    pub fn set_store_slug(mut self, slug: String) -> Self {
+        self.store_slug = Some(slug);
+        self
+    }
+
     pub fn open(path: &Path) -> Result<Self, SandboxError> {
         GitScm::open_direct(path).map(|scm| Self {
             inner: Mutex::new(scm),
             prefix_override: None,
+            store_slug: None,
         })
     }
 
@@ -148,6 +165,7 @@ impl ThreadSafeScm {
         GitScm::open(path, mode).map(|scm| Self {
             inner: Mutex::new(scm),
             prefix_override: None,
+            store_slug: None,
         })
     }
 
@@ -155,6 +173,7 @@ impl ThreadSafeScm {
         GitScm::open_direct(path).map(|scm| Self {
             inner: Mutex::new(scm),
             prefix_override: prefix,
+            store_slug: None,
         })
     }
 
@@ -167,6 +186,7 @@ impl ThreadSafeScm {
         GitScm::open_with_host(path, mode, host_repo_path).map(|scm| Self {
             inner: Mutex::new(scm),
             prefix_override: prefix,
+            store_slug: None,
         })
     }
 
@@ -182,6 +202,7 @@ impl ThreadSafeScm {
         Ok(Self {
             inner: Mutex::new(scm),
             prefix_override: prefix,
+            store_slug: None,
         })
     }
 
@@ -214,7 +235,7 @@ impl ThreadSafeScm {
     }
 }
 
-impl Scm for ThreadSafeScm {
+impl Scm for GitVcs {
     fn mode(&self) -> ScmMode {
         self.lock().map(|g| g.mode()).unwrap_or(ScmMode::Direct)
     }
@@ -355,6 +376,279 @@ impl Scm for GitScm {
                     message: format!("Failed to apply patch: {}", e),
                 })
             })
+    }
+}
+
+impl Vcs for GitVcs {
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            conflict_model: ConflictModel::Blocking,
+            op_log: false,
+            bindings: BindingSupport::Copied,
+            export: ExportSupport::None,
+        }
+    }
+
+    fn prepare(&self, sandbox: &str) -> Result<Prepared, VcsError> {
+        let branch = self.create_branch(sandbox).map_err(vcs_error)?;
+        Ok(Prepared {
+            workspace: Workspace::from_branch(branch),
+            base: Revision::new("HEAD"),
+        })
+    }
+
+    fn masked_paths(&self, _workspace: &Workspace) -> Vec<PathBuf> {
+        Vec::new()
+    }
+
+    fn identity(&self, workspace: &Workspace) -> Result<TreeId, VcsError> {
+        let branch = workspace.branch().to_string();
+        self.repo_for_branch(&branch, |repo| {
+            let oid = repo
+                .refname_to_id(&format!("refs/heads/{branch}"))
+                .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+            let commit = repo
+                .find_commit(oid)
+                .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+            let tree = commit
+                .tree()
+                .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+            Ok(tree.id().to_string())
+        })
+        .map(TreeId::new)
+        .map_err(vcs_error)
+    }
+
+    fn materialise(
+        &self,
+        workspace: &Workspace,
+        revision: &Revision,
+        into: &Path,
+    ) -> Result<(), VcsError> {
+        let branch = workspace.branch().to_string();
+        let bytes = self
+            .repo_for_branch(&branch, |repo| {
+                crate::vcs::git_common::archive::archive(repo, revision.as_str())
+            })
+            .map_err(vcs_error)?;
+        crate::vcs::git_common::archive::unpack(&bytes, into).map_err(vcs_error)
+    }
+
+    fn snapshot_filter(&self, rules_root: &Path) -> Result<Arc<dyn SnapshotSelector>, VcsError> {
+        let filter = self
+            .lock()
+            .map_err(vcs_error)?
+            .snapshot_filter(rules_root)
+            .map_err(vcs_error)?;
+        Ok(Arc::new(filter))
+    }
+
+    fn snapshot(
+        &self,
+        workspace: &Workspace,
+        staging: &Path,
+        message: &str,
+    ) -> Result<Revision, VcsError> {
+        self.set_snapshot_branch(workspace.branch().to_string())
+            .map_err(vcs_error)?;
+        match self
+            .commit_snapshot_from_staging(staging, message)
+            .map_err(vcs_error)?
+        {
+            Some(oid) => Ok(Revision::new(oid.to_string())),
+            None => self.tip(workspace),
+        }
+    }
+
+    fn sandboxes(&self) -> Result<Vec<String>, VcsError> {
+        Scm::list_sandboxes(self).map_err(vcs_error)
+    }
+
+    fn delete_branch(&self, sandbox: &str) -> Result<(), VcsError> {
+        let branch = GitScm::branch_name(sandbox);
+        self.repo_for_branch(&branch, |repo| {
+            let mut found = repo.find_branch(&branch, BranchType::Local).map_err(|_| {
+                SandboxError::SandboxNotFound {
+                    name: sandbox.to_string(),
+                }
+            })?;
+            found
+                .delete()
+                .map_err(|source| SandboxError::Scm(ScmError::BranchDelete { source }))
+        })
+        .map_err(vcs_error)
+    }
+
+    fn state_path(&self) -> Option<PathBuf> {
+        self.store_slug
+            .as_ref()
+            .map(|slug| crate::vcs::git::VcsStore::resolve_path(slug))
+    }
+
+    fn expose(&self, name: &str) -> Result<bool, VcsError> {
+        let Some(store) = self.state_path() else {
+            return Err(unsupported("expose"));
+        };
+        crate::vcs::git::expose_store(&store, name).map_err(vcs_error)
+    }
+
+    fn prune(&self) -> Result<(), VcsError> {
+        let Some(slug) = &self.store_slug else {
+            return Ok(());
+        };
+        let path = crate::vcs::git::VcsStore::resolve_path(slug);
+        if !path.is_dir() {
+            return Ok(());
+        }
+        let bare = Repository::open_bare(&path)
+            .map_err(|source| SandboxError::Scm(ScmError::Open { source }))
+            .map_err(vcs_error)?;
+        let mut branches = bare
+            .branches(Some(BranchType::Local))
+            .map_err(|source| SandboxError::Scm(ScmError::BranchList { source }))
+            .map_err(vcs_error)?;
+        let any = branches.any(|branch| {
+            branch
+                .ok()
+                .and_then(|(branch, _)| branch.name().ok().flatten().map(str::to_string))
+                .is_some_and(|name| name.starts_with("litterbox/"))
+        });
+        if !any {
+            crate::vcs::git::VcsStore::destroy_bare(slug).map_err(vcs_error)?;
+        }
+        Ok(())
+    }
+
+    fn tip(&self, workspace: &Workspace) -> Result<Revision, VcsError> {
+        let branch = workspace.branch().to_string();
+        self.repo_for_branch(&branch, |repo| {
+            repo.refname_to_id(&format!("refs/heads/{branch}"))
+                .map(|oid| oid.to_string())
+                .map_err(|source| SandboxError::Scm(ScmError::Reference { source }))
+        })
+        .map(Revision::new)
+        .map_err(vcs_error)
+    }
+
+    fn set_tip(&self, _workspace: &Workspace, _revision: &Revision) -> Result<(), VcsError> {
+        Err(unsupported("set_tip"))
+    }
+
+    fn synced(&self, _workspace: &Workspace) -> Result<Revision, VcsError> {
+        Err(unsupported("synced"))
+    }
+
+    fn set_synced(&self, _workspace: &Workspace, _revision: &Revision) -> Result<(), VcsError> {
+        Err(unsupported("set_synced"))
+    }
+
+    fn merge(
+        &self,
+        _base: &Revision,
+        _ours: &Revision,
+        _theirs: &Revision,
+    ) -> Result<Merge, VcsError> {
+        Err(unsupported("merge"))
+    }
+
+    fn conflicts(&self, _revision: &Revision) -> Result<Vec<Conflict>, VcsError> {
+        Err(unsupported("conflicts"))
+    }
+
+    fn conflict_sides(
+        &self,
+        _revision: &Revision,
+        _path: &Path,
+    ) -> Result<ConflictSides, VcsError> {
+        Err(unsupported("conflict_sides"))
+    }
+
+    fn resolve(&self, _revision: &Revision, _paths: &[PathBuf]) -> Result<Revision, VcsError> {
+        Err(unsupported("resolve"))
+    }
+
+    fn abort(&self, _revision: &Revision) -> Result<(), VcsError> {
+        Err(unsupported("abort"))
+    }
+
+    fn history(
+        &self,
+        _workspace: &Workspace,
+        _keep: &HistoryPolicy,
+    ) -> Result<Vec<Revision>, VcsError> {
+        Err(unsupported("history"))
+    }
+
+    fn restore(
+        &self,
+        _workspace: &Workspace,
+        _revision: &Revision,
+        _mode: RestoreMode,
+    ) -> Result<(), VcsError> {
+        Err(unsupported("restore"))
+    }
+
+    fn export(&self) -> Result<(), VcsError> {
+        Ok(())
+    }
+}
+
+impl GitVcs {
+    /// Run `operation` against the repository that holds `branch`.
+    ///
+    /// The bare clone is checked first, then the host repository, then the
+    /// configured store. That is the same order `make_archive` uses, and it
+    /// lets one backend instance serve records created under either locality.
+    fn repo_for_branch<T>(
+        &self,
+        branch: &str,
+        operation: impl FnOnce(&Repository) -> Result<T, SandboxError>,
+    ) -> Result<T, SandboxError> {
+        let guard = self.lock()?;
+
+        if guard.repo.find_branch(branch, BranchType::Local).is_ok() {
+            return operation(&guard.repo);
+        }
+
+        if let Some(path) = &guard.host_repo_path
+            && let Ok(host) = Repository::open(path)
+            && host.find_branch(branch, BranchType::Local).is_ok()
+        {
+            return operation(&host);
+        }
+
+        if let Some(slug) = &self.store_slug {
+            let path = crate::vcs::git::VcsStore::resolve_path(slug);
+            if let Ok(bare) = Repository::open_bare(&path)
+                && bare.find_branch(branch, BranchType::Local).is_ok()
+            {
+                return operation(&bare);
+            }
+        }
+
+        operation(&guard.repo)
+    }
+}
+
+fn vcs_error(error: SandboxError) -> VcsError {
+    match error {
+        SandboxError::SandboxExists { name } => VcsError::Exists { name },
+        SandboxError::SandboxNotFound { name } => VcsError::NotFound { name },
+        SandboxError::Io(source) => VcsError::Io(source),
+        other => VcsError::Backend {
+            operation: "git".to_string(),
+            message: other.to_string(),
+        },
+    }
+}
+
+fn unsupported(operation: &str) -> VcsError {
+    VcsError::Unsupported {
+        operation: operation.to_string(),
+        backend: "git".to_string(),
+        primitive: "not implemented in this cut".to_string(),
+        reason: "the conflict and history surface lands in a later change".to_string(),
+        remedy: "create, prepare, materialise, snapshot, list and delete are available".to_string(),
     }
 }
 

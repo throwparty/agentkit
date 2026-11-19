@@ -8,6 +8,7 @@
 mod capabilities;
 mod conflict;
 mod error;
+pub mod git;
 pub mod git_common;
 mod types;
 

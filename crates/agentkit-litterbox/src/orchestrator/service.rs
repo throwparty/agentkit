@@ -20,8 +20,8 @@ use crate::sandbox::contract::{
     SandboxRecord, SandboxStatus, Workspace,
 };
 use crate::sandbox::selected::Selected;
-use crate::scm::{Scm, ThreadSafeScm};
-use crate::vcs_store::VcsStore;
+use crate::vcs::git::VcsStore;
+use crate::vcs::git::{Scm, ThreadSafeScm};
 
 /// How long host preparation may take before its commands are killed and
 /// reaped. Preparation runs before a backend's create budget starts, so it
@@ -899,14 +899,12 @@ fn port(port: &crate::config::PortRequest) -> RequestedPort {
 /// Returns whether the remote was added; false means the name already points
 /// at the store.
 pub fn expose_store(store: &std::path::Path, name: &str) -> Result<bool, SandboxError> {
-    let mut repo = git2::Repository::discover(".")
-        .map_err(|source| SandboxError::Scm(crate::domain::ScmError::Open { source }))?;
-    crate::vcs_store::remote::install_remote_in(&mut repo, name, store)
+    crate::vcs::git::expose_store(store, name)
 }
 
 /// The Git store that holds this project's sandbox branches.
 pub fn store_path(config: &Config) -> Result<std::path::PathBuf, SandboxError> {
-    Ok(crate::vcs_store::VcsStore::resolve_path(
+    Ok(crate::vcs::git::VcsStore::resolve_path(
         &resolve_project_slug(config)?,
     ))
 }
@@ -1425,7 +1423,7 @@ impl Sandboxes {
         let workspace = selected.core().inspect(&stored.sandbox).await?.workspace;
         // The ignore rules travel first, so the bulk transfer can skip build
         // trees and secrets instead of copying them into host staging.
-        let ignore = Some(std::sync::Arc::new(crate::scm::IgnoreFiles)
+        let ignore = Some(std::sync::Arc::new(crate::vcs::git_common::IgnoreFiles)
             as std::sync::Arc<dyn crate::sandbox::contract::SnapshotSelector>);
         selected
             .core()
@@ -1520,8 +1518,8 @@ mod seam_tests {
     };
     use crate::sandbox::report::State;
     use crate::sandbox::selected::Selected;
-    use crate::scm::{Scm, ThreadSafeScm};
     use crate::testing::TestBackend;
+    use crate::vcs::git::{Scm, ThreadSafeScm};
 
     fn repository() -> (TempDir, Repository) {
         let dir = TempDir::new().expect("tempdir");
