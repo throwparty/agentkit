@@ -52,6 +52,9 @@ pub trait Vcs: Send + Sync {
     /// The transfer predicate for a snapshot, read from `rules_root`.
     fn snapshot_filter(&self, rules_root: &Path) -> Result<Arc<dyn SnapshotSelector>, Error>;
 
+    /// The selector that carries a snapshot's ignore files.
+    fn ignore_files(&self) -> Arc<dyn SnapshotSelector>;
+
     /// Commit the staged tree into the workspace's branch.
     fn snapshot(
         &self,
@@ -157,6 +160,10 @@ mod tests {
 
         fn snapshot_filter(&self, _rules_root: &Path) -> Result<Arc<dyn SnapshotSelector>, Error> {
             unsupported("snapshot_filter")
+        }
+
+        fn ignore_files(&self) -> Arc<dyn SnapshotSelector> {
+            Arc::new(crate::vcs::git_common::IgnoreFiles)
         }
 
         fn snapshot(

@@ -444,6 +444,10 @@ impl Vcs for GitVcs {
         Ok(Arc::new(filter))
     }
 
+    fn ignore_files(&self) -> Arc<dyn SnapshotSelector> {
+        Arc::new(crate::vcs::git_common::IgnoreFiles)
+    }
+
     fn snapshot(
         &self,
         workspace: &Workspace,
@@ -525,7 +529,15 @@ impl Vcs for GitVcs {
         self.repo_for_branch(&branch, |repo| {
             repo.refname_to_id(&format!("refs/heads/{branch}"))
                 .map(|oid| oid.to_string())
-                .map_err(|source| SandboxError::from(GitError::Reference { source }))
+                .map_err(|source| {
+                    if source.code() == git2::ErrorCode::NotFound {
+                        SandboxError::SandboxNotFound {
+                            name: branch.clone(),
+                        }
+                    } else {
+                        SandboxError::from(GitError::Reference { source })
+                    }
+                })
         })
         .map(Revision::new)
         .map_err(vcs_error)
