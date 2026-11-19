@@ -14,5 +14,5 @@ pub use bulk::PauseSummary;
 pub use outcome::{Deletion, InspectionReport, Performed, Recovery};
 pub use service::{
     HostReport, HostRequirement, Listing, PausedPolicy, PlannedStep, Preflight, SandboxIo,
-    Sandboxes, expose_store, preflight, preflight_host, resolve_project_slug, store_path,
+    Sandboxes, preflight, preflight_host, resolve_project_slug,
 };

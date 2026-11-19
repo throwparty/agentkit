@@ -1,5 +1,5 @@
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -8,7 +8,7 @@ use tempfile::TempDir;
 
 use crate::backends;
 use crate::config::Config;
-use crate::domain::{SandboxError, ScmMode};
+use crate::domain::SandboxError;
 use crate::metadata_store::{self, LoadedSandbox, StoredSandbox};
 use crate::orchestrator::lock;
 use crate::orchestrator::outcome::{Deletion, InspectionReport, Performed, Recovery};
@@ -21,7 +21,6 @@ use crate::sandbox::contract::{
     SandboxRecord, SandboxStatus, Workspace,
 };
 use crate::sandbox::selected::Selected;
-use crate::vcs::git::GitVcs;
 use crate::vcs::{Error as VcsError, Prepared, Vcs, Workspace as VcsWorkspace};
 
 /// How long host preparation may take before its commands are killed and
@@ -62,16 +61,6 @@ pub enum PausedPolicy {
 }
 
 impl Sandboxes {
-    /// Open the project the current directory belongs to.
-    pub fn open(config: Config) -> Result<Self, SandboxError> {
-        let project_slug = resolve_project_slug(&config)?;
-        let mode = config.git.snapshot_mode.unwrap_or_default();
-        let remote = mode == ScmMode::Remote;
-        let vcs = open_vcs(&config, &project_slug, mode)?;
-
-        Self::with_vcs(config, Arc::new(vcs), remote)
-    }
-
     /// Build an orchestrator over an explicit backend.
     pub fn with_vcs(config: Config, vcs: Arc<dyn Vcs>, remote: bool) -> Result<Self, SandboxError> {
         let project_slug = resolve_project_slug(&config)?;
@@ -848,6 +837,24 @@ impl Sandboxes {
             .materialise(&prepared.workspace, &prepared.base, staged.path())?;
         Ok(staged)
     }
+
+    /// Attach the project's store to the checkout as a remote.
+    ///
+    /// Returns the store path and whether the remote was added; false means the
+    /// name already points at the store.
+    pub fn expose_remote(&self, name: &str) -> Result<(std::path::PathBuf, bool), Error> {
+        let Some(store) = self.vcs.state_path() else {
+            return Err(Error::failed("this VCS has no sandbox store"));
+        };
+        if !store.is_dir() {
+            return Err(Error::failed(format!(
+                "this project has no sandbox store at '{}' yet; create a sandbox first",
+                store.display()
+            )));
+        }
+        let added = self.vcs.expose(name).map_err(contract_error)?;
+        Ok((store, added))
+    }
 }
 
 fn unsupported(
@@ -877,21 +884,6 @@ fn port(port: &crate::config::PortRequest) -> RequestedPort {
 ///
 /// A configured slug becomes a path component, so it is validated rather than
 /// trusted: a value the slug rules would change is refused, naming the setting.
-/// Attach this project's sandbox store to the current checkout as a remote.
-///
-/// Returns whether the remote was added; false means the name already points
-/// at the store.
-pub fn expose_store(store: &std::path::Path, name: &str) -> Result<bool, SandboxError> {
-    crate::vcs::git::expose_store(store, name)
-}
-
-/// The Git store that holds this project's sandbox branches.
-pub fn store_path(config: &Config) -> Result<std::path::PathBuf, SandboxError> {
-    Ok(crate::vcs::git::VcsStore::resolve_path(
-        &resolve_project_slug(config)?,
-    ))
-}
-
 pub fn resolve_project_slug(config: &Config) -> Result<String, SandboxError> {
     Ok(format!("{}-{}", base_slug(config)?, namespace_suffix()))
 }
@@ -1227,29 +1219,6 @@ fn directory_slug() -> String {
         .and_then(|name| name.to_str())
         .map(crate::domain::slugify)
         .unwrap_or_else(|| "unknown".to_string())
-}
-
-fn open_vcs(config: &Config, project_slug: &str, mode: ScmMode) -> Result<GitVcs, SandboxError> {
-    let host = Path::new(".");
-
-    let vcs = match mode {
-        ScmMode::Direct => {
-            GitVcs::open_with_mode_and_prefix(host, mode, config.project.slug.clone(), None)?
-        }
-        ScmMode::Remote => {
-            let bare: PathBuf = crate::vcs::git::VcsStore::clone_bare(host, project_slug)?;
-            crate::vcs::git::VcsStore::install_remote(host, &bare)?;
-            let host_abs = host.canonicalize().unwrap_or_else(|_| host.to_path_buf());
-            GitVcs::open_with_mode_and_prefix(
-                &bare,
-                mode,
-                config.project.slug.clone(),
-                Some(host_abs),
-            )?
-        }
-    };
-
-    Ok(vcs.set_store_slug(project_slug.to_string()))
 }
 
 /// The operations the file and command tools need, addressed by sandbox name.

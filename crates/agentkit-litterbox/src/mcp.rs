@@ -370,7 +370,7 @@ fn build_project() -> Result<Sandboxes, McpError> {
     for notice in &config.notices {
         tracing::warn!("configuration: {notice}");
     }
-    Sandboxes::open(config).map_err(|error| map_contract(error.into()))
+    crate::compose::open(config).map_err(|error| map_contract(error.into()))
 }
 
 /// The per-invocation backend selection, set once when the server starts.
