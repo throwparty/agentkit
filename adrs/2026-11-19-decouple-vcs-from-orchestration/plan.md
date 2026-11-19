@@ -16,7 +16,7 @@ The shape that makes step 4 small is branch addressing: the backend resolves a b
 
 ## Architecture
 
-Four layers replace two Git modules. `vcs` is the contract the orchestrator names; `vcs::git_common` holds the Git concepts both Git-backed backends reuse; `vcs::git` is the Git backend, and `vcs::git_common` and `vcs::git` are the only modules that see `git2`; `src/compose.rs` is the only module that constructs a backend. `cli` and `mcp` may name `vcs` types but never a backend, and `orchestrator/**` may name neither `vcs::git` nor `vcs::git_common`.
+Four layers replace two Git modules. `vcs` is the contract the orchestrator names; `vcs::git_common` holds the Git concepts both Git-backed backends reuse; `vcs::git` is the Git backend, and within the VCS tree only `vcs::git_common` and `vcs::git` see `git2`; `src/compose.rs` is the only module that constructs a backend. `cli` and `mcp` may name `vcs` types but never a backend, and `orchestrator/**` may name neither `vcs::git` nor `vcs::git_common`.
 
 
 ```mermaid
@@ -95,7 +95,7 @@ The one dependency inversion. `snapshot_filter` returns `Arc<dyn SnapshotSelecto
 | Technology | Role |
 |------------|------|
 | Rust 2024 | The workspace language and edition; no new dependency is added |
-| git2 0.21 | The Git backend implementation; confined to `src/vcs/git/` |
+| git2 0.21 | The Git implementation; confined to the VCS tree (`vcs::git` and `vcs::git_common`) |
 | arch-lint 0.11.0 | Path scopes, allow-lists and deny rules; pinned in `nix/flake.nix` |
 | tar and tempfile | Archive materialisation and staging directories, moved into `vcs::git_common` |
 | cargo, clippy, just | Test, lint and fixture gates; `just lint` already runs arch-lint and the negative fixture |
@@ -113,7 +113,7 @@ Owns the trait, the opaque types and the neutral error
 
 Holds the Git concepts Git-backed backends reuse
 
-`src/vcs/git_common/{ignore,filter,archive,unpack,naming}.rs`. Moves `IgnoreFiles` (`scm/mod.rs` line 804), `SnapshotFilter` (line 682), `branch_name_for` (line 824), the tar builder and `git2::Tree` walk (lines 366-392, 449-480), and the unpack loop the orchestrator keeps in `stage` (`service.rs` lines 853-859), including the path confinement `tar` enforces. It is Git-specific, not VCS-neutral, and may use `git2`, which is confined to `src/vcs/git_common/**` and `src/vcs/git/**`. `GitError` (the old `ScmError`) lives here. `SnapshotFilter` and `IgnoreFiles` keep their `contract::SnapshotSelector` impls. It imports neither `vcs::git` nor `vcs::jj`; it may import `vcs` for `Error` and `contract` for the selector trait. Workspace binding and masking are not Git concepts and do not live here. FR-002, NFR-003, NFR-004.
+`src/vcs/git_common/{ignore,filter,archive,unpack,naming}.rs`. Moves `IgnoreFiles` (`scm/mod.rs` line 804), `SnapshotFilter` (line 682), `branch_name_for` (line 824), the tar builder and `git2::Tree` walk (lines 366-392, 449-480), and the unpack loop the orchestrator keeps in `stage` (`service.rs` lines 853-859), including the path confinement `tar` enforces. It is Git-specific, not VCS-neutral, and may use `git2`; within the VCS tree that use is confined to `src/vcs/git_common/**` and `src/vcs/git/**`. `GitError` (the old `ScmError`) lives here. `SnapshotFilter` and `IgnoreFiles` keep their `contract::SnapshotSelector` impls. It imports neither `vcs::git` nor `vcs::jj`; it may import `vcs` for `Error` and `contract` for the selector trait. Workspace binding and masking are not Git concepts and do not live here. FR-002, NFR-003, NFR-004.
 
 
 ### vcs::git

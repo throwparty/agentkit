@@ -119,14 +119,14 @@ Update `hack/arch-lint-negative.sh`: remove the `crate::scm` plant and add plant
 | Depends On | T-008 |
 | References | arch-negative,fixture-bites |
 
-### T-010: Verification
+### T-010: [x] Verification
 
 Run the full gate and a parity smoke on a scratch repository.
 
 
 | Field | Value |
 |-------|-------|
-| Success Criteria | `cargo test -p agentkit-litterbox`, `cargo clippy -p agentkit-litterbox --all-targets -- -D warnings`, `arch-lint check` and `bash hack/arch-lint-negative.sh` all pass. With `snapshot-mode` set to direct and then remote: create, exec, snapshot, list, delete, and `remote <name>` followed by the printed `git fetch`. The commands and their output are recorded in `adrs/2026-11-19-decouple-vcs-from-orchestration/evidence.md`. A search for files containing `git2` outside `src/vcs/git/` and `src/vcs/git_common/` returns nothing. |
+| Success Criteria | `cargo test -p agentkit-litterbox`, `cargo clippy -p agentkit-litterbox --all-targets -- -D warnings`, `arch-lint check` and `bash hack/arch-lint-negative.sh` all pass. With `snapshot-mode` set to direct and then remote: create, exec, snapshot, list, delete, and `remote <name>` followed by the printed `git fetch`. The commands and their output are recorded in `adrs/2026-11-19-decouple-vcs-from-orchestration/evidence.md`. The orchestrator, CLI and MCP contain no `git2`; within the VCS tree `git2` appears only under `git/` and `git_common/`. |
 | Complexity | 🟢 Low |
 | Effort | 3-4h |
 | Depends On | T-009 |

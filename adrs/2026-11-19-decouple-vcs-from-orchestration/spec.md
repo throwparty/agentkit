@@ -1,6 +1,6 @@
 # Decouple VCS From Orchestration
 
-**Status:** draft  **Created:** 2026-11-19  **Author:** adrian
+**Status:** implemented  **Created:** 2026-11-19  **Author:** adrian
 
 Litterbox pairs a sandbox with a Git branch. That pairing lives in `crates/agentkit-litterbox/src/orchestrator/service.rs`, which imports `Scm`, `ThreadSafeScm`, `ScmMode` and `VcsStore` (lines 11 and 24-25) and stores `scm: ThreadSafeScm` on `Sandboxes` (lines 33-35). `crates/agentkit-litterbox/src/scm/mod.rs` holds the `Scm` trait (line 13), `GitScm` over `git2::Repository` (line 23), `ThreadSafeScm` (line 208), the snapshot filter and ignore matcher (lines 682 and 804) and `branch_name_for` (line 824). `crates/agentkit-litterbox/src/vcs_store/mod.rs` is a bare-clone store built on `git2` (lines 7-12). Both modules are declared at the crate root (`lib.rs` lines 12 and 15).
 
@@ -45,7 +45,7 @@ Orchestration cannot be separated from Git. `Sandboxes` holds a `ThreadSafeScm` 
 - One composition point outside the orchestrator constructs the backend, and the CLI and MCP server keep a single entry point and name nothing backend-shaped.
 - The build fails when orchestration reaches a backend, or when a backend reaches its sibling.
 - The negative fixture proves each rule fails for the intended reason, and restores the tree.
-- `git2` is confined to the Git common and Git backend modules and never appears in a public contract type.
+- No Git type appears in a public contract signature, and the orchestrator, CLI and MCP import neither Git module.
 - Adding `vcs::jj` later changes no file in `vcs`, `vcs::git_common`, the orchestrator, the CLI or MCP.
 
 ## Non-goals
@@ -75,7 +75,7 @@ Orchestration cannot be separated from Git. `Sandboxes` holds a `ThreadSafeScm` 
 
 ### FR-003: The Git backend
 
-`vcs::git` owns `GitVcs`, the adapted `GitScm`/`ThreadSafeScm` and `VcsStore`. It imports `vcs`, `vcs::git_common` and the contract's `SnapshotSelector`, and no sibling backend. Every `git2` path in the crate is under `src/vcs/git_common/**` or `src/vcs/git/**`, and `git2` remains a dependency of the crate. The crate root no longer declares `scm` or `vcs_store`, and their tests move with them.
+`vcs::git` owns `GitVcs`, the adapted `GitScm`/`ThreadSafeScm` and `VcsStore`. It imports `vcs`, `vcs::git_common` and the contract's `SnapshotSelector`, and no sibling backend. Every `git2` path in the VCS tree is under `src/vcs/git_common/**` or `src/vcs/git/**`; `config_loader` keeps its own repository discovery, which is configuration code, not VCS code. The crate root no longer declares `scm` or `vcs_store`, and their tests move with them.
 
 **Slug:** `git-backend`
 
@@ -123,15 +123,15 @@ The same sandbox operations produce the same branches, commits, tree contents an
 
 ### FR-011: The error boundary
 
-`vcs` defines the error type the trait returns, and no backend type appears in it. `git2::Error` occurs only under `src/vcs/git_common/**` and `src/vcs/git/**`; `domain::ScmError` moves to `vcs::git_common` as `GitError`. `SandboxError` names no VCS or Git type: a VCS failure reaches it as a mapped variant (exists, not-found or I/O) or as a neutral message, and the conversion to the contract's failure classes produces the same class and the same message for every existing path. The orchestrator's direct `ScmError::Open` construction (`service.rs` line 916) moves with the code that produces it.
+`vcs` defines the error type the trait returns, and no backend type appears in it. Within the VCS tree, `git2::Error` occurs only under `src/vcs/git_common/**` and `src/vcs/git/**`; `domain::ScmError` moves to `vcs::git_common` as `GitError`. `SandboxError` names no VCS or Git type: a VCS failure reaches it as a mapped variant (exists, not-found or I/O) or as a neutral message, and the conversion to the contract's failure classes produces the same class and the same message for every existing path. The orchestrator's direct `ScmError::Open` construction (`service.rs` line 916) moves with the code that produces it.
 
 **Slug:** `error-boundary`
 
 ## Non-functional Requirements
 
-### NFR-001: No git2 outside the Git modules
+### NFR-001: Git code stays out of orchestration
 
-A search of `crates/agentkit-litterbox/src` finds `git2` only under `src/vcs/git_common/` and `src/vcs/git/`. `domain::ScmError` becomes `vcs::git_common::GitError`; the trait returns a neutral `vcs::Error`, and `SandboxError` carries its message rather than its type, so the shared kernel does not depend on the contract. The mapping from backend failures to the contract's failure classes is unchanged for every existing path.
+The orchestrator, CLI and MCP contain no `git2` and import neither `vcs::git` nor `vcs::git_common`. Within the VCS tree, `git2` occurs only under `src/vcs/git_common/` and `src/vcs/git/`, and `vcs::git` and `vcs::jj` never import each other. `config_loader` keeps its own `git2` repository discovery: it decides configuration scope from Git concepts and is not VCS code. `domain::ScmError` becomes `vcs::git_common::GitError`; the trait returns a neutral `vcs::Error`, and `SandboxError` carries its message rather than its type, so the shared kernel does not depend on the contract. The mapping from backend failures to the contract's failure classes is unchanged for every existing path.
 
 **Slug:** `git2-confinement`
 
