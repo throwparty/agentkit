@@ -66,6 +66,7 @@ doc = "adrs/2026-11-19-decouple-vcs-from-orchestration"
 from = "litterbox-compose"
 to = [
   "litterbox-config",
+  "litterbox-contract",
   "litterbox-orchestrator",
   "litterbox-shared",
   "litterbox-vcs",
