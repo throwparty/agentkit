@@ -54,7 +54,7 @@ Move `domain::ScmError` into `vcs::git_common` as `GitError`; add `SandboxError:
 | Depends On | T-003 |
 | References | error-boundary,git2-confinement,behaviour-parity |
 
-### T-005: Recording TestVcs
+### T-005: [x] Recording TestVcs
 
 Add `TestVcs` to `src/testing.rs` beside `TestBackend`. It implements every trait method, records `prepare`, `materialise`, `snapshot`, `delete_branch`, `expose` and `prune`, and returns configured `Prepared`, `Revision`, `sandboxes` and `tip` values. Keep it `#[cfg(test)]`.
 
