@@ -106,7 +106,7 @@ Add scopes `litterbox-vcs`, `litterbox-vcs-git-common`, `litterbox-vcs-git` and 
 | Depends On | T-007 |
 | References | arch-scopes,arch-rules,open-for-extension,empty-jj-scope,inline-path |
 
-### T-009: Negative fixture
+### T-009: [x] Negative fixture
 
 Update `hack/arch-lint-negative.sh`: remove the `crate::scm` plant and add plants for orchestrator to `vcs::git` and `vcs::git_common`, `vcs::git_common` to `vcs::git`, CLI and MCP to `vcs::git`, MCP to `vcs::git_common`, and one backend to `vcs::git`. Expect the named rule in each failure and keep the restore trap.
 

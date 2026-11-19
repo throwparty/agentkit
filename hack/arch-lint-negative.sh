@@ -68,8 +68,8 @@ plant "crates/agentkit-litterbox/src/cli.rs" \
   "litterbox-cli"
 
 plant "crates/agentkit-litterbox/src/cli.rs" \
-  "use crate::scm::Scm as _;" \
-  "cli-to-scm" \
+  "use crate::vcs::git::GitVcs as _;" \
+  "cli-to-git" \
   "litterbox-cli"
 
 plant "crates/agentkit-litterbox/src/cli.rs" \
@@ -116,6 +116,36 @@ plant "crates/agentkit-litterbox/src/orchestrator/service.rs" \
   "use crate::backends::docker::BACKEND as _;" \
   "orchestrator-to-backend" \
   "litterbox-orchestrator"
+
+plant "crates/agentkit-litterbox/src/orchestrator/service.rs" \
+  "use crate::vcs::git::GitVcs as _;" \
+  "orchestrator-to-git" \
+  "litterbox-orchestrator"
+
+plant "crates/agentkit-litterbox/src/orchestrator/service.rs" \
+  "use crate::vcs::git_common::IgnoreFiles as _;" \
+  "orchestrator-to-git-common" \
+  "litterbox-orchestrator"
+
+plant "crates/agentkit-litterbox/src/vcs/git_common/mod.rs" \
+  "use crate::vcs::git::GitVcs as _;" \
+  "git-common-to-git" \
+  "litterbox-vcs-git-common"
+
+plant "crates/agentkit-litterbox/src/mcp.rs" \
+  "use crate::vcs::git::GitVcs as _;" \
+  "mcp-to-git" \
+  "litterbox-mcp"
+
+plant "crates/agentkit-litterbox/src/mcp.rs" \
+  "use crate::vcs::git_common::IgnoreFiles as _;" \
+  "mcp-to-git-common" \
+  "litterbox-mcp"
+
+plant "crates/agentkit-litterbox/src/backends/docker/backend.rs" \
+  "use crate::vcs::git::GitVcs as _;" \
+  "backend-to-git" \
+  "litterbox-backend-docker"
 
 plant "crates/agentkit-litterbox/src/backends/docker/backend.rs" \
   "use crate::provision::resolve as _;" \
