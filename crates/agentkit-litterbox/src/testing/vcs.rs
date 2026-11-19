@@ -185,6 +185,10 @@ impl Vcs for TestVcs {
         Ok(Arc::new(SelectAll))
     }
 
+    fn ignore_files(&self) -> Arc<dyn SnapshotSelector> {
+        Arc::new(SelectAll)
+    }
+
     fn snapshot(
         &self,
         workspace: &Workspace,
