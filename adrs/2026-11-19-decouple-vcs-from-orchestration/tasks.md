@@ -2,7 +2,7 @@
 
 ## Tasks
 
-### T-001: Contract module
+### T-001: [x] Contract module
 
 Add `src/vcs/{mod,types,capabilities,conflict,error}.rs`: `BranchName`, `Revision`, `TreeId`, `Workspace` with `from_branch`, `Prepared`, `Capabilities` with `ConflictModel`/`BindingSupport`/`ExportSupport`, `Merge`, `Conflict`, `ConflictSides`, `HistoryPolicy`, `RestoreMode`, and `Error` with `Exists`, `NotFound`, `Unsupported`, `Backend` and `Io`. Declare the object-safe synchronous trait with every method the plan lists. No implementation and no caller; no behaviour change.
 

@@ -260,7 +260,9 @@ impl Backend for TestBackend {
                     .records
                     .lock()
                     .map_err(|_| Error::failed("test backend lock poisoned"))?;
-                if let Some(existing) = records.iter().find(|existing| existing.name == request.name)
+                if let Some(existing) = records
+                    .iter()
+                    .find(|existing| existing.name == request.name)
                 {
                     if request.mode == CreateMode::ReuseExisting {
                         let mut deleted = self

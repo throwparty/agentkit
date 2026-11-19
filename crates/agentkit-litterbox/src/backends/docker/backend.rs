@@ -334,8 +334,9 @@ impl Backend for DockerBackend {
                     operation: format!("repair the sandbox '{}'", request.name),
                     backend: BACKEND.to_string(),
                     primitive: "a backend recovery path".to_string(),
-                    reason: "the Docker backend cannot recreate a container against an existing record"
-                        .to_string(),
+                    reason:
+                        "the Docker backend cannot recreate a container against an existing record"
+                            .to_string(),
                     remedy: format!(
                         "run `litterbox delete --force {}` and create it again",
                         request.name

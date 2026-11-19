@@ -990,7 +990,8 @@ impl BubblewrapBackend {
             }
         }
         let workspace = workspace::workspace_directory(&request.project_slug, &request.name);
-        let owns_directory = !workspace::sandbox_directory(&request.project_slug, &request.name).exists();
+        let owns_directory =
+            !workspace::sandbox_directory(&request.project_slug, &request.name).exists();
         let materialised = !workspace.is_dir();
         std::fs::create_dir_all(&workspace).map_err(|error| {
             Error::failed(format!("the state directory could not be created: {error}"))
