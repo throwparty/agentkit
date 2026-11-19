@@ -5,10 +5,12 @@
 //! it; neither backend imports the other. It may use `git2`.
 
 pub mod archive;
+pub mod error;
 pub mod filter;
 pub mod ignore;
 pub mod naming;
 
+pub use error::GitError;
 pub use filter::SnapshotFilter;
 pub use ignore::IgnoreFiles;
 pub use naming::branch_name_for;

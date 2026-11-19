@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 use git2::build::RepoBuilder;
 use git2::{FetchOptions, Repository};
 
-use crate::domain::{SandboxError, ScmError};
+use crate::domain::SandboxError;
+use crate::vcs::git_common::GitError;
 
 pub struct VcsStore;
 
@@ -66,10 +67,10 @@ impl VcsStore {
             Err(ref e) if is_shallow_not_supported(e) => {
                 match Self::try_clone_bare(url, &bare_path, None) {
                     Ok(_) => Ok(bare_path),
-                    Err(e) => Err(SandboxError::Scm(ScmError::Clone { source: e })),
+                    Err(e) => Err(SandboxError::from(GitError::Clone { source: e })),
                 }
             }
-            Err(e) => Err(SandboxError::Scm(ScmError::Clone { source: e })),
+            Err(e) => Err(SandboxError::from(GitError::Clone { source: e })),
         }
     }
 

@@ -17,7 +17,8 @@ pub use store::VcsStore;
 
 use std::path::Path;
 
-use crate::domain::{SandboxError, ScmError};
+use crate::domain::SandboxError;
+use crate::vcs::git_common::GitError;
 
 /// Attach this project's sandbox store to the current checkout as a remote.
 ///
@@ -25,6 +26,6 @@ use crate::domain::{SandboxError, ScmError};
 /// the store.
 pub fn expose_store(store: &Path, name: &str) -> Result<bool, SandboxError> {
     let mut repo = git2::Repository::discover(".")
-        .map_err(|source| SandboxError::Scm(ScmError::Open { source }))?;
+        .map_err(|source| SandboxError::from(GitError::Open { source }))?;
     remote::install_remote_in(&mut repo, name, store)
 }

@@ -41,7 +41,7 @@ Move `scm/mod.rs`, `vcs_store/{mod,remote,path}.rs` and their tests under `src/v
 | Depends On | T-001,T-002 |
 | References | git-backend,existing-operations,mechanical-move,git2-confinement |
 
-### T-004: Move the error boundary
+### T-004: [x] Move the error boundary
 
 Move `domain::ScmError` into `vcs::git_common` as `GitError`; add `SandboxError::Vcs { message }` and remove `SandboxError::Scm`. Convert `GitError` into `vcs::Error::Backend` preserving every display string, and implement the orchestrator's `From<vcs::Error> for SandboxError` mapping for `Exists`, `NotFound`, `Io` and the rest. Keep the `SCM error:` prefix so contract failure messages are byte-identical.
 

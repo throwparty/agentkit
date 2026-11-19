@@ -6,7 +6,7 @@ const REMOTE_NAME: &str = "litterbox";
 
 pub fn install_remote(repo_path: &Path, bare_path: &Path) -> Result<(), SandboxError> {
     let mut repo = git2::Repository::open(repo_path)
-        .map_err(|source| SandboxError::Scm(crate::domain::ScmError::Open { source }))?;
+        .map_err(|source| SandboxError::from(crate::vcs::git_common::GitError::Open { source }))?;
     install_remote_in(&mut repo, REMOTE_NAME, bare_path).map(|_| ())
 }
 
@@ -34,24 +34,28 @@ pub fn install_remote_in(
         }
         Err(e) if e.code() == git2::ErrorCode::NotFound => {
             repo.remote(name, &bare_url).map_err(|source| {
-                SandboxError::Scm(crate::domain::ScmError::BranchCreate { source })
+                SandboxError::from(crate::vcs::git_common::GitError::BranchCreate { source })
             })?;
             Ok(true)
         }
-        Err(source) => Err(SandboxError::Scm(crate::domain::ScmError::Open { source })),
+        Err(source) => Err(SandboxError::from(crate::vcs::git_common::GitError::Open {
+            source,
+        })),
     }
 }
 
 pub fn remove_remote(repo_path: &Path) -> Result<(), SandboxError> {
     let repo = git2::Repository::open(repo_path)
-        .map_err(|source| SandboxError::Scm(crate::domain::ScmError::Open { source }))?;
+        .map_err(|source| SandboxError::from(crate::vcs::git_common::GitError::Open { source }))?;
 
     match repo.find_remote(REMOTE_NAME) {
-        Ok(_) => repo
-            .remote_delete(REMOTE_NAME)
-            .map_err(|source| SandboxError::Scm(crate::domain::ScmError::BranchDelete { source })),
+        Ok(_) => repo.remote_delete(REMOTE_NAME).map_err(|source| {
+            SandboxError::from(crate::vcs::git_common::GitError::BranchDelete { source })
+        }),
         Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(()),
-        Err(source) => Err(SandboxError::Scm(crate::domain::ScmError::Open { source })),
+        Err(source) => Err(SandboxError::from(crate::vcs::git_common::GitError::Open {
+            source,
+        })),
     }
 }
 
