@@ -168,13 +168,11 @@ impl SandboxServer {
         Parameters(args): Parameters<ReadArgs>,
     ) -> Result<CallToolResult, McpError> {
         let project = self.project()?;
-        let performed = read_in_sandbox(project, &args.sandbox, &args.path, args.offset, args.limit)
-            .await
-            .map_err(ToolError::into_mcp)?;
-        success_with_recovery(
-            ContentBlock::text(performed.value),
-            performed.recovery,
-        )
+        let performed =
+            read_in_sandbox(project, &args.sandbox, &args.path, args.offset, args.limit)
+                .await
+                .map_err(ToolError::into_mcp)?;
+        success_with_recovery(ContentBlock::text(performed.value), performed.recovery)
     }
 
     #[tool(name = "write", description = "Write a file into the sandbox")]
@@ -280,9 +278,10 @@ impl SandboxServer {
         Parameters(args): Parameters<GlobArgs>,
     ) -> Result<CallToolResult, McpError> {
         let project = self.project()?;
-        let performed = glob_in_sandbox(project, &args.sandbox, &args.pattern, args.path.as_deref())
-            .await
-            .map_err(ToolError::into_mcp)?;
+        let performed =
+            glob_in_sandbox(project, &args.sandbox, &args.pattern, args.path.as_deref())
+                .await
+                .map_err(ToolError::into_mcp)?;
         let content = ContentBlock::json(performed.value)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
         success_with_recovery(content, performed.recovery)
@@ -740,7 +739,10 @@ async fn write_in_sandbox<P: SandboxIo + ?Sized>(
     if result.exit_code != 0 {
         return Err(ToolError::classify(Tool::Write, &sandbox_path, &result));
     }
-    Ok(Performed { value: (), recovery })
+    Ok(Performed {
+        value: (),
+        recovery,
+    })
 }
 
 #[allow(clippy::result_large_err)]
@@ -772,7 +774,10 @@ async fn patch_in_sandbox<P: SandboxIo + ?Sized>(
         recovery = written.recovery;
     }
 
-    Ok(Performed { value: (), recovery })
+    Ok(Performed {
+        value: (),
+        recovery,
+    })
 }
 
 #[allow(clippy::result_large_err)]
@@ -1561,7 +1566,8 @@ mod tests {
         let provider = TestProvider::new(Ok(result), Arc::clone(&last_command));
         let content = read_in_sandbox(&provider, "sandbox", "README.md", None, None)
             .await
-            .expect("read").value;
+            .expect("read")
+            .value;
 
         assert_eq!(content, "one\ntwo\n");
         let command = last_command.lock().expect("command lock");
@@ -1583,7 +1589,8 @@ mod tests {
         let provider = TestProvider::new(Ok(result), Arc::clone(&last_command));
         let content = read_in_sandbox(&provider, "sandbox", "README.md", Some(1), Some(1))
             .await
-            .expect("read").value;
+            .expect("read")
+            .value;
 
         assert_eq!(content, "two\n");
     }
@@ -1802,7 +1809,8 @@ mod tests {
         let provider = TestProvider::new(Ok(result), Arc::clone(&last_command));
         let entries = ls_in_sandbox(&provider, "sandbox", "dir", false)
             .await
-            .expect("list").value;
+            .expect("list")
+            .value;
 
         assert_eq!(entries, vec!["file.txt", "subdir"]);
         let command = last_command.lock().expect("command lock");
@@ -1822,7 +1830,8 @@ mod tests {
         let provider = TestProvider::new(Ok(result), Arc::clone(&last_command));
         let entries = ls_in_sandbox(&provider, "sandbox", "dir", true)
             .await
-            .expect("list").value;
+            .expect("list")
+            .value;
 
         assert_eq!(entries, vec!["file.txt", "subdir", "subdir/child.txt"]);
         let command = last_command.lock().expect("command lock");
@@ -1842,7 +1851,8 @@ mod tests {
         let provider = TestProvider::new(Ok(result), Arc::new(Mutex::new(None)));
         let entries = ls_in_sandbox(&provider, "sandbox", "empty", false)
             .await
-            .expect("list").value;
+            .expect("list")
+            .value;
 
         assert!(entries.is_empty());
     }
@@ -1898,7 +1908,8 @@ mod tests {
         let provider = TestProvider::new(Ok(result), Arc::clone(&last_command));
         let entries = glob_in_sandbox(&provider, "sandbox", "**/*.txt", Some("dir"))
             .await
-            .expect("glob").value;
+            .expect("glob")
+            .value;
 
         assert_eq!(entries, vec!["root.txt", "subdir/child.txt"]);
         let command = last_command.lock().expect("command lock");
@@ -1917,7 +1928,8 @@ mod tests {
         let provider = TestProvider::new(Ok(result), Arc::new(Mutex::new(None)));
         let entries = glob_in_sandbox(&provider, "sandbox", "*.md", None)
             .await
-            .expect("glob").value;
+            .expect("glob")
+            .value;
 
         assert!(entries.is_empty());
     }
@@ -1950,7 +1962,8 @@ mod tests {
         let provider = TestProvider::new(Ok(result), Arc::clone(&last_command));
         let entries = grep_in_sandbox(&provider, "sandbox", "hello", "dir", None)
             .await
-            .expect("grep").value;
+            .expect("grep")
+            .value;
 
         assert_eq!(
             entries,
@@ -1975,7 +1988,8 @@ mod tests {
         let provider = TestProvider::new(Ok(result), Arc::clone(&last_command));
         let entries = grep_in_sandbox(&provider, "sandbox", "hello", "dir", Some("*.rs"))
             .await
-            .expect("grep").value;
+            .expect("grep")
+            .value;
 
         assert_eq!(entries, vec!["/src/dir/main.rs:1:hello"]);
         let command = last_command.lock().expect("command lock");
@@ -1994,7 +2008,8 @@ mod tests {
         let provider = TestProvider::new(Ok(result), Arc::new(Mutex::new(None)));
         let entries = grep_in_sandbox(&provider, "sandbox", "hello", "dir", None)
             .await
-            .expect("grep").value;
+            .expect("grep")
+            .value;
 
         assert!(entries.is_empty());
     }
@@ -2129,7 +2144,8 @@ mod tests {
         let provider = TestProvider::new(Ok(result), Arc::clone(&last_command));
         let output = bash_in_sandbox(&provider, "sandbox", "echo ok", None, None)
             .await
-            .expect("bash").value;
+            .expect("bash")
+            .value;
 
         assert_eq!(output.stdout, "ok");
         let command = last_command.lock().expect("command lock");
@@ -2149,7 +2165,8 @@ mod tests {
         let provider = TestProvider::new(Ok(result), Arc::new(Mutex::new(None)));
         let output = bash_in_sandbox(&provider, "sandbox", "false", None, None)
             .await
-            .expect("bash").value;
+            .expect("bash")
+            .value;
 
         assert_eq!(output.exit_code, 2);
         assert_eq!(output.stderr, "fail");

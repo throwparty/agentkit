@@ -12,4 +12,5 @@ pub mod sandbox;
 pub mod scm;
 #[cfg(test)]
 pub mod testing;
+pub mod vcs;
 pub mod vcs_store;

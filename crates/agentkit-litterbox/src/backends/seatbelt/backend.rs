@@ -901,17 +901,11 @@ impl Backend for SeatbeltBackend {
         Box::pin(async move { self.inspect_sandbox(sandbox) })
     }
 
-    fn delete<'a>(
-        &'a self,
-        sandbox: &'a SandboxRecord,
-    ) -> BoxFuture<'a, Result<Teardown, Error>> {
+    fn delete<'a>(&'a self, sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<Teardown, Error>> {
         Box::pin(async move { self.delete_sandbox(sandbox) })
     }
 
-    fn stop<'a>(
-        &'a self,
-        sandbox: &'a SandboxRecord,
-    ) -> BoxFuture<'a, Result<Teardown, Error>> {
+    fn stop<'a>(&'a self, sandbox: &'a SandboxRecord) -> BoxFuture<'a, Result<Teardown, Error>> {
         Box::pin(async move {
             let payload = Payload::from_record(sandbox).ok();
             if let Some(payload) = &payload {
