@@ -5,8 +5,9 @@ use std::sync::{Arc, Mutex};
 
 use git2::{BranchType, ObjectType, Repository};
 
-use crate::domain::{SandboxError, ScmError, ScmMode, slugify};
+use crate::domain::{SandboxError, ScmMode, slugify};
 use crate::sandbox::contract::SnapshotSelector;
+use crate::vcs::git_common::GitError;
 use crate::vcs::git_common::archive;
 pub use crate::vcs::git_common::{SnapshotFilter, branch_name_for};
 use crate::vcs::{
@@ -44,7 +45,7 @@ impl GitScm {
                 snapshot_branch: None,
                 host_repo_path: None,
             })
-            .map_err(|source| SandboxError::Scm(ScmError::Open { source }))
+            .map_err(|source| SandboxError::from(GitError::Open { source }))
     }
 
     pub fn open_with_host(
@@ -59,7 +60,7 @@ impl GitScm {
                 snapshot_branch: None,
                 host_repo_path,
             })
-            .map_err(|source| SandboxError::Scm(ScmError::Open { source }))
+            .map_err(|source| SandboxError::from(GitError::Open { source }))
     }
 
     pub fn open_direct(path: &Path) -> Result<Self, SandboxError> {
@@ -93,16 +94,16 @@ impl GitScm {
         let head = self
             .repo
             .head()
-            .map_err(|source| SandboxError::Scm(ScmError::BranchCreate { source }))?;
+            .map_err(|source| SandboxError::from(GitError::BranchCreate { source }))?;
         head.peel_to_commit()
-            .map_err(|source| SandboxError::Scm(ScmError::BranchCreate { source }))
+            .map_err(|source| SandboxError::from(GitError::BranchCreate { source }))
     }
 
     fn signature(&self) -> Result<git2::Signature<'_>, SandboxError> {
         self.repo
             .signature()
             .or_else(|_| git2::Signature::now("Litterbox", "noreply@example.com"))
-            .map_err(|source| SandboxError::Scm(ScmError::Signature { source }))
+            .map_err(|source| SandboxError::from(GitError::Signature { source }))
     }
 
     fn head_commit_optional(&self) -> Result<Option<git2::Commit<'_>>, SandboxError> {
@@ -110,9 +111,9 @@ impl GitScm {
             Ok(head) => head
                 .peel_to_commit()
                 .map(Some)
-                .map_err(|source| SandboxError::Scm(ScmError::Head { source })),
+                .map_err(|source| SandboxError::from(GitError::Head { source })),
             Err(error) if error.code() == git2::ErrorCode::UnbornBranch => Ok(None),
-            Err(source) => Err(SandboxError::Scm(ScmError::Head { source })),
+            Err(source) => Err(SandboxError::from(GitError::Head { source })),
         }
     }
 
@@ -129,9 +130,9 @@ impl GitScm {
             Ok(reference) => reference
                 .peel_to_commit()
                 .map(Some)
-                .map_err(|source| SandboxError::Scm(ScmError::Reference { source })),
+                .map_err(|source| SandboxError::from(GitError::Reference { source })),
             Err(error) if error.code() == git2::ErrorCode::NotFound => Ok(None),
-            Err(source) => Err(SandboxError::Scm(ScmError::Reference { source })),
+            Err(source) => Err(SandboxError::from(GitError::Reference { source })),
         }
     }
 }
@@ -290,7 +291,7 @@ impl Scm for GitScm {
 
         self.repo
             .branch(&branch_name, &head, false)
-            .map_err(|source| SandboxError::Scm(ScmError::BranchCreate { source }))?;
+            .map_err(|source| SandboxError::from(GitError::BranchCreate { source }))?;
 
         Ok(branch_name)
     }
@@ -307,7 +308,7 @@ impl Scm for GitScm {
 
         branch
             .delete()
-            .map_err(|source| SandboxError::Scm(ScmError::BranchDelete { source }))
+            .map_err(|source| SandboxError::from(GitError::BranchDelete { source }))
     }
 
     fn make_archive(&self, reference: &str) -> Result<Vec<u8>, SandboxError> {
@@ -322,7 +323,7 @@ impl Scm for GitScm {
                     &self.repo
                 } else if let Some(ref host_path) = self.host_repo_path {
                     host = Repository::open(host_path)
-                        .map_err(|source| SandboxError::Scm(ScmError::Open { source }))?;
+                        .map_err(|source| SandboxError::from(GitError::Open { source }))?;
                     &host
                 } else {
                     &self.repo
@@ -343,11 +344,11 @@ impl Scm for GitScm {
         let branches = self
             .repo
             .branches(Some(BranchType::Local))
-            .map_err(|source| SandboxError::Scm(ScmError::BranchList { source }))?;
+            .map_err(|source| SandboxError::from(GitError::BranchList { source }))?;
 
         for branch in branches {
             let (branch, _) =
-                branch.map_err(|source| SandboxError::Scm(ScmError::BranchList { source }))?;
+                branch.map_err(|source| SandboxError::from(GitError::BranchList { source }))?;
             if let Some(name) = branch.name().ok().flatten()
                 && let Some(slug) = name.strip_prefix("litterbox/")
             {
@@ -364,7 +365,7 @@ impl Scm for GitScm {
 
     fn apply_patch(&self, diff: &str) -> Result<(), SandboxError> {
         let diff_obj = git2::Diff::from_buffer(diff.as_bytes()).map_err(|e| {
-            SandboxError::Scm(ScmError::ApplyPatch {
+            SandboxError::from(GitError::ApplyPatch {
                 message: format!("Failed to parse diff: {}", e),
             })
         })?;
@@ -372,7 +373,7 @@ impl Scm for GitScm {
         self.repo
             .apply(&diff_obj, git2::ApplyLocation::WorkDir, None)
             .map_err(|e| {
-                SandboxError::Scm(ScmError::ApplyPatch {
+                SandboxError::from(GitError::ApplyPatch {
                     message: format!("Failed to apply patch: {}", e),
                 })
             })
@@ -406,13 +407,13 @@ impl Vcs for GitVcs {
         self.repo_for_branch(&branch, |repo| {
             let oid = repo
                 .refname_to_id(&format!("refs/heads/{branch}"))
-                .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+                .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
             let commit = repo
                 .find_commit(oid)
-                .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+                .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
             let tree = commit
                 .tree()
-                .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+                .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
             Ok(tree.id().to_string())
         })
         .map(TreeId::new)
@@ -474,7 +475,7 @@ impl Vcs for GitVcs {
             })?;
             found
                 .delete()
-                .map_err(|source| SandboxError::Scm(ScmError::BranchDelete { source }))
+                .map_err(|source| SandboxError::from(GitError::BranchDelete { source }))
         })
         .map_err(vcs_error)
     }
@@ -501,11 +502,11 @@ impl Vcs for GitVcs {
             return Ok(());
         }
         let bare = Repository::open_bare(&path)
-            .map_err(|source| SandboxError::Scm(ScmError::Open { source }))
+            .map_err(|source| SandboxError::from(GitError::Open { source }))
             .map_err(vcs_error)?;
         let mut branches = bare
             .branches(Some(BranchType::Local))
-            .map_err(|source| SandboxError::Scm(ScmError::BranchList { source }))
+            .map_err(|source| SandboxError::from(GitError::BranchList { source }))
             .map_err(vcs_error)?;
         let any = branches.any(|branch| {
             branch
@@ -524,7 +525,7 @@ impl Vcs for GitVcs {
         self.repo_for_branch(&branch, |repo| {
             repo.refname_to_id(&format!("refs/heads/{branch}"))
                 .map(|oid| oid.to_string())
-                .map_err(|source| SandboxError::Scm(ScmError::Reference { source }))
+                .map_err(|source| SandboxError::from(GitError::Reference { source }))
         })
         .map(Revision::new)
         .map_err(vcs_error)
@@ -664,7 +665,7 @@ impl GitScm {
         };
         let tree = parent
             .tree()
-            .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+            .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
 
         tree.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
             let path = Path::new(root).join(entry.name().unwrap_or_default());
@@ -679,7 +680,7 @@ impl GitScm {
             }
             0
         })
-        .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+        .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
 
         Ok((tracked, tracked_dirs))
     }
@@ -705,7 +706,7 @@ impl GitScm {
         let mut builder = self
             .repo
             .treebuilder(None)
-            .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+            .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
 
         // The staged tree is the sandbox's, so its rules are the ones that
         // decide what the snapshot records; the transfer applied the same ones.
@@ -714,12 +715,12 @@ impl GitScm {
 
         let tree_oid = builder
             .write()
-            .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+            .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
 
         let tree = self
             .repo
             .find_tree(tree_oid)
-            .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+            .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
 
         // Another tool call can snapshot the same sandbox while this tree is
         // being built, so the branch may move. Build each commit against the
@@ -748,7 +749,7 @@ impl GitScm {
             let oid = self
                 .repo
                 .commit(None, &signature, &signature, message, &tree, &parents)
-                .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+                .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
 
             let updated = if ref_exists {
                 let expected = parent
@@ -790,7 +791,7 @@ impl GitScm {
                     // compare-and-swap that has not succeeded, so there is
                     // nothing to roll back. Restoring the tip seen at the start
                     // would undo whatever another writer has published since.
-                    return Err(SandboxError::Scm(ScmError::Commit { source: error }));
+                    return Err(SandboxError::from(GitError::Commit { source: error }));
                 }
             }
         }
@@ -827,17 +828,17 @@ impl GitScm {
                 let mut sub_builder = self
                     .repo
                     .treebuilder(None)
-                    .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
 
                 self.add_directory_to_tree(&mut sub_builder, &path, &child, filter)?;
 
                 let sub_tree_oid = sub_builder
                     .write()
-                    .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
 
                 builder
                     .insert(&*name_str, sub_tree_oid, 0o040000)
-                    .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
             } else if file_type.is_symlink() {
                 if filter.skips_file(&child)? {
                     continue;
@@ -849,11 +850,11 @@ impl GitScm {
                 let blob_oid = self
                     .repo
                     .blob(target.as_os_str().as_encoded_bytes())
-                    .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
 
                 builder
                     .insert(&*name_str, blob_oid, 0o120000)
-                    .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
             } else if file_type.is_file() {
                 if filter.skips_file(&child)? {
                     continue;
@@ -865,11 +866,11 @@ impl GitScm {
                 let mut writer = self
                     .repo
                     .blob_writer(None)
-                    .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
                 std::io::copy(&mut source, &mut writer).map_err(SandboxError::Io)?;
                 let blob_oid = writer
                     .commit()
-                    .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
 
                 #[cfg(unix)]
                 let filemode = {
@@ -888,7 +889,7 @@ impl GitScm {
 
                 builder
                     .insert(&*name_str, blob_oid, filemode)
-                    .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
             }
         }
 

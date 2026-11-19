@@ -97,6 +97,17 @@ fn the_unimplemented_surface_returns_the_neutral_error() {
 }
 
 #[test]
+fn preparing_an_existing_branch_reports_exists() {
+    let dir = repo_with_commit();
+    let vcs = GitVcs::open(dir.path()).expect("vcs");
+    vcs.prepare("example").expect("first prepare");
+
+    let error = vcs.prepare("example").expect_err("second prepare");
+
+    assert!(matches!(error, Error::Exists { .. }));
+}
+
+#[test]
 fn a_configured_store_slug_gives_the_backend_a_state_path() {
     let dir = repo_with_commit();
     let vcs = GitVcs::open(dir.path())
