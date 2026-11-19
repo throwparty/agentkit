@@ -1,0 +1,13 @@
+flowchart TD
+  CLI["cli.rs"] --> ORCH["orchestrator (dyn Vcs)"]
+  MCP["mcp.rs"] --> ORCH
+  ROOT["composition point"] --> GIT["vcs::git (GitVcs, VcsStore)"]
+  ROOT -.-> JJ["vcs::jj (later)"]
+  ORCH --> CONTRACT["vcs (trait, Revision, TreeId, Capabilities, Merge, Conflict)"]
+  GIT --> CONTRACT
+  JJ --> CONTRACT
+  GIT --> GIT_COMMON["vcs::git_common (Git concepts: ignore, archive, objects, naming)"]
+  JJ --> GIT_COMMON
+  ORCH -- "denied" --> GIT
+  ORCH -- "denied" --> GIT_COMMON
+  GIT -- "denied" --> JJ

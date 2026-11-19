@@ -100,7 +100,7 @@ Created: 2026-11-18
 | Field | Value |
 |-------|-------|
 | State | answered |
-| Answer | Machine-owned `[vcs] tool` and `[workspace] binding`, required for create and stored per sandbox; legacy records are Git + Copied facts; incompatible requests are refused, never defaulted. |
+| Answer | Machine-owned `[vcs] tool` with a per-VCS configuration section (`[vcs.git]`, `[vcs.jj]`) mirroring `[backends.*]`; the selected section supplies binding; required for create and stored per sandbox; legacy records are Git + Copied facts; incompatible combinations are refused at validation, never defaulted. |
 | Evidence | [evidence/T-010.md](evidence/T-010.md) |
 
 ### T-011: What is the operator CLI surface, and how does it share the `plan` logic with MCP?
@@ -126,7 +126,7 @@ Created: 2026-11-18
 | Field | Value |
 |-------|-------|
 | State | answered |
-| Answer | Sandbox/backends are neutral; `scm` (1,777 lines), `vcs_store` and `orchestrator/service.rs` (2,270) are Git-coupled; `mcp.rs` (2,276) and `cli.rs` (1,572) are monoliths. Define the VCS interface and `vcs::common` first, add arch-lint, adapt Git, build the plan/conflict surface, then add jj. |
+| Answer | Sandbox/backends are neutral; `scm` (1,777 lines) holds a Git-shaped trait and `GitScm`; `vcs_store` is a bare-Git store; `orchestrator/service.rs` (2,270) imports `ThreadSafeScm`/`VcsStore`/`ScmMode` and calls `git2::Repository::discover` directly; `domain::ScmError` wraps `git2::Error`; `mcp.rs` (2,276) and `cli.rs` (1,572) are monoliths. Define the VCS interface and `vcs::git_common` first, add arch-lint, adapt Git, build the plan/conflict surface, then add jj. |
 | Evidence | [evidence/T-013.md](evidence/T-013.md) |
 
 ### T-014: Should Git emulate deferred conflict resolution with notes/refs, given the lack of tool adoption?
@@ -159,10 +159,12 @@ Created: 2026-11-18
 | Field | Value |
 |-------|-------|
 | State | answered |
-| Answer | Define `vcs` and `vcs::common` first; adapt Git; add jj later. Orchestrator imports `vcs` only; `vcs::git` and `vcs::jj` may import `vcs`/`vcs::common` but never each other; arch-lint enforces the boundary. |
+| Answer | Define `vcs` (trait, `Revision`, `TreeId`, `Capabilities`, `Merge`, `Conflict`, `ConflictSides`) and `vcs::git_common` (Git concepts: ignore, archive, object/ref primitives, path safety, naming) first; the contract must also express the operations orchestration uses today (branch create/delete, branch enumeration, archive, snapshot commit, snapshot filter, remote/direct fact); adapt Git; add jj later. Orchestrator imports `vcs` only (never `vcs::git_common`); `vcs::git` and `vcs::jj` may import `vcs`/`vcs::git_common` but never each other; arch-lint 0.11.0 scopes with `deny-scope-dep` and `independent` enforce the boundary. |
 | Evidence | [evidence/T-017.md](evidence/T-017.md) |
 
 ## Decision
 
-Git and jj sit behind one VCS trait with opaque revisions and capabilities. Define `vcs` and `vcs::common` first, add arch-lint rules, adapt the existing Git implementation to the interface, build the plan/conflict/MCP/CLI surface on Git `Blocking`, and add jj later as a second implementation that uses `vcs::common` and never calls `vcs::git`. Git uses `Blocking` (`merge-tree` markers in the workspace, branch held at the user tip until resolve); jj uses `Native` (conflicts in commits, one jj workspace per sandbox, non-colocated bridge, `.jj` masked). `Deferred` and git-notes emulation are rejected. The source state is derived from Base/Workspace/Merge axes and one `plan` is the only consumer. No sandbox tool is blocked while conflicted; only the branch advance is held for `Blocking`. Every sandbox tool returns a proactive `workspace` block; `sandbox-status`, `sandbox-resolve`, `sandbox-conflict` are the model surface; `status`, `conflicts`, `resolve`, `abort`, `shell` are the operator surface. History retention and restore semantics are user configuration with no default; Git uses a bridge reflog on `synced`, jj uses its op log, and the user's repository is not the history store. Open risks: a `Blocking` merge is only durable through the record, so repair must re-materialise it; `.jj` is an empty mountpoint, not absent; Seatbelt masking is unprobed; the non-colocated jj bridge exposes only the Git remote, so a conflicted jj commit is not a supported Git consumer, export failures must surface, aborts must be scoped and bridge operations serialised; delete warns about unmerged work and `--force` only means stop it while running.
+Git and jj sit behind one VCS trait with opaque revisions and capabilities. Define `vcs` and `vcs::git_common` first, add arch-lint rules, adapt the existing Git implementation to the interface, build the plan/conflict/MCP/CLI surface on Git `Blocking`, and add jj later as a second implementation that uses `vcs::git_common` and never calls `vcs::git`. Git uses `Blocking` (`merge-tree` markers in the workspace, branch held at the user tip until resolve); jj uses `Native` (conflicts in commits, one jj workspace per sandbox, non-colocated bridge, `.jj` masked). `Deferred` and git-notes emulation are rejected. The source state is derived from Base/Workspace/Merge axes and one `plan` is the only consumer. No sandbox tool is blocked while conflicted; only the branch advance is held for `Blocking`. Every sandbox tool returns a proactive `workspace` block; `sandbox-status`, `sandbox-resolve`, `sandbox-conflict` are the model surface; `status`, `conflicts`, `resolve`, `abort`, `shell` are the operator surface. History retention and restore semantics are user configuration with no default; Git uses a bridge reflog on `synced`, jj uses its op log, and the user's repository is not the history store. Open risks: a `Blocking` merge is only durable through the record, so repair must re-materialise it; `.jj` is an empty mountpoint, not absent; Seatbelt masking is unprobed; the non-colocated jj bridge exposes only the Git remote, so a conflicted jj commit is not a supported Git consumer, export failures must surface, aborts must be scoped and bridge operations serialised; delete warns about unmerged work and `--force` only means stop it while running.
+
+ADR: `adrs/2026-11-19-decouple-vcs-from-orchestration`
 
