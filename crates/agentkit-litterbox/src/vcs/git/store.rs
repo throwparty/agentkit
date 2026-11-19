@@ -1,6 +1,3 @@
-pub mod path;
-pub mod remote;
-
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -39,7 +36,7 @@ impl VcsStore {
     }
 
     pub fn resolve_path(slug: &str) -> PathBuf {
-        crate::vcs_store::path::resolve_path(slug)
+        crate::vcs::git::path::resolve_path(slug)
     }
 
     pub fn clone_bare(host_path: &Path, slug: &str) -> Result<PathBuf, SandboxError> {
@@ -106,11 +103,11 @@ impl VcsStore {
     }
 
     pub fn install_remote(repo_path: &Path, bare_path: &Path) -> Result<(), SandboxError> {
-        crate::vcs_store::remote::install_remote(repo_path, bare_path)
+        crate::vcs::git::remote::install_remote(repo_path, bare_path)
     }
 
     pub fn remove_remote(repo_path: &Path) -> Result<(), SandboxError> {
-        crate::vcs_store::remote::remove_remote(repo_path)
+        crate::vcs::git::remote::remove_remote(repo_path)
     }
 }
 
@@ -126,7 +123,7 @@ mod tests {
     use tempfile::TempDir;
 
     use crate::domain::ScmMode;
-    use crate::scm::{GitScm, Scm};
+    use crate::vcs::git::{GitScm, Scm};
 
     use git2::Repository;
 
