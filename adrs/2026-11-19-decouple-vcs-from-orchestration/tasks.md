@@ -28,7 +28,7 @@ Add `src/vcs/git_common/{ignore,filter,archive,unpack,naming}.rs`. Move `IgnoreF
 | Depends On | T-001 |
 | References | git-common,mechanical-move |
 
-### T-003: Move the Git backend
+### T-003: [x] Move the Git backend
 
 Move `scm/mod.rs`, `vcs_store/{mod,remote,path}.rs` and their tests under `src/vcs/git/`. Rename `GitScm`/`ThreadSafeScm` to `GitVcs`, keep the mutex and the branch-resolution rule (bare clone first, host fallback), and implement the trait. Add `GitVcsConfig { remote, project_slug, host }`. Move the `expose_store` and `store_path` bodies into `vcs::git`, leaving temporary orchestrator wrappers so the CLI still compiles. Delete `apply_patch` and `repo_prefix`.
 
