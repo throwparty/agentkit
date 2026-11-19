@@ -1,5 +1,6 @@
 pub mod backends;
 pub mod cli;
+pub mod compose;
 pub mod config;
 pub mod config_loader;
 pub mod docgen;
