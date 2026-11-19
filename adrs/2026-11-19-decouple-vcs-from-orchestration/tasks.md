@@ -67,7 +67,7 @@ Add `TestVcs` to `src/testing.rs` beside `TestBackend`. It implements every trai
 | Depends On | T-001 |
 | References | object-safe,unimplemented-operation,moved-git-tests |
 
-### T-006: Rewire the orchestrator
+### T-006: [x] Rewire the orchestrator
 
 Replace `Sandboxes.scm` with `vcs: Arc<dyn Vcs>` and `remote: bool`. Rewrite create, repair, snapshot, delete, list and failure cleanup through the trait; delete `with_branch_scm`, `snapshot_scm`, `stage`, `stage_reference`, `open_scm`, `scm()` and the temporary wrappers. Repair uses `tip` and maps `NotFound` to the existing Unavailable refusal; delete calls `prune` only for a remote record. Migrate the six orchestrator test sites to `TestVcs` and move Git assertions into `vcs::git` tests.
 
