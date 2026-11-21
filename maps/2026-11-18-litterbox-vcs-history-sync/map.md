@@ -8,13 +8,13 @@ Created: 2026-11-18
 
 | Metric | Value |
 |--------|-------|
-| Tickets | 17 |
+| Tickets | 18 |
 | Answered | 17 |
-| Open | 0 |
+| Open | 1 |
 | Probing | 0 |
 | Abandoned | 0 |
 | Blocked | 0 |
-| Frontier | empty |
+| Frontier | T-018 |
 
 ## Tickets
 
@@ -162,9 +162,15 @@ Created: 2026-11-18
 | Answer | Define `vcs` (trait, `Revision`, `TreeId`, `Capabilities`, `Merge`, `Conflict`, `ConflictSides`) and `vcs::git_common` (Git concepts: ignore, archive, object/ref primitives, path safety, naming) first; the contract must also express the operations orchestration uses today (branch create/delete, branch enumeration, archive, snapshot commit, snapshot filter, remote/direct fact); adapt Git; add jj later. Orchestrator imports `vcs` only (never `vcs::git_common`); `vcs::git` and `vcs::jj` may import `vcs`/`vcs::git_common` but never each other; arch-lint 0.11.0 scopes with `deny-scope-dep` and `independent` enforce the boundary. |
 | Evidence | [evidence/T-017.md](evidence/T-017.md) |
 
+### T-018: Can Seatbelt deny a path inside a workspace it already allows, so a bound workspace can hide `.git` or `.jj`?
+
+| Field | Value |
+|-------|-------|
+| State | open |
+
 ## Decision
 
-Git and jj sit behind one VCS trait with opaque revisions and capabilities. Define `vcs` and `vcs::git_common` first, add arch-lint rules, adapt the existing Git implementation to the interface, build the plan/conflict/MCP/CLI surface on Git `Blocking`, and add jj later as a second implementation that uses `vcs::git_common` and never calls `vcs::git`. Git uses `Blocking` (`merge-tree` markers in the workspace, branch held at the user tip until resolve); jj uses `Native` (conflicts in commits, one jj workspace per sandbox, non-colocated bridge, `.jj` masked). `Deferred` and git-notes emulation are rejected. The source state is derived from Base/Workspace/Merge axes and one `plan` is the only consumer. No sandbox tool is blocked while conflicted; only the branch advance is held for `Blocking`. Every sandbox tool returns a proactive `workspace` block; `sandbox-status`, `sandbox-resolve`, `sandbox-conflict` are the model surface; `status`, `conflicts`, `resolve`, `abort`, `shell` are the operator surface. History retention and restore semantics are user configuration with no default; Git uses a bridge reflog on `synced`, jj uses its op log, and the user's repository is not the history store. Open risks: a `Blocking` merge is only durable through the record, so repair must re-materialise it; `.jj` is an empty mountpoint, not absent; Seatbelt masking is unprobed; the non-colocated jj bridge exposes only the Git remote, so a conflicted jj commit is not a supported Git consumer, export failures must surface, aborts must be scoped and bridge operations serialised; delete warns about unmerged work and `--force` only means stop it while running.
+Git and jj sit behind one VCS trait with opaque revisions and capabilities. Define `vcs` and `vcs::git_common` first, add arch-lint rules, adapt the existing Git implementation to the interface, build the plan/conflict/MCP/CLI surface on Git `Blocking`, and add jj later as a second implementation that uses `vcs::git_common` and never calls `vcs::git`. Git uses `Blocking` (`merge-tree` markers in the workspace, branch held at the user tip until resolve); jj uses `Native` (conflicts in commits, one jj workspace per sandbox, non-colocated bridge, `.jj` masked). `Deferred` and git-notes emulation are rejected. The source state is derived from Base/Workspace/Merge axes and one `plan` is the only consumer. No sandbox tool is blocked while conflicted; only the branch advance is held for `Blocking`. Every sandbox tool returns a proactive `workspace` block; `sandbox-status`, `sandbox-resolve`, `sandbox-conflict` are the model surface; `status`, `conflicts`, `resolve`, `abort`, `shell` are the operator surface. History retention and restore semantics are user configuration with no default; Git uses a bridge reflog on `synced`, jj uses its op log, and the user's repository is not the history store. Open risks: a `Blocking` merge is only durable through the record, so repair must re-materialise it; `.jj` is an empty mountpoint, not absent; Seatbelt masking is unprobed (T-018); the non-colocated jj bridge exposes only the Git remote, so a conflicted jj commit is not a supported Git consumer, export failures must surface, aborts must be scoped and bridge operations serialised; delete warns about unmerged work and `--force` only means stop it while running.
 
 ADR: `adrs/2026-11-19-decouple-vcs-from-orchestration`
 
