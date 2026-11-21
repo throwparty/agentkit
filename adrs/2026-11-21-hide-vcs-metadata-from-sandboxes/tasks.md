@@ -184,7 +184,7 @@ T-002 probed `.jj`, which is a directory. Run a bubblewrap probe twice, once wit
 | Depends On | T-013 |
 | References | bwrap-masking,empty-mountpoint |
 
-### T-015: Probe Docker's empty volume and daemon filesystem
+### T-015: [x] Probe Docker's empty volume and daemon filesystem
 
 Run a Docker probe for an empty volume at a masked path, both when the bound directory already holds `.git` and when it does not. Separately establish how the backend can tell that the daemon shares the host filesystem, since `compute.rs:630-667` proves only that the connection is a local unix socket.
 

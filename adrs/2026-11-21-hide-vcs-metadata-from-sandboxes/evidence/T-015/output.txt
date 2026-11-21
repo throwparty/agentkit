@@ -1,0 +1,41 @@
+docker: 29.9.3
+root: /home/lukecarrier/.local/share/docker
+image: busybox:latest
+scratch: /tmp/tmp.fFH08Jagaw
+
+Case A: .git exists, masked with an empty volume
+  readme=hello
+  entries=0
+  write=volume
+  PASS readme is readable (hello)
+  PASS the entry is empty (0)
+  PASS the host .git is untouched (SECRET)
+  PASS no file lands in the host .git (absent)
+
+Case B: .git is absent, masked with a bind of an empty host directory
+  readme=hello
+  entry=present
+  entries=0
+  write=accepted
+  PASS readme is readable (hello)
+  PASS the mountpoint is a directory (present)
+  PASS the mountpoint is empty (0)
+  NOTE: the host workspace has a .git entry after the bind
+
+Case B2: .git is absent, masked with a named volume
+  readme=hello
+  entry=present
+  entries=0
+  PASS the mountpoint is a directory (present)
+  PASS the mountpoint is empty (0)
+  NOTE: the host workspace has a .git entry after the bind
+
+Case C: does the daemon share the host filesystem?
+  host-side
+  daemon: shares the host filesystem
+
+Case D: control, no mask
+  SECRET
+  PASS the control leaks (SECRET)
+
+RESULT: every check passed
