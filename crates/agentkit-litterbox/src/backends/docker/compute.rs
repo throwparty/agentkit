@@ -15,7 +15,8 @@ use bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
 use bollard::models::{ContainerCreateBody, HostConfig, PortBinding};
 use bollard::query_parameters::{
     CreateContainerOptionsBuilder, CreateImageOptions, DownloadFromContainerOptionsBuilder,
-    ListContainersOptionsBuilder, RemoveContainerOptions, UploadToContainerOptionsBuilder,
+    ListContainersOptionsBuilder, LogsOptionsBuilder, RemoveContainerOptions,
+    UploadToContainerOptionsBuilder,
 };
 use bollard::{API_DEFAULT_VERSION, Docker};
 use bytes::Bytes;
@@ -50,6 +51,30 @@ pub struct ContainerSpec {
     pub pids_limit: Option<i64>,
     /// Extra capabilities to grant.
     pub cap_add: Vec<String>,
+    /// Host paths bound into the container.
+    pub binds: Vec<BindSpec>,
+}
+
+/// One host path bound into a container.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BindSpec {
+    /// The host path.
+    pub host: String,
+    /// Where the container sees it.
+    pub container: String,
+    /// Whether the container may write to it.
+    pub read_only: bool,
+}
+
+impl BindSpec {
+    /// The `host:container[:ro]` form the daemon takes.
+    pub fn render(&self) -> String {
+        if self.read_only {
+            format!("{}:{}:ro", self.host, self.container)
+        } else {
+            format!("{}:{}", self.host, self.container)
+        }
+    }
 }
 
 /// One host binding for a container port.
@@ -201,6 +226,11 @@ impl DockerCompute {
                 },
                 cap_drop: Some(vec!["ALL".to_string()]),
                 security_opt: Some(vec!["no-new-privileges".to_string()]),
+                binds: if spec.binds.is_empty() {
+                    None
+                } else {
+                    Some(spec.binds.iter().map(BindSpec::render).collect())
+                },
                 ..Default::default()
             }),
             ..Default::default()
@@ -233,6 +263,22 @@ impl DockerCompute {
         }
 
         Ok(response.id)
+    }
+
+    /// The root directory the daemon reports.
+    ///
+    /// A bind source is resolved on the daemon's side, so a bound workspace
+    /// needs the daemon to share the host filesystem. A root that is not a
+    /// directory on this host is the cheap signal that it does not.
+    pub async fn root_dir(&self) -> Result<Option<String>, ComputeError> {
+        let info = self
+            .client
+            .info()
+            .await
+            .map_err(|source| ComputeError::Connection {
+                source: backend_error(source),
+            })?;
+        Ok(info.docker_root_dir)
     }
 
     pub async fn state(&self, container_id: &str) -> Result<SandboxState, ComputeError> {
@@ -353,6 +399,58 @@ impl DockerCompute {
                 source: backend_error(source),
             }),
         }
+    }
+
+    /// Run a one-shot container and return what it wrote.
+    ///
+    /// The container is removed whatever the outcome, so a probe leaves no
+    /// state behind.
+    pub async fn run_once(&self, spec: &ContainerSpec) -> Result<String, ComputeError> {
+        let id = self.create_container(spec).await?;
+        let output = self.read_until_stopped(&id).await;
+        let _ = self.delete_container(&id).await;
+        output
+    }
+
+    async fn read_until_stopped(&self, container_id: &str) -> Result<String, ComputeError> {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            match self.state(container_id).await? {
+                SandboxState::Stopped => break,
+                SandboxState::Missing => {
+                    return Err(ComputeError::ContainerInspect {
+                        source: BackendError::other("the one-shot container disappeared"),
+                    });
+                }
+                SandboxState::Running | SandboxState::Paused => {
+                    if tokio::time::Instant::now() >= deadline {
+                        return Err(ComputeError::Timeout { seconds: 30 });
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                }
+            }
+        }
+
+        let options = LogsOptionsBuilder::default()
+            .stdout(true)
+            .stderr(true)
+            .build();
+        let mut stream = self.client.logs(container_id, Some(options));
+        let mut output = String::new();
+        while let Some(chunk) = stream.next().await {
+            match chunk.map_err(|source| ComputeError::ContainerExec {
+                source: backend_error(source),
+            })? {
+                LogOutput::StdOut { message } | LogOutput::Console { message } => {
+                    output.push_str(&String::from_utf8_lossy(&message));
+                }
+                LogOutput::StdErr { message } => {
+                    output.push_str(&String::from_utf8_lossy(&message));
+                }
+                LogOutput::StdIn { .. } => {}
+            }
+        }
+        Ok(output)
     }
 
     pub async fn exec(

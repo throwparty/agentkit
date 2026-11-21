@@ -14,13 +14,14 @@ use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 
 use super::compute;
-use super::compute::{ContainerSpec, SandboxState};
+use super::compute::{BindSpec, ContainerSpec, SandboxState};
 use super::error::ComputeError;
 use super::naming::container_name_for_slug;
 use crate::backends::shared::{CREATE_BUDGET, PROVISION_OUTPUT_CAP, UPLOAD_TIMEOUT, run_steps};
 use crate::sandbox::contract::{
     Backend, ContributionSupport, CreateMode, CreateRequest, Error, Execution, Forward, Inspection,
     ProvisioningClass, ProvisioningFailure, ResolvedStep, SandboxRecord, SandboxStatus, Scope,
+    WorkspaceBinding,
 };
 use crate::sandbox::environment::{Change, Environment, Origin, Provenance, Variable};
 use crate::sandbox::facets::{Forwarding, Lifecycle, Limits, ResourceLimits};
@@ -28,6 +29,15 @@ use crate::sandbox::report::{Capability, Check, EgressPosture, Readiness, State}
 
 /// The backend's own name in records and reports.
 pub const BACKEND: &str = "docker";
+
+/// Where this backend keeps the empty directories it masks with.
+fn mask_directory(project: &str, name: &str) -> std::path::PathBuf {
+    agentkit_common::data_dir("litterbox")
+        .join("docker")
+        .join(project)
+        .join(name)
+        .join("mask")
+}
 
 /// Where the workspace is mounted inside the container.
 const WORKDIR: &str = "/src";
@@ -124,8 +134,20 @@ impl DockerBackend {
             let (port_bindings, forwards) =
                 super::forwarding::forwarded_ports(&request.ports, &request.forward_bind).await?;
             let environment = environment(&forwards);
-            let spec =
-                self.container_spec(request, container, port_bindings, &environment, &forwards)?;
+            let mask = mask_directory(&request.project_slug, &request.name);
+            if request.workspace.binding == WorkspaceBinding::Bound
+                && !request.workspace.masked_paths.is_empty()
+            {
+                std::fs::create_dir_all(&mask).map_err(|error| Error::failed(error.to_string()))?;
+            }
+            let spec = self.container_spec(
+                request,
+                container,
+                port_bindings,
+                &environment,
+                &forwards,
+                &mask,
+            )?;
 
             match self.compute.create_container(&spec).await {
                 Ok(id) => return Ok((id, forwards, environment)),
@@ -165,6 +187,7 @@ impl DockerBackend {
         port_bindings: HashMap<String, Vec<super::compute::PortBindingSpec>>,
         environment: &Environment,
         forwards: &[Forward],
+        mask: &Path,
     ) -> Result<ContainerSpec, Error> {
         let env = environment
             .variables
@@ -190,7 +213,130 @@ impl DockerBackend {
             nano_cpus: Some(i64::from(self.settings.cpus) * 1_000_000_000),
             pids_limit: Some(i64::from(self.settings.pids_limit)),
             cap_add: self.settings.cap_add.clone(),
+            binds: binds(request, mask)?,
         })
+    }
+
+    /// Refuse `Bound` when the daemon does not share the host filesystem.
+    async fn ensure_shared_filesystem(&self) -> Result<(), Error> {
+        let root = self.compute.root_dir().await?;
+        if !shares_host_filesystem(root.as_deref()) {
+            return Err(Error::Unsupported {
+                operation: "bind the workspace".to_string(),
+                backend: BACKEND.to_string(),
+                primitive: "a host directory the daemon can reach".to_string(),
+                reason: format!(
+                    "the daemon reports its root at '{}', which is not a directory on this host, \
+                     so a bind source is resolved somewhere else",
+                    root.as_deref().unwrap_or("an unknown path")
+                ),
+                remedy: "use binding = 'copied', or point DOCKER_HOST at a daemon on this host"
+                    .to_string(),
+            });
+        }
+
+        // The root string only proves that a directory of that name exists
+        // here. Ask the daemon to read a file this host just wrote through a
+        // bind; a daemon resolving paths elsewhere cannot return it.
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+        let directory = agentkit_common::data_dir("litterbox")
+            .join("docker")
+            .join("sentinel");
+        std::fs::create_dir_all(&directory).map_err(|error| {
+            Error::failed(format!(
+                "the sentinel directory could not be created: {error}"
+            ))
+        })?;
+        let sentinel = directory.join(format!("{}-{stamp}", std::process::id()));
+        let content = format!("litterbox-sentinel-{}-{stamp}", std::process::id());
+        std::fs::write(&sentinel, &content).map_err(|error| {
+            Error::failed(format!("the sentinel could not be written: {error}"))
+        })?;
+
+        let spec = sentinel_spec(
+            &self.settings.image,
+            format!("litterbox-sentinel-{}-{stamp}", std::process::id()),
+            &sentinel,
+        );
+        let output = self.compute.run_once(&spec).await;
+        let _ = std::fs::remove_file(&sentinel);
+        let output = output.map_err(Error::from)?;
+
+        if output.trim() != content {
+            return Err(Error::Unsupported {
+                operation: "bind the workspace".to_string(),
+                backend: BACKEND.to_string(),
+                primitive: "a host directory the daemon can reach".to_string(),
+                reason: "the daemon could not read a sentinel written on this host, so a bind \
+                         source is resolved somewhere else"
+                    .to_string(),
+                remedy: "use binding = 'copied', or point DOCKER_HOST at a daemon on this host"
+                    .to_string(),
+            });
+        }
+
+        Ok(())
+    }
+}
+
+/// The host paths a container sees.
+///
+/// A copy is uploaded after the container starts, so it binds nothing. A
+/// bound workspace is the VCS's host directory, and every masked path is
+/// bound over with an empty read-only directory so the sandbox cannot read
+/// or write the VCS metadata inside it.
+fn binds(request: &CreateRequest, mask: &Path) -> Result<Vec<BindSpec>, Error> {
+    if request.workspace.binding != WorkspaceBinding::Bound {
+        return Ok(Vec::new());
+    }
+
+    let mut binds = vec![BindSpec {
+        host: request.workspace.source.to_string_lossy().to_string(),
+        container: WORKDIR.to_string(),
+        read_only: false,
+    }];
+
+    for relative in &request.workspace.masked_paths {
+        binds.push(BindSpec {
+            host: mask.to_string_lossy().to_string(),
+            container: format!("{WORKDIR}/{}", relative.display()),
+            read_only: true,
+        });
+    }
+
+    Ok(binds)
+}
+
+/// Whether a daemon's reported root is a directory on this host.
+fn shares_host_filesystem(root: Option<&str>) -> bool {
+    root.is_some_and(|root| {
+        let path = Path::new(root);
+        path.is_absolute() && path.is_dir()
+    })
+}
+
+/// The one-shot container that reads a host-written sentinel.
+fn sentinel_spec(image: &str, name: String, sentinel: &Path) -> ContainerSpec {
+    ContainerSpec {
+        name,
+        image: image.to_string(),
+        command: vec!["cat".to_string(), "/litterbox-sentinel".to_string()],
+        working_dir: None,
+        env: Vec::new(),
+        labels: HashMap::new(),
+        port_bindings: HashMap::new(),
+        memory_bytes: Some(16 * 1024 * 1024),
+        nano_cpus: Some(50_000_000),
+        pids_limit: Some(8),
+        cap_add: Vec::new(),
+        binds: vec![BindSpec {
+            host: sentinel.to_string_lossy().to_string(),
+            container: "/litterbox-sentinel".to_string(),
+            read_only: true,
+        }],
     }
 }
 
@@ -352,6 +498,10 @@ impl Backend for DockerBackend {
             }
             self.compute.ensure_image(&self.settings.image).await?;
 
+            if request.workspace.binding == WorkspaceBinding::Bound {
+                self.ensure_shared_filesystem().await?;
+            }
+
             let container = self.container_name(request);
             let (id, forwards, mut environment) =
                 self.create_container(request, &container).await?;
@@ -362,27 +512,32 @@ impl Backend for DockerBackend {
                 armed: true,
             };
 
-            let upload = tokio::time::timeout(
-                UPLOAD_TIMEOUT,
-                self.compute.upload_path(
-                    &id,
-                    &request.workspace.source,
-                    WORKDIR,
-                    self.settings.max_transfer_bytes,
-                ),
-            )
-            .await;
-            match upload {
-                Ok(Ok(())) => {}
-                Ok(Err(error)) => {
-                    guard.armed = false;
-                    self.rollback(&id).await;
-                    return Err(error.into());
-                }
-                Err(_) => {
-                    guard.armed = false;
-                    self.rollback(&id).await;
-                    return Err(upload_failure(UPLOAD_TIMEOUT));
+            // A copy is uploaded into the container. A bound workspace is
+            // already the host directory the VCS owns, and the container sees
+            // it through the bind, so there is nothing to upload.
+            if request.workspace.binding == WorkspaceBinding::Copied {
+                let upload = tokio::time::timeout(
+                    UPLOAD_TIMEOUT,
+                    self.compute.upload_path(
+                        &id,
+                        &request.workspace.source,
+                        WORKDIR,
+                        self.settings.max_transfer_bytes,
+                    ),
+                )
+                .await;
+                match upload {
+                    Ok(Ok(())) => {}
+                    Ok(Err(error)) => {
+                        guard.armed = false;
+                        self.rollback(&id).await;
+                        return Err(error.into());
+                    }
+                    Err(_) => {
+                        guard.armed = false;
+                        self.rollback(&id).await;
+                        return Err(upload_failure(UPLOAD_TIMEOUT));
+                    }
                 }
             }
 
@@ -595,9 +750,20 @@ impl Backend for DockerBackend {
             let data = DockerData::from_record(sandbox)?;
             // `delete_container` already treats a missing container as success.
             self.compute.delete_container(&data.container).await?;
+            // The mask directory is this backend's own state, so it goes with
+            // the sandbox rather than staying behind as an orphan.
+            let mask = mask_directory(&sandbox.project_slug, &sandbox.name);
+            let mut removed = Vec::new();
+            if mask.is_dir() {
+                if let Err(error) = std::fs::remove_dir_all(&mask) {
+                    tracing::warn!(path = %mask.display(), %error, "the mask directory may remain");
+                } else {
+                    removed.push(mask);
+                }
+            }
             Ok(crate::sandbox::contract::Teardown {
                 compute_stopped: true,
-                state_paths: Vec::new(),
+                state_paths: removed,
                 detail: Some(format!("container {}", data.container)),
             })
         })
@@ -932,9 +1098,10 @@ fn confined(path: &str, sandbox: &SandboxRecord) -> Result<String, Error> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BACKEND, Backend, CREATE_BUDGET, DockerBackend, DockerSettings, PORT_RETRIES, confined,
-        is_name_conflict, is_port_conflict, labels_for, missing_image_check, record_from_labels,
-        retry_after_port_conflict, run_steps, step_failure, timeout_failure, upload_failure,
+        BACKEND, Backend, CREATE_BUDGET, DockerBackend, DockerSettings, PORT_RETRIES, binds,
+        confined, is_name_conflict, is_port_conflict, labels_for, missing_image_check,
+        record_from_labels, retry_after_port_conflict, run_steps, sentinel_spec,
+        shares_host_filesystem, step_failure, timeout_failure, upload_failure,
     };
     use crate::backends::docker::compute;
     use crate::backends::docker::error::{BackendError, ComputeError, FailureKind};
@@ -949,6 +1116,7 @@ mod tests {
     use crate::sandbox::facets::{Limits, ResourceLimits};
     use crate::sandbox::report::{EgressPosture, State};
     use std::collections::HashMap;
+    use std::path::Path;
     use std::time::Duration;
 
     fn request() -> CreateRequest {
@@ -961,6 +1129,58 @@ mod tests {
             ports: Vec::new(),
             mode: CreateMode::Fresh,
         }
+    }
+
+    #[test]
+    fn a_copied_create_binds_nothing() {
+        let binds = binds(&request(), std::path::Path::new("/state/mask")).expect("binds");
+        assert!(binds.is_empty(), "a copy is uploaded, not bound");
+    }
+
+    #[test]
+    fn a_bound_create_binds_the_workspace_and_masks_each_path_read_only() {
+        let mut request = request();
+        request.workspace = Workspace::bound(
+            std::path::PathBuf::from("/tmp/checkout"),
+            vec![
+                std::path::PathBuf::from(".git"),
+                std::path::PathBuf::from(".jj"),
+            ],
+        );
+
+        let binds = binds(&request, std::path::Path::new("/state/mask")).expect("binds");
+
+        assert_eq!(binds.len(), 3, "the workspace and one bind per masked path");
+        assert_eq!(binds[0].host, "/tmp/checkout");
+        assert_eq!(binds[0].container, "/src");
+        assert!(!binds[0].read_only, "the workspace is writable");
+        for (bind, path) in binds[1..].iter().zip(["/src/.git", "/src/.jj"]) {
+            assert_eq!(bind.host, "/state/mask");
+            assert_eq!(bind.container, path);
+            assert!(bind.read_only, "the mask is read-only");
+        }
+    }
+
+    #[test]
+    fn a_daemon_root_is_shared_only_when_it_is_a_directory_here() {
+        assert!(shares_host_filesystem(Some("/tmp")));
+        assert!(!shares_host_filesystem(Some("/definitely/not/here")));
+        assert!(!shares_host_filesystem(Some("relative/path")));
+        assert!(!shares_host_filesystem(None));
+    }
+
+    #[test]
+    fn the_sentinel_reads_a_host_file_through_a_read_only_bind() {
+        let spec = sentinel_spec(
+            "busybox",
+            "litterbox-sentinel".to_string(),
+            Path::new("/state/sentinel"),
+        );
+        assert_eq!(spec.command, ["cat", "/litterbox-sentinel"]);
+        assert_eq!(spec.binds.len(), 1);
+        assert_eq!(spec.binds[0].host, "/state/sentinel");
+        assert_eq!(spec.binds[0].container, "/litterbox-sentinel");
+        assert!(spec.binds[0].read_only, "the sentinel is read-only");
     }
 
     #[test]
