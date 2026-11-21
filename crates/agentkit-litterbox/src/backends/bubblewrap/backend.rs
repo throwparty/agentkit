@@ -9,7 +9,7 @@ use futures_util::future::BoxFuture;
 use super::BACKEND;
 use super::host::{Host, SharedHost};
 use super::payload::{Payload, RecordedMount, RecordedPids, RecordedRoot};
-use super::view::{Boundaries, RenderOptions, Requested, View, WORKSPACE};
+use super::view::{Boundaries, Masked, RenderOptions, Requested, View, WORKSPACE};
 use super::{environment, holder, join, lifecycle, readiness, validate, workspace};
 use crate::backends::shared::{
     DOWNLOAD_TIMEOUT, EXEC_OUTPUT_CAP, PROVISION_OUTPUT_CAP, UPLOAD_TIMEOUT, run_steps, transfer,
@@ -149,6 +149,47 @@ impl BubblewrapBackend {
         paths
     }
 
+    /// The paths a create has to hide, relative to the workspace.
+    ///
+    /// `Copied` carries an empty list because the staged tree has no VCS
+    /// metadata. `Bound` stats each path so the renderer knows whether a
+    /// tmpfs or an empty bind applies. An absent path is masked as a
+    /// directory, so the sandbox cannot create metadata where none exists.
+    fn masked_paths(
+        &self,
+        request: &CreateRequest,
+        workspace: &Path,
+    ) -> Result<Vec<Masked>, Error> {
+        let mut masked = Vec::with_capacity(request.workspace.masked_paths.len());
+        for relative in &request.workspace.masked_paths {
+            let host = workspace.join(relative);
+            let directory = match std::fs::symlink_metadata(&host) {
+                Ok(metadata) if metadata.is_dir() => true,
+                Ok(metadata) if metadata.is_file() => false,
+                Ok(_) => {
+                    return Err(Error::Unsupported {
+                        operation: format!("mask '{}'", relative.display()),
+                        backend: BACKEND.to_string(),
+                        primitive: "a directory or a regular file".to_string(),
+                        reason: "the masked path is neither, so neither a tmpfs nor an \
+                                 empty bind applies to it"
+                            .to_string(),
+                        remedy: "remove the path, or replace it with a directory or a \
+                                 regular file"
+                            .to_string(),
+                    });
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+                Err(error) => return Err(Error::failed(error.to_string())),
+            };
+            masked.push(Masked {
+                path: relative.clone(),
+                directory,
+            });
+        }
+        Ok(masked)
+    }
+
     /// Build the view a sandbox receives.
     fn build_view(
         &self,
@@ -264,6 +305,7 @@ impl BubblewrapBackend {
         &self,
         holder: &holder::Holder,
         view: &View,
+        masked: &[Masked],
         workspace: &Path,
         environment: &crate::sandbox::environment::Environment,
         forwards: &[crate::sandbox::contract::Forward],
@@ -307,9 +349,9 @@ impl BubblewrapBackend {
                 inode: root.inode,
             },
             mounts: view
-                .pinned
+                .mounts(masked)
                 .iter()
-                .map(|pinned| RecordedMount::from(&pinned.mount))
+                .map(RecordedMount::from)
                 .collect(),
             workspace_host: workspace.to_string_lossy().to_string(),
             workspace: WORKSPACE.to_string(),
@@ -1062,6 +1104,16 @@ impl BubblewrapBackend {
             .await?;
         }
         let view = self.build_view(request, holder_command, workspace)?;
+        let masked = self.masked_paths(request, workspace)?;
+        // A masked path that is a file is bound over with an empty read-only
+        // file, because a tmpfs needs a directory mountpoint.
+        let mask_file = workspace
+            .parent()
+            .map(|parent| parent.join("mask"))
+            .unwrap_or_else(|| PathBuf::from("mask"));
+        if masked.iter().any(|entry| !entry.directory) {
+            std::fs::write(&mask_file, b"").map_err(|error| Error::failed(error.to_string()))?;
+        }
         let holder_arguments = holder_command.arguments();
         let scope = if scoped {
             let launcher = self
@@ -1108,6 +1160,8 @@ impl BubblewrapBackend {
             status_fd,
             network: self.settings.network,
             symlinks: &holder_command.symlinks,
+            masked: &masked,
+            mask_file: &mask_file,
         });
         let status_path = workspace
             .parent()
@@ -1146,7 +1200,7 @@ impl BubblewrapBackend {
         holder::await_ready(
             &*self.host,
             holder.sandbox_pid,
-            &view.mounts(),
+            &view.mounts(&masked),
             holder::READY_TIMEOUT,
         )
         .await?;
@@ -1156,6 +1210,7 @@ impl BubblewrapBackend {
         let data = self.payload(
             &holder,
             &view,
+            &masked,
             workspace,
             environment,
             forwards,
@@ -1266,6 +1321,77 @@ mod tests {
             ports,
             mode: CreateMode::Fresh,
         }
+    }
+
+    #[test]
+    fn a_bound_create_masks_a_directory_a_file_and_an_absent_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let workspace = dir.path().join("workspace");
+        std::fs::create_dir_all(workspace.join(".git")).expect("dir");
+        std::fs::write(workspace.join(".jj"), b"gitdir: elsewhere").expect("file");
+
+        let mut request = request(Vec::new());
+        request.workspace = Workspace::bound(
+            workspace.clone(),
+            vec![
+                PathBuf::from(".git"),
+                PathBuf::from(".jj"),
+                PathBuf::from(".vcs-absent"),
+            ],
+        );
+
+        let masked = backend()
+            .masked_paths(&request, &workspace)
+            .expect("masked");
+
+        assert_eq!(
+            masked,
+            vec![
+                crate::backends::bubblewrap::view::Masked {
+                    path: PathBuf::from(".git"),
+                    directory: true,
+                },
+                crate::backends::bubblewrap::view::Masked {
+                    path: PathBuf::from(".jj"),
+                    directory: false,
+                },
+                crate::backends::bubblewrap::view::Masked {
+                    path: PathBuf::from(".vcs-absent"),
+                    directory: true,
+                },
+            ],
+            "an absent path is masked as a directory so nothing can be created there"
+        );
+    }
+
+    #[test]
+    fn a_masked_path_that_is_neither_a_file_nor_a_directory_is_refused() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let workspace = dir.path().join("workspace");
+        std::fs::create_dir_all(&workspace).expect("dir");
+        std::os::unix::fs::symlink(".git", workspace.join(".link")).expect("symlink");
+
+        let mut request = request(Vec::new());
+        request.workspace = Workspace::bound(workspace.clone(), vec![PathBuf::from(".link")]);
+
+        let error = backend()
+            .masked_paths(&request, &workspace)
+            .expect_err("a symlink cannot be masked");
+
+        assert!(matches!(error, Error::Unsupported { .. }), "{error}");
+    }
+
+    #[test]
+    fn a_copied_create_masks_nothing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let workspace = dir.path().join("workspace");
+        std::fs::create_dir_all(&workspace).expect("dir");
+
+        let masked = backend()
+            .masked_paths(&request(Vec::new()), &workspace)
+            .expect("masked");
+
+        assert!(masked.is_empty());
     }
 
     fn backend() -> BubblewrapBackend {

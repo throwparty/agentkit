@@ -259,6 +259,18 @@ fn pin(path: &Path) -> io::Result<File> {
     Ok(unsafe { File::from_raw_fd(fd as i32) })
 }
 
+/// A path the sandbox must not read or write, relative to the workspace.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Masked {
+    /// Where the path sits inside the sandbox, relative to the workspace root.
+    pub path: PathBuf,
+    /// Whether the host path is a directory.
+    ///
+    /// A directory is hidden with a tmpfs and a file with an empty read-only
+    /// bind, because a tmpfs needs a directory mountpoint.
+    pub directory: bool,
+}
+
 /// What the renderer needs that is not part of the view.
 #[derive(Clone, Debug)]
 pub struct RenderOptions<'a> {
@@ -276,15 +288,35 @@ pub struct RenderOptions<'a> {
     pub network: crate::backends::bubblewrap::backend::Network,
     /// The links to create in the private root, as `(target, link)`.
     pub symlinks: &'a [(PathBuf, PathBuf)],
+    /// The VCS metadata paths to hide, rendered after the workspace bind.
+    pub masked: &'a [Masked],
+    /// An empty file bound over each masked path that is a file.
+    pub mask_file: &'a Path,
 }
 
 impl View {
     /// The mounts this view holds, in render order.
-    pub fn mounts(&self) -> Vec<Mount> {
-        self.pinned
+    ///
+    /// A masked file is a read-only host mount at its sandbox path, so it must
+    /// appear here too: readiness waits for it and validation rejects a mount
+    /// the record does not name. A masked directory is a tmpfs, which
+    /// validation ignores, so it is not listed.
+    pub fn mounts(&self, masked: &[Masked]) -> Vec<Mount> {
+        let mut mounts: Vec<Mount> = self
+            .pinned
             .iter()
             .map(|pinned| pinned.mount.clone())
-            .collect()
+            .collect();
+        mounts.extend(
+            masked
+                .iter()
+                .filter(|entry| !entry.directory)
+                .map(|entry| Mount {
+                    path: Path::new(WORKSPACE).join(&entry.path),
+                    access: Access::ReadOnly,
+                }),
+        );
+        mounts
     }
 
     /// The descriptors the mechanism is handed, in render order.
@@ -339,6 +371,17 @@ impl View {
         push("--bind".to_string());
         push(options.workspace_host.to_string_lossy().to_string());
         push(WORKSPACE.to_string());
+        for masked in options.masked {
+            let target = format!("{WORKSPACE}/{}", masked.path.display());
+            if masked.directory {
+                push("--tmpfs".to_string());
+                push(target);
+            } else {
+                push("--ro-bind".to_string());
+                push(options.mask_file.to_string_lossy().to_string());
+                push(target);
+            }
+        }
         push("--chdir".to_string());
         push(WORKSPACE.to_string());
         push("--json-status-fd".to_string());
@@ -356,7 +399,7 @@ impl View {
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use super::{Access, Boundaries, Mount, RenderOptions, Requested, View, WORKSPACE};
+    use super::{Access, Boundaries, Masked, Mount, RenderOptions, Requested, View, WORKSPACE};
     use crate::sandbox::contract::Error;
 
     fn boundaries(root: &Path) -> Boundaries {
@@ -414,6 +457,8 @@ mod tests {
             status_fd: 3,
             network: crate::backends::bubblewrap::backend::Network::Denied,
             symlinks: &[],
+            masked: &[],
+            mask_file: Path::new("/dev/null"),
         };
         let argv: Vec<String> = view
             .render(&options)
@@ -593,6 +638,82 @@ mod tests {
     }
 
     #[test]
+    fn the_mask_is_rendered_after_the_workspace_bind() {
+        let (temporary, _grant, workspace) = sandbox_layout();
+        let view = View::build(&[], &workspace, &boundaries(temporary.path())).expect("view");
+        let masked = [
+            Masked {
+                path: PathBuf::from(".git"),
+                directory: true,
+            },
+            Masked {
+                path: PathBuf::from(".jj"),
+                directory: false,
+            },
+        ];
+        let options = RenderOptions {
+            bwrap: Path::new("/bin/bwrap"),
+            holder: Path::new("/bin/sleep"),
+            holder_arguments: &[],
+            workspace_host: &workspace,
+            status_fd: 3,
+            network: crate::backends::bubblewrap::backend::Network::Denied,
+            symlinks: &[],
+            masked: &masked,
+            mask_file: Path::new("/state/mask"),
+        };
+
+        let argv = view.render(&options);
+        let target = argv
+            .iter()
+            .position(|argument| argument == WORKSPACE)
+            .expect("the workspace bind");
+        assert_eq!(
+            &argv[target + 1..target + 7],
+            [
+                "--tmpfs",
+                "/src/.git",
+                "--ro-bind",
+                "/state/mask",
+                "/src/.jj",
+                "--chdir",
+            ],
+            "the mask follows the bind: {argv:?}"
+        );
+    }
+
+    #[test]
+    fn a_file_mask_is_an_expected_read_only_mount() {
+        let (temporary, _grant, workspace) = sandbox_layout();
+        let view = View::build(&[], &workspace, &boundaries(temporary.path())).expect("view");
+        let masked = [
+            Masked {
+                path: PathBuf::from(".git"),
+                directory: true,
+            },
+            Masked {
+                path: PathBuf::from(".jj"),
+                directory: false,
+            },
+        ];
+
+        let mounts = view.mounts(&masked);
+        assert!(
+            mounts.iter().any(|mount| {
+                mount.path == Path::new(WORKSPACE).join(".jj")
+                    && mount.access == Access::ReadOnly
+            }),
+            "a file mask is a read-only host mount the record must name"
+        );
+        assert!(
+            !mounts
+                .iter()
+                .any(|mount| mount.path == Path::new(WORKSPACE).join(".git")),
+            "a directory mask is a tmpfs, not a host mount"
+        );
+    }
+
+    #[test]
     fn the_mount_type_is_carried() {
         let mount = Mount {
             path: PathBuf::from("/opt/toolchain/abc"),
@@ -618,6 +739,8 @@ mod tests {
             status_fd: 3,
             network: crate::backends::bubblewrap::backend::Network::Denied,
             symlinks: &[],
+            masked: &[],
+            mask_file: Path::new("/dev/null"),
         };
         let argv = view.render(&options);
         let contains = |flag: &str| argv.iter().any(|argument| argument == flag);

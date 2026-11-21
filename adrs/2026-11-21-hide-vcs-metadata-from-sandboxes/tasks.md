@@ -171,7 +171,7 @@ T-002 probed `.jj`, which is a directory. Run a bubblewrap probe twice, once wit
 | Depends On | T-012 |
 | References | bwrap-masking,empty-mountpoint |
 
-### T-014: Mask in bubblewrap
+### T-014: [x] Mask in bubblewrap
 
 `backends/bubblewrap/view.rs` gains masked paths in its render options, emitted after the workspace bind at `view.rs:339-341`: `--tmpfs` over each masked directory, and a bind over an empty file for a masked path that is a file. `backends/bubblewrap/backend.rs` refuses `Bound` when a masked path cannot be rendered.
 
