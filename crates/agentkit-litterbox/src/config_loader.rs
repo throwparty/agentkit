@@ -308,6 +308,16 @@ fn validate_user_config_against(
 /// Steps are project-owned; the user configuration carries machine settings
 /// and consent only.
 fn reject_project_keys_in_user(user: &ProjectFile) -> Result<(), ConfigError> {
+    // A VCS section decides how one workspace is presented, so it belongs to
+    // that workspace rather than to the whole machine.
+    if !user.vcs.is_empty() {
+        return Err(ConfigError::ParseError(
+            "vcs is a workspace setting; declare it in the local override at \
+             .agentkit/litterbox/config.local.toml, not in the user configuration"
+                .to_string(),
+        ));
+    }
+
     let backend_provision = user.backends.iter().find_map(|(name, value)| match value {
         toml::Value::Table(table) if table.contains_key("provision") => {
             Some(format!("backends.{name}.provision"))
@@ -320,7 +330,6 @@ fn reject_project_keys_in_user(user: &ProjectFile) -> Result<(), ConfigError> {
         .map(|_| "provision".to_string())
         .or_else(|| (user.project != ProjectConfig::default()).then(|| "project".to_string()))
         .or_else(|| (!user.ports.is_empty()).then(|| "ports".to_string()))
-        .or_else(|| (!user.vcs.is_empty()).then(|| "vcs".to_string()))
         .or(backend_provision);
     if let Some(key) = key {
         return Err(ConfigError::ParseError(format!(
@@ -1344,6 +1353,42 @@ bind = "0.0.0.0"
     }
 
     #[test]
+    fn a_local_override_carries_the_vcs_section() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        git2::Repository::init(dir.path()).expect("repo");
+        let project = dir.path().join("config.toml");
+        let local = dir.path().join("config.local.toml");
+        std::fs::write(&project, "[project]\nbackends = ['docker']\n").expect("project");
+        std::fs::write(&local, "[vcs.git]\nsnapshot-mode = 'direct'\n").expect("local");
+
+        let config =
+            super::load_final_from(&project, &local, None, Some(dir.path())).expect("load");
+        assert_eq!(
+            config.vcs_settings["git"]["snapshot-mode"].as_str(),
+            Some("direct"),
+            "the workspace setting reaches the merged configuration"
+        );
+    }
+
+    #[test]
+    fn a_user_configuration_cannot_set_the_vcs_section() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        git2::Repository::init(dir.path()).expect("repo");
+        let user_dir = tempfile::tempdir().expect("user dir");
+        let project = dir.path().join("config.toml");
+        let local = dir.path().join("config.local.toml");
+        let user = user_dir.path().join("user.toml");
+        std::fs::write(&project, "[project]\nbackends = ['docker']\n").expect("project");
+        std::fs::write(&user, "[vcs.git]\nsnapshot-mode = 'direct'\n").expect("user");
+
+        let error = super::load_final_from(&project, &local, Some(&user), Some(dir.path()))
+            .expect_err("a VCS section is not a machine-wide setting");
+        let message = error.to_string();
+        assert!(message.contains("workspace setting"), "{message}");
+        assert!(message.contains("config.local.toml"), "{message}");
+    }
+
+    #[test]
     fn a_local_override_cannot_choose_the_store_view() {
         let dir = tempfile::tempdir().expect("tempdir");
         git2::Repository::init(dir.path()).expect("repo");
@@ -1428,7 +1473,6 @@ bind = "0.0.0.0"
             ),
             ("[project]\nbackends = ['docker']\n", "project"),
             ("[[ports]]\nname = 'web'\ntarget = 8080\n", "ports"),
-            ("[vcs.git]\nsnapshot-mode = 'remote'\n", "vcs"),
         ] {
             let user: ProjectFile = toml::from_str(text).expect("user parses");
             let error = super::reject_project_keys_in_user(&user)

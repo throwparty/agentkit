@@ -54,7 +54,7 @@ Add `vcs: BTreeMap<String, toml::Value>` to `ProjectFile` and `vcs_settings` to 
 | Depends On | T-001 |
 | References | config-key,old-git-key |
 
-### T-005: Reject `vcs` where it does not belong
+### T-005: [x] Reject `vcs` where it does not belong
 
 Swap `git` for `vcs` in `CONFIG_KEYS`. Add a `vcs` clause to `reject_project_keys_in_user`. Leave `reject_machine_keys_in_local` alone, because `vcs` is not in its refuse list and so the local override accepts it. Extend the loader tests.
 
