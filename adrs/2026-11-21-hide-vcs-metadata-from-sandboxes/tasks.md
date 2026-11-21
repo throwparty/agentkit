@@ -158,7 +158,7 @@ The `prune` call condition at `service.rs:478-482` widens from `stored.remote` t
 | Depends On | T-002 |
 | References | gates |
 
-### T-013: Probe masking a file and a directory
+### T-013: [x] Probe masking a file and a directory
 
 T-002 probed `.jj`, which is a directory. Run a bubblewrap probe twice, once with `.git` as a directory and once with `.git` as a file the way a linked worktree has it, using `--tmpfs` over the directory and a bind over an empty file over the file. Record the output as evidence beside the ADR.
 
