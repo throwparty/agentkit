@@ -1,0 +1,10 @@
+flowchart TD
+  committed[".agentkit/litterbox/config.toml<br/>committed project file"] -->|"[vcs] is noticed and ignored"| merged
+  local[".agentkit/litterbox/config.local.toml<br/>untracked local override"] -->|"supplies [vcs.git]"| merged
+  user["~/.config/agentkit/litterbox/config.toml<br/>user configuration"] -->|"refused by reject_project_keys_in_user"| refused
+  old["[git] snapshot-mode"] -->|"unknown field, the parse fails"| refused
+  merged["Config.vcs_settings"] --> parse["compose::open parses the vcs.git section"]
+  parse --> choice["Option of WorkspaceBinding"]
+  choice --> orch["Sandboxes carries it beside remote"]
+  orch --> create["create refuses when it is None"]
+  orch --> other["list, delete, pause and resume never read it"]

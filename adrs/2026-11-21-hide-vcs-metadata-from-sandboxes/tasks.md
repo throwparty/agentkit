@@ -1,0 +1,251 @@
+# Hide VCS Metadata From Sandboxes
+
+## Tasks
+
+### T-001: Move the binding vocabulary into the contract
+
+Move `WorkspaceBinding` and `BindingSupport` from `src/vcs/capabilities.rs` into `src/sandbox/contract.rs`, beside `StoreView`. `WorkspaceBinding` has `Copied` and `Bound` with kebab-case serde renaming, no `Default` impl and no serde default. `Capabilities` in `vcs` imports `BindingSupport` from the contract. Update every importer: `vcs/mod.rs`, `vcs/git/scm.rs`, `testing/vcs.rs` and their tests.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | `cargo build -p agentkit-litterbox` succeeds with no `BindingSupport` left in `vcs`. `arch-lint check` passes, so the contract still imports nothing internal. A unit test asserts `WorkspaceBinding` round-trips through serde as `copied` and `bound`. |
+| Complexity | 🟢 Low |
+| Effort | 1-2h |
+| Depends On |  |
+| References | binding-enum |
+
+### T-002: Declare the bound root and pin the mask contract
+
+Add `fn bound_root(&self, workspace: &Workspace) -> Result<PathBuf, Error>` to the `Vcs` trait, returning the host directory a bound workspace lives in. Document `masked_paths` as returning paths relative to the workspace root and name `.git` and `.jj` in the doc comment. `GitVcs` returns `Unsupported` from `bound_root` and keeps returning an empty mask. Update the stub in `vcs/mod.rs` and `TestVcs`.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | The trait still compiles as `dyn Vcs` and the existing object-safety test passes. `GitVcs::bound_root` returns the neutral unsupported error rather than panicking. No production caller exists yet, so the method is declared and unimplemented, matching `set_tip` and `synced`. |
+| Complexity | 🟢 Low |
+| Effort | 1-2h |
+| Depends On | T-001 |
+| References | mask-contract,bound-directory |
+
+### T-003: Carry the binding and the mask in the create request
+
+Extend the contract's `Workspace` with `binding: WorkspaceBinding` and `masked_paths: Vec<PathBuf>`, keeping `source`. The mask is relative to the workspace root, because the sandbox sees the workspace at a backend-specific path. Update the three consumers of `request.workspace.source`: docker, seatbelt and bubblewrap.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | `CreateRequest` builds in tests. `cargo clippy -p agentkit-litterbox --all-targets -- -D warnings` passes. No backend reads the new fields yet, so they are present and unused. |
+| Complexity | 🟢 Low |
+| Effort | 1-2h |
+| Depends On | T-001 |
+| References | mask-contract |
+
+### T-004: Add the `[vcs]` section and delete `[git]`
+
+Add `vcs: BTreeMap<String, toml::Value>` to `ProjectFile` and `vcs_settings` to `Config`. Delete `GitConfig` and its `snapshot_mode` field. `merge` takes the local file's `vcs` map, notices and ignores the committed file's table the way `config.rs:445-463` already does for `backends`, and extracts `snapshot-mode` from the `[vcs.git]` table into a struct `compose` reads.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | A unit test asserts the local file's `[vcs.git]` reaches `Config.vcs_settings`. A test asserts the committed file's table is noticed and ignored. A test asserts `[git]` now fails to parse with an unknown-field error. |
+| Complexity | 🟡 Medium |
+| Effort | 2-4h |
+| Depends On | T-001 |
+| References | config-key,old-git-key |
+
+### T-005: Reject `vcs` where it does not belong
+
+Swap `git` for `vcs` in `CONFIG_KEYS`. Add a `vcs` clause to `reject_project_keys_in_user`. Leave `reject_machine_keys_in_local` alone, because `vcs` is not in its refuse list and so the local override accepts it. Extend the loader tests.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | A test asserts the user configuration is refused when it sets `[vcs]`. A test asserts the local override is accepted when it sets `[vcs.git] binding`. The old `git` rejection test is replaced rather than left passing on a deleted field. |
+| Complexity | 🟢 Low |
+| Effort | 1-2h |
+| Depends On | T-004 |
+| References | config-key,project-cannot-set |
+
+### T-006: Read the section in the composition point
+
+`compose::open` reads `snapshot-mode` from `vcs_settings["git"]` instead of `config.git`, parses `binding` from the same table, and passes `Some(binding)` or `None` to `Sandboxes::with_vcs`. An absent key is `None`. An unparseable value is a configuration error naming the key and the accepted values.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | A test asserts an absent binding produces `None` and does not fail `open`. A test asserts `copied` and `bound` parse. A test asserts an unknown value fails naming the key and the values. |
+| Complexity | 🟢 Low |
+| Effort | 1-2h |
+| Depends On | T-005 |
+| References | config-key,no-default |
+
+### T-007: Record the binding per sandbox
+
+Add `binding: Option<WorkspaceBinding>` with `#[serde(default)]` to `StoredSandbox`, plus an accessor returning `Copied` for `None`. `create` and `repair` write the accessor's value. `LoadedSandbox` stays unchanged, so a record without the field is still `Current`.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | A test asserts a record written without the field loads as `Current` and its accessor returns `Copied`. A test asserts a record with the field round-trips. A test asserts loading never rewrites the record. |
+| Complexity | 🟢 Low |
+| Effort | 1-2h |
+| Depends On | T-001 |
+| References | record-field,legacy-records,legacy-loads |
+
+### T-008: Refuse a missing key and an unhonourable combination
+
+`Sandboxes` gains `binding: Option<WorkspaceBinding>` beside `remote`. `create` refuses when it is `None`, naming the key, the accepted values and the file. `create` also refuses when `vcs.capabilities().bindings` cannot honour the configured binding, naming the tool and the binding. `with_vcs` and `for_test` take the new argument.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | A test asserts create without a binding fails with a configuration error naming the key and the file. A test asserts `bound` is refused for a VCS reporting `Copied`. `list`, `delete`, `pause` and `resume` still work with `None`. |
+| Complexity | 🟡 Medium |
+| Effort | 2-4h |
+| Depends On | T-006,T-007 |
+| References | no-default,missing-key-refused,validation,no-fallback |
+
+### T-009: Branch create on the binding
+
+`create` asks `vcs.masked_paths` after `prepare`, then branches. Under `Copied` it materialises into a `TempDir` as today. Under `Bound` it calls `bound_root` and materialises nothing. Both build one `CreateRequest` carrying the source, the binding and the mask. Every existing failure path that deletes the branch also removes what `bound_root` created.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | A test with a recording VCS asserts `masked_paths` is asked and the request carries both the binding and the mask. A test asserts `Copied` still materialises. A test asserts a failure after `bound_root` leaves no directory behind. |
+| Complexity | 🟡 Medium |
+| Effort | 3-5h |
+| Depends On | T-003,T-008 |
+| References | mask-contract,bound-directory,derived-path,failed-create |
+
+### T-010: Branch repair on the record
+
+`repair` reads the record's binding rather than the configuration, materialises only under `Copied`, and preserves the binding when it rewrites the record, as `remote` already is.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | A test asserts a `Bound` record repairs against its host directory with no materialise call. A test asserts the rewritten record keeps its binding. |
+| Complexity | 🟢 Low |
+| Effort | 1-2h |
+| Depends On | T-009 |
+| References | record-decides |
+
+### T-011: Widen prune and sweep orphans
+
+The `prune` call condition at `service.rs:478-482` widens from `stored.remote` to `stored.remote || stored.binding() == Bound`. `GitVcs::prune` keeps its existing bare-clone guard and gains removal of bound directories that have no record.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | A test asserts `prune` is called for a `Bound` record even when it is not remote. A test asserts a bound directory with no record is removed. A test asserts a bound directory whose record exists is kept. |
+| Complexity | 🟡 Medium |
+| Effort | 2-4h |
+| Depends On | T-010 |
+| References | orphans,corrupt-orphan |
+
+### T-012: Teach the test doubles to mask
+
+`TestVcs` records `masked_paths` and `bound_root` calls and can be configured to report `Bound` support and to return a bound root. `src/testing.rs` gains a masking backend beside `TestBackend` that records the paths it was asked to hide and can be told to refuse.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | The doubles stay `#[cfg(test)]` and never become a construction path. Orchestration tests assert the orchestrator asked for the mask and branched on the binding without opening a repository. |
+| Complexity | 🟢 Low |
+| Effort | 1-2h |
+| Depends On | T-002 |
+| References | gates |
+
+### T-013: Probe masking a file and a directory
+
+T-002 probed `.jj`, which is a directory. Run a bubblewrap probe twice, once with `.git` as a directory and once with `.git` as a file the way a linked worktree has it, using `--tmpfs` over the directory and a bind over an empty file over the file. Record the output as evidence beside the ADR.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | The probe exits cleanly for both shapes and the contents are unreadable in both. If the file shape cannot be masked, the task returns that finding and T-014 records a refusal for that shape rather than leaving a silent gap. |
+| Complexity | 🟢 Low |
+| Effort | 1-2h |
+| Depends On | T-012 |
+| References | bwrap-masking,empty-mountpoint |
+
+### T-014: Mask in bubblewrap
+
+`backends/bubblewrap/view.rs` gains masked paths in its render options, emitted after the workspace bind at `view.rs:339-341`: `--tmpfs` over each masked directory, and a bind over an empty file for a masked path that is a file. `backends/bubblewrap/backend.rs` refuses `Bound` when a masked path cannot be rendered.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | A rendering test asserts the argv carries a tmpfs per masked directory after the workspace bind. A test asserts a masked file is bound over an empty file. A test asserts the refusal when the shape is unsupported. The existing argv expectation test still passes. |
+| Complexity | 🟡 Medium |
+| Effort | 3-5h |
+| Depends On | T-013 |
+| References | bwrap-masking,empty-mountpoint |
+
+### T-015: Probe Docker's empty volume and daemon filesystem
+
+Run a Docker probe for an empty volume at a masked path, both when the bound directory already holds `.git` and when it does not. Separately establish how the backend can tell that the daemon shares the host filesystem, since `compute.rs:630-667` proves only that the connection is a local unix socket.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | The probe exits cleanly for both cases, or returns the finding that a mountpoint is not created. The daemon question returns either a check that works or a decision that `Bound` is refused on Docker. |
+| Complexity | 🟡 Medium |
+| Effort | 2-4h |
+| Depends On | T-012 |
+| References | docker-masking,docker-local |
+
+### T-016: Mask in Docker
+
+`backends/docker/compute.rs` gains `binds` and `volumes` on `ContainerSpec` and sets them on `HostConfig`, which today carries neither. One empty volume per masked path, mounted inside the bound workspace. `backends/docker/backend.rs` binds the host directory instead of uploading a tar under `Bound` (`backend.rs:365-374`), and refuses when it cannot guarantee the daemon shares the host filesystem.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | A test asserts the container spec carries one empty volume per masked path. A test asserts the refusal when the daemon cannot be established as sharing the filesystem. The existing tar upload path is unchanged under `Copied`. |
+| Complexity | 🔴 High |
+| Effort | 4-8h |
+| Depends On | T-015 |
+| References | docker-masking,docker-local,no-vcs-data |
+
+### T-017: Refuse in Seatbelt
+
+`backends/seatbelt/backend.rs` reports that it cannot mask and refuses `Bound` with a structured unsupported failure naming the backend, the binding and the remedy. No masking code is written here in this change.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | A test asserts a `Bound` create against Seatbelt fails with an unsupported refusal naming the backend and the remedy, and that no sandbox is created. `Copied` is unchanged. |
+| Complexity | 🟢 Low |
+| Effort | 1-2h |
+| Depends On | T-003 |
+| References | mask-refusal,cannot-mask-refuses |
+
+### T-018: Update the configuration reference
+
+`docs/docs/user/litterbox/reference/config.mdx` documents `[git] snapshot-mode`. Replace it with `[vcs.git]` in the local override and document `binding` with its two values and the fact that `create` refuses without it.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | The page builds. It names the file the key belongs in, the two accepted values, and the refusal. No reference to `[git]` remains. |
+| Complexity | 🟢 Low |
+| Effort | 1h |
+| Depends On | T-005 |
+| References | config-key |
+
+### T-019: Run the gates and smoke both bindings
+
+Run the four gates. Then a manual smoke on a scratch repository: create with `copied`, create with `bound` refused for Git, a legacy record loading and listing, delete removing the state, and `prune` finding an orphan.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | All four gates pass on a clean tree. The smoke covers every acceptance criterion that needs a human. |
+| Complexity | 🟢 Low |
+| Effort | 2-3h |
+| Depends On | T-014,T-016,T-017,T-018 |
+| References | gates,gates-pass,no-vcs-data |
+
