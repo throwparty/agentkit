@@ -197,7 +197,7 @@ Run a Docker probe for an empty volume at a masked path, both when the bound dir
 | Depends On | T-012 |
 | References | docker-masking,docker-local |
 
-### T-016: Mask in Docker
+### T-016: [x] Mask in Docker
 
 `backends/docker/compute.rs` gains `binds` and `volumes` on `ContainerSpec` and sets them on `HostConfig`, which today carries neither. One empty volume per masked path, mounted inside the bound workspace. `backends/docker/backend.rs` binds the host directory instead of uploading a tar under `Bound` (`backend.rs:365-374`), and refuses when it cannot guarantee the daemon shares the host filesystem.
 
