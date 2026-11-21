@@ -1798,11 +1798,10 @@ mod seam_tests {
             .map(|elapsed| elapsed.as_nanos())
             .unwrap_or_default();
         let project = format!("bound-mask-{}-{nonce}", std::process::id());
-        let state = agentkit_common::data_dir("litterbox")
-            .join("bubblewrap")
-            .join(&project)
-            .join("demo");
-        let _ = std::fs::remove_dir_all(&state);
+        let _cleanup = Cleanup {
+            mechanism: "bubblewrap",
+            project: project.clone(),
+        };
 
         let config = Config {
             backend: Some("bubblewrap".to_string()),
@@ -1863,9 +1862,153 @@ mod seam_tests {
         );
 
         sandboxes.delete("demo", true).await.expect("delete");
-        if let Some(project_dir) = state.parent() {
-            let _ = std::fs::remove_dir_all(project_dir);
+    }
+
+    /// Removes what a live sandbox test made, even when an assertion panics.
+    ///
+    /// Both live tests create real state under the data directory, and the
+    /// Docker one leaves a container; a test that fails should not make the
+    /// next run conflict or accumulate containers.
+    struct Cleanup {
+        mechanism: &'static str,
+        project: String,
+    }
+
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let base = agentkit_common::data_dir("litterbox");
+            let _ = std::fs::remove_dir_all(base.join(self.mechanism).join(&self.project));
+            if self.mechanism != "docker" {
+                return;
+            }
+            let found = std::process::Command::new("docker")
+                .args([
+                    "ps",
+                    "-a",
+                    "--filter",
+                    &format!("name={}", self.project),
+                    "--format",
+                    "{{.ID}}",
+                ])
+                .output();
+            let Ok(found) = found else { return };
+            let ids: Vec<String> = String::from_utf8_lossy(&found.stdout)
+                .split_whitespace()
+                .map(str::to_string)
+                .collect();
+            if ids.is_empty() {
+                return;
+            }
+            let mut args = vec!["rm".to_string(), "-f".to_string()];
+            args.extend(ids);
+            let _ = std::process::Command::new("docker").args(&args).output();
         }
+    }
+
+    /// Whether a Docker daemon with a filesystem this host shares is reachable,
+    /// and the probe image is already local so the test never pulls.
+    fn docker_is_usable(image: &str) -> bool {
+        let root = std::process::Command::new("docker")
+            .args(["info", "--format", "{{.DockerRootDir}}"])
+            .output();
+        let Ok(root) = root else { return false };
+        if !root.status.success() {
+            return false;
+        }
+        let root = String::from_utf8_lossy(&root.stdout).trim().to_string();
+        if !Path::new(&root).is_dir() {
+            return false;
+        }
+        std::process::Command::new("docker")
+            .args(["image", "inspect", image])
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    }
+
+    #[tokio::test]
+    async fn a_bound_sandbox_hides_the_vcs_metadata_inside_a_real_docker_container() {
+        let image = "busybox:latest";
+        if !docker_is_usable(image) {
+            eprintln!("skipping: no Docker daemon sharing this filesystem with {image}");
+            return;
+        }
+
+        let records = TempDir::new().expect("records");
+        let checkout = TempDir::new().expect("checkout");
+        std::fs::write(checkout.path().join("README.md"), "hello\n").expect("readme");
+        std::fs::create_dir_all(checkout.path().join(".git")).expect("git");
+        std::fs::write(checkout.path().join(".git/HEAD"), "SECRET\n").expect("head");
+
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or_default();
+        let project = format!("bound-mask-{}-{nonce}", std::process::id());
+        let _cleanup = Cleanup {
+            mechanism: "docker",
+            project: project.clone(),
+        };
+
+        let mut config = Config {
+            backend: Some("docker".to_string()),
+            project: crate::config::ProjectConfig {
+                slug: Some(project.clone()),
+                backends: Some(vec!["docker".to_string()]),
+            },
+            ..Config::default()
+        };
+        config.backend_settings.insert(
+            "docker".to_string(),
+            toml::from_str(&format!("image = \"{image}\"")).expect("the docker section"),
+        );
+        let selected = crate::backends::registry::build(&config).expect("a registered backend");
+        let vcs = Arc::new(
+            TestVcs::new()
+                .with_bindings(BindingSupport::Bound)
+                .with_bound_root(checkout.path().to_path_buf()),
+        );
+        let sandboxes = Sandboxes::for_test(
+            config,
+            vcs,
+            false,
+            project.clone(),
+            records.path().to_path_buf(),
+            selected,
+        )
+        .with_binding(Some(WorkspaceBinding::Bound));
+
+        sandboxes.create("demo").await.expect("create");
+
+        let script = "read a < README.md; echo readme=$a; \
+                      if read b < .git/HEAD 2>/dev/null; then echo git-leaked=$b; \
+                      else echo git-denied; fi";
+        let result = sandboxes
+            .exec(
+                "demo",
+                &["sh".to_string(), "-c".to_string(), script.to_string()],
+            )
+            .await
+            .expect("exec")
+            .value;
+
+        assert_eq!(result.exit_code, 0, "{result}");
+        assert!(
+            result.stdout.contains("readme=hello"),
+            "the bound workspace is visible: {result}"
+        );
+        assert!(
+            result.stdout.contains("git-denied"),
+            "the metadata is hidden: {result}"
+        );
+        assert!(!result.stdout.contains("SECRET"), "nothing leaks: {result}");
+        assert_eq!(
+            std::fs::read_to_string(checkout.path().join(".git/HEAD")).expect("head"),
+            "SECRET\n",
+            "the mask hid the file; it did not remove it"
+        );
+
+        sandboxes.delete("demo", true).await.expect("delete");
     }
 
     #[tokio::test]
