@@ -224,6 +224,7 @@ mod tests {
             }],
             workspace_host: "/state/workspace".to_string(),
             workspace: WORKSPACE.to_string(),
+            masked_paths: Vec::new(),
             scope: None,
             paused: false,
             environment: Provenance {

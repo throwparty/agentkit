@@ -27,12 +27,38 @@ pub(crate) fn copy_from(staged: &Path, destination: &Path) -> Result<(), Error> 
         .map_err(|error| Error::failed(format!("the workspace could not be materialised: {error}")))
 }
 
+/// Whether `relative` is a masked path or sits inside one.
+fn hidden(masks: &[PathBuf], relative: &Path) -> bool {
+    masks
+        .iter()
+        .any(|mask| relative == mask || relative.starts_with(mask))
+}
+
+/// A selector that hides the sandbox's VCS metadata.
+struct Masked<'a> {
+    masks: &'a [PathBuf],
+    inner: Option<&'a dyn SnapshotSelector>,
+}
+
+impl SnapshotSelector for Masked<'_> {
+    fn selects(&self, relative: &Path, is_dir: bool) -> Result<bool, Error> {
+        if hidden(self.masks, relative) {
+            return Ok(false);
+        }
+        match self.inner {
+            Some(inner) => inner.selects(relative, is_dir),
+            None => Ok(true),
+        }
+    }
+}
+
 /// Copy a host path into the sandbox workspace.
 pub(crate) fn transfer_in(
     root: &Path,
     sandbox_root: &Path,
     source: &Path,
     destination: &str,
+    masks: &[PathBuf],
 ) -> Result<(), Error> {
     let root = Root::open(root)
         .map_err(|error| Error::failed(format!("the workspace cannot be opened: {error}")))?;
@@ -47,7 +73,17 @@ pub(crate) fn transfer_in(
         })?;
         relative.push(name.to_os_string());
     }
-    copy_in(&root, &relative, source).map_err(|error| {
+    let relative_path = relative.iter().fold(PathBuf::new(), |mut path, part| {
+        path.push(part);
+        path
+    });
+    if hidden(masks, &relative_path) {
+        return Err(Error::failed(format!(
+            "{} is hidden by the sandbox's VCS mask",
+            relative_path.display()
+        )));
+    }
+    copy_in(&root, &relative, source, masks).map_err(|error| {
         Error::failed(format!(
             "{} could not be uploaded: {error}",
             source.display()
@@ -65,6 +101,7 @@ pub(crate) fn transfer_out(
     source: &str,
     destination: &Path,
     selector: Option<&dyn SnapshotSelector>,
+    masks: &[PathBuf],
 ) -> Result<(), Error> {
     let root = Root::open(root)
         .map_err(|error| Error::failed(format!("the workspace cannot be opened: {error}")))?;
@@ -75,6 +112,21 @@ pub(crate) fn transfer_out(
         ))
     })?;
     let relative = components(source, sandbox_root, "download from the sandbox")?;
+    let relative_path = relative.iter().fold(PathBuf::new(), |mut path, part| {
+        path.push(part);
+        path
+    });
+    if hidden(masks, &relative_path) {
+        return Err(Error::failed(format!(
+            "{} is hidden by the sandbox's VCS mask",
+            relative_path.display()
+        )));
+    }
+    let masked = Masked {
+        masks,
+        inner: selector,
+    };
+    let selector: Option<&dyn SnapshotSelector> = Some(&masked);
     let Some((name, parents)) = relative.split_last() else {
         // The workspace itself: its contents merge into the destination.
         return copy_contents(
@@ -334,7 +386,7 @@ fn readlink_in(directory: &std::fs::File, name: &OsStr) -> io::Result<PathBuf> {
 }
 
 /// Copy a host tree into the workspace at the given components.
-fn copy_in(root: &Root, relative: &[OsString], source: &Path) -> io::Result<()> {
+fn copy_in(root: &Root, relative: &[OsString], source: &Path, masks: &[PathBuf]) -> io::Result<()> {
     let metadata = std::fs::symlink_metadata(source)?;
     if metadata.file_type().is_symlink() {
         return Err(io::Error::other(format!(
@@ -348,7 +400,14 @@ fn copy_in(root: &Root, relative: &[OsString], source: &Path) -> io::Result<()> 
             let entry = entry?;
             let mut child = relative.to_vec();
             child.push(entry.file_name());
-            copy_in(root, &child, &entry.path())?;
+            let child_path = child.iter().fold(PathBuf::new(), |mut path, part| {
+                path.push(part);
+                path
+            });
+            if hidden(masks, &child_path) {
+                continue;
+            }
+            copy_in(root, &child, &entry.path(), masks)?;
         }
         return Ok(());
     }
@@ -599,6 +658,8 @@ mod tests {
     use super::{components, copy_from, transfer_in, transfer_out};
     use crate::sandbox::contract::SnapshotSelector;
 
+    use std::path::{Path, PathBuf};
+
     struct Skip(&'static str);
 
     impl SnapshotSelector for Skip {
@@ -691,6 +752,7 @@ mod tests {
             &workspace,
             &source,
             workspace.join("nested/in").to_str().expect("utf8"),
+            &[],
         )
         .expect("upload");
         assert_eq!(
@@ -715,6 +777,7 @@ mod tests {
             workspace.to_str().expect("utf8"),
             &destination,
             Some(&Skip("target") as &dyn SnapshotSelector),
+            &[],
         )
         .expect("download");
         assert!(destination.join("keep/inside").exists());
@@ -742,10 +805,81 @@ mod tests {
             &workspace,
             &source,
             workspace.join("planted/file").to_str().expect("utf8"),
+            &[],
         )
         .expect_err("planted link");
         assert!(!outside.join("file").exists(), "the write escaped");
         assert!(!outside.join("source").exists(), "the write escaped");
         assert!(error.to_string().contains("uploaded"), "{error}");
+    }
+
+    #[test]
+    fn an_upload_into_a_masked_path_is_refused() {
+        let root = workspace();
+        let workspace = root.path().join("ws");
+        std::fs::create_dir_all(workspace.join(".git")).expect("dirs");
+        let source = root.path().join("source");
+        std::fs::write(&source, b"in").expect("file");
+        let masks = [PathBuf::from(".git")];
+
+        let error = transfer_in(
+            &workspace,
+            Path::new("/src"),
+            &source,
+            "/src/.git/config",
+            &masks,
+        )
+        .expect_err("the mask must refuse the upload");
+        assert!(error.to_string().contains("hidden"), "{error}");
+        assert!(
+            !workspace.join(".git/config").exists(),
+            "the upload wrote into the mask"
+        );
+    }
+
+    #[test]
+    fn a_download_of_a_masked_path_is_refused() {
+        let root = workspace();
+        let workspace = root.path().join("ws");
+        std::fs::create_dir_all(workspace.join(".git")).expect("dirs");
+        std::fs::write(workspace.join(".git/HEAD"), b"secret").expect("file");
+        let destination = root.path().join("out");
+        let masks = [PathBuf::from(".git")];
+
+        let error = transfer_out(
+            &workspace,
+            Path::new("/src"),
+            "/src/.git/HEAD",
+            &destination,
+            None,
+            &masks,
+        )
+        .expect_err("the mask must refuse the download");
+        assert!(error.to_string().contains("hidden"), "{error}");
+        assert!(!destination.join("HEAD").exists(), "the read leaked");
+    }
+
+    #[test]
+    fn a_recursive_download_skips_masked_paths() {
+        let root = workspace();
+        let workspace = root.path().join("ws");
+        std::fs::create_dir_all(workspace.join(".git")).expect("dirs");
+        std::fs::write(workspace.join(".git/HEAD"), b"secret").expect("file");
+        std::fs::write(workspace.join("keep.txt"), b"kept").expect("file");
+        let destination = root.path().join("out");
+        let masks = [PathBuf::from(".git")];
+
+        transfer_out(
+            &workspace,
+            Path::new("/src"),
+            "/src",
+            &destination,
+            None,
+            &masks,
+        )
+        .expect("download");
+
+        assert!(destination.join("keep.txt").exists());
+        assert!(!destination.join(".git").exists(), "the mask leaked");
     }
 }

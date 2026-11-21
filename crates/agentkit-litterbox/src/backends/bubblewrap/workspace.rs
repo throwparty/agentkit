@@ -33,8 +33,13 @@ pub fn copy_from(staged: &Path, destination: &Path) -> Result<(), Error> {
 }
 
 /// Copy a host path into the sandbox workspace.
-pub fn transfer_in(root: &Path, source: &Path, destination: &str) -> Result<(), Error> {
-    transfer::transfer_in(root, Path::new(WORKSPACE), source, destination)
+pub fn transfer_in(
+    root: &Path,
+    source: &Path,
+    destination: &str,
+    masks: &[PathBuf],
+) -> Result<(), Error> {
+    transfer::transfer_in(root, Path::new(WORKSPACE), source, destination, masks)
 }
 
 /// Copy a sandbox path out to the host.
@@ -43,8 +48,16 @@ pub fn transfer_out(
     source: &str,
     destination: &Path,
     selector: Option<&dyn SnapshotSelector>,
+    masks: &[PathBuf],
 ) -> Result<(), Error> {
-    transfer::transfer_out(root, Path::new(WORKSPACE), source, destination, selector)
+    transfer::transfer_out(
+        root,
+        Path::new(WORKSPACE),
+        source,
+        destination,
+        selector,
+        masks,
+    )
 }
 
 #[cfg(test)]
