@@ -1260,9 +1260,7 @@ mod tests {
         CreateRequest {
             name: "demo".to_string(),
             project_slug: "project".to_string(),
-            workspace: Workspace {
-                source: std::path::PathBuf::from("/staged"),
-            },
+            workspace: Workspace::copied(std::path::PathBuf::from("/staged")),
             provision: Vec::new(),
             forward_bind: "127.0.0.1".to_string(),
             ports,
@@ -1694,9 +1692,7 @@ mod tests {
         CreateRequest {
             name: name.to_string(),
             project_slug: "probe".to_string(),
-            workspace: Workspace {
-                source: staged.to_path_buf(),
-            },
+            workspace: Workspace::copied(staged.to_path_buf()),
             provision: vec![userland()],
             forward_bind: "127.0.0.1".to_string(),
             ports: Vec::new(),

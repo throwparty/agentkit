@@ -571,9 +571,7 @@ pub async fn exercise<S: Backend + ?Sized>(backend: &S) -> Result<(), Error> {
     let request = CreateRequest {
         name: name.clone(),
         project_slug: "conformance".to_string(),
-        workspace: Workspace {
-            source: workspace.path().to_path_buf(),
-        },
+        workspace: Workspace::copied(workspace.path().to_path_buf()),
         provision: Vec::new(),
         forward_bind: "127.0.0.1".to_string(),
         ports: Vec::new(),
@@ -752,9 +750,7 @@ pub async fn exercise_provisioning<S: Backend + ?Sized>(backend: &S) -> Result<(
     let request = CreateRequest {
         name: run_name("provisioning"),
         project_slug: "conformance".to_string(),
-        workspace: Workspace {
-            source: workspace.path().to_path_buf(),
-        },
+        workspace: Workspace::copied(workspace.path().to_path_buf()),
         provision: vec![
             command_step("z-first", "true"),
             command_step("a-second", "true"),
@@ -800,9 +796,7 @@ pub async fn exercise_lifecycle<S: Lifecycle + ?Sized>(backend: &S) -> Result<()
     let request = CreateRequest {
         name: run_name("lifecycle"),
         project_slug: "conformance".to_string(),
-        workspace: Workspace {
-            source: workspace.path().to_path_buf(),
-        },
+        workspace: Workspace::copied(workspace.path().to_path_buf()),
         provision: Vec::new(),
         forward_bind: "127.0.0.1".to_string(),
         ports: Vec::new(),
@@ -875,9 +869,7 @@ pub async fn exercise_failed_create_with<S: Backend + ?Sized>(
     let request = CreateRequest {
         name: name.to_string(),
         project_slug: "conformance".to_string(),
-        workspace: Workspace {
-            source: workspace.path().to_path_buf(),
-        },
+        workspace: Workspace::copied(workspace.path().to_path_buf()),
         provision,
         forward_bind: "127.0.0.1".to_string(),
         ports: Vec::new(),
@@ -947,9 +939,7 @@ mod tests {
         CreateRequest {
             name: "recorded".to_string(),
             project_slug: "conformance".to_string(),
-            workspace: Workspace {
-                source: std::path::PathBuf::from("/tmp/workspace"),
-            },
+            workspace: Workspace::copied(std::path::PathBuf::from("/tmp/workspace")),
             provision,
             forward_bind: "127.0.0.1".to_string(),
             ports: Vec::new(),

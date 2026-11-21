@@ -152,9 +152,7 @@ impl Sandboxes {
         let request = CreateRequest {
             name: name.to_string(),
             project_slug: self.project_slug.clone(),
-            workspace: Workspace {
-                source: staged.path().to_path_buf(),
-            },
+            workspace: Workspace::copied(staged.path().to_path_buf()),
             provision,
             forward_bind: self.config.forwarding.bind.clone(),
             ports: self.config.ports.iter().map(port).collect(),
@@ -331,9 +329,7 @@ impl Sandboxes {
         let request = CreateRequest {
             name: name.to_string(),
             project_slug: self.project_slug.clone(),
-            workspace: Workspace {
-                source: staged.path().to_path_buf(),
-            },
+            workspace: Workspace::copied(staged.path().to_path_buf()),
             provision,
             forward_bind: self.config.forwarding.bind.clone(),
             ports: self.config.ports.iter().map(port).collect(),
