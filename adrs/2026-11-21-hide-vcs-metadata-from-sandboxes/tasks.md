@@ -106,7 +106,7 @@ Add `binding: Option<WorkspaceBinding>` with `#[serde(default)]` to `StoredSandb
 | Depends On | T-006,T-007 |
 | References | no-default,missing-key-refused,validation,no-fallback |
 
-### T-009: Branch create on the binding
+### T-009: [x] Branch create on the binding
 
 `create` asks `vcs.masked_paths` after `prepare`, then branches. Under `Copied` it materialises into a `TempDir` as today. Under `Bound` it calls `bound_root` and materialises nothing. Both build one `CreateRequest` carrying the source, the binding and the mask. Every existing failure path that deletes the branch also removes what `bound_root` created.
 

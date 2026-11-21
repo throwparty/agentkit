@@ -35,6 +35,10 @@ struct State {
     sandboxes: Vec<String>,
     tip: String,
     failure: Failure,
+    masked: Vec<String>,
+    bound: Vec<String>,
+    bindings: Option<BindingSupport>,
+    bound_root: Option<PathBuf>,
 }
 
 impl Default for TestVcs {
@@ -75,6 +79,28 @@ impl TestVcs {
     pub fn failing_prepare_not_found(mut self) -> Self {
         self.state_mut().failure = Failure::NotFound;
         self
+    }
+
+    /// Report these bindings rather than `Copied`.
+    pub fn with_bindings(mut self, bindings: BindingSupport) -> Self {
+        self.state_mut().bindings = Some(bindings);
+        self
+    }
+
+    /// Make `bound_root` create and return this directory.
+    pub fn with_bound_root(mut self, root: PathBuf) -> Self {
+        self.state_mut().bound_root = Some(root);
+        self
+    }
+
+    /// The workspaces whose mask was asked for.
+    pub fn masked(&self) -> Vec<String> {
+        self.state().masked.clone()
+    }
+
+    /// The workspaces whose bound root was asked for.
+    pub fn bound(&self) -> Vec<String> {
+        self.state().bound.clone()
     }
 
     /// The sandbox names passed to `prepare`.
@@ -133,7 +159,7 @@ impl Vcs for TestVcs {
         Capabilities {
             conflict_model: ConflictModel::Blocking,
             op_log: false,
-            bindings: BindingSupport::Copied,
+            bindings: self.state().bindings.unwrap_or(BindingSupport::Copied),
             export: ExportSupport::None,
         }
     }
@@ -160,12 +186,23 @@ impl Vcs for TestVcs {
         })
     }
 
-    fn masked_paths(&self, _workspace: &Workspace) -> Vec<PathBuf> {
-        Vec::new()
+    fn masked_paths(&self, workspace: &Workspace) -> Vec<PathBuf> {
+        self.state()
+            .masked
+            .push(workspace.branch().as_str().to_string());
+        vec![PathBuf::from(".git"), PathBuf::from(".jj")]
     }
 
-    fn bound_root(&self, _workspace: &Workspace) -> Result<PathBuf, Error> {
-        Err(unsupported("bound_root"))
+    fn bound_root(&self, workspace: &Workspace) -> Result<PathBuf, Error> {
+        let mut state = self.state();
+        state.bound.push(workspace.branch().as_str().to_string());
+        match state.bound_root.clone() {
+            Some(root) => {
+                std::fs::create_dir_all(&root)?;
+                Ok(root)
+            }
+            None => Err(unsupported("bound_root")),
+        }
     }
 
     fn identity(&self, _workspace: &Workspace) -> Result<TreeId, Error> {
