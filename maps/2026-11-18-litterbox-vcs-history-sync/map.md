@@ -100,7 +100,7 @@ Created: 2026-11-18
 | Field | Value |
 |-------|-------|
 | State | answered |
-| Answer | Machine-owned `[vcs] tool` with a per-VCS configuration section (`[vcs.git]`, `[vcs.jj]`) mirroring `[backends.*]`; the selected section supplies binding; required for create and stored per sandbox; legacy records are Git + Copied facts; incompatible combinations are refused at validation, never defaulted. |
+| Answer | `[vcs] tool` with a per-VCS configuration section (`[vcs.git]`, `[vcs.jj]`) mirroring `[backends.*]`; the selected section supplies binding; required for create and stored per sandbox; legacy records are Git + Copied facts; incompatible combinations are refused at validation, never defaulted. The section is a workspace setting in the untracked `.agentkit/litterbox/config.local.toml`, not machine-wide user configuration: a machine hosts many workspaces, so one user file cannot carry their choices. The committed project file cannot set it. |
 | Evidence | [evidence/T-010.md](evidence/T-010.md) |
 
 ### T-011: What is the operator CLI surface, and how does it share the `plan` logic with MCP?
