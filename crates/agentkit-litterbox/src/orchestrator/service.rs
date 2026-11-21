@@ -192,20 +192,40 @@ impl Sandboxes {
         tracing::info!(sandbox = %name, project = %self.project_slug, "creating the branch");
         let prepared = self.vcs.prepare(&name).map_err(contract_error)?;
         let branch_name = prepared.workspace.branch().to_string();
-        let staged = match self.materialise(&prepared) {
-            Ok(staged) => staged,
-            Err(error) => {
-                if let Err(cleanup) = self.vcs.delete_branch(&name) {
-                    tracing::warn!(sandbox = %name, %cleanup, "the branch may remain after a failed create");
+        let masked_paths = self.vcs.masked_paths(&prepared.workspace);
+
+        // A copy is materialised into a temporary directory; a bound workspace
+        // is the host directory the VCS owns.
+        let staged = match binding {
+            WorkspaceBinding::Copied => match self.materialise(&prepared) {
+                Ok(staged) => Some(staged),
+                Err(error) => {
+                    if let Err(cleanup) = self.vcs.delete_branch(&name) {
+                        tracing::warn!(sandbox = %name, %cleanup, "the branch may remain after a failed create");
+                    }
+                    return Err(error.into());
                 }
-                return Err(error.into());
-            }
+            },
+            WorkspaceBinding::Bound => None,
+        };
+
+        let workspace = match &staged {
+            Some(staged) => Workspace::copied(staged.path().to_path_buf()),
+            None => match self.vcs.bound_root(&prepared.workspace) {
+                Ok(root) => Workspace::bound(root, masked_paths),
+                Err(error) => {
+                    if let Err(cleanup) = self.vcs.delete_branch(&name) {
+                        tracing::warn!(sandbox = %name, %cleanup, "the branch may remain after a failed create");
+                    }
+                    return Err(contract_error(error));
+                }
+            },
         };
 
         let request = CreateRequest {
             name: name.to_string(),
             project_slug: self.project_slug.clone(),
-            workspace: Workspace::copied(staged.path().to_path_buf()),
+            workspace,
             provision,
             forward_bind: self.config.forwarding.bind.clone(),
             ports: self.config.ports.iter().map(port).collect(),
@@ -1529,7 +1549,8 @@ mod seam_tests {
     use crate::config::Config;
     use crate::metadata_store::{self, StoredSandbox};
     use crate::sandbox::contract::{
-        Error, ProvisionStep, ProvisioningClass, ResolvedStep, SandboxRecord, WorkspaceBinding,
+        BindingSupport, Error, ProvisionStep, ProvisioningClass, ResolvedStep, SandboxRecord,
+        WorkspaceBinding,
     };
     use crate::sandbox::report::State;
     use crate::sandbox::selected::Selected;
@@ -1722,6 +1743,121 @@ mod seam_tests {
             .delete("nothing-here", false)
             .await
             .expect("a retried delete succeeds");
+    }
+
+    #[tokio::test]
+    async fn create_asks_for_the_mask_and_records_the_binding() {
+        let dir = scratch();
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let (sandboxes, vcs) = orchestrator(
+            dir.path(),
+            records.path().to_path_buf(),
+            Arc::clone(&backend),
+            None,
+        );
+
+        sandboxes.create("demo").await.expect("create");
+
+        assert_eq!(vcs.masked(), vec!["litterbox/demo"]);
+        assert_eq!(
+            backend.requests()[0].workspace.binding,
+            WorkspaceBinding::Copied
+        );
+        assert!(
+            backend.requests()[0].workspace.masked_paths.is_empty(),
+            "a copy carries the tree without VCS metadata, so it masks nothing"
+        );
+
+        let stored = metadata_store::load_sandbox_at(records.path(), "demo")
+            .expect("readable")
+            .expect("persisted");
+        let metadata_store::LoadedSandbox::Current(stored) = stored else {
+            panic!("a record written now is current");
+        };
+        assert_eq!(stored.binding(), WorkspaceBinding::Copied);
+    }
+
+    #[tokio::test]
+    async fn a_bound_create_binds_the_host_directory_and_masks_the_metadata() {
+        let records = TempDir::new().expect("records");
+        let bound_root = TempDir::new().expect("bound root");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(
+            TestVcs::new()
+                .with_bindings(BindingSupport::Bound)
+                .with_bound_root(bound_root.path().to_path_buf()),
+        );
+        let config = Config {
+            project: crate::config::ProjectConfig {
+                slug: Some("project".to_string()),
+                backends: Some(vec!["test".to_string()]),
+            },
+            ..Config::default()
+        };
+        let sandboxes = Sandboxes::for_test(
+            config,
+            vcs.clone(),
+            false,
+            "project".to_string(),
+            records.path().to_path_buf(),
+            selected(Arc::clone(&backend)),
+        )
+        .with_binding(Some(WorkspaceBinding::Bound));
+
+        sandboxes.create("demo").await.expect("create");
+
+        assert_eq!(vcs.bound(), vec!["litterbox/demo"]);
+        assert!(
+            vcs.materialised().is_empty(),
+            "a bound create copies nothing into staging"
+        );
+
+        let request = backend.requests().remove(0);
+        assert_eq!(request.workspace.binding, WorkspaceBinding::Bound);
+        assert_eq!(request.workspace.source, bound_root.path().to_path_buf());
+        assert_eq!(
+            request.workspace.masked_paths,
+            vec![PathBuf::from(".git"), PathBuf::from(".jj")]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_bound_create_deletes_the_branch_and_its_host_directory() {
+        let records = TempDir::new().expect("records");
+        let bound_root = TempDir::new().expect("bound root");
+        let backend = Arc::new(TestBackend::failing());
+        let vcs = Arc::new(
+            TestVcs::new()
+                .with_bindings(BindingSupport::Bound)
+                .with_bound_root(bound_root.path().to_path_buf()),
+        );
+        let config = Config {
+            project: crate::config::ProjectConfig {
+                slug: Some("project".to_string()),
+                backends: Some(vec!["test".to_string()]),
+            },
+            ..Config::default()
+        };
+        let sandboxes = Sandboxes::for_test(
+            config,
+            vcs.clone(),
+            false,
+            "project".to_string(),
+            records.path().to_path_buf(),
+            selected(backend),
+        )
+        .with_binding(Some(WorkspaceBinding::Bound));
+
+        sandboxes.create("demo").await.expect_err("create fails");
+
+        // `delete_branch` owns releasing the host directory a bound sandbox
+        // lived in, so the branch deletion is the cleanup the failure takes.
+        assert!(
+            vcs.deleted().contains(&"demo".to_string()),
+            "the branch and its directory are released: {:?}",
+            vcs.deleted()
+        );
     }
 
     #[tokio::test]

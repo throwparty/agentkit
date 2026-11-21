@@ -79,7 +79,8 @@ pub trait Vcs: Send + Sync {
     /// The sandbox names this backend exposes in its configured locality.
     fn sandboxes(&self) -> Result<Vec<String>, Error>;
 
-    /// Delete the branch paired with `sandbox`.
+    /// Delete the branch paired with `sandbox`, and release any host directory
+    /// the backend owned for it.
     fn delete_branch(&self, sandbox: &str) -> Result<(), Error>;
 
     /// Where this backend keeps durable project state, if it has a path.
