@@ -29,7 +29,7 @@ A sandbox that binds a host workspace directory would read and write `.git` or `
 ## Non-goals
 
 - The VCS selector. `[vcs] tool` and the `[vcs.jj]` section land with the ADR that introduces jj.
-- Darwin masking. It depends on this configuration wiring and on a probe of Seatbelt's deny-rule ordering, recorded as evidence beside the map, and lands as a separate change written and tested on a macOS host.
+- Darwin masking. It depends on this configuration wiring and on a probe of Seatbelt's deny-rule ordering, recorded as evidence beside the map, and lands as a separate change written and tested on a macOS host. The open question is map ticket T-018, and the backend refuses `Bound` until it is answered.
 - The state machine, conflict mechanics and history retention.
 - Removing `.git` from a copied workspace. `materialise` unpacks an archive, so `.git` is already absent under `Copied`.
 - Making the directory entry absent rather than empty.

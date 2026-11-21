@@ -5,13 +5,15 @@ All four gates pass on a clean tree, and the smoke covers every acceptance crite
 ## Gates
 
 ```text
-cargo test -p agentkit-litterbox                                  557 passed, 14 ignored
+cargo test -p agentkit-litterbox                                  559 passed, 14 ignored
 cargo clippy -p agentkit-litterbox --all-targets -- -D warnings   clean
 arch-lint check                                                   0 errors, 0 warnings in 425 files
 bash hack/arch-lint-negative.sh                                   every planted import rejected
 ```
 
 The negative fixture needed no new rule: this change adds no arch-lint scope.
+
+Two of the 559 are live seam tests, added after the first pass because the probes alone left a gap. `a_bound_sandbox_hides_the_vcs_metadata_from_a_real_bubblewrap_sandbox` and `a_bound_sandbox_hides_the_vcs_metadata_inside_a_real_docker_container` each build a bound checkout holding `.git/HEAD`, create a real sandbox through `registry::build`, exec a shell script from inside it, and assert the workspace reads, the metadata does not, and the host file survives. Disabling the mask in either backend turns them red with `git-leaked=SECRET`, so they bite.
 
 ## Smoke
 
@@ -25,7 +27,7 @@ A scratch repository with a committed project file naming `bubblewrap`, a user c
 6. **Delete.** Removes the record, the state directory and the branch: `removed record ...; removed state ...; removed branch litterbox/demo`. Nothing is left in the records directory.
 7. **Prune.** No bound sandbox can exist yet, because no VCS binds, so the orphan sweep has no case to exercise end to end. The call condition is covered by `delete_prunes_for_a_bound_record_even_when_it_is_not_remote` in the orchestrator tests.
 
-`AC-001` for `Bound` cannot be smoked for the same reason: `create` refuses it. Masking itself is proven by T-013 and T-015 and by the backend rendering and bind tests.
+`AC-001` for `Bound` is covered by the two live seam tests rather than by this smoke, because `create` refuses `Bound` for Git. Masking itself is also proven by T-013 and T-015 and by the backend rendering and bind tests.
 
 ## Notes
 
