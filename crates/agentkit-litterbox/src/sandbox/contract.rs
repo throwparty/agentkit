@@ -29,6 +29,30 @@ pub struct SandboxRecord {
     pub data: toml::Value,
 }
 
+/// How a sandbox presents its workspace.
+///
+/// The choice belongs to the contract because persistence and configuration
+/// both carry it, and neither may name a VCS.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WorkspaceBinding {
+    /// The backend receives a private copy of the workspace.
+    Copied,
+    /// The backend binds a host directory the VCS backend owns.
+    Bound,
+}
+
+/// How a backend can present its workspace to a sandbox.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BindingSupport {
+    /// The workspace is copied into the sandbox.
+    Copied,
+    /// The workspace is bound into the sandbox.
+    Bound,
+    /// Both presentations are available.
+    Both,
+}
+
 /// A workspace prepared for materialisation inside a sandbox.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct Workspace {
@@ -717,8 +741,31 @@ mod tests {
 
     use super::{
         Backend, Contributions, CreateRequest, Error, Execution, Inspection, ProvisionStep,
-        SandboxRecord, Scope,
+        SandboxRecord, Scope, WorkspaceBinding,
     };
+
+    #[test]
+    fn the_binding_round_trips_as_kebab_case() {
+        #[derive(serde::Serialize, serde::Deserialize)]
+        struct Entry {
+            binding: WorkspaceBinding,
+        }
+
+        let copied = toml::to_string(&Entry {
+            binding: WorkspaceBinding::Copied,
+        })
+        .expect("serialise");
+        let bound = toml::to_string(&Entry {
+            binding: WorkspaceBinding::Bound,
+        })
+        .expect("serialise");
+
+        assert_eq!(copied.trim(), "binding = \"copied\"");
+        assert_eq!(bound.trim(), "binding = \"bound\"");
+
+        let parsed: Entry = toml::from_str(&copied).expect("parse");
+        assert_eq!(parsed.binding, WorkspaceBinding::Copied);
+    }
 
     struct Stub;
 

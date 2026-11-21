@@ -12,7 +12,7 @@ pub mod git;
 pub mod git_common;
 mod types;
 
-pub use capabilities::{BindingSupport, Capabilities, ConflictModel, ExportSupport};
+pub use capabilities::{Capabilities, ConflictModel, ExportSupport};
 pub use conflict::{Conflict, ConflictSides, HistoryPolicy, Merge, RestoreMode};
 pub use error::Error;
 pub use types::{BranchName, Prepared, Revision, TreeId, Workspace};
@@ -124,6 +124,7 @@ pub trait Vcs: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sandbox::contract::BindingSupport;
 
     struct Stub;
 

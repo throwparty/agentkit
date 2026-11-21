@@ -2,7 +2,7 @@
 
 ## Tasks
 
-### T-001: Move the binding vocabulary into the contract
+### T-001: [x] Move the binding vocabulary into the contract
 
 Move `WorkspaceBinding` and `BindingSupport` from `src/vcs/capabilities.rs` into `src/sandbox/contract.rs`, beside `StoreView`. `WorkspaceBinding` has `Copied` and `Bound` with kebab-case serde renaming, no `Default` impl and no serde default. `Capabilities` in `vcs` imports `BindingSupport` from the contract. Update every importer: `vcs/mod.rs`, `vcs/git/scm.rs`, `testing/vcs.rs` and their tests.
 

@@ -6,10 +6,10 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use crate::sandbox::contract::SnapshotSelector;
+use crate::sandbox::contract::{BindingSupport, SnapshotSelector};
 use crate::vcs::{
-    BindingSupport, Capabilities, Conflict, ConflictModel, ConflictSides, Error, ExportSupport,
-    HistoryPolicy, Merge, Prepared, RestoreMode, Revision, TreeId, Vcs, Workspace, git_common,
+    Capabilities, Conflict, ConflictModel, ConflictSides, Error, ExportSupport, HistoryPolicy,
+    Merge, Prepared, RestoreMode, Revision, TreeId, Vcs, Workspace, git_common,
 };
 
 /// How `prepare` should fail, if at all.

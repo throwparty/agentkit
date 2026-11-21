@@ -1,3 +1,5 @@
+use crate::sandbox::contract::BindingSupport;
+
 /// How a backend surfaces a conflict.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConflictModel {
@@ -5,17 +7,6 @@ pub enum ConflictModel {
     Native,
     /// The branch advance is held until the conflict is resolved.
     Blocking,
-}
-
-/// How a backend can present its workspace to a sandbox.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BindingSupport {
-    /// The workspace is copied into the sandbox.
-    Copied,
-    /// The workspace is bound into the sandbox.
-    Bound,
-    /// Both presentations are available.
-    Both,
 }
 
 /// How a backend publishes its state.
