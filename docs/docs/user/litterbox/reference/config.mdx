@@ -134,9 +134,6 @@ provision = ["setup"]
 [[ports]]
 name = "web"
 target = 8080
-
-[git]
-snapshot-mode = "direct"
 ```
 
 - `project.slug` identifies the project. It must already be a valid slug; a value
@@ -171,8 +168,9 @@ snapshot-mode = "direct"
   old key is rejected with a message naming the replacement.
 - `ports` declares what the project expects forwarded. The project cannot decide
   where those ports bind or who may reach them.
-- `git.snapshot-mode` is `"remote"` (the default) to keep snapshots in an isolated
-  bare clone, or `"direct"` to keep them as branches in your working repository.
+- `[vcs]` is a workspace setting and is refused here. `snapshot-mode` and
+  `binding` live under `[vcs.git]` in the local override. A committed file that
+  still sets `[git]` fails to load, because the key is gone.
 - `store-view` is machine-owned, so the committed project file may not set it. The
   default `closure` binds only the devShell's store closure; `whole` binds all of
   `/nix/store`. `litterbox doctor` reports the view in force and the path count it
@@ -193,11 +191,39 @@ selected backend's order with its state and remedy. It does not create anything.
 ## Local project override
 
 `.agentkit/litterbox/config.local.toml` takes the project file's project-owned
-shape. A `[project]`, `[[ports]]` or `[git]` entry there overrides the committed
-value; `[project] backends`, `[[provision]]` and
+shape, plus the `[vcs]` section, which is a workspace setting. A `[project]`,
+`[[ports]]` or `[vcs]` entry there overrides the committed value;
+`[project] backends`, `[[provision]]` and
 `[backends.<name>].provision` are replaced wholesale, and an empty list is a
 deliberate removal rather than a fallback to the project. Keep it untracked: it
 describes this checkout, not the machine.
+
+```toml
+# One section per VCS tool, in that tool's own vocabulary.
+[vcs.git]
+# "remote" (the default) keeps snapshots in an isolated bare clone; "direct"
+# keeps them as branches in your working repository.
+snapshot-mode = "remote"
+
+# How a sandbox receives its workspace. There is no default: the MCP
+# `sandbox-create` tool refuses without this key.
+#
+#   "copied" gives the sandbox a private copy. Snapshots are downloaded from it.
+#   "bound"  binds a host directory the VCS owns, and masks the VCS metadata
+#            inside it. Git cannot bind, so it refuses "bound".
+binding = "copied"
+```
+
+A missing `binding` is a configuration error naming the key, the two values and
+this file. A binding the selected VCS cannot honour is refused when the
+configuration is validated, before any sandbox is created, and never falls back
+to a copy. The choice is recorded per sandbox, so a later change affects only
+new sandboxes: `litterbox list`, `delete`, `pause` and `resume` never read it.
+
+A masked path is hidden, not removed. Bubblewrap puts a tmpfs over a directory
+and binds an empty file over a file; Docker binds an empty read-only directory
+over it. In both cases `.git` or `.jj` remains as an empty entry that the
+sandbox can neither read nor write. The VCS itself stays on the host.
 
 Machine settings and setup consent are rejected here; they belong in
 `~/.config/agentkit/litterbox/config.toml`. Litterbox refuses a local override
