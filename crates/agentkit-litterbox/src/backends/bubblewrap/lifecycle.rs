@@ -178,6 +178,7 @@ mod tests {
             mounts: Vec::new(),
             workspace_host: "/state/workspace".to_string(),
             workspace: "/src".to_string(),
+            masked_paths: Vec::new(),
             scope: scope.map(str::to_string),
             paused: false,
             environment: Provenance {

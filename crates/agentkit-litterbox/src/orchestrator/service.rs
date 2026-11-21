@@ -1766,6 +1766,109 @@ mod seam_tests {
     }
 
     #[tokio::test]
+    async fn a_bound_sandbox_hides_the_vcs_metadata_from_a_real_bubblewrap_sandbox() {
+        // Resolve tools the way the host does, without naming a backend.
+        let on_path = |name: &str| {
+            std::env::var_os("PATH").is_some_and(|paths| {
+                std::env::split_paths(&paths).any(|dir| dir.join(name).is_file())
+            })
+        };
+        if !on_path("bwrap") {
+            eprintln!("bwrap does not resolve; skipping the live bound-mask test");
+            return;
+        }
+        let shell = std::env::var_os("PATH")
+            .and_then(|paths| {
+                std::env::split_paths(&paths)
+                    .map(|dir| dir.join("sh"))
+                    .find(|candidate| candidate.is_file())
+            })
+            .expect("sh resolves on PATH");
+
+        let records = TempDir::new().expect("records");
+        let checkout = TempDir::new().expect("checkout");
+        std::fs::write(checkout.path().join("README.md"), "hello\n").expect("readme");
+        std::fs::create_dir_all(checkout.path().join(".git")).expect("git");
+        std::fs::write(checkout.path().join(".git/HEAD"), "SECRET\n").expect("head");
+
+        // The backend keeps state under the project slug, so a unique slug
+        // makes the test re-runnable and lets it clean up after itself.
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or_default();
+        let project = format!("bound-mask-{}-{nonce}", std::process::id());
+        let state = agentkit_common::data_dir("litterbox")
+            .join("bubblewrap")
+            .join(&project)
+            .join("demo");
+        let _ = std::fs::remove_dir_all(&state);
+
+        let config = Config {
+            backend: Some("bubblewrap".to_string()),
+            project: crate::config::ProjectConfig {
+                slug: Some(project.clone()),
+                backends: Some(vec!["bubblewrap".to_string()]),
+            },
+            ..Config::default()
+        };
+        let selected = crate::backends::registry::build(&config).expect("a registered backend");
+        let vcs = Arc::new(
+            TestVcs::new()
+                .with_bindings(BindingSupport::Bound)
+                .with_bound_root(checkout.path().to_path_buf()),
+        );
+        let sandboxes = Sandboxes::for_test(
+            config,
+            vcs,
+            false,
+            project.clone(),
+            records.path().to_path_buf(),
+            selected,
+        )
+        .with_binding(Some(WorkspaceBinding::Bound));
+
+        sandboxes.create("demo").await.expect("create");
+
+        let script = "read a < README.md; echo readme=$a; \
+                      if read b < .git/HEAD 2>/dev/null; then echo git-leaked=$b; \
+                      else echo git-denied; fi";
+        let result = sandboxes
+            .exec(
+                "demo",
+                &[
+                    shell.to_string_lossy().to_string(),
+                    "-c".to_string(),
+                    script.to_string(),
+                ],
+            )
+            .await
+            .expect("exec")
+            .value;
+
+        assert_eq!(result.exit_code, 0, "{result}");
+        assert!(
+            result.stdout.contains("readme=hello"),
+            "the workspace is readable: {result}"
+        );
+        assert!(
+            result.stdout.contains("git-denied"),
+            "the metadata is hidden: {result}"
+        );
+        assert!(!result.stdout.contains("SECRET"), "nothing leaks: {result}");
+        assert_eq!(
+            std::fs::read_to_string(checkout.path().join(".git/HEAD")).expect("head"),
+            "SECRET\n",
+            "the mask hid the file; it did not remove it"
+        );
+
+        sandboxes.delete("demo", true).await.expect("delete");
+        if let Some(project_dir) = state.parent() {
+            let _ = std::fs::remove_dir_all(project_dir);
+        }
+    }
+
+    #[tokio::test]
     async fn create_asks_for_the_mask_and_records_the_binding() {
         let dir = scratch();
         let records = TempDir::new().expect("records");

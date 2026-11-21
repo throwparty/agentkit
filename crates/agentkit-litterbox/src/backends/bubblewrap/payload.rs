@@ -112,6 +112,12 @@ pub struct Payload {
     pub scope: Option<String>,
     /// Whether the sandbox is paused.
     pub paused: bool,
+    /// The paths inside the workspace hidden from the sandbox.
+    ///
+    /// The mechanism masks them in the sandbox namespace; host-side transfers
+    /// read the record so they can enforce the same boundary.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub masked_paths: Vec<String>,
     /// Where the environment came from and what was withheld.
     pub environment: Provenance,
     /// Whether the sandbox shares the host network.
@@ -261,6 +267,7 @@ mod tests {
                 .collect(),
             workspace_host: "/state/workspace".to_string(),
             workspace: WORKSPACE.to_string(),
+            masked_paths: Vec::new(),
             scope: Some("litterbox-demo".to_string()),
             paused: false,
             environment: Provenance {

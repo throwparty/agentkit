@@ -17,7 +17,7 @@ use crate::backends::shared::{
 use crate::sandbox::contract::{
     Backend, ContributionSort, ContributionSupport, CreateMode, CreateRequest, Error, Execution,
     Forward, Inspection, ProvisioningClass, ProvisioningFailure, SandboxRecord, Scope,
-    forwarded_port_env_var,
+    WorkspaceBinding, forwarded_port_env_var,
 };
 use crate::sandbox::facets::{Lifecycle, Limits, ResourceLimits};
 use crate::sandbox::report::{Capability, EgressPosture, Readiness, State};
@@ -91,10 +91,14 @@ struct Creation<'a> {
     environment: &'a crate::sandbox::environment::Environment,
     /// The host directory bound at the workspace path.
     workspace: &'a Path,
+    /// The backend's own directory for this sandbox, holding its bookkeeping.
+    state: &'a Path,
     /// The ports the sandbox reaches on the host.
     forwards: &'a [crate::sandbox::contract::Forward],
     /// Whether this attempt materialises the workspace or reuses one.
     materialised: bool,
+    /// Whether this is a fresh create rather than a repair.
+    fresh: bool,
     /// Whether the sandbox is launched inside a user scope.
     scoped: bool,
     /// The holder, once one has started.
@@ -355,6 +359,10 @@ impl BubblewrapBackend {
                 .collect(),
             workspace_host: workspace.to_string_lossy().to_string(),
             workspace: WORKSPACE.to_string(),
+            masked_paths: masked
+                .iter()
+                .map(|entry| entry.path.to_string_lossy().to_string())
+                .collect(),
             scope: holder.unit.clone(),
             paused: false,
             environment: environment.provenance.clone(),
@@ -532,10 +540,15 @@ impl Backend for BubblewrapBackend {
         Box::pin(async move {
             let data = self.live(sandbox)?;
             let root = Path::new(&data.workspace_host).to_path_buf();
+            let masks: Vec<PathBuf> = data
+                .masked_paths
+                .iter()
+                .map(PathBuf::from)
+                .collect();
             let source = source.to_path_buf();
             let destination = destination.to_string();
             transfer(UPLOAD_TIMEOUT, move || {
-                workspace::transfer_in(&root, &source, &destination)
+                workspace::transfer_in(&root, &source, &destination, &masks)
             })
             .await
         })
@@ -551,13 +564,18 @@ impl Backend for BubblewrapBackend {
         Box::pin(async move {
             let data = self.live(sandbox)?;
             let root = Path::new(&data.workspace_host).to_path_buf();
+            let masks: Vec<PathBuf> = data
+                .masked_paths
+                .iter()
+                .map(PathBuf::from)
+                .collect();
             let source = source.to_string();
             let destination = destination.to_path_buf();
             // The selector is owned, so the copy runs where it cannot hold a
             // runtime worker: a workspace of any size is bounded by the
             // deadline rather than by how long the caller is willing to wait.
             transfer(DOWNLOAD_TIMEOUT, move || {
-                workspace::transfer_out(&root, &source, &destination, selector.as_deref())
+                workspace::transfer_out(&root, &source, &destination, selector.as_deref(), &masks)
             })
             .await
         })
@@ -1031,13 +1049,38 @@ impl BubblewrapBackend {
                 }
             }
         }
-        let workspace = workspace::workspace_directory(&request.project_slug, &request.name);
-        let owns_directory =
-            !workspace::sandbox_directory(&request.project_slug, &request.name).exists();
-        let materialised = !workspace.is_dir();
-        std::fs::create_dir_all(&workspace).map_err(|error| {
+        // The backend always owns a state directory for its bookkeeping. A
+        // bound sandbox's workspace is the host directory the VCS owns, so it
+        // is not the state directory's child and must not be copied into.
+        let state = workspace::sandbox_directory(&request.project_slug, &request.name);
+        let owns_directory = !state.exists();
+        std::fs::create_dir_all(&state).map_err(|error| {
             Error::failed(format!("the state directory could not be created: {error}"))
         })?;
+        let bound = request.workspace.binding == WorkspaceBinding::Bound;
+        let workspace = if bound {
+            request.workspace.source.clone()
+        } else {
+            workspace::workspace_directory(&request.project_slug, &request.name)
+        };
+        let materialised = !bound && !workspace.is_dir();
+        // A repair that found no copied workspace materialises a new one, so it
+        // needs the setup steps even though the compute is being rebuilt.
+        let fresh = runs_steps(request.mode, materialised);
+        if !bound {
+            std::fs::create_dir_all(&workspace).map_err(|error| {
+                Error::failed(format!(
+                    "the workspace directory could not be created: {error}"
+                ))
+            })?;
+        } else if !workspace.is_dir() {
+            return Err(Error::Misconfigured {
+                message: format!(
+                    "the bound workspace '{}' is not a directory",
+                    workspace.display()
+                ),
+            });
+        }
 
         let mut started: Option<holder::Holder> = None;
         let outcome = self
@@ -1047,8 +1090,10 @@ impl BubblewrapBackend {
                 command: &command,
                 environment: &environment,
                 workspace: &workspace,
+                state: &state,
                 forwards: &forwards,
                 materialised,
+                fresh,
                 scoped,
                 started: &mut started,
             })
@@ -1090,8 +1135,10 @@ impl BubblewrapBackend {
             command: holder_command,
             environment,
             workspace,
+            state,
             forwards,
             materialised,
+            fresh,
             scoped,
             started,
         } = creation;
@@ -1107,10 +1154,7 @@ impl BubblewrapBackend {
         let masked = self.masked_paths(request, workspace)?;
         // A masked path that is a file is bound over with an empty read-only
         // file, because a tmpfs needs a directory mountpoint.
-        let mask_file = workspace
-            .parent()
-            .map(|parent| parent.join("mask"))
-            .unwrap_or_else(|| PathBuf::from("mask"));
+        let mask_file = state.join("mask");
         if masked.iter().any(|entry| !entry.directory) {
             std::fs::write(&mask_file, b"").map_err(|error| Error::failed(error.to_string()))?;
         }
@@ -1163,14 +1207,8 @@ impl BubblewrapBackend {
             masked: &masked,
             mask_file: &mask_file,
         });
-        let status_path = workspace
-            .parent()
-            .map(|parent| parent.join("status"))
-            .unwrap_or_else(|| PathBuf::from("status"));
-        let stderr_path = workspace
-            .parent()
-            .map(|parent| parent.join("bwrap-stderr"))
-            .unwrap_or_else(|| PathBuf::from("bwrap-stderr"));
+        let status_path = state.join("status");
+        let stderr_path = state.join("bwrap-stderr");
 
         let spawn_argv = argv.clone();
         let spawn_environment = environment.clone();
@@ -1216,7 +1254,7 @@ impl BubblewrapBackend {
             forwards,
             holder_command,
         )?;
-        let steps = if materialised {
+        let steps = if fresh {
             let last_step = Mutex::new(None);
             let host = self.host.clone();
             let sandbox_name = request.name.clone();
@@ -1262,12 +1300,9 @@ impl BubblewrapBackend {
 
         let mut data = data;
         data.environment.steps = steps;
-        // The orchestrator keeps the record; the backend keeps a copy beside
-        // the workspace so enumeration can rebuild it without one.
-        let payload_path = workspace
-            .parent()
-            .map(|parent| parent.join("payload.toml"))
-            .ok_or_else(|| Error::failed("the state directory has no parent"))?;
+        // The orchestrator keeps the record; the backend keeps a copy in its
+        // state directory so enumeration can rebuild it without one.
+        let payload_path = state.join("payload.toml");
         let text = toml::to_string_pretty(&data)
             .map_err(|error| Error::failed(format!("the payload could not be written: {error}")))?;
         let staging = payload_path.with_extension("toml.new");
@@ -1293,12 +1328,20 @@ impl BubblewrapBackend {
     }
 }
 
+/// Whether this attempt must run the sandbox's setup steps.
+///
+/// A fresh create always runs them. A repair runs them when it had to
+/// materialise the copied workspace, because the steps built that tree.
+fn runs_steps(mode: CreateMode, materialised: bool) -> bool {
+    mode == CreateMode::Fresh || materialised
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
-    use super::{BubblewrapBackend, BubblewrapSettings, Network};
+    use super::{BubblewrapBackend, BubblewrapSettings, Network, runs_steps};
     use crate::backends::bubblewrap::host::{
         FakeHost, MountEntry, NamespaceInodes, ProcessInfo, ProcessState, RootIdentity,
     };
@@ -1310,6 +1353,16 @@ mod tests {
     use crate::sandbox::contract::{Placement, ResolvedStep};
     use crate::sandbox::environment::{Origin, Provenance};
     use crate::sandbox::report::EgressPosture;
+
+    #[test]
+    fn a_rebuilt_copied_workspace_runs_the_setup_steps() {
+        assert!(runs_steps(CreateMode::Fresh, false));
+        assert!(runs_steps(CreateMode::ReuseExisting, true));
+        assert!(
+            !runs_steps(CreateMode::ReuseExisting, false),
+            "an unchanged repair does not repeat the steps"
+        );
+    }
 
     fn request(ports: Vec<RequestedPort>) -> CreateRequest {
         CreateRequest {
@@ -1417,6 +1470,7 @@ mod tests {
             }],
             workspace_host: "/state/workspace".to_string(),
             workspace: "/src".to_string(),
+            masked_paths: Vec::new(),
             scope: None,
             paused: false,
             environment: Provenance {
