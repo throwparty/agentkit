@@ -20,7 +20,7 @@ pub fn open(config: Config) -> Result<Sandboxes, SandboxError> {
     let remote = mode == ScmMode::Remote;
     let vcs = open_git(&config, &project_slug, mode)?;
 
-    Sandboxes::with_vcs(config, Arc::new(vcs), remote)
+    Sandboxes::with_vcs(config, Arc::new(vcs), remote, git.binding)
 }
 
 /// Git's section from the workspace's VCS settings.
@@ -66,10 +66,51 @@ mod tests {
     use tempfile::TempDir;
 
     use crate::config::{Config, ProjectConfig};
+    use crate::domain::ScmMode;
     use crate::orchestrator::Sandboxes;
+    use crate::sandbox::contract::WorkspaceBinding;
     use crate::sandbox::selected::Selected;
     use crate::testing::TestBackend;
     use crate::vcs::git::GitVcs;
+
+    #[test]
+    fn git_settings_read_the_binding_from_the_section() {
+        let mut config = Config::default();
+        config.vcs_settings.insert(
+            "git".to_string(),
+            toml::from_str("binding = 'bound'\nsnapshot-mode = 'direct'").expect("section"),
+        );
+
+        let git = super::git_settings(&config).expect("settings");
+        assert_eq!(git.binding, Some(WorkspaceBinding::Bound));
+        assert_eq!(git.snapshot_mode, Some(ScmMode::Direct));
+    }
+
+    #[test]
+    fn an_absent_binding_stays_unset() {
+        let git = super::git_settings(&Config::default()).expect("settings");
+        assert_eq!(
+            git.binding, None,
+            "no section must not become a silent copy"
+        );
+    }
+
+    #[test]
+    fn an_unknown_binding_fails_with_the_key_named() {
+        let mut config = Config::default();
+        config.vcs_settings.insert(
+            "git".to_string(),
+            toml::from_str("binding = 'hardlink'").expect("section"),
+        );
+
+        let error = super::git_settings(&config).expect_err("unknown value");
+        let message = error.to_string();
+        assert!(message.contains("vcs.git"), "{message}");
+        assert!(
+            message.contains("copied") && message.contains("bound"),
+            "{message}"
+        );
+    }
 
     fn git(dir: &Path, args: &[&str]) {
         let status = Command::new("git")
