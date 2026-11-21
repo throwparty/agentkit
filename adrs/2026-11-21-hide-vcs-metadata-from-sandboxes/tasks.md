@@ -145,7 +145,7 @@ The `prune` call condition at `service.rs:478-482` widens from `stored.remote` t
 | Depends On | T-010 |
 | References | orphans,corrupt-orphan |
 
-### T-012: Teach the test doubles to mask
+### T-012: [x] Teach the test doubles to mask
 
 `TestVcs` records `masked_paths` and `bound_root` calls and can be configured to report `Bound` support and to return a bound root. `src/testing.rs` gains a masking backend beside `TestBackend` that records the paths it was asked to hide and can be told to refuse.
 
