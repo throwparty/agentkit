@@ -236,7 +236,7 @@ Run a Docker probe for an empty volume at a masked path, both when the bound dir
 | Depends On | T-005 |
 | References | config-key |
 
-### T-019: Run the gates and smoke both bindings
+### T-019: [x] Run the gates and smoke both bindings
 
 Run the four gates. Then a manual smoke on a scratch repository: create with `copied`, create with `bound` refused for Git, a legacy record loading and listing, delete removing the state, and `prune` finding an orphan.
 
