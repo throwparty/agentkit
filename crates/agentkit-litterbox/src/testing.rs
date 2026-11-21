@@ -18,6 +18,9 @@ use crate::sandbox::environment::{Origin, Provenance, StepProvenance};
 use crate::sandbox::facets::Lifecycle;
 use crate::sandbox::report::{EgressPosture, Fallback, Readiness, State};
 
+pub mod vcs;
+pub use vcs::TestVcs;
+
 /// The resolved steps a test backend stores in its record payload.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct StoredSteps {
@@ -260,7 +263,9 @@ impl Backend for TestBackend {
                     .records
                     .lock()
                     .map_err(|_| Error::failed("test backend lock poisoned"))?;
-                if let Some(existing) = records.iter().find(|existing| existing.name == request.name)
+                if let Some(existing) = records
+                    .iter()
+                    .find(|existing| existing.name == request.name)
                 {
                     if request.mode == CreateMode::ReuseExisting {
                         let mut deleted = self

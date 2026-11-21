@@ -191,7 +191,7 @@ fn load_host_config(backend: Option<String>) -> Result<Config, Error> {
 }
 
 fn project(config: Config) -> Result<Sandboxes, Error> {
-    Sandboxes::open(config).map_err(Error::from)
+    crate::compose::open(config).map_err(Error::from)
 }
 
 async fn handle_stdio(backend: Option<String>) -> ExitCode {
@@ -206,19 +206,13 @@ fn handle_remote(backend: Option<String>, name: String) -> ExitCode {
         Ok(config) => config,
         Err(error) => return report(error),
     };
-    let store = match crate::orchestrator::store_path(&config) {
-        Ok(store) => store,
-        Err(error) => return report(Error::from(error)),
+    let sandboxes = match project(config) {
+        Ok(sandboxes) => sandboxes,
+        Err(error) => return report(error),
     };
-    if !store.is_dir() {
-        return report(Error::failed(format!(
-            "this project has no sandbox store at '{}' yet; create a sandbox first",
-            store.display()
-        )));
-    }
-    let added = match crate::orchestrator::expose_store(&store, &name) {
-        Ok(added) => added,
-        Err(error) => return report(Error::from(error)),
+    let (store, added) = match sandboxes.expose_remote(&name) {
+        Ok(result) => result,
+        Err(error) => return report(error),
     };
     if added {
         println!("added remote '{name}' -> '{}'", store.display());

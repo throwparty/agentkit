@@ -1,13 +1,11 @@
-pub mod path;
-pub mod remote;
-
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use git2::build::RepoBuilder;
 use git2::{FetchOptions, Repository};
 
-use crate::domain::{SandboxError, ScmError};
+use crate::domain::SandboxError;
+use crate::vcs::git_common::GitError;
 
 pub struct VcsStore;
 
@@ -39,7 +37,7 @@ impl VcsStore {
     }
 
     pub fn resolve_path(slug: &str) -> PathBuf {
-        crate::vcs_store::path::resolve_path(slug)
+        crate::vcs::git::path::resolve_path(slug)
     }
 
     pub fn clone_bare(host_path: &Path, slug: &str) -> Result<PathBuf, SandboxError> {
@@ -69,10 +67,10 @@ impl VcsStore {
             Err(ref e) if is_shallow_not_supported(e) => {
                 match Self::try_clone_bare(url, &bare_path, None) {
                     Ok(_) => Ok(bare_path),
-                    Err(e) => Err(SandboxError::Scm(ScmError::Clone { source: e })),
+                    Err(e) => Err(SandboxError::from(GitError::Clone { source: e })),
                 }
             }
-            Err(e) => Err(SandboxError::Scm(ScmError::Clone { source: e })),
+            Err(e) => Err(SandboxError::from(GitError::Clone { source: e })),
         }
     }
 
@@ -106,11 +104,11 @@ impl VcsStore {
     }
 
     pub fn install_remote(repo_path: &Path, bare_path: &Path) -> Result<(), SandboxError> {
-        crate::vcs_store::remote::install_remote(repo_path, bare_path)
+        crate::vcs::git::remote::install_remote(repo_path, bare_path)
     }
 
     pub fn remove_remote(repo_path: &Path) -> Result<(), SandboxError> {
-        crate::vcs_store::remote::remove_remote(repo_path)
+        crate::vcs::git::remote::remove_remote(repo_path)
     }
 }
 
@@ -126,7 +124,7 @@ mod tests {
     use tempfile::TempDir;
 
     use crate::domain::ScmMode;
-    use crate::scm::{GitScm, Scm};
+    use crate::vcs::git::{GitScm, Scm};
 
     use git2::Repository;
 

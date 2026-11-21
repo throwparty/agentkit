@@ -1,11 +1,19 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use git2::{BranchType, ObjectType, Repository};
 
-use crate::domain::{SandboxError, ScmError, ScmMode, slugify};
+use crate::domain::{SandboxError, ScmMode, slugify};
+use crate::sandbox::contract::SnapshotSelector;
+use crate::vcs::git_common::GitError;
+use crate::vcs::git_common::archive;
+pub use crate::vcs::git_common::{SnapshotFilter, branch_name_for};
+use crate::vcs::{
+    BindingSupport, Capabilities, Conflict, ConflictModel, ConflictSides, Error as VcsError,
+    ExportSupport, HistoryPolicy, Merge, Prepared, RestoreMode, Revision, TreeId, Vcs, Workspace,
+};
 
 /// How many times a snapshot may rebuild its commit while another moves the ref.
 const MAX_SNAPSHOT_ATTEMPTS: usize = 8;
@@ -37,7 +45,7 @@ impl GitScm {
                 snapshot_branch: None,
                 host_repo_path: None,
             })
-            .map_err(|source| SandboxError::Scm(ScmError::Open { source }))
+            .map_err(|source| SandboxError::from(GitError::Open { source }))
     }
 
     pub fn open_with_host(
@@ -52,7 +60,7 @@ impl GitScm {
                 snapshot_branch: None,
                 host_repo_path,
             })
-            .map_err(|source| SandboxError::Scm(ScmError::Open { source }))
+            .map_err(|source| SandboxError::from(GitError::Open { source }))
     }
 
     pub fn open_direct(path: &Path) -> Result<Self, SandboxError> {
@@ -86,27 +94,16 @@ impl GitScm {
         let head = self
             .repo
             .head()
-            .map_err(|source| SandboxError::Scm(ScmError::BranchCreate { source }))?;
+            .map_err(|source| SandboxError::from(GitError::BranchCreate { source }))?;
         head.peel_to_commit()
-            .map_err(|source| SandboxError::Scm(ScmError::BranchCreate { source }))
-    }
-
-    fn tree_from_reference_in<'a>(
-        repo: &'a Repository,
-        reference: &str,
-    ) -> Result<git2::Tree<'a>, SandboxError> {
-        let obj = repo
-            .revparse_single(reference)
-            .map_err(|source| SandboxError::Scm(ScmError::Archive { source }))?;
-        obj.peel_to_tree()
-            .map_err(|source| SandboxError::Scm(ScmError::Archive { source }))
+            .map_err(|source| SandboxError::from(GitError::BranchCreate { source }))
     }
 
     fn signature(&self) -> Result<git2::Signature<'_>, SandboxError> {
         self.repo
             .signature()
             .or_else(|_| git2::Signature::now("Litterbox", "noreply@example.com"))
-            .map_err(|source| SandboxError::Scm(ScmError::Signature { source }))
+            .map_err(|source| SandboxError::from(GitError::Signature { source }))
     }
 
     fn head_commit_optional(&self) -> Result<Option<git2::Commit<'_>>, SandboxError> {
@@ -114,9 +111,9 @@ impl GitScm {
             Ok(head) => head
                 .peel_to_commit()
                 .map(Some)
-                .map_err(|source| SandboxError::Scm(ScmError::Head { source })),
+                .map_err(|source| SandboxError::from(GitError::Head { source })),
             Err(error) if error.code() == git2::ErrorCode::UnbornBranch => Ok(None),
-            Err(source) => Err(SandboxError::Scm(ScmError::Head { source })),
+            Err(source) => Err(SandboxError::from(GitError::Head { source })),
         }
     }
 
@@ -133,88 +130,35 @@ impl GitScm {
             Ok(reference) => reference
                 .peel_to_commit()
                 .map(Some)
-                .map_err(|source| SandboxError::Scm(ScmError::Reference { source })),
+                .map_err(|source| SandboxError::from(GitError::Reference { source })),
             Err(error) if error.code() == git2::ErrorCode::NotFound => Ok(None),
-            Err(source) => Err(SandboxError::Scm(ScmError::Reference { source })),
+            Err(source) => Err(SandboxError::from(GitError::Reference { source })),
         }
-    }
-
-    fn append_tree(
-        repo: &Repository,
-        builder: &mut tar::Builder<Vec<u8>>,
-        tree: &git2::Tree<'_>,
-        base: &Path,
-    ) -> Result<(), SandboxError> {
-        for entry in tree.iter() {
-            Self::append_entry(repo, builder, base, &entry)?;
-        }
-
-        Ok(())
-    }
-
-    fn append_entry(
-        repo: &Repository,
-        builder: &mut tar::Builder<Vec<u8>>,
-        base: &Path,
-        entry: &git2::TreeEntry<'_>,
-    ) -> Result<(), SandboxError> {
-        let name = entry
-            .name()
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid path"))?;
-        let path = base.join(PathBuf::from(name));
-
-        match entry.kind() {
-            Some(ObjectType::Tree) => {
-                let subtree = entry
-                    .to_object(repo)
-                    .map_err(|source| SandboxError::Scm(ScmError::Archive { source }))?
-                    .peel_to_tree()
-                    .map_err(|source| SandboxError::Scm(ScmError::Archive { source }))?;
-                Self::append_tree(repo, builder, &subtree, &path)
-            }
-            Some(ObjectType::Blob) => Self::append_blob(repo, builder, &path, entry),
-            _ => Ok(()),
-        }
-    }
-
-    fn append_blob(
-        repo: &Repository,
-        builder: &mut tar::Builder<Vec<u8>>,
-        path: &Path,
-        entry: &git2::TreeEntry<'_>,
-    ) -> Result<(), SandboxError> {
-        let blob = entry
-            .to_object(repo)
-            .map_err(|source| SandboxError::Scm(ScmError::Archive { source }))?
-            .peel_to_blob()
-            .map_err(|source| SandboxError::Scm(ScmError::Archive { source }))?;
-
-        let mut header = tar::Header::new_gnu();
-        let mode = match entry.filemode() {
-            0 => 0o644,
-            value => value as u32,
-        };
-        let size = u64::try_from(blob.size())
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "blob too large"))?;
-        header.set_size(size);
-        header.set_mode(mode);
-        header.set_cksum();
-
-        builder.append_data(&mut header, path, blob.content())?;
-        Ok(())
     }
 }
 
-pub struct ThreadSafeScm {
+pub struct GitVcs {
     inner: Mutex<GitScm>,
     prefix_override: Option<String>,
+    /// The project slug the bare store is named after, when known.
+    store_slug: Option<String>,
 }
 
-impl ThreadSafeScm {
+/// The old name, kept while the orchestrator still imports it.
+pub type ThreadSafeScm = GitVcs;
+
+impl GitVcs {
+    /// Record the project slug used for the bare store.
+    pub fn set_store_slug(mut self, slug: String) -> Self {
+        self.store_slug = Some(slug);
+        self
+    }
+
     pub fn open(path: &Path) -> Result<Self, SandboxError> {
         GitScm::open_direct(path).map(|scm| Self {
             inner: Mutex::new(scm),
             prefix_override: None,
+            store_slug: None,
         })
     }
 
@@ -222,6 +166,7 @@ impl ThreadSafeScm {
         GitScm::open(path, mode).map(|scm| Self {
             inner: Mutex::new(scm),
             prefix_override: None,
+            store_slug: None,
         })
     }
 
@@ -229,6 +174,7 @@ impl ThreadSafeScm {
         GitScm::open_direct(path).map(|scm| Self {
             inner: Mutex::new(scm),
             prefix_override: prefix,
+            store_slug: None,
         })
     }
 
@@ -241,6 +187,7 @@ impl ThreadSafeScm {
         GitScm::open_with_host(path, mode, host_repo_path).map(|scm| Self {
             inner: Mutex::new(scm),
             prefix_override: prefix,
+            store_slug: None,
         })
     }
 
@@ -256,6 +203,7 @@ impl ThreadSafeScm {
         Ok(Self {
             inner: Mutex::new(scm),
             prefix_override: prefix,
+            store_slug: None,
         })
     }
 
@@ -288,7 +236,7 @@ impl ThreadSafeScm {
     }
 }
 
-impl Scm for ThreadSafeScm {
+impl Scm for GitVcs {
     fn mode(&self) -> ScmMode {
         self.lock().map(|g| g.mode()).unwrap_or(ScmMode::Direct)
     }
@@ -343,7 +291,7 @@ impl Scm for GitScm {
 
         self.repo
             .branch(&branch_name, &head, false)
-            .map_err(|source| SandboxError::Scm(ScmError::BranchCreate { source }))?;
+            .map_err(|source| SandboxError::from(GitError::BranchCreate { source }))?;
 
         Ok(branch_name)
     }
@@ -360,7 +308,7 @@ impl Scm for GitScm {
 
         branch
             .delete()
-            .map_err(|source| SandboxError::Scm(ScmError::BranchDelete { source }))
+            .map_err(|source| SandboxError::from(GitError::BranchDelete { source }))
     }
 
     fn make_archive(&self, reference: &str) -> Result<Vec<u8>, SandboxError> {
@@ -375,7 +323,7 @@ impl Scm for GitScm {
                     &self.repo
                 } else if let Some(ref host_path) = self.host_repo_path {
                     host = Repository::open(host_path)
-                        .map_err(|source| SandboxError::Scm(ScmError::Open { source }))?;
+                        .map_err(|source| SandboxError::from(GitError::Open { source }))?;
                     &host
                 } else {
                     &self.repo
@@ -383,10 +331,10 @@ impl Scm for GitScm {
             }
             ScmMode::Direct => &self.repo,
         };
-        let tree = Self::tree_from_reference_in(repo, reference)?;
+        let tree = archive::tree_from_reference(repo, reference)?;
         let mut builder = tar::Builder::new(Vec::new());
 
-        Self::append_tree(repo, &mut builder, &tree, Path::new(""))?;
+        archive::append_tree(repo, &mut builder, &tree, Path::new(""))?;
 
         builder.into_inner().map_err(SandboxError::Io)
     }
@@ -396,11 +344,11 @@ impl Scm for GitScm {
         let branches = self
             .repo
             .branches(Some(BranchType::Local))
-            .map_err(|source| SandboxError::Scm(ScmError::BranchList { source }))?;
+            .map_err(|source| SandboxError::from(GitError::BranchList { source }))?;
 
         for branch in branches {
             let (branch, _) =
-                branch.map_err(|source| SandboxError::Scm(ScmError::BranchList { source }))?;
+                branch.map_err(|source| SandboxError::from(GitError::BranchList { source }))?;
             if let Some(name) = branch.name().ok().flatten()
                 && let Some(slug) = name.strip_prefix("litterbox/")
             {
@@ -417,7 +365,7 @@ impl Scm for GitScm {
 
     fn apply_patch(&self, diff: &str) -> Result<(), SandboxError> {
         let diff_obj = git2::Diff::from_buffer(diff.as_bytes()).map_err(|e| {
-            SandboxError::Scm(ScmError::ApplyPatch {
+            SandboxError::from(GitError::ApplyPatch {
                 message: format!("Failed to parse diff: {}", e),
             })
         })?;
@@ -425,10 +373,295 @@ impl Scm for GitScm {
         self.repo
             .apply(&diff_obj, git2::ApplyLocation::WorkDir, None)
             .map_err(|e| {
-                SandboxError::Scm(ScmError::ApplyPatch {
+                SandboxError::from(GitError::ApplyPatch {
                     message: format!("Failed to apply patch: {}", e),
                 })
             })
+    }
+}
+
+impl Vcs for GitVcs {
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            conflict_model: ConflictModel::Blocking,
+            op_log: false,
+            bindings: BindingSupport::Copied,
+            export: ExportSupport::None,
+        }
+    }
+
+    fn prepare(&self, sandbox: &str) -> Result<Prepared, VcsError> {
+        let branch = self.create_branch(sandbox).map_err(vcs_error)?;
+        Ok(Prepared {
+            workspace: Workspace::from_branch(branch),
+            base: Revision::new("HEAD"),
+        })
+    }
+
+    fn masked_paths(&self, _workspace: &Workspace) -> Vec<PathBuf> {
+        Vec::new()
+    }
+
+    fn identity(&self, workspace: &Workspace) -> Result<TreeId, VcsError> {
+        let branch = workspace.branch().to_string();
+        self.repo_for_branch(&branch, |repo| {
+            let oid = repo
+                .refname_to_id(&format!("refs/heads/{branch}"))
+                .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
+            let commit = repo
+                .find_commit(oid)
+                .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
+            let tree = commit
+                .tree()
+                .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
+            Ok(tree.id().to_string())
+        })
+        .map(TreeId::new)
+        .map_err(vcs_error)
+    }
+
+    fn materialise(
+        &self,
+        workspace: &Workspace,
+        revision: &Revision,
+        into: &Path,
+    ) -> Result<(), VcsError> {
+        let branch = workspace.branch().to_string();
+        let bytes = self
+            .repo_for_branch(&branch, |repo| {
+                crate::vcs::git_common::archive::archive(repo, revision.as_str())
+            })
+            .map_err(vcs_error)?;
+        crate::vcs::git_common::archive::unpack(&bytes, into).map_err(vcs_error)
+    }
+
+    fn snapshot_filter(&self, rules_root: &Path) -> Result<Arc<dyn SnapshotSelector>, VcsError> {
+        let filter = self
+            .lock()
+            .map_err(vcs_error)?
+            .snapshot_filter(rules_root)
+            .map_err(vcs_error)?;
+        Ok(Arc::new(filter))
+    }
+
+    fn ignore_files(&self) -> Arc<dyn SnapshotSelector> {
+        Arc::new(crate::vcs::git_common::IgnoreFiles)
+    }
+
+    fn snapshot(
+        &self,
+        workspace: &Workspace,
+        staging: &Path,
+        message: &str,
+    ) -> Result<Revision, VcsError> {
+        self.set_snapshot_branch(workspace.branch().to_string())
+            .map_err(vcs_error)?;
+        match self
+            .commit_snapshot_from_staging(staging, message)
+            .map_err(vcs_error)?
+        {
+            Some(oid) => Ok(Revision::new(oid.to_string())),
+            None => self.tip(workspace),
+        }
+    }
+
+    fn sandboxes(&self) -> Result<Vec<String>, VcsError> {
+        Scm::list_sandboxes(self).map_err(vcs_error)
+    }
+
+    fn delete_branch(&self, sandbox: &str) -> Result<(), VcsError> {
+        let branch = GitScm::branch_name(sandbox);
+        self.repo_for_branch(&branch, |repo| {
+            let mut found = repo.find_branch(&branch, BranchType::Local).map_err(|_| {
+                SandboxError::SandboxNotFound {
+                    name: sandbox.to_string(),
+                }
+            })?;
+            found
+                .delete()
+                .map_err(|source| SandboxError::from(GitError::BranchDelete { source }))
+        })
+        .map_err(vcs_error)
+    }
+
+    fn state_path(&self) -> Option<PathBuf> {
+        self.store_slug
+            .as_ref()
+            .map(|slug| crate::vcs::git::VcsStore::resolve_path(slug))
+    }
+
+    fn expose(&self, name: &str) -> Result<bool, VcsError> {
+        let Some(store) = self.state_path() else {
+            return Err(unsupported("expose"));
+        };
+        crate::vcs::git::expose_store(&store, name).map_err(vcs_error)
+    }
+
+    fn prune(&self) -> Result<(), VcsError> {
+        let Some(slug) = &self.store_slug else {
+            return Ok(());
+        };
+        let path = crate::vcs::git::VcsStore::resolve_path(slug);
+        if !path.is_dir() {
+            return Ok(());
+        }
+        let bare = Repository::open_bare(&path)
+            .map_err(|source| SandboxError::from(GitError::Open { source }))
+            .map_err(vcs_error)?;
+        let mut branches = bare
+            .branches(Some(BranchType::Local))
+            .map_err(|source| SandboxError::from(GitError::BranchList { source }))
+            .map_err(vcs_error)?;
+        let any = branches.any(|branch| {
+            branch
+                .ok()
+                .and_then(|(branch, _)| branch.name().ok().flatten().map(str::to_string))
+                .is_some_and(|name| name.starts_with("litterbox/"))
+        });
+        if !any {
+            crate::vcs::git::VcsStore::destroy_bare(slug).map_err(vcs_error)?;
+        }
+        Ok(())
+    }
+
+    fn tip(&self, workspace: &Workspace) -> Result<Revision, VcsError> {
+        let branch = workspace.branch().to_string();
+        self.repo_for_branch(&branch, |repo| {
+            repo.refname_to_id(&format!("refs/heads/{branch}"))
+                .map(|oid| oid.to_string())
+                .map_err(|source| {
+                    if source.code() == git2::ErrorCode::NotFound {
+                        SandboxError::SandboxNotFound {
+                            name: branch.clone(),
+                        }
+                    } else {
+                        SandboxError::from(GitError::Reference { source })
+                    }
+                })
+        })
+        .map(Revision::new)
+        .map_err(vcs_error)
+    }
+
+    fn set_tip(&self, _workspace: &Workspace, _revision: &Revision) -> Result<(), VcsError> {
+        Err(unsupported("set_tip"))
+    }
+
+    fn synced(&self, _workspace: &Workspace) -> Result<Revision, VcsError> {
+        Err(unsupported("synced"))
+    }
+
+    fn set_synced(&self, _workspace: &Workspace, _revision: &Revision) -> Result<(), VcsError> {
+        Err(unsupported("set_synced"))
+    }
+
+    fn merge(
+        &self,
+        _base: &Revision,
+        _ours: &Revision,
+        _theirs: &Revision,
+    ) -> Result<Merge, VcsError> {
+        Err(unsupported("merge"))
+    }
+
+    fn conflicts(&self, _revision: &Revision) -> Result<Vec<Conflict>, VcsError> {
+        Err(unsupported("conflicts"))
+    }
+
+    fn conflict_sides(
+        &self,
+        _revision: &Revision,
+        _path: &Path,
+    ) -> Result<ConflictSides, VcsError> {
+        Err(unsupported("conflict_sides"))
+    }
+
+    fn resolve(&self, _revision: &Revision, _paths: &[PathBuf]) -> Result<Revision, VcsError> {
+        Err(unsupported("resolve"))
+    }
+
+    fn abort(&self, _revision: &Revision) -> Result<(), VcsError> {
+        Err(unsupported("abort"))
+    }
+
+    fn history(
+        &self,
+        _workspace: &Workspace,
+        _keep: &HistoryPolicy,
+    ) -> Result<Vec<Revision>, VcsError> {
+        Err(unsupported("history"))
+    }
+
+    fn restore(
+        &self,
+        _workspace: &Workspace,
+        _revision: &Revision,
+        _mode: RestoreMode,
+    ) -> Result<(), VcsError> {
+        Err(unsupported("restore"))
+    }
+
+    fn export(&self) -> Result<(), VcsError> {
+        Ok(())
+    }
+}
+
+impl GitVcs {
+    /// Run `operation` against the repository that holds `branch`.
+    ///
+    /// The bare clone is checked first, then the host repository, then the
+    /// configured store. That is the same order `make_archive` uses, and it
+    /// lets one backend instance serve records created under either locality.
+    fn repo_for_branch<T>(
+        &self,
+        branch: &str,
+        operation: impl FnOnce(&Repository) -> Result<T, SandboxError>,
+    ) -> Result<T, SandboxError> {
+        let guard = self.lock()?;
+
+        if guard.repo.find_branch(branch, BranchType::Local).is_ok() {
+            return operation(&guard.repo);
+        }
+
+        if let Some(path) = &guard.host_repo_path
+            && let Ok(host) = Repository::open(path)
+            && host.find_branch(branch, BranchType::Local).is_ok()
+        {
+            return operation(&host);
+        }
+
+        if let Some(slug) = &self.store_slug {
+            let path = crate::vcs::git::VcsStore::resolve_path(slug);
+            if let Ok(bare) = Repository::open_bare(&path)
+                && bare.find_branch(branch, BranchType::Local).is_ok()
+            {
+                return operation(&bare);
+            }
+        }
+
+        operation(&guard.repo)
+    }
+}
+
+fn vcs_error(error: SandboxError) -> VcsError {
+    match error {
+        SandboxError::SandboxExists { name } => VcsError::Exists { name },
+        SandboxError::SandboxNotFound { name } => VcsError::NotFound { name },
+        SandboxError::Io(source) => VcsError::Io(source),
+        other => VcsError::Backend {
+            operation: "git".to_string(),
+            message: other.to_string(),
+        },
+    }
+}
+
+fn unsupported(operation: &str) -> VcsError {
+    VcsError::Unsupported {
+        operation: operation.to_string(),
+        backend: "git".to_string(),
+        primitive: "not implemented in this cut".to_string(),
+        reason: "the conflict and history surface lands in a later change".to_string(),
+        remedy: "create, prepare, materialise, snapshot, list and delete are available".to_string(),
     }
 }
 
@@ -444,7 +677,7 @@ impl GitScm {
         };
         let tree = parent
             .tree()
-            .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+            .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
 
         tree.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
             let path = Path::new(root).join(entry.name().unwrap_or_default());
@@ -459,7 +692,7 @@ impl GitScm {
             }
             0
         })
-        .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+        .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
 
         Ok((tracked, tracked_dirs))
     }
@@ -485,7 +718,7 @@ impl GitScm {
         let mut builder = self
             .repo
             .treebuilder(None)
-            .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+            .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
 
         // The staged tree is the sandbox's, so its rules are the ones that
         // decide what the snapshot records; the transfer applied the same ones.
@@ -494,12 +727,12 @@ impl GitScm {
 
         let tree_oid = builder
             .write()
-            .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+            .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
 
         let tree = self
             .repo
             .find_tree(tree_oid)
-            .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+            .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
 
         // Another tool call can snapshot the same sandbox while this tree is
         // being built, so the branch may move. Build each commit against the
@@ -528,7 +761,7 @@ impl GitScm {
             let oid = self
                 .repo
                 .commit(None, &signature, &signature, message, &tree, &parents)
-                .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+                .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
 
             let updated = if ref_exists {
                 let expected = parent
@@ -570,7 +803,7 @@ impl GitScm {
                     // compare-and-swap that has not succeeded, so there is
                     // nothing to roll back. Restoring the tip seen at the start
                     // would undo whatever another writer has published since.
-                    return Err(SandboxError::Scm(ScmError::Commit { source: error }));
+                    return Err(SandboxError::from(GitError::Commit { source: error }));
                 }
             }
         }
@@ -607,17 +840,17 @@ impl GitScm {
                 let mut sub_builder = self
                     .repo
                     .treebuilder(None)
-                    .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
 
                 self.add_directory_to_tree(&mut sub_builder, &path, &child, filter)?;
 
                 let sub_tree_oid = sub_builder
                     .write()
-                    .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
 
                 builder
                     .insert(&*name_str, sub_tree_oid, 0o040000)
-                    .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
             } else if file_type.is_symlink() {
                 if filter.skips_file(&child)? {
                     continue;
@@ -629,11 +862,11 @@ impl GitScm {
                 let blob_oid = self
                     .repo
                     .blob(target.as_os_str().as_encoded_bytes())
-                    .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
 
                 builder
                     .insert(&*name_str, blob_oid, 0o120000)
-                    .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
             } else if file_type.is_file() {
                 if filter.skips_file(&child)? {
                     continue;
@@ -645,11 +878,11 @@ impl GitScm {
                 let mut writer = self
                     .repo
                     .blob_writer(None)
-                    .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
                 std::io::copy(&mut source, &mut writer).map_err(SandboxError::Io)?;
                 let blob_oid = writer
                     .commit()
-                    .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
 
                 #[cfg(unix)]
                 let filemode = {
@@ -668,161 +901,12 @@ impl GitScm {
 
                 builder
                     .insert(&*name_str, blob_oid, filemode)
-                    .map_err(|source| SandboxError::Scm(ScmError::Commit { source }))?;
+                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
             }
         }
 
         Ok(())
     }
-}
-
-/// What a snapshot tracks, decided the way `git add -A` decides it: a path the
-/// snapshot's parent already records is tracked, and the sandbox's ignore rules
-/// apply only to everything else.
-pub struct SnapshotFilter {
-    /// The checkout libgit2 evaluates rules against. Kept alive because it owns
-    /// the directory the sandbox's rule files are mirrored into.
-    _rules: tempfile::TempDir,
-    checkout: Mutex<Repository>,
-    tracked: HashSet<PathBuf>,
-    tracked_dirs: HashSet<PathBuf>,
-}
-
-impl SnapshotFilter {
-    fn open(
-        rules_root: &Path,
-        tracked: HashSet<PathBuf>,
-        tracked_dirs: HashSet<PathBuf>,
-    ) -> Result<Self, SandboxError> {
-        let rules = tempfile::tempdir().map_err(SandboxError::Io)?;
-        let checkout = Repository::init(rules.path())
-            .map_err(|source| SandboxError::Scm(ScmError::Open { source }))?;
-
-        // libgit2 answers ignore questions about a checkout, so the sandbox's
-        // own ignore files are mirrored into this one at the same paths: a
-        // nested rule keeps meaning what it means inside the sandbox.
-        mirror_ignore_files(rules_root, rules.path())?;
-
-        // A repository's own exclude file applies from its root.
-        if let Ok(contents) = fs::read(rules_root.join(".git").join("info").join("exclude")) {
-            let target = checkout.path().join("info").join("exclude");
-            fs::write(target, contents).map_err(SandboxError::Io)?;
-        }
-
-        Ok(Self {
-            _rules: rules,
-            checkout: Mutex::new(checkout),
-            tracked,
-            tracked_dirs,
-        })
-    }
-
-    fn skips_file(&self, relative: &Path) -> Result<bool, SandboxError> {
-        if self.tracked.contains(relative) {
-            return Ok(false);
-        }
-        self.ignored(relative)
-    }
-
-    /// A directory is skipped only when the snapshot's parent records nothing
-    /// beneath it.
-    fn skips_dir(&self, relative: &Path) -> Result<bool, SandboxError> {
-        if self.tracked_dirs.contains(relative) {
-            return Ok(false);
-        }
-        // The staging tree is not the checkout, so libgit2 cannot stat the
-        // directory to learn it is one; the trailing separator says so.
-        let mut probe = relative.as_os_str().to_owned();
-        probe.push("/");
-        self.ignored(Path::new(&probe))
-    }
-
-    fn ignored(&self, relative: &Path) -> Result<bool, SandboxError> {
-        let checkout = self
-            .checkout
-            .lock()
-            .map_err(|_| SandboxError::Config("Mutex poisoned".to_string()))?;
-        checkout
-            .status_should_ignore(relative)
-            .map_err(|source| SandboxError::Scm(ScmError::Status { source }))
-    }
-}
-
-/// Copy a tree's ignore files into a checkout, leaving everything else behind.
-///
-/// `from` is a tree the sandbox produced; `to` is the scratch checkout libgit2
-/// reads rules from. Only the rule files are needed, so nothing else is copied
-/// and no rule changes meaning: `.gitignore` governs the directory it sits in.
-fn mirror_ignore_files(from: &Path, to: &Path) -> Result<(), SandboxError> {
-    let entries = match fs::read_dir(from) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(SandboxError::Io(error)),
-    };
-
-    for entry in entries {
-        let entry = entry.map_err(SandboxError::Io)?;
-        let name = entry.file_name();
-        if name == ".git" {
-            continue;
-        }
-        // `file_type` does not follow a link, so a linked directory is left
-        // alone rather than walked in circles.
-        if entry.file_type().map_err(SandboxError::Io)?.is_dir() {
-            mirror_ignore_files(&entry.path(), &to.join(&name))?;
-        } else if name == ".gitignore" {
-            fs::create_dir_all(to).map_err(SandboxError::Io)?;
-            fs::copy(entry.path(), to.join(&name)).map_err(SandboxError::Io)?;
-        }
-    }
-
-    Ok(())
-}
-
-impl crate::sandbox::contract::SnapshotSelector for SnapshotFilter {
-    fn selects(
-        &self,
-        relative: &Path,
-        is_dir: bool,
-    ) -> Result<bool, crate::sandbox::contract::Error> {
-        let skips = if is_dir {
-            self.skips_dir(relative)
-        } else {
-            self.skips_file(relative)
-        };
-        skips
-            .map(|skips| !skips)
-            .map_err(|error| crate::sandbox::contract::Error::failed(error.to_string()))
-    }
-}
-
-/// Selects the ignore files a snapshot's rules are read from.
-///
-/// A snapshot has to know the sandbox's own rules before it decides what to
-/// transfer, so the transfer runs twice: once for these files, and once for
-/// everything else under the rules they describe.
-pub struct IgnoreFiles;
-
-impl crate::sandbox::contract::SnapshotSelector for IgnoreFiles {
-    fn selects(
-        &self,
-        relative: &Path,
-        is_dir: bool,
-    ) -> Result<bool, crate::sandbox::contract::Error> {
-        // A directory is kept so the walk reaches the rules nested inside it.
-        if is_dir {
-            return Ok(true);
-        }
-        Ok(relative
-            .file_name()
-            .is_some_and(|name| name == ".gitignore")
-            || relative == Path::new(".git/info/exclude"))
-    }
-}
-
-/// The branch a sandbox's snapshots live on.
-pub fn branch_name_for(slug: &str) -> String {
-    format!("litterbox/{}", slug)
 }
 
 fn repo_prefix_from_path(path: &Path) -> String {
