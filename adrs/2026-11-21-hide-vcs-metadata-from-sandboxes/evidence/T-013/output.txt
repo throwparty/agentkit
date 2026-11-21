@@ -1,0 +1,30 @@
+bwrap: bubblewrap 0.11.2
+root: /tmp/tmp.eEHNWdKrOw
+
+Case A: .git is a directory, masked with --tmpfs
+  readme=hello
+  head=denied
+  entries=0
+  write=tmpfs
+  PASS readme is readable (hello)
+  PASS HEAD is denied (denied)
+  PASS the directory entry is empty (0)
+  PASS a write lands in the tmpfs, not the host (tmpfs)
+  PASS the host .git is untouched (SECRET)
+  PASS no file lands on the host (absent)
+
+Case B: .git is a file, masked with a read-only bind over an empty file
+  readme=hello
+  bytes=0
+  sh: line 4: .git: Read-only file system
+  write=denied
+  PASS readme is readable (hello)
+  PASS the gitfile is empty (0)
+  PASS a write is denied (denied)
+  PASS the host gitfile is untouched (gitdir: /tmp/elsewhere)
+
+Case C: control, no mask
+  SECRET
+  PASS the control leaks (SECRET)
+
+RESULT: every check passed
