@@ -15,7 +15,7 @@ Move `WorkspaceBinding` and `BindingSupport` from `src/vcs/capabilities.rs` into
 | Depends On |  |
 | References | binding-enum |
 
-### T-002: Declare the bound root and pin the mask contract
+### T-002: [x] Declare the bound root and pin the mask contract
 
 Add `fn bound_root(&self, workspace: &Workspace) -> Result<PathBuf, Error>` to the `Vcs` trait, returning the host directory a bound workspace lives in. Document `masked_paths` as returning paths relative to the workspace root and name `.git` and `.jj` in the doc comment. `GitVcs` returns `Unsupported` from `bound_root` and keeps returning an empty mask. Update the stub in `vcs/mod.rs` and `TestVcs`.
 
