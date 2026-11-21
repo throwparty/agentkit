@@ -5,6 +5,7 @@
 //! it shares with the jj bridge comes from [`crate::vcs::git_common`]; it never
 //! imports `vcs::jj`.
 
+mod config;
 pub mod path;
 pub mod remote;
 mod scm;
@@ -12,6 +13,7 @@ mod store;
 #[cfg(test)]
 mod vcs_tests;
 
+pub use config::GitVcsConfig;
 pub use scm::{GitScm, GitVcs, Scm, ThreadSafeScm};
 pub use store::VcsStore;
 

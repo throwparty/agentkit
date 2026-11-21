@@ -41,7 +41,7 @@ Extend the contract's `Workspace` with `binding: WorkspaceBinding` and `masked_p
 | Depends On | T-001 |
 | References | mask-contract |
 
-### T-004: Add the `[vcs]` section and delete `[git]`
+### T-004: [x] Add the `[vcs]` section and delete `[git]`
 
 Add `vcs: BTreeMap<String, toml::Value>` to `ProjectFile` and `vcs_settings` to `Config`. Delete `GitConfig` and its `snapshot_mode` field. `merge` takes the local file's `vcs` map, notices and ignores the committed file's table the way `config.rs:445-463` already does for `backends`, and extracts `snapshot-mode` from the `[vcs.git]` table into a struct `compose` reads.
 

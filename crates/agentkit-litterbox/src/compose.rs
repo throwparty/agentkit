@@ -10,16 +10,27 @@ use std::sync::Arc;
 use crate::config::Config;
 use crate::domain::{SandboxError, ScmMode};
 use crate::orchestrator::{Sandboxes, resolve_project_slug};
-use crate::vcs::git::{GitVcs, VcsStore};
+use crate::vcs::git::{GitVcs, GitVcsConfig, VcsStore};
 
 /// Build the orchestrator for the project the current directory belongs to.
 pub fn open(config: Config) -> Result<Sandboxes, SandboxError> {
     let project_slug = resolve_project_slug(&config)?;
-    let mode = config.git.snapshot_mode.unwrap_or_default();
+    let git = git_settings(&config)?;
+    let mode = git.snapshot_mode.unwrap_or_default();
     let remote = mode == ScmMode::Remote;
     let vcs = open_git(&config, &project_slug, mode)?;
 
     Sandboxes::with_vcs(config, Arc::new(vcs), remote)
+}
+
+/// Git's section from the workspace's VCS settings.
+fn git_settings(config: &Config) -> Result<GitVcsConfig, SandboxError> {
+    let section = config
+        .vcs_settings
+        .get("git")
+        .cloned()
+        .unwrap_or(toml::Value::Table(Default::default()));
+    GitVcsConfig::from_section(&section).map_err(SandboxError::Config)
 }
 
 fn open_git(config: &Config, project_slug: &str, mode: ScmMode) -> Result<GitVcs, SandboxError> {
