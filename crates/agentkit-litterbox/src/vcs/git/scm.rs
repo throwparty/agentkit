@@ -402,6 +402,18 @@ impl Vcs for GitVcs {
         Vec::new()
     }
 
+    fn bound_root(&self, _workspace: &Workspace) -> Result<PathBuf, VcsError> {
+        Err(VcsError::Unsupported {
+            operation: "bind the workspace".to_string(),
+            backend: "git".to_string(),
+            primitive: "a host directory that holds the branch's checkout".to_string(),
+            reason: "the Git backend materialises a revision into a private copy and owns no \
+                     host directory to bind"
+                .to_string(),
+            remedy: "use binding = 'copied'; a binding VCS arrives with the jj bridge".to_string(),
+        })
+    }
+
     fn identity(&self, workspace: &Workspace) -> Result<TreeId, VcsError> {
         let branch = workspace.branch().to_string();
         self.repo_for_branch(&branch, |repo| {

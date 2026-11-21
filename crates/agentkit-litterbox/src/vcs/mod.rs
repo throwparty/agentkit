@@ -36,7 +36,20 @@ pub trait Vcs: Send + Sync {
     fn prepare(&self, sandbox: &str) -> Result<Prepared, Error>;
 
     /// Paths the sandbox must not see inside a bound workspace.
+    ///
+    /// They are relative to the workspace root, because a backend decides
+    /// where the sandbox sees its workspace: `/src` under bubblewrap, the
+    /// image's working directory under Docker. A copy excludes them; a bind
+    /// masks them.
     fn masked_paths(&self, workspace: &Workspace) -> Vec<PathBuf>;
+
+    /// The host directory a bound workspace lives in.
+    ///
+    /// Only meaningful when the binding is `Bound`. The directory holds the
+    /// checkout the backend binds into the sandbox, and the orchestrator
+    /// creates it on create and removes it on delete. A backend that cannot
+    /// bind returns the neutral unsupported error.
+    fn bound_root(&self, workspace: &Workspace) -> Result<PathBuf, Error>;
 
     /// The tree identity of the workspace's branch tip.
     fn identity(&self, workspace: &Workspace) -> Result<TreeId, Error>;
@@ -156,6 +169,10 @@ mod tests {
 
         fn masked_paths(&self, _workspace: &Workspace) -> Vec<PathBuf> {
             Vec::new()
+        }
+
+        fn bound_root(&self, _workspace: &Workspace) -> Result<PathBuf, Error> {
+            unsupported("bound_root")
         }
 
         fn identity(&self, _workspace: &Workspace) -> Result<TreeId, Error> {

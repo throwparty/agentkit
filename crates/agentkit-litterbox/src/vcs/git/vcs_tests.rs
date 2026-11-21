@@ -97,6 +97,27 @@ fn the_unimplemented_surface_returns_the_neutral_error() {
 }
 
 #[test]
+fn git_cannot_bind_a_host_directory() {
+    let dir = repo_with_commit();
+    let vcs = GitVcs::open(dir.path()).expect("vcs");
+    let prepared = vcs.prepare("example").expect("prepare");
+
+    let error = vcs
+        .bound_root(&prepared.workspace)
+        .expect_err("Git owns no host directory to bind");
+
+    match error {
+        Error::Unsupported {
+            operation, backend, ..
+        } => {
+            assert_eq!(operation, "bind the workspace");
+            assert_eq!(backend, "git");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
 fn preparing_an_existing_branch_reports_exists() {
     let dir = repo_with_commit();
     let vcs = GitVcs::open(dir.path()).expect("vcs");

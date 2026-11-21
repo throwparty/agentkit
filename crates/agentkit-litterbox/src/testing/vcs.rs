@@ -164,6 +164,10 @@ impl Vcs for TestVcs {
         Vec::new()
     }
 
+    fn bound_root(&self, _workspace: &Workspace) -> Result<PathBuf, Error> {
+        Err(unsupported("bound_root"))
+    }
+
     fn identity(&self, _workspace: &Workspace) -> Result<TreeId, Error> {
         Ok(TreeId::new("tree"))
     }
