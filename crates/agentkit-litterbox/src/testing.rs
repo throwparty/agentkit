@@ -1055,6 +1055,7 @@ mod tests {
             sandbox: record,
             branch_name: "branch".to_string(),
             remote: false,
+            binding: None,
         };
         let dir = tempfile::tempdir().expect("tempdir");
         crate::metadata_store::store_sandbox_at(dir.path(), "demo", &stored).expect("store");
