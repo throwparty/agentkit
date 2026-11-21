@@ -382,6 +382,7 @@ impl Sandboxes {
             }
         }
 
+        let binding = stored.binding();
         let workspace = VcsWorkspace::from_branch(&stored.branch_name);
         let tip = match self.vcs.tip(&workspace) {
             Ok(tip) => tip,
@@ -394,16 +395,33 @@ impl Sandboxes {
             }
             Err(error) => return Err(contract_error(error)),
         };
-        let staged = TempDir::new().map_err(SandboxError::Io)?;
-        self.vcs
-            .materialise(&workspace, &tip, staged.path())
-            .map_err(contract_error)?;
+
+        // The record decides how the workspace is presented, so a
+        // configuration change affects only new sandboxes.
+        let masked_paths = self.vcs.masked_paths(&workspace);
+        let staged = match binding {
+            WorkspaceBinding::Copied => {
+                let staged = TempDir::new().map_err(SandboxError::Io)?;
+                self.vcs
+                    .materialise(&workspace, &tip, staged.path())
+                    .map_err(contract_error)?;
+                Some(staged)
+            }
+            WorkspaceBinding::Bound => None,
+        };
+        let created = match &staged {
+            Some(staged) => Workspace::copied(staged.path().to_path_buf()),
+            None => {
+                let root = self.vcs.bound_root(&workspace).map_err(contract_error)?;
+                Workspace::bound(root, masked_paths)
+            }
+        };
 
         let provision = self.resolve_provision(&name, selected).await?;
         let request = CreateRequest {
             name: name.to_string(),
             project_slug: self.project_slug.clone(),
-            workspace: Workspace::copied(staged.path().to_path_buf()),
+            workspace: created,
             provision,
             forward_bind: self.config.forwarding.bind.clone(),
             ports: self.config.ports.iter().map(port).collect(),
@@ -1778,15 +1796,15 @@ mod seam_tests {
         assert_eq!(stored.binding(), WorkspaceBinding::Copied);
     }
 
-    #[tokio::test]
-    async fn a_bound_create_binds_the_host_directory_and_masks_the_metadata() {
-        let records = TempDir::new().expect("records");
-        let bound_root = TempDir::new().expect("bound root");
-        let backend = Arc::new(TestBackend::new());
+    fn bound_orchestrator(
+        records: PathBuf,
+        backend: Arc<TestBackend>,
+        root: PathBuf,
+    ) -> (Sandboxes, Arc<TestVcs>) {
         let vcs = Arc::new(
             TestVcs::new()
                 .with_bindings(BindingSupport::Bound)
-                .with_bound_root(bound_root.path().to_path_buf()),
+                .with_bound_root(root),
         );
         let config = Config {
             project: crate::config::ProjectConfig {
@@ -1800,10 +1818,23 @@ mod seam_tests {
             vcs.clone(),
             false,
             "project".to_string(),
-            records.path().to_path_buf(),
-            selected(Arc::clone(&backend)),
+            records,
+            selected(backend),
         )
         .with_binding(Some(WorkspaceBinding::Bound));
+        (sandboxes, vcs)
+    }
+
+    #[tokio::test]
+    async fn a_bound_create_binds_the_host_directory_and_masks_the_metadata() {
+        let records = TempDir::new().expect("records");
+        let bound_root = TempDir::new().expect("bound root");
+        let backend = Arc::new(TestBackend::new());
+        let (sandboxes, vcs) = bound_orchestrator(
+            records.path().to_path_buf(),
+            Arc::clone(&backend),
+            bound_root.path().to_path_buf(),
+        );
 
         sandboxes.create("demo").await.expect("create");
 
@@ -1827,27 +1858,11 @@ mod seam_tests {
         let records = TempDir::new().expect("records");
         let bound_root = TempDir::new().expect("bound root");
         let backend = Arc::new(TestBackend::failing());
-        let vcs = Arc::new(
-            TestVcs::new()
-                .with_bindings(BindingSupport::Bound)
-                .with_bound_root(bound_root.path().to_path_buf()),
-        );
-        let config = Config {
-            project: crate::config::ProjectConfig {
-                slug: Some("project".to_string()),
-                backends: Some(vec!["test".to_string()]),
-            },
-            ..Config::default()
-        };
-        let sandboxes = Sandboxes::for_test(
-            config,
-            vcs.clone(),
-            false,
-            "project".to_string(),
+        let (sandboxes, vcs) = bound_orchestrator(
             records.path().to_path_buf(),
-            selected(backend),
-        )
-        .with_binding(Some(WorkspaceBinding::Bound));
+            backend,
+            bound_root.path().to_path_buf(),
+        );
 
         sandboxes.create("demo").await.expect_err("create fails");
 
@@ -1857,6 +1872,43 @@ mod seam_tests {
             vcs.deleted().contains(&"demo".to_string()),
             "the branch and its directory are released: {:?}",
             vcs.deleted()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_bound_record_repairs_against_its_directory_and_keeps_its_binding() {
+        let records = TempDir::new().expect("records");
+        let bound_root = TempDir::new().expect("bound root");
+        let backend = Arc::new(TestBackend::new());
+        let (sandboxes, vcs) = bound_orchestrator(
+            records.path().to_path_buf(),
+            Arc::clone(&backend),
+            bound_root.path().to_path_buf(),
+        );
+        sandboxes.create("demo").await.expect("create");
+        backend.mark_missing("demo");
+
+        let performed = sandboxes
+            .exec("demo", &["true".to_string()])
+            .await
+            .expect("the command repairs the sandbox");
+        assert_eq!(performed.value.exit_code, 0);
+        assert!(
+            vcs.materialised().is_empty(),
+            "a bound repair materialises nothing"
+        );
+        assert_eq!(vcs.bound().len(), 2, "create and repair both ask");
+
+        let stored = metadata_store::load_sandbox_at(records.path(), "demo")
+            .expect("readable")
+            .expect("persisted");
+        let metadata_store::LoadedSandbox::Current(stored) = stored else {
+            panic!("a record written now is current");
+        };
+        assert_eq!(
+            stored.binding(),
+            WorkspaceBinding::Bound,
+            "the record keeps the binding it was created with"
         );
     }
 

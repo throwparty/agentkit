@@ -119,7 +119,7 @@ Add `binding: Option<WorkspaceBinding>` with `#[serde(default)]` to `StoredSandb
 | Depends On | T-003,T-008 |
 | References | mask-contract,bound-directory,derived-path,failed-create |
 
-### T-010: Branch repair on the record
+### T-010: [x] Branch repair on the record
 
 `repair` reads the record's binding rather than the configuration, materialises only under `Copied`, and preserves the binding when it rewrites the record, as `remote` already is.
 
