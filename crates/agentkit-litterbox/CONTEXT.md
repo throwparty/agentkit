@@ -46,8 +46,11 @@ Normative terminology for the Litterbox component. It covers the sandbox model t
 - **Record** — the persisted `StoredSandbox`: the contract record (name, backend, project, backend-owned payload) plus the branch and the SCM mode. Persistence keeps SCM vocabulary out of the contract.
 - **Unreadable record** — a record that cannot be read as a `StoredSandbox` is reported as corrupt; it is never adopted, and no record is synthesised from a name.
 - **User configuration** — the person's choice of backend, that backend's settings, setup consent and where forwarded ports bind, in `~/.config/agentkit/litterbox/config.toml`. The only place a mechanism is chosen.
-- **Local override** — the untracked `.agentkit/litterbox/config.local.toml`, carrying project-owned replacements only; machine settings and consent are rejected there.
-- **Project configuration** — what the project needs: its provisioning definitions, the backends its provisioning supports, expected ports and snapshot mode. It cannot select a backend or dictate confinement.
+- **Workspace setting** — a machine decision that applies to one workspace rather than to the whole machine, such as the VCS binding. It lives in the local override, and the committed project file may not set it.
+- **Local override** — the untracked `.agentkit/litterbox/config.local.toml`, carrying project-owned replacements and workspace settings; machine-wide settings and consent are rejected there.
+- **Project configuration** — what the project needs: its provisioning definitions, the backends its provisioning supports and the ports it expects. It cannot select a backend or dictate confinement.
+- **Workspace binding** — whether a sandbox gets a private copy of its workspace or a host directory bound in, with the VCS metadata masked. It is a workspace setting, is recorded per sandbox, and has no default.
+- **Snapshot mode** — whether snapshots go to a branch in the user's repository or to a bare clone. It is a workspace setting under `[vcs.git]`, not project configuration.
 
 ## Upstream vocabulary
 

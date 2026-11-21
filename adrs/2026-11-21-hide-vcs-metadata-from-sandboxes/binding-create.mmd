@@ -1,0 +1,17 @@
+flowchart TD
+  start([create]) --> cfg{binding configured?}
+  cfg -- no --> r1["configuration error naming the key and the file"]
+  cfg -- yes --> cap{"can the VCS honour it?"}
+  cap -- no --> r2["unsupported refusal naming the tool and the binding"]
+  cap -- yes --> prep["vcs.prepare creates the branch"]
+  prep --> mask["vcs.masked_paths returns .git and .jj"]
+  mask --> which{binding}
+  which -- copied --> stage["materialise the base revision into a TempDir"]
+  which -- bound --> root["vcs.bound_root returns the host directory"]
+  stage --> req["CreateRequest.workspace carries the source, the binding and the mask"]
+  root --> req
+  req --> be{can the backend mask?}
+  be -- no --> r3["unsupported refusal naming the backend and the remedy"]
+  be -- yes --> make["backend.create binds the source and masks each path"]
+  make --> rec["the record stores the binding"]
+  rec --> done([sandbox])
