@@ -564,10 +564,12 @@ impl Sandboxes {
                     Err(error) => return Err(contract_error(error)),
                 }
 
-                if stored.remote
+                // A bound sandbox owns a host directory, so a delete that
+                // released one asks the backend to sweep whatever is left.
+                if (stored.remote || stored.binding() == WorkspaceBinding::Bound)
                     && let Err(error) = self.vcs.prune()
                 {
-                    tracing::warn!(project = %self.project_slug, %error, "the bare clone may remain");
+                    tracing::warn!(project = %self.project_slug, %error, "project storage may remain");
                 }
 
                 metadata_store::remove_sandbox_at(&self.records_dir, &stored.sandbox.name)?;
@@ -1823,6 +1825,28 @@ mod seam_tests {
         )
         .with_binding(Some(WorkspaceBinding::Bound));
         (sandboxes, vcs)
+    }
+
+    #[tokio::test]
+    async fn delete_prunes_for_a_bound_record_even_when_it_is_not_remote() {
+        let records = TempDir::new().expect("records");
+        let bound_root = TempDir::new().expect("bound root");
+        let backend = Arc::new(TestBackend::new());
+        let (sandboxes, vcs) = bound_orchestrator(
+            records.path().to_path_buf(),
+            backend,
+            bound_root.path().to_path_buf(),
+        );
+
+        sandboxes.create("demo").await.expect("create");
+        assert_eq!(vcs.prunes(), 0, "create does not prune");
+
+        sandboxes.delete("demo", true).await.expect("delete");
+        assert_eq!(
+            vcs.prunes(),
+            1,
+            "a bound sandbox asks the backend to sweep what it left"
+        );
     }
 
     #[tokio::test]

@@ -91,6 +91,11 @@ pub trait Vcs: Send + Sync {
     fn expose(&self, name: &str) -> Result<bool, Error>;
 
     /// Release project storage that is no longer needed.
+    ///
+    /// A backend that keeps a bare clone destroys it once no sandbox branch
+    /// remains. A backend that owns a host directory per bound sandbox removes
+    /// the directories whose branches are gone, because the branch is the
+    /// authoritative record of which sandboxes exist.
     fn prune(&self) -> Result<(), Error>;
 
     /// The revision at the workspace branch tip.

@@ -132,7 +132,7 @@ Add `binding: Option<WorkspaceBinding>` with `#[serde(default)]` to `StoredSandb
 | Depends On | T-009 |
 | References | record-decides |
 
-### T-011: Widen prune and sweep orphans
+### T-011: [x] Widen prune and sweep orphans
 
 The `prune` call condition at `service.rs:478-482` widens from `stored.remote` to `stored.remote || stored.binding() == Bound`. `GitVcs::prune` keeps its existing bare-clone guard and gains removal of bound directories that have no record.
 
