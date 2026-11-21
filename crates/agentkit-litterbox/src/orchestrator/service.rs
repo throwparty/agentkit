@@ -18,7 +18,7 @@ use crate::provision::prepare::{self, PrepareContext, PrepareError, SystemRunner
 use crate::sandbox::contract::{
     ContributionSupport, CreateMode, CreateRequest, Error, Execution, Forward, Inspection,
     ProvisionStep, ProvisioningClass, ProvisioningFailure, RequestedPort, ResolvedStep,
-    SandboxRecord, SandboxStatus, Workspace,
+    SandboxRecord, SandboxStatus, Workspace, WorkspaceBinding,
 };
 use crate::sandbox::selected::Selected;
 use crate::vcs::{Error as VcsError, Prepared, Vcs, Workspace as VcsWorkspace};
@@ -33,6 +33,7 @@ pub struct Sandboxes {
     config: Config,
     vcs: Arc<dyn Vcs>,
     remote: bool,
+    binding: Option<WorkspaceBinding>,
     project_slug: String,
     records_dir: std::path::PathBuf,
     fixed: Option<Selected>,
@@ -62,7 +63,12 @@ pub enum PausedPolicy {
 
 impl Sandboxes {
     /// Build an orchestrator over an explicit backend.
-    pub fn with_vcs(config: Config, vcs: Arc<dyn Vcs>, remote: bool) -> Result<Self, SandboxError> {
+    pub fn with_vcs(
+        config: Config,
+        vcs: Arc<dyn Vcs>,
+        remote: bool,
+        binding: Option<WorkspaceBinding>,
+    ) -> Result<Self, SandboxError> {
         let project_slug = resolve_project_slug(&config)?;
         let records_dir = metadata_store::directory(&project_slug);
 
@@ -70,10 +76,19 @@ impl Sandboxes {
             config,
             vcs,
             remote,
+            binding,
             project_slug,
             records_dir,
             fixed: None,
         })
+    }
+
+    /// The workspace binding this machine configured, if any.
+    ///
+    /// `None` means no section chose one, and `create` refuses rather than
+    /// defaulting.
+    pub fn binding(&self) -> Option<WorkspaceBinding> {
+        self.binding
     }
 
     /// Build an orchestrator over an explicit record directory and backend,
@@ -92,6 +107,7 @@ impl Sandboxes {
             config,
             vcs,
             remote,
+            binding: None,
             project_slug,
             records_dir,
             fixed: Some(fixed),

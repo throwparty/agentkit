@@ -7,6 +7,7 @@
 use serde::Deserialize;
 
 use crate::domain::ScmMode;
+use crate::sandbox::contract::WorkspaceBinding;
 
 /// Git's keys.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
@@ -15,6 +16,9 @@ pub struct GitVcsConfig {
     /// Whether snapshots go to a branch or a bare clone.
     #[serde(rename = "snapshot-mode", default)]
     pub snapshot_mode: Option<ScmMode>,
+    /// How a sandbox receives its workspace.
+    #[serde(default)]
+    pub binding: Option<WorkspaceBinding>,
 }
 
 impl GitVcsConfig {
@@ -34,6 +38,7 @@ impl GitVcsConfig {
 mod tests {
     use super::GitVcsConfig;
     use crate::domain::ScmMode;
+    use crate::sandbox::contract::WorkspaceBinding;
 
     fn section(text: &str) -> toml::Value {
         toml::from_str(text).expect("section")
@@ -44,6 +49,30 @@ mod tests {
         let config =
             GitVcsConfig::from_section(&section("snapshot-mode = 'direct'")).expect("config");
         assert_eq!(config.snapshot_mode, Some(ScmMode::Direct));
+    }
+
+    #[test]
+    fn the_binding_parses_and_an_absent_one_is_none() {
+        let config = GitVcsConfig::from_section(&section("binding = 'bound'")).expect("config");
+        assert_eq!(config.binding, Some(WorkspaceBinding::Bound));
+
+        let config = GitVcsConfig::from_section(&section("binding = 'copied'")).expect("config");
+        assert_eq!(config.binding, Some(WorkspaceBinding::Copied));
+
+        let config =
+            GitVcsConfig::from_section(&toml::Value::Table(Default::default())).expect("config");
+        assert_eq!(config.binding, None, "an absent binding is not a default");
+    }
+
+    #[test]
+    fn an_unknown_binding_is_refused_naming_the_values() {
+        let error =
+            GitVcsConfig::from_section(&section("binding = 'hardlink'")).expect_err("unknown");
+        assert!(error.contains("vcs.git"), "{error}");
+        assert!(
+            error.contains("copied") && error.contains("bound"),
+            "{error}"
+        );
     }
 
     #[test]

@@ -53,6 +53,18 @@ pub enum BindingSupport {
     Both,
 }
 
+impl BindingSupport {
+    /// Whether this support can present the workspace the given way.
+    pub fn honours(self, binding: WorkspaceBinding) -> bool {
+        match (self, binding) {
+            (Self::Both, _) => true,
+            (Self::Copied, WorkspaceBinding::Copied) => true,
+            (Self::Bound, WorkspaceBinding::Bound) => true,
+            (Self::Copied | Self::Bound, _) => false,
+        }
+    }
+}
+
 /// A workspace prepared for materialisation inside a sandbox.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct Workspace {

@@ -67,7 +67,7 @@ Swap `git` for `vcs` in `CONFIG_KEYS`. Add a `vcs` clause to `reject_project_key
 | Depends On | T-004 |
 | References | config-key,project-cannot-set |
 
-### T-006: Read the section in the composition point
+### T-006: [x] Read the section in the composition point
 
 `compose::open` reads `snapshot-mode` from `vcs_settings["git"]` instead of `config.git`, parses `binding` from the same table, and passes `Some(binding)` or `None` to `Sandboxes::with_vcs`. An absent key is `None`. An unparseable value is a configuration error naming the key and the accepted values.
 
