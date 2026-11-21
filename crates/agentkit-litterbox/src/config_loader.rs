@@ -33,7 +33,7 @@ const CONFIG_KEYS: &[&str] = &[
     "project",
     "provision",
     "ports",
-    "git",
+    "vcs",
     "backend",
     "backends",
     "forwarding",
@@ -320,7 +320,7 @@ fn reject_project_keys_in_user(user: &ProjectFile) -> Result<(), ConfigError> {
         .map(|_| "provision".to_string())
         .or_else(|| (user.project != ProjectConfig::default()).then(|| "project".to_string()))
         .or_else(|| (!user.ports.is_empty()).then(|| "ports".to_string()))
-        .or_else(|| user.git.snapshot_mode.is_some().then(|| "git".to_string()))
+        .or_else(|| (!user.vcs.is_empty()).then(|| "vcs".to_string()))
         .or(backend_provision);
     if let Some(key) = key {
         return Err(ConfigError::ParseError(format!(
@@ -810,7 +810,7 @@ run = "true"
 name = "web"
 target = 8080
 
-[git]
+[vcs.git]
 snapshot-mode = "direct"
 
 [backends.docker]
@@ -1428,7 +1428,7 @@ bind = "0.0.0.0"
             ),
             ("[project]\nbackends = ['docker']\n", "project"),
             ("[[ports]]\nname = 'web'\ntarget = 8080\n", "ports"),
-            ("[git]\nsnapshot-mode = 'remote'\n", "git"),
+            ("[vcs.git]\nsnapshot-mode = 'remote'\n", "vcs"),
         ] {
             let user: ProjectFile = toml::from_str(text).expect("user parses");
             let error = super::reject_project_keys_in_user(&user)

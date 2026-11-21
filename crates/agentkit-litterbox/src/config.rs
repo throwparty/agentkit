@@ -10,7 +10,6 @@ use std::collections::{BTreeMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::domain::ScmMode;
 use crate::sandbox::contract::{ProvisionStep, StoreView};
 
 /// A port the project expects to be forwarded.
@@ -50,15 +49,6 @@ pub struct ProjectConfig {
     pub backends: Option<Vec<String>>,
 }
 
-/// How sandboxes are made from the repository.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct GitConfig {
-    /// Whether snapshots go to a branch or a bare clone.
-    #[serde(rename = "snapshot-mode", default)]
-    pub snapshot_mode: Option<ScmMode>,
-}
-
 /// The merged configuration.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Config {
@@ -85,8 +75,8 @@ pub struct Config {
     pub allow_project_setup: bool,
     /// Projects allowed to run their own setup command, by namespace.
     pub allowed_projects: Vec<String>,
-    /// How sandboxes are made.
-    pub git: GitConfig,
+    /// Workspace-owned VCS settings, keyed by tool name.
+    pub vcs_settings: BTreeMap<String, toml::Value>,
     /// Settings that were accepted but ignored, and why.
     pub notices: Vec<String>,
 }
@@ -360,9 +350,10 @@ pub struct ProjectFile {
     /// Ports the project expects.
     #[serde(default)]
     pub ports: Vec<PortRequest>,
-    /// How sandboxes are made.
+    /// One untyped section per VCS tool. A workspace setting, never the
+    /// project's.
     #[serde(default)]
-    pub git: GitConfig,
+    pub vcs: BTreeMap<String, toml::Value>,
     /// The backend the person running the code selected.
     pub backend: Option<String>,
     /// One untyped section per backend.
@@ -462,6 +453,14 @@ pub fn merge(local: ProjectFile, project: ProjectFile) -> Result<Config, ConfigE
         }
     }
 
+    for name in project.vcs.keys() {
+        let name = escaped(name);
+        notices.push(format!(
+            "project configuration configures a VCS ('{name}'); VCS settings are workspace \
+             settings, so they are ignored"
+        ));
+    }
+
     Ok(Config {
         backend: local.backend,
         backend_settings: backends,
@@ -481,9 +480,7 @@ pub fn merge(local: ProjectFile, project: ProjectFile) -> Result<Config, ConfigE
         accept_degraded: local.accept_degraded,
         allow_project_setup: local.allow_project_setup,
         allowed_projects: local.allowed_projects,
-        git: GitConfig {
-            snapshot_mode: local.git.snapshot_mode.or(project.git.snapshot_mode),
-        },
+        vcs_settings: local.vcs,
         notices,
     })
 }
@@ -997,22 +994,48 @@ installable = "./nix"
     }
 
     #[test]
-    fn snapshot_mode_prefers_the_local_file_then_the_project() {
-        let project: ProjectFile =
-            toml::from_str("[git]\nsnapshot-mode = 'direct'\n").expect("project");
-        let config = merge(ProjectFile::default(), project.clone()).expect("merge");
-        assert_eq!(
-            config.git.snapshot_mode,
-            Some(crate::domain::ScmMode::Direct)
-        );
-
+    fn the_local_file_supplies_the_vcs_settings() {
         let local: ProjectFile =
-            toml::from_str("[git]\nsnapshot-mode = 'remote'\n").expect("local");
-        let config = merge(local, project).expect("merge");
+            toml::from_str("[vcs.git]\nsnapshot-mode = 'direct'\n\n[vcs.jj]\nbinding = 'bound'\n")
+                .expect("local");
+        let config = merge(local, ProjectFile::default()).expect("merge");
+
         assert_eq!(
-            config.git.snapshot_mode,
-            Some(crate::domain::ScmMode::Remote)
+            config.vcs_settings["git"]
+                .get("snapshot-mode")
+                .and_then(toml::Value::as_str),
+            Some("direct")
         );
+        assert!(config.vcs_settings.contains_key("jj"));
+        assert!(config.notices.is_empty(), "{:?}", config.notices);
+    }
+
+    #[test]
+    fn a_project_setting_the_vcs_section_is_reported_and_ignored() {
+        let project: ProjectFile =
+            toml::from_str("[vcs.git]\nsnapshot-mode = 'direct'\n").expect("project");
+        let config = merge(ProjectFile::default(), project).expect("merge");
+
+        assert!(
+            config.vcs_settings.is_empty(),
+            "a project table contributes no workspace settings"
+        );
+        assert!(
+            config
+                .notices
+                .iter()
+                .any(|notice| notice.contains("VCS") && notice.contains("ignored")),
+            "{:?}",
+            config.notices
+        );
+    }
+
+    #[test]
+    fn the_git_table_is_gone() {
+        let error = toml::from_str::<ProjectFile>("[git]\nsnapshot-mode = 'direct'\n")
+            .expect_err("[git] is no longer a key");
+
+        assert!(error.to_string().contains("git"), "{error}");
     }
 
     #[test]
