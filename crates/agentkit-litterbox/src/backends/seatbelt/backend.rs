@@ -20,7 +20,7 @@ use super::workspace;
 use crate::backends::shared::{self, DOWNLOAD_TIMEOUT, UPLOAD_TIMEOUT};
 use crate::sandbox::contract::{
     Backend, ContributionSort, ContributionSupport, CreateMode, CreateRequest, Error, Execution,
-    Inspection, SandboxRecord, Scope, Teardown,
+    Inspection, SandboxRecord, Scope, Teardown, WorkspaceBinding,
 };
 use crate::sandbox::facets::Lifecycle;
 use crate::sandbox::report::{Capability, Check, Readiness, State};
@@ -98,6 +98,20 @@ impl SeatbeltBackend {
                 reason: "the Seatbelt profile emits neither network-bind nor network-inbound"
                     .to_string(),
                 remedy: "remove the declared ports".to_string(),
+            });
+        }
+        // The profile renderer emits allow rules only, so it cannot deny a
+        // path inside the workspace it already allows. A bound workspace
+        // would hand the sandbox its `.git` or `.jj`.
+        if request.workspace.binding == WorkspaceBinding::Bound {
+            return Err(Error::Unsupported {
+                operation: format!("create the sandbox '{}'", request.name),
+                backend: BACKEND.to_string(),
+                primitive: "a deny rule for a path inside the workspace".to_string(),
+                reason: "the Seatbelt profile is an allow-list, so a masked path inside the \
+                         allowed workspace cannot be hidden from the sandbox"
+                    .to_string(),
+                remedy: "use binding = 'copied'".to_string(),
             });
         }
         let readiness = self.readiness_report();
@@ -1758,6 +1772,37 @@ mod tests {
             check.primitive == "the Seatbelt probe"
                 && check.state == crate::sandbox::report::State::Unavailable
         }));
+    }
+
+    #[tokio::test]
+    async fn a_bound_create_is_refused() {
+        let project = "seatbelt-bound-refusal";
+        let source = tempfile::tempdir().expect("source");
+        let state = agentkit_common::data_dir("litterbox")
+            .join("seatbelt")
+            .join(project);
+        let _ = std::fs::remove_dir_all(&state);
+        let backend = SeatbeltBackend::with_helper(
+            settings(),
+            Arc::new(SystemHost::new()),
+            PathBuf::from("/bin/true"),
+        );
+        let mut request = request(source.path(), project);
+        request.workspace =
+            Workspace::bound(source.path().to_path_buf(), vec![PathBuf::from(".git")]);
+
+        let error = backend.create_sandbox(&request).expect_err("cannot mask");
+
+        match error {
+            Error::Unsupported {
+                backend, remedy, ..
+            } => {
+                assert_eq!(backend, super::BACKEND);
+                assert!(remedy.contains("copied"), "{remedy}");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+        assert!(!state.exists(), "no sandbox is made");
     }
 
     #[tokio::test]

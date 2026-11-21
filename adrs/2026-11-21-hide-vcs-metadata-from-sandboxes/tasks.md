@@ -210,7 +210,7 @@ Run a Docker probe for an empty volume at a masked path, both when the bound dir
 | Depends On | T-015 |
 | References | docker-masking,docker-local,no-vcs-data |
 
-### T-017: Refuse in Seatbelt
+### T-017: [x] Refuse in Seatbelt
 
 `backends/seatbelt/backend.rs` reports that it cannot mask and refuses `Bound` with a structured unsupported failure naming the backend, the binding and the remedy. No masking code is written here in this change.
 
