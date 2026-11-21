@@ -223,7 +223,7 @@ Run a Docker probe for an empty volume at a masked path, both when the bound dir
 | Depends On | T-003 |
 | References | mask-refusal,cannot-mask-refuses |
 
-### T-018: Update the configuration reference
+### T-018: [x] Update the configuration reference
 
 `docs/docs/user/litterbox/reference/config.mdx` documents `[git] snapshot-mode`. Replace it with `[vcs.git]` in the local override and document `binding` with its two values and the fact that `create` refuses without it.
 
