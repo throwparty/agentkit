@@ -89,6 +89,7 @@ pub struct TestBackend {
     fail_create: bool,
     provision_failure: Option<String>,
     workspace: String,
+    refuse_bound: bool,
 }
 
 impl Default for TestBackend {
@@ -112,6 +113,7 @@ impl TestBackend {
             fail_create: false,
             provision_failure: None,
             workspace: "/sandbox".to_string(),
+            refuse_bound: false,
         }
     }
 
@@ -129,6 +131,7 @@ impl TestBackend {
             fail_create: true,
             provision_failure: None,
             workspace: "/sandbox".to_string(),
+            refuse_bound: false,
         }
     }
 
@@ -146,6 +149,7 @@ impl TestBackend {
             fail_create: false,
             provision_failure: Some(identity.to_string()),
             workspace: "/sandbox".to_string(),
+            refuse_bound: false,
         }
     }
 
@@ -180,6 +184,17 @@ impl TestBackend {
             })
             .collect();
         self
+    }
+
+    /// A backend that records the mask it was given and refuses to mask.
+    ///
+    /// Stands in for a mechanism that cannot hide a bound workspace's VCS
+    /// metadata, such as Seatbelt today.
+    pub fn refusing_bound() -> Self {
+        Self {
+            refuse_bound: true,
+            ..Self::new()
+        }
     }
 
     /// The create requests this backend has seen, in order.
@@ -236,6 +251,18 @@ impl Backend for TestBackend {
                 .lock()
                 .map_err(|_| Error::failed("test backend lock poisoned"))?
                 .push(request.clone());
+            if self.refuse_bound
+                && request.workspace.binding == crate::sandbox::contract::WorkspaceBinding::Bound
+            {
+                return Err(Error::Unsupported {
+                    operation: format!("bind the workspace for sandbox '{}'", request.name),
+                    backend: "test".to_string(),
+                    primitive: "a masked host directory".to_string(),
+                    reason: "this mechanism cannot hide a bound workspace's VCS metadata"
+                        .to_string(),
+                    remedy: "use binding = 'copied'".to_string(),
+                });
+            }
             if self.fail_create {
                 return Err(Error::failed("the mechanism refused to create the sandbox"));
             }

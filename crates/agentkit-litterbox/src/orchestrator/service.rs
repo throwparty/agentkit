@@ -1850,6 +1850,34 @@ mod seam_tests {
     }
 
     #[tokio::test]
+    async fn a_backend_that_cannot_mask_refuses_bound() {
+        let records = TempDir::new().expect("records");
+        let bound_root = TempDir::new().expect("bound root");
+        let backend = Arc::new(TestBackend::refusing_bound());
+        let (sandboxes, _vcs) = bound_orchestrator(
+            records.path().to_path_buf(),
+            Arc::clone(&backend),
+            bound_root.path().to_path_buf(),
+        );
+
+        let error = sandboxes.create("demo").await.expect_err("cannot mask");
+        let message = error.to_string();
+        assert!(message.contains("mask"), "{message}");
+        assert!(message.contains("copied"), "the remedy is named: {message}");
+        assert_eq!(
+            backend.requests().len(),
+            1,
+            "the refusal happens at the backend, which saw the request"
+        );
+        assert!(
+            metadata_store::load_sandbox_at(records.path(), "demo")
+                .expect("readable")
+                .is_none(),
+            "no record survives the refusal"
+        );
+    }
+
+    #[tokio::test]
     async fn a_bound_create_binds_the_host_directory_and_masks_the_metadata() {
         let records = TempDir::new().expect("records");
         let bound_root = TempDir::new().expect("bound root");
