@@ -80,7 +80,7 @@ Swap `git` for `vcs` in `CONFIG_KEYS`. Add a `vcs` clause to `reject_project_key
 | Depends On | T-005 |
 | References | config-key,no-default |
 
-### T-007: Record the binding per sandbox
+### T-007: [x] Record the binding per sandbox
 
 Add `binding: Option<WorkspaceBinding>` with `#[serde(default)]` to `StoredSandbox`, plus an accessor returning `Copied` for `None`. `create` and `repair` write the accessor's value. `LoadedSandbox` stays unchanged, so a record without the field is still `Current`.
 

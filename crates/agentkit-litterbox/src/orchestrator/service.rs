@@ -194,6 +194,7 @@ impl Sandboxes {
             sandbox: record.clone(),
             branch_name,
             remote: self.remote,
+            binding: self.binding,
         };
 
         if let Err(error) =
@@ -365,6 +366,7 @@ impl Sandboxes {
             sandbox: record.clone(),
             branch_name: stored.branch_name.clone(),
             remote: stored.remote,
+            binding: stored.binding,
         };
         if let Err(error) =
             metadata_store::store_sandbox_at(&self.records_dir, &updated.sandbox.name, &updated)
@@ -1582,6 +1584,7 @@ mod seam_tests {
             },
             branch_name: format!("litterbox/{name}"),
             remote: false,
+            binding: None,
         }
     }
 

@@ -22,6 +22,21 @@ pub struct StoredSandbox {
     pub branch_name: String,
     /// Whether the branch lives in a bare clone rather than the working repo.
     pub remote: bool,
+    /// How the workspace was presented. A record written before the choice
+    /// existed has no field, which is a legacy fact rather than a default.
+    #[serde(default)]
+    pub binding: Option<crate::sandbox::contract::WorkspaceBinding>,
+}
+
+impl StoredSandbox {
+    /// The binding this sandbox was created with.
+    ///
+    /// A record without the field predates the choice, and it was created as a
+    /// private copy, so it reads as `Copied` without being rewritten.
+    pub fn binding(&self) -> crate::sandbox::contract::WorkspaceBinding {
+        self.binding
+            .unwrap_or(crate::sandbox::contract::WorkspaceBinding::Copied)
+    }
 }
 
 /// What a metadata file turned out to be.
@@ -217,7 +232,7 @@ mod record_tests {
     use tempfile::TempDir;
 
     use super::{LoadedSandbox, StoredSandbox, load_sandbox_in, remove_in, store_value_in};
-    use crate::sandbox::contract::SandboxRecord;
+    use crate::sandbox::contract::{SandboxRecord, WorkspaceBinding};
 
     fn stored() -> StoredSandbox {
         StoredSandbox {
@@ -229,6 +244,7 @@ mod record_tests {
             },
             branch_name: "litterbox/demo".to_string(),
             remote: false,
+            binding: None,
         }
     }
 
@@ -243,6 +259,53 @@ mod record_tests {
                 assert!(reason.contains("filed-as"), "{reason}");
             }
             other => panic!("expected a corrupt record, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_record_without_a_binding_reads_as_copied() {
+        assert!(stored().binding.is_none(), "the fixture is a legacy record");
+        assert_eq!(stored().binding(), WorkspaceBinding::Copied);
+    }
+
+    #[test]
+    fn a_legacy_record_loads_and_is_never_rewritten() {
+        let dir = TempDir::new().expect("tempdir");
+        store_value_in(dir.path(), "demo", &stored()).expect("store");
+        let path = dir.path().join("demo.toml");
+        let before = std::fs::read_to_string(&path).expect("read");
+        assert!(!before.contains("binding"), "{before}");
+
+        let loaded = load_sandbox_in(dir.path(), "demo")
+            .expect("load")
+            .expect("present");
+        let LoadedSandbox::Current(current) = loaded else {
+            panic!("expected a current record");
+        };
+
+        assert_eq!(current.binding(), WorkspaceBinding::Copied);
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read"),
+            before,
+            "loading does not rewrite the record"
+        );
+    }
+
+    #[test]
+    fn a_recorded_binding_round_trips() {
+        let dir = TempDir::new().expect("tempdir");
+        let mut bound = stored();
+        bound.binding = Some(WorkspaceBinding::Bound);
+        store_value_in(dir.path(), "demo", &bound).expect("store");
+
+        match load_sandbox_in(dir.path(), "demo")
+            .expect("load")
+            .expect("present")
+        {
+            LoadedSandbox::Current(current) => {
+                assert_eq!(current.binding(), WorkspaceBinding::Bound);
+            }
+            other => panic!("expected a current record, got {other:?}"),
         }
     }
 
