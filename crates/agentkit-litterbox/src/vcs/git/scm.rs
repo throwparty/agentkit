@@ -6,13 +6,13 @@ use std::sync::{Arc, Mutex};
 use git2::{BranchType, ObjectType, Repository};
 
 use crate::domain::{SandboxError, ScmMode, slugify};
-use crate::sandbox::contract::SnapshotSelector;
+use crate::sandbox::contract::{BindingSupport, SnapshotSelector};
 use crate::vcs::git_common::GitError;
 use crate::vcs::git_common::archive;
 pub use crate::vcs::git_common::{SnapshotFilter, branch_name_for};
 use crate::vcs::{
-    BindingSupport, Capabilities, Conflict, ConflictModel, ConflictSides, Error as VcsError,
-    ExportSupport, HistoryPolicy, Merge, Prepared, RestoreMode, Revision, TreeId, Vcs, Workspace,
+    Capabilities, Conflict, ConflictModel, ConflictSides, Error as VcsError, ExportSupport,
+    HistoryPolicy, Merge, Prepared, RestoreMode, Revision, TreeId, Vcs, Workspace,
 };
 
 /// How many times a snapshot may rebuild its commit while another moves the ref.
