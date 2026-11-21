@@ -42,6 +42,16 @@ pub enum WorkspaceBinding {
     Bound,
 }
 
+impl WorkspaceBinding {
+    /// The stable name a surface reports and configuration accepts.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Copied => "copied",
+            Self::Bound => "bound",
+        }
+    }
+}
+
 /// How a backend can present its workspace to a sandbox.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BindingSupport {

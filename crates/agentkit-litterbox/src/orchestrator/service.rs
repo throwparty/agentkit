@@ -107,11 +107,20 @@ impl Sandboxes {
             config,
             vcs,
             remote,
-            binding: None,
+            // Tests model a machine that configured its workspace; a test
+            // about the missing key clears it with `with_binding`.
+            binding: Some(WorkspaceBinding::Copied),
             project_slug,
             records_dir,
             fixed: Some(fixed),
         }
+    }
+
+    /// Set or clear the configured binding, for tests about the refusal paths.
+    #[cfg(test)]
+    pub fn with_binding(mut self, binding: Option<WorkspaceBinding>) -> Self {
+        self.binding = binding;
+        self
     }
 
     /// The project these sandboxes belong to.
@@ -124,10 +133,37 @@ impl Sandboxes {
         &self.records_dir
     }
 
+    /// The binding this create will use.
+    ///
+    /// A missing key is a configuration error rather than a default, and a
+    /// combination the VCS cannot honour is refused before anything is made.
+    fn configured_binding(&self) -> Result<WorkspaceBinding, Error> {
+        let Some(binding) = self.binding else {
+            return Err(Error::Misconfigured {
+                message: "no workspace binding is configured; set `binding = 'copied'` or \
+                          `binding = 'bound'` under [vcs.git] in \
+                          .agentkit/litterbox/config.local.toml"
+                    .to_string(),
+            });
+        };
+
+        if !self.vcs.capabilities().bindings.honours(binding) {
+            return Err(Error::Misconfigured {
+                message: format!(
+                    "the configured workspace binding '{}' is not one this VCS can honour; \
+                     set `binding = 'copied'` under [vcs.git] in \
+                     .agentkit/litterbox/config.local.toml, or select a VCS that binds",
+                    binding.as_str()
+                ),
+            });
+        }
+
+        Ok(binding)
+    }
+
     /// Create a sandbox, or repair one whose compute is missing.
     pub async fn create(&self, name: &str) -> Result<Performed<SandboxRecord>, Error> {
         let name = self.valid_name(name)?;
-
         if let Some(loaded) = metadata_store::load_sandbox_at(&self.records_dir, &name)? {
             match loaded {
                 LoadedSandbox::Current(stored) => {
@@ -149,6 +185,7 @@ impl Sandboxes {
             }
         }
 
+        let binding = self.configured_binding()?;
         let selected = self.selected_for_operation("create a sandbox").await?;
         let provision = self.resolve_provision(&name, &selected).await?;
 
@@ -194,7 +231,7 @@ impl Sandboxes {
             sandbox: record.clone(),
             branch_name,
             remote: self.remote,
-            binding: self.binding,
+            binding: Some(binding),
         };
 
         if let Err(error) =
@@ -1492,7 +1529,7 @@ mod seam_tests {
     use crate::config::Config;
     use crate::metadata_store::{self, StoredSandbox};
     use crate::sandbox::contract::{
-        Error, ProvisionStep, ProvisioningClass, ResolvedStep, SandboxRecord,
+        Error, ProvisionStep, ProvisioningClass, ResolvedStep, SandboxRecord, WorkspaceBinding,
     };
     use crate::sandbox::report::State;
     use crate::sandbox::selected::Selected;
@@ -1685,6 +1722,61 @@ mod seam_tests {
             .delete("nothing-here", false)
             .await
             .expect("a retried delete succeeds");
+    }
+
+    #[tokio::test]
+    async fn create_refuses_when_no_binding_is_configured() {
+        let dir = scratch();
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let (sandboxes, vcs) =
+            orchestrator(dir.path(), records.path().to_path_buf(), backend, None);
+        let sandboxes = sandboxes.with_binding(None);
+
+        let error = sandboxes.create("demo").await.expect_err("no binding");
+        let message = error.to_string();
+        assert!(message.contains("binding"), "{message}");
+        assert!(message.contains("config.local.toml"), "{message}");
+        assert!(
+            vcs.prepared().is_empty(),
+            "nothing is made when the key is missing"
+        );
+    }
+
+    #[tokio::test]
+    async fn bound_is_refused_when_the_vcs_only_copies() {
+        let dir = scratch();
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let (sandboxes, vcs) =
+            orchestrator(dir.path(), records.path().to_path_buf(), backend, None);
+        let sandboxes = sandboxes.with_binding(Some(WorkspaceBinding::Bound));
+
+        let error = sandboxes.create("demo").await.expect_err("cannot bind");
+        let message = error.to_string();
+        assert!(message.contains("bound"), "{message}");
+        assert!(message.contains("copied"), "{message}");
+        assert!(
+            vcs.prepared().is_empty(),
+            "nothing is made when the combination is refused"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_and_delete_do_not_need_a_configured_binding() {
+        let dir = scratch();
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let (sandboxes, _vcs) =
+            orchestrator(dir.path(), records.path().to_path_buf(), backend, None);
+        sandboxes
+            .create("demo")
+            .await
+            .expect("the helper configures copied");
+
+        let sandboxes = sandboxes.with_binding(None);
+        assert_eq!(sandboxes.list().expect("list").sandboxes.len(), 1);
+        sandboxes.delete("demo", true).await.expect("delete");
     }
 
     #[tokio::test]

@@ -93,7 +93,7 @@ Add `binding: Option<WorkspaceBinding>` with `#[serde(default)]` to `StoredSandb
 | Depends On | T-001 |
 | References | record-field,legacy-records,legacy-loads |
 
-### T-008: Refuse a missing key and an unhonourable combination
+### T-008: [x] Refuse a missing key and an unhonourable combination
 
 `Sandboxes` gains `binding: Option<WorkspaceBinding>` beside `remote`. `create` refuses when it is `None`, naming the key, the accepted values and the file. `create` also refuses when `vcs.capabilities().bindings` cannot honour the configured binding, naming the tool and the binding. `with_vcs` and `for_test` take the new argument.
 
