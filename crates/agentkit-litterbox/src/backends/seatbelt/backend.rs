@@ -1083,9 +1083,7 @@ mod tests {
         let request = CreateRequest {
             name: name.to_string(),
             project_slug: project,
-            workspace: Workspace {
-                source: source.path().to_path_buf(),
-            },
+            workspace: Workspace::copied(source.path().to_path_buf()),
             provision,
             forward_bind: "127.0.0.1".to_string(),
             ports: Vec::new(),
@@ -1111,9 +1109,7 @@ mod tests {
         CreateRequest {
             name: "one".to_string(),
             project_slug: project.to_string(),
-            workspace: Workspace {
-                source: source.to_path_buf(),
-            },
+            workspace: Workspace::copied(source.to_path_buf()),
             provision: Vec::new(),
             forward_bind: "127.0.0.1".to_string(),
             ports: Vec::new(),
@@ -1784,9 +1780,7 @@ mod tests {
         let ports = CreateRequest {
             name: "one".to_string(),
             project_slug: project.clone(),
-            workspace: Workspace {
-                source: source.path().to_path_buf(),
-            },
+            workspace: Workspace::copied(source.path().to_path_buf()),
             provision: Vec::new(),
             forward_bind: "127.0.0.1".to_string(),
             ports: vec![crate::sandbox::contract::RequestedPort {
@@ -1804,9 +1798,7 @@ mod tests {
         let bad_tag = CreateRequest {
             name: "with space".to_string(),
             project_slug: project.clone(),
-            workspace: Workspace {
-                source: source.path().to_path_buf(),
-            },
+            workspace: Workspace::copied(source.path().to_path_buf()),
             provision: Vec::new(),
             forward_bind: "127.0.0.1".to_string(),
             ports: Vec::new(),
@@ -1820,9 +1812,7 @@ mod tests {
         let request = CreateRequest {
             name: "one".to_string(),
             project_slug: project.clone(),
-            workspace: Workspace {
-                source: source.path().to_path_buf(),
-            },
+            workspace: Workspace::copied(source.path().to_path_buf()),
             provision: Vec::new(),
             forward_bind: "127.0.0.1".to_string(),
             ports: Vec::new(),
@@ -1859,9 +1849,7 @@ mod tests {
         let request = CreateRequest {
             name: name.to_string(),
             project_slug: project.clone(),
-            workspace: Workspace {
-                source: source.path().to_path_buf(),
-            },
+            workspace: Workspace::copied(source.path().to_path_buf()),
             provision: Vec::new(),
             forward_bind: "127.0.0.1".to_string(),
             ports: Vec::new(),

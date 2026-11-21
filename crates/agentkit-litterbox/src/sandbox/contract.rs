@@ -58,6 +58,34 @@ pub enum BindingSupport {
 pub struct Workspace {
     /// Host directory holding the tree to materialise.
     pub source: PathBuf,
+    /// Whether the backend receives a copy or binds the directory.
+    pub binding: WorkspaceBinding,
+    /// Paths under the workspace the sandbox must not see, relative to the
+    /// workspace root.
+    pub masked_paths: Vec<PathBuf>,
+}
+
+impl Workspace {
+    /// A workspace the sandbox receives as a private copy.
+    pub fn copied(source: impl Into<PathBuf>) -> Self {
+        Self {
+            source: source.into(),
+            binding: WorkspaceBinding::Copied,
+            masked_paths: Vec::new(),
+        }
+    }
+
+    /// A workspace the sandbox sees at its host path.
+    ///
+    /// The masked paths are relative to the workspace root and name the VCS
+    /// metadata the backend has to hide.
+    pub fn bound(source: impl Into<PathBuf>, masked_paths: Vec<PathBuf>) -> Self {
+        Self {
+            source: source.into(),
+            binding: WorkspaceBinding::Bound,
+            masked_paths,
+        }
+    }
 }
 
 /// A port a project expects to have forwarded.
@@ -741,8 +769,19 @@ mod tests {
 
     use super::{
         Backend, Contributions, CreateRequest, Error, Execution, Inspection, ProvisionStep,
-        SandboxRecord, Scope, WorkspaceBinding,
+        SandboxRecord, Scope, Workspace, WorkspaceBinding,
     };
+
+    #[test]
+    fn a_bound_workspace_carries_the_mask_and_a_copied_one_does_not() {
+        let copied = Workspace::copied("/tmp/staged");
+        assert_eq!(copied.binding, WorkspaceBinding::Copied);
+        assert!(copied.masked_paths.is_empty());
+
+        let bound = Workspace::bound("/tmp/checkout", vec![std::path::PathBuf::from(".git")]);
+        assert_eq!(bound.binding, WorkspaceBinding::Bound);
+        assert_eq!(bound.masked_paths, vec![std::path::PathBuf::from(".git")]);
+    }
 
     #[test]
     fn the_binding_round_trips_as_kebab_case() {

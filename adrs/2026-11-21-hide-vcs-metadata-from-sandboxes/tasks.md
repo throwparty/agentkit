@@ -28,7 +28,7 @@ Add `fn bound_root(&self, workspace: &Workspace) -> Result<PathBuf, Error>` to t
 | Depends On | T-001 |
 | References | mask-contract,bound-directory |
 
-### T-003: Carry the binding and the mask in the create request
+### T-003: [x] Carry the binding and the mask in the create request
 
 Extend the contract's `Workspace` with `binding: WorkspaceBinding` and `masked_paths: Vec<PathBuf>`, keeping `source`. The mask is relative to the workspace root, because the sandbox sees the workspace at a backend-specific path. Update the three consumers of `request.workspace.source`: docker, seatbelt and bubblewrap.
 

@@ -955,9 +955,7 @@ mod tests {
         CreateRequest {
             name: "demo".to_string(),
             project_slug: "project-1234".to_string(),
-            workspace: Workspace {
-                source: std::path::PathBuf::from("/tmp/workspace"),
-            },
+            workspace: Workspace::copied(std::path::PathBuf::from("/tmp/workspace")),
             provision: Vec::new(),
             forward_bind: "127.0.0.1".to_string(),
             ports: Vec::new(),
@@ -1408,9 +1406,7 @@ mod tests {
             forward_bind: "127.0.0.1".to_string(),
             name: format!("contract-{}", std::process::id()),
             project_slug: "contract-test".to_string(),
-            workspace: Workspace {
-                source: workspace.path().to_path_buf(),
-            },
+            workspace: Workspace::copied(workspace.path().to_path_buf()),
             ports: vec![RequestedPort {
                 name: "web".to_string(),
                 target: 8080,
@@ -1480,9 +1476,7 @@ mod tests {
             ],
             forward_bind: "127.0.0.1".to_string(),
             project_slug: "contract-test".to_string(),
-            workspace: Workspace {
-                source: workspace.path().to_path_buf(),
-            },
+            workspace: Workspace::copied(workspace.path().to_path_buf()),
             ports: vec![RequestedPort {
                 name: "web".to_string(),
                 target: 8080,
@@ -1557,9 +1551,7 @@ mod tests {
             provision: vec![step_with("broken", "echo boom >&2; exit 7")],
             forward_bind: "127.0.0.1".to_string(),
             project_slug: "contract-test".to_string(),
-            workspace: Workspace {
-                source: workspace.path().to_path_buf(),
-            },
+            workspace: Workspace::copied(workspace.path().to_path_buf()),
             ports: Vec::new(),
             mode: CreateMode::Fresh,
         };
@@ -1605,9 +1597,7 @@ mod tests {
             provision: Vec::new(),
             forward_bind: "127.0.0.1".to_string(),
             project_slug: "contract-test".to_string(),
-            workspace: Workspace {
-                source: workspace.path().to_path_buf(),
-            },
+            workspace: Workspace::copied(workspace.path().to_path_buf()),
             ports: Vec::new(),
             mode: CreateMode::Fresh,
         };
