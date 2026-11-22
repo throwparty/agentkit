@@ -8,8 +8,9 @@ use std::sync::{Arc, Mutex};
 
 use crate::sandbox::contract::{BindingSupport, SnapshotSelector};
 use crate::vcs::{
-    Capabilities, Conflict, ConflictModel, ConflictSides, Error, ExportSupport, HistoryPolicy,
-    Merge, Prepared, RestoreMode, Revision, TreeId, Vcs, Workspace, git_common,
+    Capabilities, Conflict, ConflictModel, ConflictSides, Error, ExportSupport, Finished,
+    HistoryPolicy, Merge, Prepared, Report, RestoreMode, Revision, Staged, TreeId, Vcs, Workspace,
+    git_common,
 };
 
 /// How `prepare` should fail, if at all.
@@ -34,6 +35,15 @@ struct State {
     prunes: usize,
     sandboxes: Vec<String>,
     tip: String,
+    sandbox_tip: String,
+    synced: String,
+    ancestor: bool,
+    observed: usize,
+    ensured: usize,
+    advanced: Vec<String>,
+    tips_set: Vec<String>,
+    synced_set: Vec<String>,
+    sandbox_set: Vec<String>,
     failure: Failure,
     masked: Vec<String>,
     bound: Vec<String>,
@@ -58,6 +68,9 @@ impl TestVcs {
         Self {
             state: Mutex::new(State {
                 tip: "0123456789abcdef".to_string(),
+                sandbox_tip: "sandbox".to_string(),
+                synced: "synced".to_string(),
+                ancestor: true,
                 ..State::default()
             }),
         }
@@ -78,6 +91,30 @@ impl TestVcs {
     /// Make `prepare` fail as if the branch is gone.
     pub fn failing_prepare_not_found(mut self) -> Self {
         self.state_mut().failure = Failure::NotFound;
+        self
+    }
+
+    /// Configure the branch tip.
+    pub fn with_tip(mut self, revision: &str) -> Self {
+        self.state_mut().tip = revision.to_string();
+        self
+    }
+
+    /// Configure the sandbox branch tip.
+    pub fn with_sandbox_tip(mut self, revision: &str) -> Self {
+        self.state_mut().sandbox_tip = revision.to_string();
+        self
+    }
+
+    /// Configure the synced revision.
+    pub fn with_synced(mut self, revision: &str) -> Self {
+        self.state_mut().synced = revision.to_string();
+        self
+    }
+
+    /// Configure whether `is_ancestor` answers yes.
+    pub fn with_ancestor(mut self, ancestor: bool) -> Self {
+        self.state_mut().ancestor = ancestor;
         self
     }
 
@@ -131,6 +168,36 @@ impl TestVcs {
     /// How many times `prune` was called.
     pub fn prunes(&self) -> usize {
         self.state().prunes
+    }
+
+    /// How many times the workspace was observed.
+    pub fn observed(&self) -> usize {
+        self.state().observed
+    }
+
+    /// How many times the refs were initialised.
+    pub fn ensured(&self) -> usize {
+        self.state().ensured
+    }
+
+    /// The revisions passed to `advance`.
+    pub fn advanced(&self) -> Vec<String> {
+        self.state().advanced.clone()
+    }
+
+    /// The revisions passed to `set_tip`.
+    pub fn tips_set(&self) -> Vec<String> {
+        self.state().tips_set.clone()
+    }
+
+    /// The revisions passed to `set_synced`.
+    pub fn synced_set(&self) -> Vec<String> {
+        self.state().synced_set.clone()
+    }
+
+    /// The revisions passed to `set_sandbox_tip`.
+    pub fn sandbox_set(&self) -> Vec<String> {
+        self.state().sandbox_set.clone()
     }
 
     fn state(&self) -> std::sync::MutexGuard<'_, State> {
@@ -269,16 +336,18 @@ impl Vcs for TestVcs {
         Ok(Revision::new(self.state().tip.clone()))
     }
 
-    fn set_tip(&self, _workspace: &Workspace, _revision: &Revision) -> Result<(), Error> {
-        Err(unsupported("set_tip"))
+    fn set_tip(&self, _workspace: &Workspace, revision: &Revision) -> Result<(), Error> {
+        self.state().tips_set.push(revision.as_str().to_string());
+        Ok(())
     }
 
     fn synced(&self, _workspace: &Workspace) -> Result<Revision, Error> {
-        Err(unsupported("synced"))
+        Ok(Revision::new(self.state().synced.clone()))
     }
 
-    fn set_synced(&self, _workspace: &Workspace, _revision: &Revision) -> Result<(), Error> {
-        Err(unsupported("set_synced"))
+    fn set_synced(&self, _workspace: &Workspace, revision: &Revision) -> Result<(), Error> {
+        self.state().synced_set.push(revision.as_str().to_string());
+        Ok(())
     }
 
     fn merge(
@@ -324,6 +393,68 @@ impl Vcs for TestVcs {
     }
 
     fn export(&self) -> Result<(), Error> {
+        Ok(())
+    }
+
+    fn tree(&self, _revision: &Revision) -> Result<TreeId, Error> {
+        Ok(TreeId::new("tree"))
+    }
+
+    fn sandbox_tip(&self, _workspace: &Workspace) -> Result<Revision, Error> {
+        Ok(Revision::new(self.state().sandbox_tip.clone()))
+    }
+
+    fn set_sandbox_tip(&self, _workspace: &Workspace, revision: &Revision) -> Result<(), Error> {
+        self.state().sandbox_set.push(revision.as_str().to_string());
+        Ok(())
+    }
+
+    fn advance(&self, _workspace: &Workspace, revision: &Revision) -> Result<(), Error> {
+        self.state().advanced.push(revision.as_str().to_string());
+        Ok(())
+    }
+
+    fn observe(&self, _staging: &Path) -> Result<TreeId, Error> {
+        self.state().observed += 1;
+        Ok(TreeId::new("workspace"))
+    }
+
+    fn is_ancestor(&self, _ancestor: &Revision, _descendant: &Revision) -> Result<bool, Error> {
+        Ok(self.state().ancestor)
+    }
+
+    fn ensure_refs(&self, _workspace: &Workspace) -> Result<(), Error> {
+        self.state().ensured += 1;
+        Ok(())
+    }
+
+    fn report(&self, _workspace: &Workspace) -> Result<Report, Error> {
+        let state = self.state();
+        Ok(Report {
+            base: Revision::new(state.synced.clone()),
+            branch: Revision::new(state.tip.clone()),
+            sandbox: Revision::new(state.sandbox_tip.clone()),
+            conflicts: Vec::new(),
+            worktree: None,
+            reflog: None,
+        })
+    }
+
+    fn stage(&self, _workspace: &Workspace) -> Result<Staged, Error> {
+        Ok(Staged {
+            path: PathBuf::from("/litterbox/test/reconcile"),
+            branch: Revision::new(self.state().tip.clone()),
+            conflicts: Vec::new(),
+        })
+    }
+
+    fn finish(&self, _workspace: &Workspace) -> Result<Finished, Error> {
+        Ok(Finished::Landed {
+            branch: Revision::new(self.state().tip.clone()),
+        })
+    }
+
+    fn discard_stage(&self, _workspace: &Workspace) -> Result<(), Error> {
         Ok(())
     }
 }

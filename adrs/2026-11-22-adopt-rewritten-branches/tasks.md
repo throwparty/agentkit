@@ -15,7 +15,7 @@ Add `src/orchestrator/source.rs`. Define `Base` and `Workspace` and `MergeAxis` 
 | Depends On |  |
 | References | source-state,tree-identity,the-plan,pure-and-total |
 
-### T-002: Contract additions
+### T-002: [x] Contract additions
 
 Extend `vcs` with `tree` and `sandbox_tip` and `set_sandbox_tip` and `advance` and `observe` and `is_ancestor` and `ensure_refs` and `report` and `stage` and `finish` and `discard_stage`. Add neutral `Report` and `Staged` and `Finished` in `vcs::reconcile`. Implement every method in the `vcs/mod.rs` stub and in `src/testing/vcs.rs`. Git keeps the conflict and history methods unsupported.
 
