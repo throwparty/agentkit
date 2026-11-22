@@ -23,8 +23,9 @@ use crate::sandbox::contract::{
     SandboxRecord, SandboxStatus, Workspace, WorkspaceBinding,
 };
 use crate::sandbox::selected::Selected;
-use crate::vcs::{Error as VcsError, Prepared, Vcs, Workspace as VcsWorkspace};
-
+use crate::vcs::{
+    Error as VcsError, Finished, Prepared, Report, Staged, Vcs, Workspace as VcsWorkspace,
+};
 /// How long host preparation may take before its commands are killed and
 /// reaped. Preparation runs before a backend's create budget starts, so it
 /// carries its own.
@@ -1422,6 +1423,34 @@ impl SandboxIo for Sandboxes {
 }
 
 impl Sandboxes {
+    /// The host-side view of a diverged sandbox.
+    pub async fn report(&self, name: &str) -> Result<Report, Error> {
+        let stored = self.stored(name)?;
+        let workspace = VcsWorkspace::from_branch(&stored.branch_name);
+        self.vcs.report(&workspace).map_err(contract_error)
+    }
+
+    /// Stage the host merge in a linked worktree.
+    pub async fn stage(&self, name: &str) -> Result<Staged, Error> {
+        let stored = self.stored(name)?;
+        let workspace = VcsWorkspace::from_branch(&stored.branch_name);
+        self.vcs.stage(&workspace).map_err(contract_error)
+    }
+
+    /// Finish a staged merge.
+    pub async fn finish(&self, name: &str) -> Result<Finished, Error> {
+        let stored = self.stored(name)?;
+        let workspace = VcsWorkspace::from_branch(&stored.branch_name);
+        self.vcs.finish(&workspace).map_err(contract_error)
+    }
+
+    /// Discard a staging worktree, leaving the branch untouched.
+    pub async fn abort_stage(&self, name: &str) -> Result<(), Error> {
+        let stored = self.stored(name)?;
+        let workspace = VcsWorkspace::from_branch(&stored.branch_name);
+        self.vcs.discard_stage(&workspace).map_err(contract_error)
+    }
+
     /// The ports a sandbox forwards, or the reason its mechanism forwards none.
     pub async fn forwards(&self, name: &str) -> Result<Vec<Forward>, Error> {
         let stored = self.stored(name)?;

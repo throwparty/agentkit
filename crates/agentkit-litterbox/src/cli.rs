@@ -115,6 +115,34 @@ enum Commands {
         command: Vec<String>,
     },
 
+    /// Report how a sandbox's branch and workspace diverged
+    Status {
+        /// Name of the sandbox to report
+        name: String,
+
+        /// Emit structured JSON instead of a table.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Stage or finish a merge with a rewritten sandbox branch
+    Reconcile {
+        /// Name of the sandbox to reconcile
+        name: String,
+
+        /// Land the merge commit on the branch
+        #[arg(long, conflicts_with = "abort")]
+        finish: bool,
+
+        /// Remove the staging worktree and leave the branch
+        #[arg(long, conflicts_with = "finish")]
+        abort: bool,
+
+        /// Emit structured JSON instead of a table.
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Generate reference documentation
     #[command(hide = true)]
     Docgen {
@@ -151,6 +179,13 @@ pub async fn run() -> ExitCode {
         Commands::Delete { name, force } => handle_delete(backend, name, force).await,
         Commands::Remote { name } => handle_remote(backend, name),
         Commands::Shell { name, command } => handle_shell(backend, name, command).await,
+        Commands::Status { name, json } => handle_status(backend, name, json).await,
+        Commands::Reconcile {
+            name,
+            finish,
+            abort,
+            json,
+        } => handle_reconcile(backend, name, finish, abort, json).await,
         Commands::Backends { json } => handle_backends(backend, json).await,
         Commands::Doctor { json } => handle_doctor(backend, json).await,
         Commands::Docgen { kind } => handle_docgen(kind),
@@ -219,8 +254,125 @@ fn handle_remote(backend: Option<String>, name: String) -> ExitCode {
     } else {
         println!("remote '{name}' already points at '{}'", store.display());
     }
-    println!("git fetch {name} '+refs/heads/litterbox/*:refs/remotes/{name}/*'");
+    println!(
+        "git fetch {name} '+refs/heads/litterbox/*:refs/remotes/{name}/*' '+refs/litterbox/workspaces/*:refs/remotes/{name}/workspaces/*'"
+    );
     ExitCode::from(0)
+}
+
+async fn handle_status(backend: Option<String>, name: String, json: bool) -> ExitCode {
+    let config = match load_config(backend) {
+        Ok(config) => config,
+        Err(error) => return report(error),
+    };
+    let sandboxes = match project(config) {
+        Ok(sandboxes) => sandboxes,
+        Err(error) => return report(error),
+    };
+    let divergence = match sandboxes.report(&name).await {
+        Ok(report) => report,
+        Err(error) => return report(error),
+    };
+
+    if json {
+        match serde_json::to_string_pretty(&divergence) {
+            Ok(text) => println!("{text}"),
+            Err(error) => return report(Error::failed(error.to_string())),
+        }
+        return ExitCode::from(0);
+    }
+
+    println!("sandbox   {name}");
+    println!("base      {}", divergence.base);
+    println!("branch    {}", divergence.branch);
+    println!("sandbox   {}", divergence.sandbox);
+    if divergence.conflicts.is_empty() {
+        println!("conflicts none");
+    } else {
+        let paths: Vec<String> = divergence
+            .conflicts
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect();
+        println!("conflicts {}", paths.join(", "));
+    }
+    if let Some(path) = &divergence.worktree {
+        println!("worktree  {}", path.display());
+    }
+    if let Some(reflog) = &divergence.reflog {
+        println!("reflog    {reflog}");
+        println!("previous  git reflog show {reflog}");
+    }
+    ExitCode::from(0)
+}
+
+async fn handle_reconcile(
+    backend: Option<String>,
+    name: String,
+    finish: bool,
+    abort: bool,
+    json: bool,
+) -> ExitCode {
+    let config = match load_config(backend) {
+        Ok(config) => config,
+        Err(error) => return report(error),
+    };
+    let sandboxes = match project(config) {
+        Ok(sandboxes) => sandboxes,
+        Err(error) => return report(error),
+    };
+
+    if abort {
+        return match sandboxes.abort_stage(&name).await {
+            Ok(()) => {
+                println!("removed the staging worktree for '{name}'");
+                ExitCode::from(0)
+            }
+            Err(error) => report(error),
+        };
+    }
+
+    if finish {
+        return match sandboxes.finish(&name).await {
+            Ok(crate::vcs::Finished::Landed { branch }) => {
+                if json {
+                    match serde_json::to_string_pretty(&serde_json::json!({
+                        "landed": true,
+                        "branch": branch,
+                    })) {
+                        Ok(text) => println!("{text}"),
+                        Err(error) => return report(Error::failed(error.to_string())),
+                    }
+                } else {
+                    println!("the branch is now {branch}");
+                }
+                ExitCode::from(0)
+            }
+            Ok(crate::vcs::Finished::Deferred { command }) => {
+                println!("run this in your checkout, then run --finish again: {command}");
+                ExitCode::from(0)
+            }
+            Err(error) => report(error),
+        };
+    }
+
+    match sandboxes.stage(&name).await {
+        Ok(staged) => {
+            if json {
+                match serde_json::to_string_pretty(&staged) {
+                    Ok(text) => println!("{text}"),
+                    Err(error) => return report(Error::failed(error.to_string())),
+                }
+            } else {
+                println!("worktree  {}", staged.path.display());
+                for path in &staged.conflicts {
+                    println!("conflict  {}", path.display());
+                }
+            }
+            ExitCode::from(0)
+        }
+        Err(error) => report(error),
+    }
 }
 
 async fn handle_list(backend: Option<String>) -> ExitCode {

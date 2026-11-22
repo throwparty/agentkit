@@ -106,7 +106,7 @@ Add `src/vcs/git/reconcile.rs`. `report` runs `git merge-tree --write-tree --mer
 | Depends On | T-003,T-004 |
 | References | report,staging-worktree,workflow,recorded-base,no-hooks,second-stage,dirty-worktree,stale-worktree |
 
-### T-009: Operator surface
+### T-009: [x] Operator surface
 
 Add the orchestrator wrappers and the CLI commands `status <name>` and `reconcile <name>` and `reconcile --finish <name>` and `reconcile --abort <name>`. Support `--json` on `status`. Print the worktree path and the conflicting paths.
 
