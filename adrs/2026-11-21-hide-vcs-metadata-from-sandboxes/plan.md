@@ -6,7 +6,7 @@ Move the vocabulary, wire the choice, then mask. The binding is a contract type 
 
 Three assumptions this plan carries rather than settles, because this stage runs no experiments. First, how Docker determines that its daemon shares the host filesystem: `backends/docker/compute.rs:630-667` proves the connection is a local unix socket and refuses `tcp://`, but a socket can still front a daemon whose filesystem is not the host's, and no probe has run. A `sandbox-create` against Docker Desktop, or an inspection of the daemon's reported root, settles it. Second, whether a masked path that is a file rather than a directory can be masked the same way: T-002 probed `.jj`, which is a directory, and bubblewrap's `--tmpfs` needs a directory mountpoint, so a linked worktree's `.git` file is unprobed. A probe with a `git worktree` settles it. Third, whether Docker creates the mountpoint for an empty volume when the bound directory holds no `.git` at all. T-002's probe bound a directory that already contained one.
 
-The Seatbelt question is not an assumption here. `policy.rs:173-199` shows the renderer emits no deny rule, so masking is not implementable today, and FR-010 records that Seatbelt refuses `Bound`. The Darwin change depends on a probe of deny-rule ordering, recorded in the spec's non-goals.
+The Seatbelt question is now settled, not assumed. T-018 proved on this host that SBPL resolves last-match-wins: the renderer emits a deny layer after the allow rules — `(deny file-read* (subpath <ws>/.git))` and `(deny file-write* (subpath <ws>/.git))` per masked path — and the backend accepts `Bound`. The masked entry stays visible but returns `EPERM` on every access, and descendants inherit it.
 
 ## Architecture
 
@@ -47,6 +47,7 @@ Masking is per backend and never shared. Bubblewrap renders a tmpfs over each ma
 | arch-lint 0.11.0 | Path scopes and deny rules; the contract cannot import `vcs`, which is what forces the binding type into the contract |
 | bubblewrap | The Linux mechanism; a tmpfs over a directory, or a bind over an empty file, hides a masked path |
 | Docker | The container mechanism; an empty volume at a masked path hides its contents |
+| Seatbelt | The macOS mechanism; a deny rule emitted after the allow rules makes a masked path present but inaccessible |
 | cargo, clippy, just | Test, lint and fixture gates; `just lint` already runs arch-lint and the negative fixture |
 
 ## Components
@@ -116,9 +117,9 @@ Masks with an empty volume
 
 ### backends/seatbelt
 
-Refuses
+Masks by deny rule
 
-`src/backends/seatbelt/backend.rs` reports that it cannot mask and refuses `Bound` with a structured unsupported failure naming the backend, the binding and the remedy. No masking code is written here in this change. FR-010, AC-004.
+`src/backends/seatbelt/policy.rs` emits a deny layer after the allow rules — `(deny file-read* (subpath <ws>/<masked>))` and `(deny file-write* (subpath <ws>/<masked>))` per masked path — and `backends/seatbelt/backend.rs` accepts `Bound`, passing the masked paths into the profile input. FR-013, AC-006.
 
 
 ### testing
@@ -171,7 +172,7 @@ A machine that sets `[git] snapshot-mode` fails to load with an unknown-field er
 
 A machine with no `[vcs]` section at all keeps working for every command except `create`, which refuses naming the key and the file.
 
-Land as a short stack, in this order, so the tree stays green at each step: the contract types and the `vcs` method, the configuration section and the loader rejection, the record field and the orchestrator branch, then bubblewrap masking, then Docker masking, then the Seatbelt refusal. The Seatbelt step is a refusal and needs no macOS host.
+Land as a short stack, in this order, so the tree stays green at each step: the contract types and the `vcs` method, the configuration section and the loader rejection, the record field and the orchestrator branch, then bubblewrap masking, then Docker masking, then Seatbelt masking. The Seatbelt step masks by deny rule and is written and tested on a macOS host.
 
 Gates, all already in `just lint` or the build workflow: `cargo test -p agentkit-litterbox`, `cargo clippy -p agentkit-litterbox --all-targets -- -D warnings`, `arch-lint check`, and `bash hack/arch-lint-negative.sh`. The negative fixture needs no new rule: no scope changes. A manual smoke on a scratch repository covers create with `copied`, create with `bound` refused for Git, a legacy record loading and listing, and delete removing the state.
 

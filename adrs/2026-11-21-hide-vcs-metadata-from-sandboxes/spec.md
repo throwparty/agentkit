@@ -1,6 +1,6 @@
 # Hide VCS Metadata From Sandboxes
 
-**Status:** implemented  **Created:** 2026-11-21  **Author:** Luke Carrier
+**Status:** draft  **Created:** 2026-11-21  **Author:** Luke Carrier
 
 Litterbox pairs a sandbox with a Git branch and a unit of compute. Today the workspace is always a private copy: `create` calls `vcs.prepare`, materialises the base revision into a `TempDir`, and hands that directory to the backend as `CreateRequest.workspace.source` (`orchestrator/service.rs:140-162`), so the sandbox never sees `.git`. Repair does the same (`service.rs:313-341`).
 
@@ -22,14 +22,13 @@ A sandbox that binds a host workspace directory would read and write `.git` or `
 - A sandbox never reads or writes VCS metadata, whichever binding it was created with.
 - The binding is a workspace setting in the untracked local override, keyed per VCS, with no default.
 - The binding is recorded per sandbox and honoured by every later operation.
-- Bubblewrap and Docker can mask a bound workspace.
+- Bubblewrap, Docker and Seatbelt can mask a bound workspace.
 - A backend that cannot mask refuses `Bound` rather than degrading.
 - A missing key is a configuration error, never a silent copy.
 
 ## Non-goals
 
 - The VCS selector. `[vcs] tool` and the `[vcs.jj]` section land with the ADR that introduces jj.
-- Darwin masking. It depends on this configuration wiring and on a probe of Seatbelt's deny-rule ordering, recorded as evidence beside the map, and lands as a separate change written and tested on a macOS host. The open question is map ticket T-018, and the backend refuses `Bound` until it is answered.
 - The state machine, conflict mechanics and history retention.
 - Removing `.git` from a copied workspace. `materialise` unpacks an archive, so `.git` is already absent under `Copied`.
 - Making the directory entry absent rather than empty.
@@ -93,7 +92,7 @@ Docker mounts an empty volume at each masked path inside the bound workspace. It
 
 ### FR-010: A backend that cannot mask refuses
 
-A compute backend reports whether it can mask. One that cannot refuses `Bound` with a structured unsupported failure naming the backend, the binding and the remedy. Seatbelt cannot mask today, because its renderer emits no deny rule, so it refuses `Bound`.
+A compute backend reports whether it can mask. One that cannot refuses `Bound` with a structured unsupported failure naming the backend, the binding and the remedy.
 
 **Slug:** `mask-refusal`
 
@@ -108,6 +107,12 @@ The VCS backend owns one host directory per bound sandbox, derived from the proj
 The contract names both releases: `delete_branch` releases the branch and any host directory the backend owned for that sandbox, and `prune` releases project storage that is no longer needed, including bound directories whose branch is gone. The orchestrator delivers its half: the `prune` call condition widens from `stored.remote` to also cover a record whose binding is `Bound` (`orchestrator/service.rs:478-482`), and a failed create reaches the same `delete_branch` on every path that already removes the branch (`service.rs:145-147`, `172-174`, `191-193`). Git owns no bound directory, so both releases are contractual here and the binding VCS implements them; that work lands with the jj bridge. Until then no bound directory can exist and no sweep has anything to find.
 
 **Slug:** `orphans`
+
+### FR-013: Seatbelt masks by deny rule
+
+The Seatbelt renderer emits a deny layer after every allow rule: `(deny file-read* (subpath <ws>/.git))` and `(deny file-write* (subpath <ws>/.git))`, and the same for `.jj`. Ordering is load-bearing because SBPL resolves last-match-wins, so the deny must follow the workspace allow. The masked entry stays visible in a listing but every open, read, write and stat under it returns `EPERM`, and descendants inherit the denial. This is deny-access masking: the entry is present but inaccessible, not the empty mountpoint bubblewrap and Docker leave. T-018 proves it.
+
+**Slug:** `seatbelt-masking`
 
 ## Non-functional Requirements
 
@@ -139,7 +144,7 @@ Every refusal names the class, the key or value, the reason and the remedy. No p
 
 ### AC-001: No VCS data either way
 
-A sandbox created with `Copied` and one created with `Bound` both expose no VCS metadata: `.git` and `.jj` are absent from the copy, or present as an empty directory entry under a mask, and no read or write reaches the VCS.
+A sandbox created with `Copied` and one created with `Bound` both expose no VCS metadata: `.git` and `.jj` are absent from the copy, or masked — an empty directory entry under bubblewrap/Docker, an inaccessible one under Seatbelt — and no read or write reaches the VCS.
 
 **Slug:** `no-vcs-data`
 
@@ -167,11 +172,17 @@ A `Bound` request against a backend that cannot mask fails with an unsupported r
 
 **Slug:** `gates-pass`
 
+### AC-006: Seatbelt masks a bound workspace
+
+On macOS, a `Bound` create against Seatbelt succeeds: the sandbox reads and writes the workspace, every read and write under a masked path returns `EPERM`, and the masked entry is visible but not stattable. The host suite covers it.
+
+**Slug:** `seatbelt-masks`
+
 ## Edge Cases
 
-### EC-001: The empty mountpoint
+### EC-001: The masked entry is not absent
 
-Masking hides the contents and leaves the directory entry. An empty `.git` is not an absent `.git`, and this ADR does not claim absence. T-002 records that absence needs an overlay or whiteout that is unproved on both mechanisms.
+Masking hides the contents and leaves the directory entry: bubblewrap and Docker leave an empty directory, Seatbelt leaves the entry present but inaccessible (`EPERM`). An empty `.git` is not an absent `.git`, and this ADR does not claim absence. T-002 records that absence needs an overlay or whiteout that is unproved, and T-018 records the Seatbelt semantic.
 
 **Slug:** `empty-mountpoint`
 ### EC-002: The path is derived, not stored

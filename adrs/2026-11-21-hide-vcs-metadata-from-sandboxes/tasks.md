@@ -210,18 +210,18 @@ Run a Docker probe for an empty volume at a masked path, both when the bound dir
 | Depends On | T-015 |
 | References | docker-masking,docker-local,no-vcs-data |
 
-### T-017: [x] Refuse in Seatbelt
+### T-017: [ ] Mask in Seatbelt by deny rule
 
-`backends/seatbelt/backend.rs` reports that it cannot mask and refuses `Bound` with a structured unsupported failure naming the backend, the binding and the remedy. No masking code is written here in this change.
+`backends/seatbelt/policy.rs` emits a deny layer after the allow rules — `(deny file-read* (subpath <ws>/<masked>))` and `(deny file-write* (subpath <ws>/<masked>))` per masked path — and `backends/seatbelt/backend.rs` accepts `Bound`, passing the masked paths into the profile input. The masked entry stays visible but returns `EPERM` on every access, and descendants inherit it.
 
 
 | Field | Value |
 |-------|-------|
-| Success Criteria | A test asserts a `Bound` create against Seatbelt fails with an unsupported refusal naming the backend and the remedy, and that no sandbox is created. `Copied` is unchanged. |
-| Complexity | 🟢 Low |
-| Effort | 1-2h |
+| Success Criteria | A host test creates a `Bound` sandbox, reads and writes the workspace, and asserts every read and write under a masked path returns `EPERM` while the entry is visible but not stattable. A renderer unit test asserts the deny rules follow the allow rules. `Copied` is unchanged. |
+| Complexity | 🟡 Medium |
+| Effort | 3-5h |
 | Depends On | T-003 |
-| References | mask-refusal,cannot-mask-refuses |
+| References | seatbelt-masking,seatbelt-masks,no-vcs-data |
 
 ### T-018: [x] Update the configuration reference
 
