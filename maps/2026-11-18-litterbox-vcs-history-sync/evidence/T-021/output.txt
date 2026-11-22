@@ -1,0 +1,66 @@
+=== jj: a conflicted bridge tip vs a clean sandbox branch ===
+Initialized repo in "."
+Warning: This setting will only impact future commits.
+The author of the working copy will stay "Luke Carrier <luke@carrier.family>".
+To change the working copy author, use "jj metaedit --update-author".
+Warning: This setting will only impact future commits.
+The author of the working copy will stay "Luke Carrier <luke@carrier.family>".
+To change the working copy author, use "jj metaedit --update-author".
+Working copy  (@) now at: qtlvqvrx d9724692 (empty) (no description set)
+Parent commit (@-)      : rlmumzop 121e779e base
+Created 1 bookmarks pointing to rlmumzop 121e779e litterbox/name | base
+Working copy  (@) now at: nsvnvryl b01efdb8 (empty) (no description set)
+Parent commit (@-)      : qtlvqvrx 99bd6bb6 user
+Moved 1 bookmarks to qtlvqvrx 99bd6bb6 litterbox/name* | user
+Working copy  (@) now at: uzzwxxpv d4be2dd5 (empty) (no description set)
+Parent commit (@-)      : rlmumzop 121e779e base
+Added 0 files, modified 1 files, removed 0 files
+Warning: Target revision is empty.
+Created 1 bookmarks pointing to uzzwxxpv d4be2dd5 litterbox/sandbox | (empty) (no description set)
+Working copy  (@) now at: zwtnsqtw 48478946 (empty) (no description set)
+Parent commit (@-)      : uzzwxxpv 57fe897d litterbox/sandbox | sandbox
+--- merge the user and sandbox branches; the user tip conflicts ---
+Working copy  (@) now at: qrsyllrz c210ea93 (conflict) (empty) merge
+Parent commit (@-)      : qtlvqvrx 99bd6bb6 litterbox/name | user
+Parent commit (@-)      : uzzwxxpv 57fe897d litterbox/sandbox | sandbox
+Added 0 files, modified 1 files, removed 0 files
+Warning: There are unresolved conflicts at these paths:
+file.txt    2-sided conflict
+Moved 1 bookmarks to qrsyllrz c210ea93 litterbox/name* | (conflict) (empty) merge
+conflicted
+file.txt    2-sided conflict
+--- move the sandbox workspace to its own branch and read it ---
+Working copy  (@) now at: zvktqwzm a5311180 (empty) (no description set)
+Parent commit (@-)      : uzzwxxpv 57fe897d litterbox/sandbox | sandbox
+Added 0 files, modified 1 files, removed 0 files
+APPLE
+GRAPE
+ORANGE
+clean
+Error: No conflicts found at this revision
+--- the fallback decision ---
+HOLD: bridge tip is conflicted; the sandbox stays on its last non-conflicted revision
+--- resolve the bridge conflict in the working copy ---
+Working copy  (@) now at: qrsyllrz c210ea93 litterbox/name | (conflict) (empty) merge
+Parent commit (@-)      : qtlvqvrx 99bd6bb6 user
+Parent commit (@-)      : uzzwxxpv 57fe897d litterbox/sandbox | sandbox
+Added 0 files, modified 1 files, removed 0 files
+Warning: There are unresolved conflicts at these paths:
+file.txt    2-sided conflict
+Nothing changed.
+clean
+Error: No conflicts found at this revision
+--- the decision after resolution ---
+ADOPT: bridge tip is clean; the next sandbox operation adopts it
+APPLE
+GRAPEFRUIT
+ORANGE
+
+=== Git: a marker tree is detected before it is adopted ===
+--- marker scan ---
+HEAD:file.txt:2:<<<<<<< ours
+HEAD:file.txt:4:=======
+HEAD:file.txt:6:>>>>>>> theirs
+HOLD: the tip tree contains conflict markers
+--- resolve the marker tree ---
+ADOPT: no conflict markers; the next sandbox operation adopts it
