@@ -89,6 +89,11 @@ impl GitScm {
         self.snapshot_branch = Some(branch);
     }
 
+    /// Point snapshots at a full ref name, such as the sandbox branch.
+    pub fn set_snapshot_ref(&mut self, reference: String) {
+        self.snapshot_branch = Some(reference);
+    }
+
     fn branch_name(slug: &str) -> String {
         branch_name_for(slug)
     }
@@ -133,6 +138,7 @@ impl GitScm {
 
     fn snapshot_branch_ref(&self) -> String {
         match &self.snapshot_branch {
+            Some(reference) if reference.starts_with("refs/") => reference.clone(),
             Some(branch) => format!("refs/heads/{}", branch),
             None => "refs/heads/litterbox-snapshots".to_string(),
         }
@@ -223,6 +229,12 @@ impl GitVcs {
 
     pub fn set_snapshot_branch(&self, branch: String) -> Result<(), SandboxError> {
         self.lock()?.set_snapshot_branch(branch);
+        Ok(())
+    }
+
+    /// Point snapshots at a full ref name, such as the sandbox branch.
+    pub fn set_snapshot_ref(&self, reference: String) -> Result<(), SandboxError> {
+        self.lock()?.set_snapshot_ref(reference);
         Ok(())
     }
 
@@ -501,14 +513,15 @@ impl Vcs for GitVcs {
         staging: &Path,
         message: &str,
     ) -> Result<Revision, VcsError> {
-        self.set_snapshot_branch(workspace.branch().to_string())
+        let branch = workspace.branch().to_string();
+        self.set_snapshot_ref(refs::sandbox(&branch))
             .map_err(vcs_error)?;
         match self
             .commit_snapshot_from_staging(staging, message)
             .map_err(vcs_error)?
         {
             Some(oid) => Ok(Revision::new(oid.to_string())),
-            None => self.tip(workspace),
+            None => self.sandbox_tip(workspace),
         }
     }
 
@@ -592,16 +605,107 @@ impl Vcs for GitVcs {
         .map_err(vcs_error)
     }
 
-    fn set_tip(&self, _workspace: &Workspace, _revision: &Revision) -> Result<(), VcsError> {
-        Err(unsupported("set_tip"))
+    fn set_tip(&self, workspace: &Workspace, revision: &Revision) -> Result<(), VcsError> {
+        self.move_shared_branch(workspace, revision)
     }
 
-    fn synced(&self, _workspace: &Workspace) -> Result<Revision, VcsError> {
-        Err(unsupported("synced"))
+    fn advance(&self, workspace: &Workspace, revision: &Revision) -> Result<(), VcsError> {
+        self.move_shared_branch(workspace, revision)
     }
 
-    fn set_synced(&self, _workspace: &Workspace, _revision: &Revision) -> Result<(), VcsError> {
-        Err(unsupported("set_synced"))
+    fn synced(&self, workspace: &Workspace) -> Result<Revision, VcsError> {
+        let branch = workspace.branch().to_string();
+        self.repo_for_branch(&branch, |repo| {
+            refs::read(repo, &refs::synced(&branch))?
+                .map(|oid| oid.to_string())
+                .ok_or_else(|| SandboxError::SandboxNotFound {
+                    name: branch.clone(),
+                })
+        })
+        .map(Revision::new)
+        .map_err(vcs_error)
+    }
+
+    fn set_synced(&self, workspace: &Workspace, revision: &Revision) -> Result<(), VcsError> {
+        let branch = workspace.branch().to_string();
+        let oid = revision_oid(revision).map_err(vcs_error)?;
+        self.repo_for_branch(&branch, |repo| {
+            refs::write(
+                repo,
+                &refs::synced(&branch),
+                oid,
+                "litterbox: record the synced revision",
+            )
+        })
+        .map_err(vcs_error)
+    }
+
+    fn tree(&self, revision: &Revision) -> Result<TreeId, VcsError> {
+        let oid = revision_oid(revision).map_err(vcs_error)?;
+        let guard = self.lock().map_err(vcs_error)?;
+        let commit = guard
+            .repo
+            .find_commit(oid)
+            .map_err(|source| SandboxError::from(GitError::Commit { source }))
+            .map_err(vcs_error)?;
+        let tree = commit
+            .tree()
+            .map_err(|source| SandboxError::from(GitError::Commit { source }))
+            .map_err(vcs_error)?;
+        Ok(TreeId::new(tree.id().to_string()))
+    }
+
+    fn observe(&self, workspace: &Workspace, staging: &Path) -> Result<TreeId, VcsError> {
+        let branch = workspace.branch().to_string();
+        self.set_snapshot_ref(refs::sandbox(&branch))
+            .map_err(vcs_error)?;
+        let oid = self
+            .lock()
+            .map_err(vcs_error)?
+            .staged_tree(staging)
+            .map_err(vcs_error)?;
+        Ok(TreeId::new(oid.to_string()))
+    }
+
+    fn sandbox_tip(&self, workspace: &Workspace) -> Result<Revision, VcsError> {
+        let branch = workspace.branch().to_string();
+        self.repo_for_branch(&branch, |repo| {
+            refs::read(repo, &refs::sandbox(&branch))?
+                .map(|oid| oid.to_string())
+                .ok_or_else(|| SandboxError::SandboxNotFound {
+                    name: branch.clone(),
+                })
+        })
+        .map(Revision::new)
+        .map_err(vcs_error)
+    }
+
+    fn set_sandbox_tip(&self, workspace: &Workspace, revision: &Revision) -> Result<(), VcsError> {
+        let branch = workspace.branch().to_string();
+        let oid = revision_oid(revision).map_err(vcs_error)?;
+        self.repo_for_branch(&branch, |repo| {
+            refs::write(
+                repo,
+                &refs::sandbox(&branch),
+                oid,
+                "litterbox: move the sandbox branch",
+            )
+        })
+        .map_err(vcs_error)
+    }
+
+    fn is_ancestor(&self, ancestor: &Revision, descendant: &Revision) -> Result<bool, VcsError> {
+        let ancestor = revision_oid(ancestor).map_err(vcs_error)?;
+        let descendant = revision_oid(descendant).map_err(vcs_error)?;
+        if ancestor == descendant {
+            return Ok(true);
+        }
+        let guard = self.lock().map_err(vcs_error)?;
+        guard
+            .repo
+            .graph_descendant_of(descendant, ancestor)
+            .map_err(|source| SandboxError::from(GitError::Commit { source }))
+            .map_err(vcs_error)
     }
 
     fn ensure_refs(&self, workspace: &Workspace) -> Result<(), VcsError> {
@@ -688,6 +792,24 @@ impl Vcs for GitVcs {
 }
 
 impl GitVcs {
+    fn move_shared_branch(
+        &self,
+        workspace: &Workspace,
+        revision: &Revision,
+    ) -> Result<(), VcsError> {
+        let branch = workspace.branch().to_string();
+        let oid = revision_oid(revision).map_err(vcs_error)?;
+        self.repo_for_branch(&branch, |repo| {
+            refs::write(
+                repo,
+                &refs::branch(&branch),
+                oid,
+                "litterbox: advance the branch",
+            )
+        })
+        .map_err(vcs_error)
+    }
+
     /// Run `operation` against the repository that holds `branch`.
     ///
     /// The bare clone is checked first, then the host repository, then the
@@ -722,6 +844,13 @@ impl GitVcs {
 
         operation(&guard.repo)
     }
+}
+
+fn revision_oid(revision: &Revision) -> Result<git2::Oid, SandboxError> {
+    revision
+        .as_str()
+        .parse()
+        .map_err(|source| SandboxError::from(GitError::Commit { source }))
 }
 
 fn vcs_error(error: SandboxError) -> VcsError {
@@ -788,14 +917,8 @@ impl GitScm {
         SnapshotFilter::open(rules_root, tracked, tracked_dirs)
     }
 
-    fn commit_snapshot_from_staging(
-        &self,
-        staging_path: &Path,
-        message: &str,
-    ) -> Result<Option<git2::Oid>, SandboxError> {
-        let signature = self.signature()?;
-
-        // Build a new tree from staging directory
+    /// The tree a snapshot of `staging_path` would commit.
+    fn staged_tree(&self, staging_path: &Path) -> Result<git2::Oid, SandboxError> {
         let mut builder = self
             .repo
             .treebuilder(None)
@@ -806,9 +929,18 @@ impl GitScm {
         let filter = self.snapshot_filter(staging_path)?;
         self.add_directory_to_tree(&mut builder, staging_path, Path::new(""), &filter)?;
 
-        let tree_oid = builder
+        builder
             .write()
-            .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
+            .map_err(|source| SandboxError::from(GitError::Commit { source }))
+    }
+
+    fn commit_snapshot_from_staging(
+        &self,
+        staging_path: &Path,
+        message: &str,
+    ) -> Result<Option<git2::Oid>, SandboxError> {
+        let signature = self.signature()?;
+        let tree_oid = self.staged_tree(staging_path)?;
 
         let tree = self
             .repo

@@ -41,7 +41,7 @@ Add `src/vcs/git/refs.rs` with `branch_ref` and `sandbox_ref` and `synced_ref` r
 | Depends On | T-002 |
 | References | three-refs,creation-and-removal,legacy-record,reflog-keeps,missing-refspec |
 
-### T-004: Tree identity and snapshot split
+### T-004: [x] Tree identity and snapshot split
 
 In `src/vcs/git/scm.rs` implement `tree` and `observe` and `sandbox_tip` and `set_sandbox_tip` and `advance` and `set_tip` and `synced` and `set_synced` and `is_ancestor`. Change `snapshot` to commit on the sandbox branch only. Keep the compare-and-swap and the retry.
 
@@ -54,7 +54,7 @@ In `src/vcs/git/scm.rs` implement `tree` and `observe` and `sandbox_tip` and `se
 | Depends On | T-002,T-003 |
 | References | tree-identity,observing-the-workspace,snapshot,recorded-base,no-revert |
 
-### T-005: Record the merge state
+### T-005: [x] Record the merge state
 
 Add `merge: Option<StoredMerge>` to `StoredSandbox` with `base` and `ours` and `theirs`. Use `serde(default)`. Keep the field across load and store.
 
