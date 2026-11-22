@@ -119,7 +119,7 @@ Add the orchestrator wrappers and the CLI commands `status <name>` and `reconcil
 | Depends On | T-007,T-008 |
 | References | report,workflow,dirty-checkout,consent |
 
-### T-010: MCP tool
+### T-010: [x] MCP tool
 
 Add `sandbox-reconcile` to `src/mcp.rs` taking `{ sandbox }` and calling the orchestrator's stage. Return the worktree path and the conflict paths. No finish.
 
