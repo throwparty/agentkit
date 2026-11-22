@@ -12,6 +12,17 @@ fn remove_in(dir: &Path, slug: &str) -> Result<(), Error> {
     Ok(())
 }
 
+/// A held reconciliation: the three revisions a host merge needs.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct StoredMerge {
+    /// The revision both sides last agreed on.
+    pub base: String,
+    /// The sandbox branch tip.
+    pub ours: String,
+    /// The branch tip.
+    pub theirs: String,
+}
+
 /// A sandbox as persisted: the contract's record plus the branch it was paired
 /// with. The SCM mode stays out of the contract on purpose.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -26,6 +37,9 @@ pub struct StoredSandbox {
     /// existed has no field, which is a legacy fact rather than a default.
     #[serde(default)]
     pub binding: Option<crate::sandbox::contract::WorkspaceBinding>,
+    /// The held reconciliation, when one is pending.
+    #[serde(default)]
+    pub merge: Option<StoredMerge>,
 }
 
 impl StoredSandbox {
@@ -231,7 +245,9 @@ mod record_tests {
 
     use tempfile::TempDir;
 
-    use super::{LoadedSandbox, StoredSandbox, load_sandbox_in, remove_in, store_value_in};
+    use super::{
+        LoadedSandbox, StoredMerge, StoredSandbox, load_sandbox_in, remove_in, store_value_in,
+    };
     use crate::sandbox::contract::{SandboxRecord, WorkspaceBinding};
 
     fn stored() -> StoredSandbox {
@@ -245,6 +261,7 @@ mod record_tests {
             branch_name: "litterbox/demo".to_string(),
             remote: false,
             binding: None,
+            merge: None,
         }
     }
 
@@ -304,6 +321,33 @@ mod record_tests {
         {
             LoadedSandbox::Current(current) => {
                 assert_eq!(current.binding(), WorkspaceBinding::Bound);
+            }
+            other => panic!("expected a current record, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_record_without_a_merge_reads_as_none() {
+        assert!(stored().merge.is_none(), "the fixture is a legacy record");
+    }
+
+    #[test]
+    fn a_recorded_merge_round_trips() {
+        let dir = TempDir::new().expect("tempdir");
+        let mut held = stored();
+        held.merge = Some(StoredMerge {
+            base: "aaaa".to_string(),
+            ours: "bbbb".to_string(),
+            theirs: "cccc".to_string(),
+        });
+        store_value_in(dir.path(), "demo", &held).expect("store");
+
+        match load_sandbox_in(dir.path(), "demo")
+            .expect("load")
+            .expect("present")
+        {
+            LoadedSandbox::Current(current) => {
+                assert_eq!(current.merge, held.merge);
             }
             other => panic!("expected a current record, got {other:?}"),
         }

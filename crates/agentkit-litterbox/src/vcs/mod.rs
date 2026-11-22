@@ -162,7 +162,7 @@ pub trait Vcs: Send + Sync {
     }
 
     /// The tree a snapshot of `staging` would commit, without committing it.
-    fn observe(&self, _staging: &Path) -> Result<TreeId, Error> {
+    fn observe(&self, _workspace: &Workspace, _staging: &Path) -> Result<TreeId, Error> {
         Err(not_implemented("observe the workspace"))
     }
 
@@ -384,7 +384,7 @@ mod tests {
             unsupported("advance")
         }
 
-        fn observe(&self, _staging: &Path) -> Result<TreeId, Error> {
+        fn observe(&self, _workspace: &Workspace, _staging: &Path) -> Result<TreeId, Error> {
             unsupported("observe")
         }
 

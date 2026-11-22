@@ -414,7 +414,7 @@ impl Vcs for TestVcs {
         Ok(())
     }
 
-    fn observe(&self, _staging: &Path) -> Result<TreeId, Error> {
+    fn observe(&self, _workspace: &Workspace, _staging: &Path) -> Result<TreeId, Error> {
         self.state().observed += 1;
         Ok(TreeId::new("workspace"))
     }

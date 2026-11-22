@@ -58,9 +58,98 @@ fn prepare_materialise_snapshot_and_tip_round_trip() {
     let revision = vcs
         .snapshot(&prepared.workspace, staged.path(), "snapshot")
         .expect("snapshot");
-    let tip = vcs.tip(&prepared.workspace).expect("tip");
+    let sandbox = vcs.sandbox_tip(&prepared.workspace).expect("sandbox tip");
+    assert_eq!(revision.as_str(), sandbox.as_str());
+    assert_ne!(
+        revision.as_str(),
+        vcs.tip(&prepared.workspace).expect("tip").as_str()
+    );
 
-    assert_eq!(revision.as_str(), tip.as_str());
+    vcs.advance(&prepared.workspace, &revision)
+        .expect("advance");
+    assert_eq!(
+        revision.as_str(),
+        vcs.tip(&prepared.workspace).expect("tip").as_str()
+    );
+
+    vcs.set_synced(&prepared.workspace, &revision)
+        .expect("set synced");
+    assert_eq!(
+        revision.as_str(),
+        vcs.synced(&prepared.workspace).expect("synced").as_str()
+    );
+}
+
+#[test]
+fn tree_and_observe_agree_on_the_staged_content() {
+    let dir = repo_with_commit();
+    let vcs = GitVcs::open(dir.path()).expect("vcs");
+    let prepared = vcs.prepare("example").expect("prepare");
+
+    let base_tree = vcs.tree(&prepared.base).expect("base tree");
+
+    let staged = TempDir::new().expect("staging");
+    vcs.materialise(&prepared.workspace, &prepared.base, staged.path())
+        .expect("materialise");
+    assert_eq!(
+        vcs.observe(&prepared.workspace, staged.path())
+            .expect("observe")
+            .as_str(),
+        base_tree.as_str()
+    );
+
+    fs::write(staged.path().join("added.txt"), "added\n").expect("write");
+    let observed = vcs
+        .observe(&prepared.workspace, staged.path())
+        .expect("observe");
+    assert_ne!(observed.as_str(), base_tree.as_str());
+}
+
+#[test]
+fn a_snapshot_that_moves_nothing_reports_the_sandbox_tip() {
+    let dir = repo_with_commit();
+    let vcs = GitVcs::open(dir.path()).expect("vcs");
+    let prepared = vcs.prepare("example").expect("prepare");
+
+    let staged = TempDir::new().expect("staging");
+    vcs.materialise(&prepared.workspace, &prepared.base, staged.path())
+        .expect("materialise");
+
+    let first = vcs
+        .snapshot(&prepared.workspace, staged.path(), "first")
+        .expect("snapshot");
+    let second = vcs
+        .snapshot(&prepared.workspace, staged.path(), "second")
+        .expect("snapshot");
+    assert_eq!(first.as_str(), second.as_str());
+}
+
+#[test]
+fn ancestry_answers_for_equal_and_descendant_revisions() {
+    let dir = repo_with_commit();
+    let vcs = GitVcs::open(dir.path()).expect("vcs");
+    let prepared = vcs.prepare("example").expect("prepare");
+
+    let staged = TempDir::new().expect("staging");
+    vcs.materialise(&prepared.workspace, &prepared.base, staged.path())
+        .expect("materialise");
+    fs::write(staged.path().join("added.txt"), "added\n").expect("write");
+    let snapshot = vcs
+        .snapshot(&prepared.workspace, staged.path(), "snapshot")
+        .expect("snapshot");
+
+    assert!(
+        vcs.is_ancestor(&prepared.base, &prepared.base)
+            .expect("equal")
+    );
+    assert!(
+        vcs.is_ancestor(&prepared.base, &snapshot)
+            .expect("descendant")
+    );
+    assert!(
+        !vcs.is_ancestor(&snapshot, &prepared.base)
+            .expect("not an ancestor")
+    );
 }
 
 #[test]
