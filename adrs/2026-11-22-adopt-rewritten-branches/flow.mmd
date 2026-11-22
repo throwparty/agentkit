@@ -1,0 +1,18 @@
+sequenceDiagram
+    participant T as tool call
+    participant O as orchestrator
+    participant S as source plan
+    participant V as Vcs
+    T->>O: exec or upload
+    O->>V: read synced and the two tips
+    O->>S: classify
+    alt the branch moved
+        O->>V: observe the workspace
+        O->>S: plan
+        O->>V: adopt or block
+    end
+    O->>T: run the tool
+    O->>V: observe the workspace
+    O->>S: plan Snapshot
+    O->>V: snapshot and advance
+    O-->>T: result with the state
