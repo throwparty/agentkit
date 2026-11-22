@@ -80,6 +80,21 @@ fn rpc(
     connection: Option<&str>,
     message: serde_json::Value,
 ) -> (serde_json::Value, Option<String>) {
+    let response = post_body(agent, connection, message.to_string());
+    let header = response
+        .headers()
+        .get("x-acp-connection")
+        .and_then(|value| value.to_str().ok().map(str::to_owned));
+    let body = response.text().unwrap();
+    (serde_json::from_str(&body).unwrap_or(json!({})), header)
+}
+
+/// POSTs a raw body, which may be streamed rather than buffered.
+fn post_body(
+    agent: &HttpAgent,
+    connection: Option<&str>,
+    body: impl Into<reqwest::blocking::Body>,
+) -> reqwest::blocking::Response {
     let url = match connection {
         Some(connection) => format!(
             "http://127.0.0.1:{}/rpc?connection={connection}",
@@ -93,13 +108,19 @@ fn rpc(
     if let Some(token) = &agent.token {
         request = request.header("authorization", format!("Bearer {token}"));
     }
-    let response = request.body(message.to_string()).send().unwrap();
-    let header = response
-        .headers()
-        .get("x-acp-connection")
-        .and_then(|value| value.to_str().ok().map(str::to_owned));
-    let body = response.text().unwrap();
-    (serde_json::from_str(&body).unwrap_or(json!({})), header)
+    request.body(body).send().unwrap()
+}
+
+/// The `/rpc` body limit the transport enforces.
+const MAX_RPC_BODY: usize = 2 * 1024 * 1024;
+
+/// Pads a message with insignificant whitespace to exactly `size` bytes:
+/// JSON ignores it, so a boundary test needs no filler fields.
+fn body_of_size(message: serde_json::Value, size: usize) -> String {
+    let mut body = message.to_string();
+    assert!(body.len() <= size, "the message exceeds {size} bytes");
+    body.push_str(&" ".repeat(size - body.len()));
+    body
 }
 
 fn initialize() -> serde_json::Value {
@@ -339,6 +360,103 @@ fn unknown_connection_id_is_rejected() {
     assert!(
         response.headers().get("x-acp-connection").is_none(),
         "a stale id must not mint a new connection"
+    );
+}
+
+#[test]
+fn malformed_json_is_rejected_and_the_connection_survives() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = spawn_http_agent(dir.path(), "a");
+    wait_for_port(&agent);
+
+    let (response, connection) = rpc(&agent, None, initialize());
+    assert_eq!(response["result"]["protocolVersion"], 1, "{response}");
+    let connection = connection.expect("the connection id");
+
+    // A body that is not JSON is answered locally, so it never reaches the
+    // agent: a forwarded line would break the agent's codec and end the
+    // connection this test continues to use.
+    let response = post_body(&agent, Some(&connection), "{not json");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let body: serde_json::Value = serde_json::from_str(&response.text().unwrap()).unwrap();
+    assert_eq!(body["jsonrpc"], "2.0", "{body}");
+    assert!(body["id"].is_null(), "{body}");
+    assert_eq!(body["error"]["code"], -32700, "{body}");
+    assert!(
+        body.get("result").is_none(),
+        "a parse error carries no result: {body}"
+    );
+
+    // The same connection still serves valid requests.
+    let (response, header) = rpc(
+        &agent,
+        Some(&connection),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "session/list",
+            "params": {}
+        }),
+    );
+    assert!(response["result"]["sessions"].is_array(), "{response}");
+    assert_eq!(header, None, "a continued POST mints no new connection");
+}
+
+#[test]
+fn rpc_accepts_a_body_at_the_size_limit() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = spawn_http_agent(dir.path(), "a");
+    wait_for_port(&agent);
+
+    let body = body_of_size(initialize(), MAX_RPC_BODY);
+    assert_eq!(body.len(), MAX_RPC_BODY);
+
+    let response = post_body(&agent, None, body);
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    assert!(
+        response.headers().get("x-acp-connection").is_some(),
+        "a body at the limit is served"
+    );
+    let body: serde_json::Value = serde_json::from_str(&response.text().unwrap()).unwrap();
+    assert_eq!(body["result"]["protocolVersion"], 1, "{body}");
+}
+
+#[test]
+fn rpc_rejects_a_body_one_byte_over_the_limit() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = spawn_http_agent(dir.path(), "a");
+    wait_for_port(&agent);
+
+    let body = body_of_size(initialize(), MAX_RPC_BODY + 1);
+
+    let response = post_body(&agent, None, body);
+    assert_eq!(
+        response.status(),
+        reqwest::StatusCode::PAYLOAD_TOO_LARGE,
+        "the limit is inclusive of its boundary"
+    );
+    assert!(
+        response.headers().get("x-acp-connection").is_none(),
+        "an oversized body must not mint a connection"
+    );
+}
+
+#[test]
+fn rpc_rejects_a_streamed_body_over_the_limit() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = spawn_http_agent(dir.path(), "a");
+    wait_for_port(&agent);
+
+    let body = body_of_size(initialize(), MAX_RPC_BODY + 1);
+    // `Body::new` sends the payload chunked with no Content-Length, so the
+    // limit is enforced while the body is read rather than from a header.
+    let streamed = reqwest::blocking::Body::new(std::io::Cursor::new(body));
+
+    let response = post_body(&agent, None, streamed);
+    assert_eq!(response.status(), reqwest::StatusCode::PAYLOAD_TOO_LARGE);
+    assert!(
+        response.headers().get("x-acp-connection").is_none(),
+        "an oversized body must not mint a connection"
     );
 }
 

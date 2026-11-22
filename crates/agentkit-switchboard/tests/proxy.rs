@@ -807,3 +807,143 @@ async fn custom_headers_are_passed_through() {
         "response body should match the mock server's response"
     );
 }
+
+/// The proxy routes' body limit, mirrored from the router.
+const MAX_REQUEST_BODY: usize = 2 * 1024 * 1024;
+
+/// Each POST surface with the model it routes on and the upstream path its
+/// provider builds.
+const POST_ROUTES: [(&str, &str, &str); 3] = [
+    (
+        "/openai/v1/chat/completions",
+        "chat-model",
+        "/chat/completions",
+    ),
+    ("/openai/v1/responses", "responses-model", "/responses"),
+    ("/anthropic/v1/messages", "messages-model", "/messages"),
+];
+
+async fn three_surface_state(base_url: &str) -> Arc<routes::AppState> {
+    let mut providers = HashMap::new();
+    for (identity, surface, model) in [
+        ("mock_chat", ApiSurface::OpenaiChatCompletions, "chat-model"),
+        (
+            "mock_responses",
+            ApiSurface::OpenaiResponses,
+            "responses-model",
+        ),
+        (
+            "mock_messages",
+            ApiSurface::AnthropicMessages,
+            "messages-model",
+        ),
+    ] {
+        let mut provider = provider_config(identity, base_url, vec![model]);
+        provider.api_surface = surface;
+        providers.insert(identity.to_string(), provider);
+    }
+    state_with_providers(providers).await
+}
+
+/// Answers every upstream path the three surfaces build.
+async fn mount_upstreams(mock_server: &wiremock::MockServer) {
+    for (_, _, path) in POST_ROUTES {
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path(path))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .set_body_raw(r#"{"ok":true}"#, "application/json"),
+            )
+            .mount(mock_server)
+            .await;
+    }
+}
+
+/// A request body of exactly `size` bytes: trailing whitespace is valid JSON
+/// and keeps a boundary test free of filler fields.
+fn body_of_size(model: &str, size: usize) -> Vec<u8> {
+    let mut body = serde_json::to_vec(&json!({"model": model, "messages": []})).unwrap();
+    assert!(body.len() <= size, "the envelope exceeds {size} bytes");
+    body.resize(size, b' ');
+    body
+}
+
+fn post_request(uri: &str, body: axum::body::Body) -> axum::http::Request<axum::body::Body> {
+    axum::http::Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header("Content-Type", "application/json")
+        .body(body)
+        .unwrap()
+}
+
+#[tokio::test]
+async fn post_routes_accept_a_body_at_the_size_limit() {
+    let mock_server = wiremock::MockServer::start().await;
+    mount_upstreams(&mock_server).await;
+    let state = three_surface_state(&mock_server.uri()).await;
+    let mut app = routes::build_router(state);
+
+    for (uri, model, _) in POST_ROUTES {
+        let body = body_of_size(model, MAX_REQUEST_BODY);
+        assert_eq!(body.len(), MAX_REQUEST_BODY, "{uri}");
+        let request = post_request(uri, axum::body::Body::from(body));
+        let response = tower::Service::call(&mut app, request).await.unwrap();
+        assert_eq!(response.status(), 200, "{uri} handles a body at the limit");
+    }
+
+    let received = mock_server.received_requests().await.unwrap();
+    assert_eq!(
+        received.len(),
+        POST_ROUTES.len(),
+        "every request is forwarded"
+    );
+}
+
+#[tokio::test]
+async fn post_routes_reject_a_body_one_byte_over_the_size_limit() {
+    let mock_server = wiremock::MockServer::start().await;
+    mount_upstreams(&mock_server).await;
+    let state = three_surface_state(&mock_server.uri()).await;
+    let mut app = routes::build_router(state);
+
+    for (uri, model, _) in POST_ROUTES {
+        let body = body_of_size(model, MAX_REQUEST_BODY + 1);
+        let request = post_request(uri, axum::body::Body::from(body));
+        let response = tower::Service::call(&mut app, request).await.unwrap();
+        assert_eq!(
+            response.status(),
+            413,
+            "{uri} rejects a body one byte over the limit"
+        );
+    }
+
+    assert!(
+        mock_server.received_requests().await.unwrap().is_empty(),
+        "an oversized body must not reach the provider"
+    );
+}
+
+#[tokio::test]
+async fn post_routes_reject_a_streamed_body_over_the_size_limit() {
+    let mock_server = wiremock::MockServer::start().await;
+    mount_upstreams(&mock_server).await;
+    let state = three_surface_state(&mock_server.uri()).await;
+    let mut app = routes::build_router(state);
+
+    for (uri, model, _) in POST_ROUTES {
+        // A streamed body carries no Content-Length, so the limit has to be
+        // enforced by counting the bytes as they arrive.
+        let body = body_of_size(model, MAX_REQUEST_BODY + 1);
+        let chunks: Vec<Vec<u8>> = body.chunks(64 * 1024).map(<[u8]>::to_vec).collect();
+        let stream = tokio_stream::iter(chunks.into_iter().map(Ok::<_, std::io::Error>));
+        let request = post_request(uri, axum::body::Body::from_stream(stream));
+        let response = tower::Service::call(&mut app, request).await.unwrap();
+        assert_eq!(response.status(), 413, "{uri} rejects an oversized stream");
+    }
+
+    assert!(
+        mock_server.received_requests().await.unwrap().is_empty(),
+        "an oversized body must not reach the provider"
+    );
+}

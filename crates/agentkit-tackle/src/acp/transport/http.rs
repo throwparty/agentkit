@@ -32,6 +32,10 @@ const CONNECTION_IDLE: std::time::Duration = std::time::Duration::from_secs(300)
 /// processes before the idle reaper runs.
 const MAX_CONNECTIONS: usize = 64;
 
+/// Upper bound on a POSTed JSON-RPC line. The `String` extractor enforces it
+/// before the handler runs, so the body parse sees only bounded input.
+const MAX_RPC_BODY: usize = 2 * 1024 * 1024;
+
 struct Connection {
     /// Client → agent lines (POST bodies).
     incoming: mpsc::Sender<String>,
@@ -131,7 +135,19 @@ fn spawn_connection(server: &HttpServerState, id: String) -> Arc<Connection> {
 }
 
 async fn dispatch_and_await(connection: &Connection, body: &str) -> String {
-    let parsed: serde_json::Value = serde_json::from_str(body).unwrap_or(serde_json::Value::Null);
+    // A body that is not JSON is a malformed JSON-RPC message, not something
+    // to hand the agent: reject it here and report the parse error.
+    let parsed: serde_json::Value = match serde_json::from_str(body) {
+        Ok(parsed) => parsed,
+        Err(_) => {
+            return serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": serde_json::Value::Null,
+                "error": { "code": -32700, "message": "parse error" },
+            })
+            .to_string();
+        }
+    };
     let id = match parsed.get("id") {
         Some(serde_json::Value::String(value)) => Some(value.clone()),
         Some(other) => Some(other.to_string()),
@@ -385,6 +401,7 @@ pub async fn run_http(
     let app = axum::Router::new()
         .route("/rpc", post(handle_rpc))
         .route("/events", get(handle_events))
+        .layer(axum::extract::DefaultBodyLimit::max(MAX_RPC_BODY))
         .with_state(server_state);
 
     let listener = tokio::net::TcpListener::bind((bind, port))
