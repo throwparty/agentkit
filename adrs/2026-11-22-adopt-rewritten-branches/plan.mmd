@@ -1,0 +1,12 @@
+flowchart TD
+    O["read the synced and branch and sandbox trees"] --> B{"tip equals synced"}
+    B -- yes --> W{"workspace matches the sandbox branch"}
+    W -- yes --> P["Proceed"]
+    W -- no --> S["Snapshot"]
+    B -- no --> T{"branch tree equals synced tree"}
+    T -- yes --> H{"workspace matches the sandbox branch"}
+    H -- yes --> AH["AdoptHistory"]
+    H -- no --> AHS["AdoptHistory then Snapshot"]
+    T -- no --> C{"workspace matches the sandbox branch"}
+    C -- yes --> AC["AdoptContent"]
+    C -- no --> BL["Block and report"]
