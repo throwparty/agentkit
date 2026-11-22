@@ -1,0 +1,63 @@
+== read a workspace file (expect 0) ==
+$ sandbox-exec -f /tmp/lbx-t018.Svoj7N/profile.sb -- /bin/cat /private/tmp/lbx-t018.Svoj7N/visible.txt
+exit=0
+--- sandbox output ---
+hello from the workspace
+
+== write a workspace file (expect 0) ==
+$ sandbox-exec -f /tmp/lbx-t018.Svoj7N/profile.sb -- /bin/sh -c printf written > '/private/tmp/lbx-t018.Svoj7N/new.txt'
+exit=0
+--- sandbox output ---
+shell-init: error retrieving current directory: getcwd: cannot access parent directories: Operation not permitted
+
+== read under .jj (expect nonzero, EPERM) ==
+$ sandbox-exec -f /tmp/lbx-t018.Svoj7N/profile.sb -- /bin/cat /private/tmp/lbx-t018.Svoj7N/.jj/secret.txt
+exit=1
+--- sandbox output ---
+cat: /private/tmp/lbx-t018.Svoj7N/.jj/secret.txt: Operation not permitted
+
+== write under .jj (expect nonzero) ==
+$ sandbox-exec -f /tmp/lbx-t018.Svoj7N/profile.sb -- /bin/sh -c printf evil > '/private/tmp/lbx-t018.Svoj7N/.jj/evil.txt'
+exit=1
+--- sandbox output ---
+shell-init: error retrieving current directory: getcwd: cannot access parent directories: Operation not permitted
+/bin/sh: /private/tmp/lbx-t018.Svoj7N/.jj/evil.txt: Operation not permitted
+
+== list the workspace (expect .jj denied; other entries listed) ==
+$ sandbox-exec -f /tmp/lbx-t018.Svoj7N/profile.sb -- /bin/ls -la /private/tmp/lbx-t018.Svoj7N
+exit=1
+--- sandbox output ---
+ls: .jj: Operation not permitted
+ls: fts_read: Operation not permitted
+total 24
+drwx------@  7 501  0  224 Nov 22 18:58 .
+drwxrwxrwt  22 0    0  704 Nov 22 18:58 ..
+-rw-r--r--@  1 501  0    0 Nov 22 18:58 .capture
+-rw-r--r--@  1 501  0    7 Nov 22 18:58 new.txt
+-rw-r--r--@  1 501  0  949 Nov 22 18:58 profile.sb
+-rw-r--r--@  1 501  0   25 Nov 22 18:58 visible.txt
+
+== list .jj (expect nonzero) ==
+$ sandbox-exec -f /tmp/lbx-t018.Svoj7N/profile.sb -- /bin/ls /private/tmp/lbx-t018.Svoj7N/.jj
+exit=1
+--- sandbox output ---
+ls: /private/tmp/lbx-t018.Svoj7N/.jj: Operation not permitted
+
+== stat .jj (expect nonzero) ==
+$ sandbox-exec -f /tmp/lbx-t018.Svoj7N/profile.sb -- /usr/bin/stat /private/tmp/lbx-t018.Svoj7N/.jj
+exit=1
+--- sandbox output ---
+stat: /private/tmp/lbx-t018.Svoj7N/.jj: stat: Operation not permitted
+
+== descendant read under .jj (expect nonzero) ==
+$ sandbox-exec -f /tmp/lbx-t018.Svoj7N/profile.sb -- /bin/sh -c /bin/sh -c 'cat /private/tmp/lbx-t018.Svoj7N/.jj/secret.txt'
+exit=1
+--- sandbox output ---
+shell-init: error retrieving current directory: getcwd: cannot access parent directories: Operation not permitted
+shell-init: error retrieving current directory: getcwd: cannot access parent directories: Operation not permitted
+cat: /private/tmp/lbx-t018.Svoj7N/.jj/secret.txt: Operation not permitted
+
+== host view after the probe ==
+allowed: new.txt was written
+denied: .jj/evil.txt was not written
+intact: .jj/secret.txt still there
