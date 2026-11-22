@@ -32,6 +32,11 @@ pub struct AppState {
     pub mutations: std::collections::HashMap<String, Arc<MutationSet>>,
 }
 
+/// Upper bound on a proxied request body. The `Bytes` extractor enforces it
+/// before the handler runs, so the JSON parse cannot be handed an arbitrarily
+/// large payload.
+const MAX_REQUEST_BODY: usize = 2 * 1024 * 1024;
+
 pub fn build_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route(
@@ -42,6 +47,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/anthropic/v1/messages", post(messages_handler))
         .route("/openai/v1/models", get(models_handler))
         .route("/health", get(health_handler))
+        .layer(axum::extract::DefaultBodyLimit::max(MAX_REQUEST_BODY))
         .layer(axum::middleware::from_fn(
             crate::server::middleware::request_id_middleware,
         ))
@@ -177,14 +183,15 @@ async fn proxy_handler(
         )
             .into_response();
     }
-    let forwarded_body = if requested_model == model {
-        body.clone()
+    let (forwarded_body, forwarded_json) = if requested_model == model {
+        (body.clone(), parsed)
     } else {
-        let mut rewritten = parsed.clone();
+        let mut rewritten = parsed;
         rewritten["model"] = Value::String(model.clone());
-        axum::body::Bytes::from(
+        let encoded = axum::body::Bytes::from(
             serde_json::to_vec(&rewritten).expect("a JSON value serializes back to JSON"),
-        )
+        );
+        (encoded, rewritten)
     };
 
     let mut session = if let Some(ref sid) = session_id {
@@ -288,6 +295,7 @@ async fn proxy_handler(
                         mutations: mutations.clone(),
                         surface: surface.clone(),
                         model: &model,
+                        parsed_body: &forwarded_json,
                     },
                     &*p.http,
                 )
@@ -308,6 +316,7 @@ async fn proxy_handler(
                         mutations,
                         surface: surface.clone(),
                         model: &model,
+                        parsed_body: &forwarded_json,
                     },
                     &*fallback.http,
                 )
