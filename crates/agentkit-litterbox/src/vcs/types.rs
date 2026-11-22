@@ -25,7 +25,7 @@ impl fmt::Display for BranchName {
 }
 
 /// An opaque revision identity.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize)]
 pub struct Revision(String);
 
 impl Revision {

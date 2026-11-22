@@ -10,11 +10,13 @@ mod conflict;
 mod error;
 pub mod git;
 pub mod git_common;
+mod reconcile;
 mod types;
 
 pub use capabilities::{Capabilities, ConflictModel, ExportSupport};
 pub use conflict::{Conflict, ConflictSides, HistoryPolicy, Merge, RestoreMode};
 pub use error::Error;
+pub use reconcile::{Finished, Report, Staged};
 pub use types::{BranchName, Prepared, Revision, TreeId, Workspace};
 
 use std::path::{Path, PathBuf};
@@ -138,6 +140,71 @@ pub trait Vcs: Send + Sync {
 
     /// Publish the backend's state to its external form, if it has one.
     fn export(&self) -> Result<(), Error>;
+
+    /// The root tree of `revision`.
+    fn tree(&self, _revision: &Revision) -> Result<TreeId, Error> {
+        Err(not_implemented("resolve a tree"))
+    }
+
+    /// The revision at the sandbox branch tip.
+    fn sandbox_tip(&self, _workspace: &Workspace) -> Result<Revision, Error> {
+        Err(not_implemented("read the sandbox branch"))
+    }
+
+    /// Move the sandbox branch tip.
+    fn set_sandbox_tip(&self, _workspace: &Workspace, _revision: &Revision) -> Result<(), Error> {
+        Err(not_implemented("write the sandbox branch"))
+    }
+
+    /// Move the shared branch tip without moving the sandbox branch.
+    fn advance(&self, _workspace: &Workspace, _revision: &Revision) -> Result<(), Error> {
+        Err(not_implemented("advance the branch"))
+    }
+
+    /// The tree a snapshot of `staging` would commit, without committing it.
+    fn observe(&self, _staging: &Path) -> Result<TreeId, Error> {
+        Err(not_implemented("observe the workspace"))
+    }
+
+    /// Whether `ancestor` is an ancestor of `descendant`.
+    fn is_ancestor(&self, _ancestor: &Revision, _descendant: &Revision) -> Result<bool, Error> {
+        Err(not_implemented("compare revisions"))
+    }
+
+    /// Create the bookkeeping refs from the branch tip when they are absent.
+    fn ensure_refs(&self, _workspace: &Workspace) -> Result<(), Error> {
+        Err(not_implemented("initialise the bookkeeping refs"))
+    }
+
+    /// The host-side view of a diverged sandbox.
+    fn report(&self, _workspace: &Workspace) -> Result<Report, Error> {
+        Err(not_implemented("report the divergence"))
+    }
+
+    /// Stage the host merge in a linked worktree.
+    fn stage(&self, _workspace: &Workspace) -> Result<Staged, Error> {
+        Err(not_implemented("stage the merge"))
+    }
+
+    /// Finish a staged merge.
+    fn finish(&self, _workspace: &Workspace) -> Result<Finished, Error> {
+        Err(not_implemented("finish the merge"))
+    }
+
+    /// Remove a staging worktree and its temporary branch.
+    fn discard_stage(&self, _workspace: &Workspace) -> Result<(), Error> {
+        Err(not_implemented("discard the staging worktree"))
+    }
+}
+
+fn not_implemented(operation: &str) -> Error {
+    Error::Unsupported {
+        operation: operation.to_string(),
+        backend: "this backend".to_string(),
+        primitive: "the operation".to_string(),
+        reason: "it is not implemented in this change".to_string(),
+        remedy: "use a backend that implements it".to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -295,6 +362,54 @@ mod tests {
 
         fn export(&self) -> Result<(), Error> {
             Ok(())
+        }
+
+        fn tree(&self, _revision: &Revision) -> Result<TreeId, Error> {
+            unsupported("tree")
+        }
+
+        fn sandbox_tip(&self, _workspace: &Workspace) -> Result<Revision, Error> {
+            unsupported("sandbox_tip")
+        }
+
+        fn set_sandbox_tip(
+            &self,
+            _workspace: &Workspace,
+            _revision: &Revision,
+        ) -> Result<(), Error> {
+            unsupported("set_sandbox_tip")
+        }
+
+        fn advance(&self, _workspace: &Workspace, _revision: &Revision) -> Result<(), Error> {
+            unsupported("advance")
+        }
+
+        fn observe(&self, _staging: &Path) -> Result<TreeId, Error> {
+            unsupported("observe")
+        }
+
+        fn is_ancestor(&self, _ancestor: &Revision, _descendant: &Revision) -> Result<bool, Error> {
+            unsupported("is_ancestor")
+        }
+
+        fn ensure_refs(&self, _workspace: &Workspace) -> Result<(), Error> {
+            unsupported("ensure_refs")
+        }
+
+        fn report(&self, _workspace: &Workspace) -> Result<Report, Error> {
+            unsupported("report")
+        }
+
+        fn stage(&self, _workspace: &Workspace) -> Result<Staged, Error> {
+            unsupported("stage")
+        }
+
+        fn finish(&self, _workspace: &Workspace) -> Result<Finished, Error> {
+            unsupported("finish")
+        }
+
+        fn discard_stage(&self, _workspace: &Workspace) -> Result<(), Error> {
+            unsupported("discard_stage")
         }
     }
 
