@@ -1,6 +1,6 @@
 # Reconcile rewritten branches
 
-**Status:** draft  **Created:** 2026-11-22  **Author:** Luke Carrier
+**Status:** implemented  **Created:** 2026-11-22  **Author:** Luke Carrier
 
 `Litterbox` pairs a sandbox with a Git branch. The branch is `litterbox/<name>`, a normal Git branch the user can check out and push. The workspace holds a copy of its content. Only a snapshot writes Git. It builds a tree from the workspace and commits it with the branch tip as parent (`vcs/git/scm.rs:722-821`).
 

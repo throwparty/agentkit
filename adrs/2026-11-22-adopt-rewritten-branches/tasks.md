@@ -132,7 +132,7 @@ Add `sandbox-reconcile` to `src/mcp.rs` taking `{ sandbox }` and calling the orc
 | Depends On | T-009 |
 | References | consent,staging-worktree |
 
-### T-011: Verification
+### T-011: [x] Verification
 
 Run the gates and the smoke on a scratch repository under both `snapshot-mode` values.
 

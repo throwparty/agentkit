@@ -11,7 +11,7 @@ use crate::config::Config;
 use crate::domain::SandboxError;
 use crate::metadata_store::{self, LoadedSandbox, StoredSandbox};
 use crate::orchestrator::lock;
-use crate::orchestrator::outcome::{Deletion, InspectionReport, Performed, Recovery};
+use crate::orchestrator::outcome::{Deletion, InspectionReport, Performed, Recovery, StagedMerge};
 use crate::orchestrator::reconcile::Reconciler;
 use crate::orchestrator::source::Action;
 use crate::provision::StepOutcome;
@@ -1438,10 +1438,15 @@ impl Sandboxes {
     }
 
     /// Finish a staged merge.
-    pub async fn finish(&self, name: &str) -> Result<Finished, Error> {
+    pub async fn finish(&self, name: &str) -> Result<StagedMerge, Error> {
         let stored = self.stored(name)?;
         let workspace = VcsWorkspace::from_branch(&stored.branch_name);
-        self.vcs.finish(&workspace).map_err(contract_error)
+        match self.vcs.finish(&workspace).map_err(contract_error)? {
+            Finished::Landed { branch } => Ok(StagedMerge::Landed {
+                branch: branch.to_string(),
+            }),
+            Finished::Deferred { command } => Ok(StagedMerge::Deferred { command }),
+        }
     }
 
     /// Discard a staging worktree, leaving the branch untouched.
