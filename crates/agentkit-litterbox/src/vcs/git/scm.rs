@@ -12,10 +12,11 @@ use crate::vcs::git_common::archive;
 pub use crate::vcs::git_common::{SnapshotFilter, branch_name_for};
 use crate::vcs::{
     Capabilities, Conflict, ConflictModel, ConflictSides, Error as VcsError, ExportSupport,
-    HistoryPolicy, Merge, Prepared, RestoreMode, Revision, TreeId, Vcs, Workspace,
+    Finished, HistoryPolicy, Merge, Prepared, Report, RestoreMode, Revision, Staged, TreeId, Vcs,
+    Workspace,
 };
 
-use super::refs;
+use super::{reconcile, refs};
 
 /// How many times a snapshot may rebuild its commit while another moves the ref.
 const MAX_SNAPSHOT_ATTEMPTS: usize = 8;
@@ -162,6 +163,8 @@ pub struct GitVcs {
     prefix_override: Option<String>,
     /// The project slug the bare store is named after, when known.
     store_slug: Option<String>,
+    /// Where staging worktrees live, when a test overrides the data dir.
+    reconcile_root: Option<PathBuf>,
 }
 
 /// The old name, kept while the orchestrator still imports it.
@@ -174,11 +177,42 @@ impl GitVcs {
         self
     }
 
+    /// Put staging worktrees under `root` instead of the data directory.
+    pub fn with_reconcile_root(mut self, root: PathBuf) -> Self {
+        self.reconcile_root = Some(root);
+        self
+    }
+
+    fn reconcile_root(&self) -> PathBuf {
+        self.reconcile_root
+            .clone()
+            .unwrap_or_else(|| crate::vcs::git::path::data_dir().join("reconcile"))
+    }
+
+    fn project_slug(&self) -> Result<String, VcsError> {
+        self.store_slug.clone().ok_or_else(|| VcsError::Backend {
+            operation: "reconcile".to_string(),
+            message: "the project slug is not known".to_string(),
+        })
+    }
+
+    /// The repository path that holds `branch`.
+    fn repo_path_for(&self, branch: &str) -> Result<PathBuf, VcsError> {
+        self.repo_for_branch(branch, |repo| {
+            Ok(repo
+                .workdir()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| repo.path().to_path_buf()))
+        })
+        .map_err(vcs_error)
+    }
+
     pub fn open(path: &Path) -> Result<Self, SandboxError> {
         GitScm::open_direct(path).map(|scm| Self {
             inner: Mutex::new(scm),
             prefix_override: None,
             store_slug: None,
+            reconcile_root: None,
         })
     }
 
@@ -187,6 +221,7 @@ impl GitVcs {
             inner: Mutex::new(scm),
             prefix_override: None,
             store_slug: None,
+            reconcile_root: None,
         })
     }
 
@@ -195,6 +230,7 @@ impl GitVcs {
             inner: Mutex::new(scm),
             prefix_override: prefix,
             store_slug: None,
+            reconcile_root: None,
         })
     }
 
@@ -208,6 +244,7 @@ impl GitVcs {
             inner: Mutex::new(scm),
             prefix_override: prefix,
             store_slug: None,
+            reconcile_root: None,
         })
     }
 
@@ -224,6 +261,7 @@ impl GitVcs {
             inner: Mutex::new(scm),
             prefix_override: prefix,
             store_slug: None,
+            reconcile_root: None,
         })
     }
 
@@ -751,6 +789,59 @@ impl Vcs for GitVcs {
         Ok(paths)
     }
 
+    fn report(&self, workspace: &Workspace) -> Result<Report, VcsError> {
+        let branch_name = workspace.branch().to_string();
+        let repo = self.repo_path_for(&branch_name)?;
+        let synced = self.synced(workspace)?;
+        let branch = self.tip(workspace)?;
+        let sandbox = self.sandbox_tip(workspace)?;
+        let path = reconcile::worktree_path(
+            &self.reconcile_root(),
+            &self.project_slug()?,
+            sandbox_slug(&branch_name),
+        );
+        let worktree = path.is_dir().then_some(path);
+        reconcile::report(
+            &repo,
+            &synced,
+            &branch,
+            &sandbox,
+            refs::branch(&branch_name),
+            worktree,
+        )
+    }
+
+    fn stage(&self, workspace: &Workspace) -> Result<Staged, VcsError> {
+        let branch_name = workspace.branch().to_string();
+        let repo = self.repo_path_for(&branch_name)?;
+        let slug = sandbox_slug(&branch_name).to_string();
+        let path = reconcile::worktree_path(&self.reconcile_root(), &self.project_slug()?, &slug);
+        let synced = self.synced(workspace)?;
+        let branch = self.tip(workspace)?;
+        let sandbox = self.sandbox_tip(workspace)?;
+        let temp = format!("litterbox-reconcile/{slug}");
+        reconcile::stage(&repo, &path, &synced, &branch, &sandbox, &temp)
+    }
+
+    fn finish(&self, workspace: &Workspace) -> Result<Finished, VcsError> {
+        let branch_name = workspace.branch().to_string();
+        let repo = self.repo_path_for(&branch_name)?;
+        let slug = sandbox_slug(&branch_name).to_string();
+        let path = reconcile::worktree_path(&self.reconcile_root(), &self.project_slug()?, &slug);
+        let branch = self.tip(workspace)?;
+        let temp = format!("litterbox-reconcile/{slug}");
+        reconcile::finish(&repo, &path, &branch_name, &branch, &temp)
+    }
+
+    fn discard_stage(&self, workspace: &Workspace) -> Result<(), VcsError> {
+        let branch_name = workspace.branch().to_string();
+        let repo = self.repo_path_for(&branch_name)?;
+        let slug = sandbox_slug(&branch_name).to_string();
+        let path = reconcile::worktree_path(&self.reconcile_root(), &self.project_slug()?, &slug);
+        let temp = format!("litterbox-reconcile/{slug}");
+        reconcile::discard(&repo, &path, &temp)
+    }
+
     fn ensure_refs(&self, workspace: &Workspace) -> Result<(), VcsError> {
         let branch = workspace.branch().to_string();
         self.repo_for_branch(&branch, |repo| {
@@ -915,6 +1006,10 @@ fn revision_oid(revision: &Revision) -> Result<git2::Oid, SandboxError> {
         .as_str()
         .parse()
         .map_err(|source| SandboxError::from(GitError::Commit { source }))
+}
+
+fn sandbox_slug(branch: &str) -> &str {
+    branch.strip_prefix("litterbox/").unwrap_or(branch)
 }
 
 fn vcs_error(error: SandboxError) -> VcsError {

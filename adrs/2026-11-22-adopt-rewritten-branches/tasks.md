@@ -93,7 +93,7 @@ In `src/orchestrator/service.rs` call the reconciler from `create` and `exec` an
 | Depends On | T-006 |
 | References | lazy-planning,no-tool-refused,backend-writes,creation-and-removal,branch-gone |
 
-### T-008: Report and stage in Git
+### T-008: [x] Report and stage in Git
 
 Add `src/vcs/git/reconcile.rs`. `report` runs `git merge-tree --write-tree --merge-base=<synced>` and parses the conflict paths and names the branch reflog. `stage` creates `data_dir()/reconcile/<slug>/<sandbox>` with `git worktree add` on a temporary branch then `read-tree -m` and `checkout --conflict=merge` then writes `MERGE_HEAD` and `MERGE_MSG`. `finish` checks a clean worktree and a descendant merge commit and moves the branch or prints the fast-forward. `discard_stage` removes the worktree and the temporary branch. Every command runs with `-c core.hooksPath` pointing at an empty directory.
 
