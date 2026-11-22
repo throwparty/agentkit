@@ -2,7 +2,7 @@
 
 ## Tasks
 
-### T-001: Source state and plan
+### T-001: [x] Source state and plan
 
 Add `src/orchestrator/source.rs`. Define `Base` and `Workspace` and `MergeAxis` and `SourceState` and `Action` and `Step`. `classify` takes the two tips and the four trees and the recorded merge state and returns the state. `plan` takes the state and the action and the conflict model and returns ordered steps. Keep it free of I/O and locks and clocks.
 
