@@ -184,21 +184,7 @@ impl SandboxServer {
         let performed = write_in_sandbox(project, &args.sandbox, &args.path, &args.content)
             .await
             .map_err(ToolError::into_mcp)?;
-        let recovery = performed.recovery;
-        if let Err(error) = project
-            .snapshot(
-                &args.sandbox,
-                &snapshot_message(&SnapshotTrigger::Write { path: args.path }),
-            )
-            .await
-        {
-            // The file landed; a failed snapshot must not read as a failed
-            // write, or the caller will apply the edit twice. The result says
-            // separately that the edit is not yet recorded.
-            tracing::warn!(sandbox = %args.sandbox, %error, "the write landed but the snapshot failed");
-            return mutation_result(Some(error.to_string()), recovery);
-        }
-        mutation_result(None, recovery)
+        mutation_result(None, performed.recovery)
     }
 
     #[tool(
@@ -213,20 +199,7 @@ impl SandboxServer {
         let performed = patch_in_sandbox(project, &args.sandbox, &args.path, &args.diff)
             .await
             .map_err(ToolError::into_mcp)?;
-        let recovery = performed.recovery;
-        if let Err(error) = project
-            .snapshot(
-                &args.sandbox,
-                &snapshot_message(&SnapshotTrigger::Patch { path: args.path }),
-            )
-            .await
-        {
-            // The patch landed; see the write tool for why this is not an
-            // error result.
-            tracing::warn!(sandbox = %args.sandbox, %error, "the patch landed but the snapshot failed");
-            return mutation_result(Some(error.to_string()), recovery);
-        }
-        mutation_result(None, recovery)
+        mutation_result(None, performed.recovery)
     }
 
     #[tool(
@@ -249,12 +222,6 @@ impl SandboxServer {
         .map_err(ToolError::into_mcp)?;
         let recovery = performed.recovery;
         let result = performed.value;
-        if let Err(error) = project
-            .snapshot(&args.sandbox, &snapshot_message(&SnapshotTrigger::Bash))
-            .await
-        {
-            tracing::warn!(sandbox = %args.sandbox, %error, "the command ran but the snapshot failed");
-        }
         let content = ContentBlock::json(result)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
         success_with_recovery(content, recovery)
@@ -587,10 +554,10 @@ async fn ls_in_sandbox<P: SandboxIo + ?Sized>(
     if result.exit_code != 0 {
         return Err(ToolError::classify(Tool::Ls, &sandbox_path, &result));
     }
-    Ok(Performed {
-        value: parse_ls_output(&result.stdout, &sandbox_path, recursive),
-        recovery,
-    })
+    Ok(
+        Performed::fresh(parse_ls_output(&result.stdout, &sandbox_path, recursive))
+            .or_recovery(recovery),
+    )
 }
 
 fn parse_ls_output(output: &str, base: &str, recursive: bool) -> Vec<String> {
@@ -612,13 +579,6 @@ fn parse_ls_output(output: &str, base: &str, recursive: bool) -> Vec<String> {
         .collect();
     entries.sort();
     entries
-}
-
-#[derive(Debug, Clone)]
-enum SnapshotTrigger {
-    Write { path: String },
-    Patch { path: String },
-    Bash,
 }
 
 /// What `write` and `patch` report once their edit has landed.
@@ -660,20 +620,6 @@ fn success_with_recovery(
     Ok(CallToolResult::success(blocks))
 }
 
-fn snapshot_message(trigger: &SnapshotTrigger) -> String {
-    // Raw tool input is never persisted: a command line can carry credentials,
-    // and a path can be arbitrarily long.
-    match trigger {
-        SnapshotTrigger::Write { path } => format!("write: {}", bounded(path)),
-        SnapshotTrigger::Patch { path } => format!("patch: {}", bounded(path)),
-        SnapshotTrigger::Bash => "bash".to_string(),
-    }
-}
-
-fn bounded(text: &str) -> String {
-    text.chars().take(120).collect()
-}
-
 #[allow(clippy::result_large_err)]
 async fn read_in_sandbox<P: SandboxIo + ?Sized>(
     io: &P,
@@ -702,10 +648,7 @@ async fn read_in_sandbox<P: SandboxIo + ?Sized>(
     if result.exit_code != 0 {
         return Err(ToolError::classify(Tool::Read, &sandbox_path, &result));
     }
-    Ok(Performed {
-        value: slice_content(&result.stdout, offset, limit),
-        recovery,
-    })
+    Ok(Performed::fresh(slice_content(&result.stdout, offset, limit)).or_recovery(recovery))
 }
 
 #[allow(clippy::result_large_err)]
@@ -739,10 +682,7 @@ async fn write_in_sandbox<P: SandboxIo + ?Sized>(
     if result.exit_code != 0 {
         return Err(ToolError::classify(Tool::Write, &sandbox_path, &result));
     }
-    Ok(Performed {
-        value: (),
-        recovery,
-    })
+    Ok(Performed::fresh(()).or_recovery(recovery))
 }
 
 #[allow(clippy::result_large_err)]
@@ -774,10 +714,7 @@ async fn patch_in_sandbox<P: SandboxIo + ?Sized>(
         recovery = written.recovery;
     }
 
-    Ok(Performed {
-        value: (),
-        recovery,
-    })
+    Ok(Performed::fresh(()).or_recovery(recovery))
 }
 
 #[allow(clippy::result_large_err)]
@@ -1037,10 +974,7 @@ async fn glob_in_sandbox<P: SandboxIo + ?Sized>(
     }
 
     entries.sort();
-    Ok(Performed {
-        value: entries,
-        recovery,
-    })
+    Ok(Performed::fresh(entries).or_recovery(recovery))
 }
 
 fn parse_find_output(output: &str) -> Vec<String> {
@@ -1086,16 +1020,10 @@ async fn grep_in_sandbox<P: SandboxIo + ?Sized>(
     let recovery = performed.recovery;
     let result = performed.value;
     if result.exit_code == 0 {
-        return Ok(Performed {
-            value: parse_grep_output(&result.stdout),
-            recovery,
-        });
+        return Ok(Performed::fresh(parse_grep_output(&result.stdout)).or_recovery(recovery));
     }
     if result.exit_code == 1 && result.stderr.trim().is_empty() {
-        return Ok(Performed {
-            value: Vec::new(),
-            recovery,
-        });
+        return Ok(Performed::fresh(Vec::new()).or_recovery(recovery));
     }
     Err(classify_grep_failure(&sandbox_path, pattern, &result))
 }
@@ -2221,26 +2149,6 @@ mod tests {
         assert!(error.to_string().contains("not found"));
     }
 
-    #[test]
-    fn snapshot_message_for_triggers() {
-        assert_eq!(
-            snapshot_message(&SnapshotTrigger::Write {
-                path: "README.md".to_string()
-            }),
-            "write: README.md"
-        );
-        assert_eq!(
-            snapshot_message(&SnapshotTrigger::Patch {
-                path: "src/lib.rs".to_string()
-            }),
-            "patch: src/lib.rs"
-        );
-        assert_eq!(
-            snapshot_message(&SnapshotTrigger::Bash),
-            "bash",
-            "a command line never enters the branch history"
-        );
-    }
     #[test]
     fn read_file_missing_returns_error() {
         let path = PathBuf::from("/tmp/this-file-should-not-exist-12345");

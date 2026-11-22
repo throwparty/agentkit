@@ -37,6 +37,8 @@ struct State {
     tip: String,
     sandbox_tip: String,
     synced: String,
+    observed_tree: String,
+    trees: std::collections::BTreeMap<String, String>,
     ancestor: bool,
     observed: usize,
     ensured: usize,
@@ -68,8 +70,9 @@ impl TestVcs {
         Self {
             state: Mutex::new(State {
                 tip: "0123456789abcdef".to_string(),
-                sandbox_tip: "sandbox".to_string(),
-                synced: "synced".to_string(),
+                sandbox_tip: "0123456789abcdef".to_string(),
+                synced: "0123456789abcdef".to_string(),
+                observed_tree: "tree".to_string(),
                 ancestor: true,
                 ..State::default()
             }),
@@ -115,6 +118,20 @@ impl TestVcs {
     /// Configure whether `is_ancestor` answers yes.
     pub fn with_ancestor(mut self, ancestor: bool) -> Self {
         self.state_mut().ancestor = ancestor;
+        self
+    }
+
+    /// Configure the tree a revision reports.
+    pub fn with_tree(mut self, revision: &str, tree: &str) -> Self {
+        self.state_mut()
+            .trees
+            .insert(revision.to_string(), tree.to_string());
+        self
+    }
+
+    /// Configure the tree an observation reports.
+    pub fn with_observed_tree(mut self, tree: &str) -> Self {
+        self.state_mut().observed_tree = tree.to_string();
         self
     }
 
@@ -396,8 +413,14 @@ impl Vcs for TestVcs {
         Ok(())
     }
 
-    fn tree(&self, _revision: &Revision) -> Result<TreeId, Error> {
-        Ok(TreeId::new("tree"))
+    fn tree(&self, revision: &Revision) -> Result<TreeId, Error> {
+        Ok(TreeId::new(
+            self.state()
+                .trees
+                .get(revision.as_str())
+                .cloned()
+                .unwrap_or_else(|| "tree".to_string()),
+        ))
     }
 
     fn sandbox_tip(&self, _workspace: &Workspace) -> Result<Revision, Error> {
@@ -425,7 +448,7 @@ impl Vcs for TestVcs {
 
     fn observe(&self, _workspace: &Workspace, _staging: &Path) -> Result<TreeId, Error> {
         self.state().observed += 1;
-        Ok(TreeId::new("workspace"))
+        Ok(TreeId::new(self.state().observed_tree.clone()))
     }
 
     fn is_ancestor(&self, _ancestor: &Revision, _descendant: &Revision) -> Result<bool, Error> {

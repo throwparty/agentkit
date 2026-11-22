@@ -80,7 +80,7 @@ Add `src/orchestrator/reconcile.rs`. `state` calls `ensure_refs` and reads `sync
 | Depends On | T-001,T-002,T-003,T-004,T-005 |
 | References | lazy-planning,adopt-history,adopt-content,divergence,no-tool-refused,ignored-files-survive,empty-workspace,repeated-rewrites,snapshot-after-merge |
 
-### T-007: Wire the operations
+### T-007: [x] Wire the operations
 
 In `src/orchestrator/service.rs` call the reconciler from `create` and `exec` and `upload` and `download` and `snapshot` and `delete`. `exec` and `upload` run the pre-plan and the post-plan. `download` runs the pre-plan only. `snapshot` runs one `Snapshot` plan. Remove the explicit snapshot from the MCP `write` tool. Return the post-plan state on `Performed`. `delete` removes any staging worktree.
 

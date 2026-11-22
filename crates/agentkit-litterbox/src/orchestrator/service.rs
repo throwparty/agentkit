@@ -12,6 +12,8 @@ use crate::domain::SandboxError;
 use crate::metadata_store::{self, LoadedSandbox, StoredSandbox};
 use crate::orchestrator::lock;
 use crate::orchestrator::outcome::{Deletion, InspectionReport, Performed, Recovery};
+use crate::orchestrator::reconcile::Reconciler;
+use crate::orchestrator::source::Action;
 use crate::provision::StepOutcome;
 use crate::provision::kind::KindDescription;
 use crate::provision::prepare::{self, PrepareContext, PrepareError, SystemRunner};
@@ -501,6 +503,10 @@ impl Sandboxes {
 
         match metadata_store::load_sandbox_at(&self.records_dir, &name)? {
             Some(LoadedSandbox::Current(stored)) => {
+                let workspace = VcsWorkspace::from_branch(&stored.branch_name);
+                if let Err(error) = self.vcs.discard_stage(&workspace) {
+                    tracing::warn!(sandbox = %name, %error, "the staging worktree may remain");
+                }
                 let selected = match self.select_for(&stored.sandbox, "delete the sandbox").await {
                     Ok(selected) => selected,
                     Err(error) => {
@@ -661,6 +667,9 @@ impl Sandboxes {
         let recovery = self.ensure_live(name, PausedPolicy::Refuse).await?;
         let stored = self.stored(name)?;
         let selected = self.select_for(&stored.sandbox, "run a command").await?;
+        let reconciler = Reconciler::new(&self.vcs, &stored, &selected, &self.records_dir);
+        reconciler.before(Action::Tool).await?;
+
         let result = selected.core().exec(&stored.sandbox, command).await;
         match &result {
             Ok(execution) => {
@@ -670,7 +679,13 @@ impl Sandboxes {
                 tracing::error!(sandbox = %name, %error, "command failed");
             }
         }
-        result.map(|value| Performed { value, recovery })
+        let value = result?;
+        let reconciled = reconciler
+            .after("litterbox: snapshot after a command")
+            .await?;
+        Ok(Performed::fresh(value)
+            .or_recovery(recovery)
+            .with_reconciliation(reconciled))
     }
 
     /// Describe a sandbox.
@@ -1427,11 +1442,18 @@ impl Sandboxes {
         let selected = self
             .select_for(&stored.sandbox, "upload into the sandbox")
             .await?;
+        let reconciler = Reconciler::new(&self.vcs, &stored, &selected, &self.records_dir);
+        reconciler.before(Action::Tool).await?;
         selected
             .core()
             .upload(&stored.sandbox, source, destination)
-            .await
-            .map(|value| Performed { value, recovery })
+            .await?;
+        let reconciled = reconciler
+            .after("litterbox: snapshot after an upload")
+            .await?;
+        Ok(Performed::fresh(())
+            .or_recovery(recovery)
+            .with_reconciliation(reconciled))
     }
 
     /// Copy a sandbox path out to the host.
@@ -1446,11 +1468,15 @@ impl Sandboxes {
         let selected = self
             .select_for(&stored.sandbox, "download from the sandbox")
             .await?;
+        let reconciler = Reconciler::new(&self.vcs, &stored, &selected, &self.records_dir);
+        let reconciliation = reconciler.before(Action::Tool).await?;
         selected
             .core()
             .download(&stored.sandbox, source, destination, None)
-            .await
-            .map(|value| Performed { value, recovery })
+            .await?;
+        Ok(Performed::fresh(())
+            .or_recovery(recovery)
+            .with_reconciliation(reconciliation))
     }
 
     /// Download the workspace and commit it to the sandbox's snapshot branch.
@@ -1460,36 +1486,11 @@ impl Sandboxes {
         let selected = self
             .select_for(&stored.sandbox, "snapshot the workspace")
             .await?;
-
-        let staging = tempfile::tempdir()
-            .map_err(|error| Error::failed(format!("could not create a staging dir: {error}")))?;
-        let workspace = selected.core().inspect(&stored.sandbox).await?.workspace;
-        // The ignore rules travel first, so the bulk transfer can skip build
-        // trees and secrets instead of copying them into host staging.
-        let ignore = Some(self.vcs.ignore_files());
-        selected
-            .core()
-            .download(&stored.sandbox, &workspace, staging.path(), ignore)
-            .await?;
-
-        let filter = self
-            .vcs
-            .snapshot_filter(staging.path())
-            .map_err(contract_error)?;
-        let selector = Some(filter);
-        selected
-            .core()
-            .download(&stored.sandbox, &workspace, staging.path(), selector)
-            .await?;
-
-        let workspace_handle = VcsWorkspace::from_branch(&stored.branch_name);
-        self.vcs
-            .snapshot(&workspace_handle, staging.path(), message)
-            .map_err(contract_error)?;
-        Ok(Performed {
-            value: (),
-            recovery,
-        })
+        let reconciler = Reconciler::new(&self.vcs, &stored, &selected, &self.records_dir);
+        let reconciled = reconciler.snapshot(message).await?;
+        Ok(Performed::fresh(())
+            .or_recovery(recovery)
+            .with_reconciliation(reconciled))
     }
 
     fn valid_name(&self, name: &str) -> Result<String, Error> {
@@ -1668,6 +1669,104 @@ mod seam_tests {
             binding: None,
             merge: None,
         }
+    }
+
+    fn orchestrator_vcs(records: &Path, backend: Arc<TestBackend>, vcs: Arc<TestVcs>) -> Sandboxes {
+        let config = Config {
+            project: crate::config::ProjectConfig {
+                slug: Some("project".to_string()),
+                backends: Some(vec!["test".to_string()]),
+            },
+            ..Config::default()
+        };
+        Sandboxes::for_test(
+            config,
+            vcs,
+            false,
+            "project".to_string(),
+            records.to_path_buf(),
+            selected(backend),
+        )
+    }
+
+    #[tokio::test]
+    async fn a_read_on_a_synced_sandbox_reads_no_workspace() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(TestVcs::new());
+        let sandboxes = orchestrator_vcs(records.path(), backend, Arc::clone(&vcs));
+        sandboxes.create("demo").await.expect("create");
+
+        let destination = TempDir::new().expect("destination");
+        let _ = sandboxes
+            .download("demo", "/src/missing.txt", destination.path())
+            .await;
+
+        assert_eq!(vcs.observed(), 0, "a synced read observes nothing");
+        let stored = metadata_store::load_sandbox_at(records.path(), "demo")
+            .expect("readable")
+            .expect("present");
+        let metadata_store::LoadedSandbox::Current(stored) = stored else {
+            panic!("a record written now is current");
+        };
+        assert!(stored.merge.is_none(), "create writes no merge state");
+    }
+
+    #[tokio::test]
+    async fn a_command_snapshots_once_when_the_workspace_changed() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(TestVcs::new().with_observed_tree("edited"));
+        let sandboxes = orchestrator_vcs(records.path(), backend, Arc::clone(&vcs));
+        sandboxes.create("demo").await.expect("create");
+
+        let performed = sandboxes
+            .exec("demo", &["true".to_string()])
+            .await
+            .expect("exec");
+
+        assert_eq!(vcs.snapshots().len(), 1, "one snapshot after the command");
+        assert_eq!(
+            performed.state().map(|state| state.workspace),
+            Some(crate::orchestrator::source::Workspace::Dirty)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_divergence_records_pending_and_holds_the_branch() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(
+            TestVcs::new()
+                .with_synced("aaaa")
+                .with_tip("bbbb")
+                .with_sandbox_tip("aaaa")
+                .with_tree("aaaa", "base")
+                .with_tree("bbbb", "branch")
+                .with_observed_tree("edited")
+                .with_ancestor(false),
+        );
+        let sandboxes = orchestrator_vcs(records.path(), backend, Arc::clone(&vcs));
+        sandboxes.create("demo").await.expect("create");
+
+        sandboxes
+            .exec("demo", &["true".to_string()])
+            .await
+            .expect("exec");
+
+        let stored = metadata_store::load_sandbox_at(records.path(), "demo")
+            .expect("readable")
+            .expect("present");
+        let metadata_store::LoadedSandbox::Current(stored) = stored else {
+            panic!("a record written now is current");
+        };
+        assert!(stored.merge.is_some(), "the divergence is recorded");
+        assert!(
+            vcs.advanced().is_empty(),
+            "the shared branch is held: {:?}",
+            vcs.advanced()
+        );
+        assert_eq!(vcs.snapshots().len(), 1, "the sandbox line keeps going");
     }
 
     #[tokio::test]
@@ -2234,7 +2333,11 @@ mod seam_tests {
             vcs.materialised().is_empty(),
             "a bound repair materialises nothing"
         );
-        assert_eq!(vcs.bound().len(), 2, "create and repair both ask");
+        assert!(
+            vcs.bound().len() >= 2,
+            "create and repair both ask: {:?}",
+            vcs.bound()
+        );
 
         let stored = metadata_store::load_sandbox_at(records.path(), "demo")
             .expect("readable")

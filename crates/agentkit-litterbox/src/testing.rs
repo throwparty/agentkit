@@ -76,6 +76,25 @@ fn persisted_provenance(steps: &[ResolvedStep]) -> Provenance {
 }
 
 /// An in-memory backend that honours the contract without confining anything.
+/// Collect every file under `dir`, relative to `base`.
+fn collect_files(
+    base: &std::path::Path,
+    dir: &std::path::Path,
+    out: &mut Vec<(std::path::PathBuf, Vec<u8>)>,
+) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if entry.file_type()?.is_dir() {
+            collect_files(base, &path, out)?;
+        } else {
+            let relative = path.strip_prefix(base).unwrap_or(&path).to_path_buf();
+            out.push((relative, std::fs::read(&path)?));
+        }
+    }
+    Ok(())
+}
+
 pub struct TestBackend {
     records: Mutex<Vec<SandboxRecord>>,
     files: Mutex<std::collections::HashMap<String, Vec<u8>>>,
@@ -425,15 +444,30 @@ impl Backend for TestBackend {
                     reason: "outside the sandbox workspace".to_string(),
                 });
             }
+            let mut files = self
+                .files
+                .lock()
+                .map_err(|_| Error::failed("test backend lock poisoned"))?;
+
+            if source.is_dir() {
+                let mut collected = Vec::new();
+                collect_files(source, source, &mut collected)
+                    .map_err(|error| Error::failed(format!("could not read the tree: {error}")))?;
+                for (relative, bytes) in collected {
+                    files.insert(
+                        format!("{destination}/{}", relative.to_string_lossy()),
+                        bytes,
+                    );
+                }
+                return Ok(());
+            }
+
             let name = source
                 .file_name()
                 .ok_or_else(|| Error::failed("the upload path has no file name"))?;
             let bytes = std::fs::read(source)
                 .map_err(|error| Error::failed(format!("could not read the fixture: {error}")))?;
-            self.files
-                .lock()
-                .map_err(|_| Error::failed("test backend lock poisoned"))?
-                .insert(format!("{destination}/{}", name.to_string_lossy()), bytes);
+            files.insert(format!("{destination}/{}", name.to_string_lossy()), bytes);
             Ok(())
         })
     }
@@ -452,21 +486,45 @@ impl Backend for TestBackend {
                     reason: "outside the sandbox workspace".to_string(),
                 });
             }
-            let bytes = self
+            let files = self
                 .files
                 .lock()
-                .map_err(|_| Error::failed("test backend lock poisoned"))?
-                .get(source)
-                .cloned()
-                .ok_or_else(|| Error::NotFound {
-                    name: source.to_string(),
+                .map_err(|_| Error::failed("test backend lock poisoned"))?;
+
+            if let Some(bytes) = files.get(source) {
+                let name = std::path::Path::new(source)
+                    .file_name()
+                    .ok_or_else(|| Error::failed("the transfer path has no file name"))?;
+                let target = destination.join(name);
+                std::fs::write(&target, bytes).map_err(|error| {
+                    Error::failed(format!("could not write the download: {error}"))
                 })?;
-            let name = std::path::Path::new(source)
-                .file_name()
-                .ok_or_else(|| Error::failed("the transfer path has no file name"))?;
-            let target = destination.join(name);
-            std::fs::write(&target, bytes)
-                .map_err(|error| Error::failed(format!("could not write the download: {error}")))?;
+                return Ok(());
+            }
+
+            let prefix = format!("{}/", source.trim_end_matches('/'));
+            let mut any = false;
+            for (path, bytes) in files.iter().filter(|(path, _)| path.starts_with(&prefix)) {
+                let relative = &path[prefix.len()..];
+                let target = destination.join(relative);
+                if let Some(parent) = target.parent() {
+                    std::fs::create_dir_all(parent).map_err(|error| {
+                        Error::failed(format!("could not create the download tree: {error}"))
+                    })?;
+                }
+                std::fs::write(&target, bytes).map_err(|error| {
+                    Error::failed(format!("could not write the download: {error}"))
+                })?;
+                any = true;
+            }
+            if !any {
+                if source == self.workspace {
+                    return Ok(());
+                }
+                return Err(Error::NotFound {
+                    name: source.to_string(),
+                });
+            }
             Ok(())
         })
     }

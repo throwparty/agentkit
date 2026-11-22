@@ -2,7 +2,10 @@
 
 use std::path::PathBuf;
 
+use crate::orchestrator::reconcile::Reconciled;
+use crate::orchestrator::source::SourceState;
 use crate::sandbox::contract::{Inspection, SandboxStatus};
+use crate::vcs::Revision;
 
 /// What a repair did, carried alongside the operation's own result.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
@@ -24,6 +27,7 @@ pub struct Performed<T> {
     pub value: T,
     /// The repair, when the operation had to recreate compute.
     pub recovery: Option<Recovery>,
+    reconciliation: Option<Reconciled>,
 }
 
 impl<T> Performed<T> {
@@ -32,6 +36,7 @@ impl<T> Performed<T> {
         Self {
             value,
             recovery: None,
+            reconciliation: None,
         }
     }
 
@@ -40,6 +45,7 @@ impl<T> Performed<T> {
         Self {
             value,
             recovery: Some(recovery),
+            reconciliation: None,
         }
     }
 
@@ -51,8 +57,27 @@ impl<T> Performed<T> {
             Self {
                 value: self.value,
                 recovery,
+                reconciliation: self.reconciliation,
             }
         }
+    }
+
+    /// Attach the reconciliation the operation performed.
+    pub(crate) fn with_reconciliation(mut self, reconciled: Reconciled) -> Self {
+        self.reconciliation = Some(reconciled);
+        self
+    }
+
+    /// The source state after the reconciliation, when one ran.
+    pub fn state(&self) -> Option<&SourceState> {
+        self.reconciliation.as_ref().map(|done| &done.state)
+    }
+
+    /// The sandbox tip adoption dropped, when it dropped one.
+    pub fn dropped(&self) -> Option<&Revision> {
+        self.reconciliation
+            .as_ref()
+            .and_then(|done| done.dropped.as_ref())
     }
 }
 
