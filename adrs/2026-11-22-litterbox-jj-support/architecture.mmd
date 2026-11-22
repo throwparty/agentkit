@@ -1,0 +1,40 @@
+flowchart TB
+    subgraph Orchestrator
+        direction LR
+        SVC["service: create / list / delete / exec"]
+        REC["reconciler: classify, plan, execute"]
+    end
+
+    subgraph Contract["vcs — opaque Revision / TreeId"]
+        VCS["Vcs trait (already carries every method)"]
+    end
+
+    subgraph Backends
+        direction LR
+        GIT["vcs::git — unchanged"]
+        JJ["vcs::jj — new"]
+    end
+
+    subgraph Clone["vcs/jj/slug — co-located, git-backed"]
+        direction LR
+        META[".jj + .git — bookmarks are branches"]
+        WS["sandbox workspaces — working-copy commits"]
+        RC["staging workspaces — reconcile/name"]
+    end
+
+    subgraph Procs["subprocesses — no git2, no jj-lib, no vcs::git"]
+        direction LR
+        JCLI["jj 0.47.1"]
+        GCLI["git"]
+    end
+
+    SVC --> VCS
+    REC --> VCS
+    VCS --> GIT
+    VCS --> JJ
+    JJ --> META --> WS
+    JJ --> RC
+    JJ --> JCLI
+    JJ --> GCLI
+    GIT -. never imports .-> JJ
+    JJ -. never imports .-> GIT
