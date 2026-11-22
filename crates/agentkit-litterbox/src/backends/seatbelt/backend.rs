@@ -100,20 +100,6 @@ impl SeatbeltBackend {
                 remedy: "remove the declared ports".to_string(),
             });
         }
-        // The profile renderer emits allow rules only, so it cannot deny a
-        // path inside the workspace it already allows. A bound workspace
-        // would hand the sandbox its `.git` or `.jj`.
-        if request.workspace.binding == WorkspaceBinding::Bound {
-            return Err(Error::Unsupported {
-                operation: format!("create the sandbox '{}'", request.name),
-                backend: BACKEND.to_string(),
-                primitive: "a deny rule for a path inside the workspace".to_string(),
-                reason: "the Seatbelt profile is an allow-list, so a masked path inside the \
-                         allowed workspace cannot be hidden from the sandbox"
-                    .to_string(),
-                remedy: "use binding = 'copied'".to_string(),
-            });
-        }
         let readiness = self.readiness_report();
         if let Some(check) = readiness
             .checks
@@ -186,11 +172,20 @@ impl SeatbeltBackend {
             Error::failed(format!("cannot protect the state directory: {error}"))
         })?;
 
-        let workspace = state.join("workspace");
-        if let Err(error) = workspace::copy_from(&request.workspace.source, &workspace) {
-            let _ = fs::remove_dir_all(&state);
-            return Err(error);
-        }
+        // A copied workspace is materialised into the state directory; a bound
+        // workspace is the host directory the VCS owns, used directly because
+        // Seatbelt has no mount namespace.
+        let workspace = match request.workspace.binding {
+            WorkspaceBinding::Copied => {
+                let workspace = state.join("workspace");
+                if let Err(error) = workspace::copy_from(&request.workspace.source, &workspace) {
+                    let _ = fs::remove_dir_all(&state);
+                    return Err(error);
+                }
+                workspace
+            }
+            WorkspaceBinding::Bound => request.workspace.source.clone(),
+        };
 
         let context = mounts::Context {
             workspace: &workspace,
@@ -234,6 +229,12 @@ impl SeatbeltBackend {
                 .mach_services
                 .iter()
                 .map(|service| service.as_bytes().to_vec())
+                .collect(),
+            masked_paths: request
+                .workspace
+                .masked_paths
+                .iter()
+                .map(|path| path_bytes(path))
                 .collect(),
         };
 
@@ -1313,6 +1314,81 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_bound_workspace_masks_the_metadata_path() {
+        let helper = helper();
+        assert!(helper.exists(), "build the helper before this test");
+        let source = tempfile::tempdir().expect("source");
+        std::fs::write(source.path().join("visible.txt"), b"hello").expect("file");
+        std::fs::create_dir_all(source.path().join(".jj")).expect("jj dir");
+        std::fs::write(source.path().join(".jj").join("secret.txt"), b"top secret")
+            .expect("secret");
+
+        let project = format!("test-{}-bound-mask-{}", std::process::id(), line!());
+        let name = "one";
+        let state = agentkit_common::data_dir("litterbox")
+            .join("seatbelt")
+            .join(&project)
+            .join(name);
+        let _ = std::fs::remove_dir_all(&state);
+        let backend = SeatbeltBackend::with_helper(settings(), Arc::new(SystemHost::new()), helper);
+        let request = CreateRequest {
+            name: name.to_string(),
+            project_slug: project,
+            workspace: Workspace::bound(source.path().to_path_buf(), vec![PathBuf::from(".jj")]),
+            provision: Vec::new(),
+            forward_bind: "127.0.0.1".to_string(),
+            ports: Vec::new(),
+            mode: CreateMode::Fresh,
+        };
+        let record = backend.create(&request).await.expect("create");
+        let payload = payload(&record);
+        let _cleanup = Cleanup {
+            pid: payload.holder_pid,
+            socket: payload.socket.clone(),
+            state: state.clone(),
+        };
+
+        let read_visible = backend
+            .exec(
+                &record,
+                &["/bin/cat".to_string(), "visible.txt".to_string()],
+            )
+            .await
+            .expect("exec");
+        assert_eq!(read_visible.exit_code, 0, "{}", read_visible.stderr);
+        assert_eq!(read_visible.stdout, "hello");
+
+        let read_secret = backend
+            .exec(
+                &record,
+                &["/bin/cat".to_string(), ".jj/secret.txt".to_string()],
+            )
+            .await
+            .expect("exec");
+        assert_ne!(read_secret.exit_code, 0, "the masked path is unreadable");
+
+        let write_secret = backend
+            .exec(
+                &record,
+                &[
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    "echo evil > .jj/evil.txt".to_string(),
+                ],
+            )
+            .await
+            .expect("exec");
+        assert_ne!(write_secret.exit_code, 0, "the masked path is unwritable");
+        assert!(
+            !source.path().join(".jj").join("evil.txt").exists(),
+            "the write did not reach the host"
+        );
+
+        backend.delete(&record).await.expect("delete");
+        let _ = state;
+    }
+
+    #[tokio::test]
     async fn a_large_contribution_is_collapsed_through_create() {
         let source = tempfile::tempdir().expect("source");
         let closure = source.path().join("closure");
@@ -1772,37 +1848,6 @@ mod tests {
             check.primitive == "the Seatbelt probe"
                 && check.state == crate::sandbox::report::State::Unavailable
         }));
-    }
-
-    #[tokio::test]
-    async fn a_bound_create_is_refused() {
-        let project = "seatbelt-bound-refusal";
-        let source = tempfile::tempdir().expect("source");
-        let state = agentkit_common::data_dir("litterbox")
-            .join("seatbelt")
-            .join(project);
-        let _ = std::fs::remove_dir_all(&state);
-        let backend = SeatbeltBackend::with_helper(
-            settings(),
-            Arc::new(SystemHost::new()),
-            PathBuf::from("/bin/true"),
-        );
-        let mut request = request(source.path(), project);
-        request.workspace =
-            Workspace::bound(source.path().to_path_buf(), vec![PathBuf::from(".git")]);
-
-        let error = backend.create_sandbox(&request).expect_err("cannot mask");
-
-        match error {
-            Error::Unsupported {
-                backend, remedy, ..
-            } => {
-                assert_eq!(backend, super::BACKEND);
-                assert!(remedy.contains("copied"), "{remedy}");
-            }
-            other => panic!("unexpected error: {other}"),
-        }
-        assert!(!state.exists(), "no sandbox is made");
     }
 
     #[tokio::test]

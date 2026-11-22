@@ -76,7 +76,8 @@ fn config(workspace: &Path) -> Vec<u8> {
     for value in baseline {
         payload.extend_from_slice(&string(value.as_bytes()));
     }
-    payload.extend_from_slice(&0u16.to_le_bytes());
+    payload.extend_from_slice(&0u16.to_le_bytes()); // mach_services
+    payload.extend_from_slice(&0u16.to_le_bytes()); // masked_paths
     frame(1, &payload)
 }
 
