@@ -409,9 +409,18 @@ impl Vcs for TestVcs {
         Ok(())
     }
 
-    fn advance(&self, _workspace: &Workspace, revision: &Revision) -> Result<(), Error> {
+    fn advance(
+        &self,
+        _workspace: &Workspace,
+        revision: &Revision,
+        _expected: &Revision,
+    ) -> Result<(), Error> {
         self.state().advanced.push(revision.as_str().to_string());
         Ok(())
+    }
+
+    fn deleted_paths(&self, _from: &TreeId, _to: &TreeId) -> Result<Vec<PathBuf>, Error> {
+        Ok(Vec::new())
     }
 
     fn observe(&self, _workspace: &Workspace, _staging: &Path) -> Result<TreeId, Error> {

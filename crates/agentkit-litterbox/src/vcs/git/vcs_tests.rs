@@ -65,7 +65,7 @@ fn prepare_materialise_snapshot_and_tip_round_trip() {
         vcs.tip(&prepared.workspace).expect("tip").as_str()
     );
 
-    vcs.advance(&prepared.workspace, &revision)
+    vcs.advance(&prepared.workspace, &revision, &prepared.base)
         .expect("advance");
     assert_eq!(
         revision.as_str(),

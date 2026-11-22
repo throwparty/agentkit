@@ -157,8 +157,21 @@ pub trait Vcs: Send + Sync {
     }
 
     /// Move the shared branch tip without moving the sandbox branch.
-    fn advance(&self, _workspace: &Workspace, _revision: &Revision) -> Result<(), Error> {
+    ///
+    /// Fails with [`Error::Raced`] when the branch no longer points at
+    /// `expected`.
+    fn advance(
+        &self,
+        _workspace: &Workspace,
+        _revision: &Revision,
+        _expected: &Revision,
+    ) -> Result<(), Error> {
         Err(not_implemented("advance the branch"))
+    }
+
+    /// The paths present in `from` and absent from `to`.
+    fn deleted_paths(&self, _from: &TreeId, _to: &TreeId) -> Result<Vec<PathBuf>, Error> {
+        Err(not_implemented("compare trees"))
     }
 
     /// The tree a snapshot of `staging` would commit, without committing it.
@@ -380,8 +393,17 @@ mod tests {
             unsupported("set_sandbox_tip")
         }
 
-        fn advance(&self, _workspace: &Workspace, _revision: &Revision) -> Result<(), Error> {
+        fn advance(
+            &self,
+            _workspace: &Workspace,
+            _revision: &Revision,
+            _expected: &Revision,
+        ) -> Result<(), Error> {
             unsupported("advance")
+        }
+
+        fn deleted_paths(&self, _from: &TreeId, _to: &TreeId) -> Result<Vec<PathBuf>, Error> {
+            unsupported("deleted_paths")
         }
 
         fn observe(&self, _workspace: &Workspace, _staging: &Path) -> Result<TreeId, Error> {

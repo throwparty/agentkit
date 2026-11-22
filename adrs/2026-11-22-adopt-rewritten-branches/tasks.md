@@ -67,7 +67,7 @@ Add `merge: Option<StoredMerge>` to `StoredSandbox` with `base` and `ours` and `
 | Depends On |  |
 | References | source-state,divergence,legacy-record |
 
-### T-006: The reconciler
+### T-006: [x] The reconciler
 
 Add `src/orchestrator/reconcile.rs`. `state` calls `ensure_refs` and reads `synced` and the branch tip and the sandbox tip and the record. `observe` downloads the workspace with the ignore selector and calls `Vcs::observe`. The pre-plan observes only when the branch moved or `Merge` is `Pending` or the action is `Snapshot` and passes `Clean` when it defers. `execute` runs `AdoptHistory` and `AdoptContent` and `Snapshot` and `Block` and `Proceed`. `AdoptContent` materialises the branch tip and uploads it and deletes the paths the new tree lacks and reports the old tip when it is not an ancestor. `Block` writes `Pending`. Clear `Pending` when the sandbox tip is an ancestor of the branch tip.
 

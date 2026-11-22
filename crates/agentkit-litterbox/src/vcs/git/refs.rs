@@ -49,6 +49,35 @@ pub(crate) fn write(
         .map_err(|source| SandboxError::from(GitError::Reference { source }))
 }
 
+/// Point a ref at a commit only if it still points at `expected`.
+pub(crate) fn write_matching(
+    repo: &Repository,
+    reference: &str,
+    oid: Oid,
+    expected: Oid,
+    message: &str,
+) -> Result<(), SandboxError> {
+    match repo.reference_matching(reference, oid, true, expected, message) {
+        Ok(_) => Ok(()),
+        Err(error)
+            if matches!(
+                error.code(),
+                git2::ErrorCode::Modified | git2::ErrorCode::Exists | git2::ErrorCode::NotFound
+            ) =>
+        {
+            let current = repo
+                .refname_to_id(reference)
+                .map(|oid| oid.to_string())
+                .unwrap_or_else(|_| "none".to_string());
+            Err(SandboxError::BranchMoved {
+                expected: expected.to_string(),
+                current,
+            })
+        }
+        Err(source) => Err(SandboxError::from(GitError::Reference { source })),
+    }
+}
+
 /// Remove a ref, ignoring one that is already gone.
 pub(crate) fn delete(repo: &Repository, reference: &str) -> Result<(), SandboxError> {
     match repo.find_reference(reference) {

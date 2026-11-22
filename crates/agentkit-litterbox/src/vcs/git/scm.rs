@@ -606,11 +606,16 @@ impl Vcs for GitVcs {
     }
 
     fn set_tip(&self, workspace: &Workspace, revision: &Revision) -> Result<(), VcsError> {
-        self.move_shared_branch(workspace, revision)
+        self.write_shared_branch(workspace, revision)
     }
 
-    fn advance(&self, workspace: &Workspace, revision: &Revision) -> Result<(), VcsError> {
-        self.move_shared_branch(workspace, revision)
+    fn advance(
+        &self,
+        workspace: &Workspace,
+        revision: &Revision,
+        expected: &Revision,
+    ) -> Result<(), VcsError> {
+        self.move_shared_branch(workspace, revision, expected)
     }
 
     fn synced(&self, workspace: &Workspace) -> Result<Revision, VcsError> {
@@ -708,6 +713,44 @@ impl Vcs for GitVcs {
             .map_err(vcs_error)
     }
 
+    fn deleted_paths(&self, from: &TreeId, to: &TreeId) -> Result<Vec<PathBuf>, VcsError> {
+        let parse = |value: &TreeId| {
+            value
+                .as_str()
+                .parse::<git2::Oid>()
+                .map_err(|source| SandboxError::from(GitError::Commit { source }))
+        };
+        let from = parse(from).map_err(vcs_error)?;
+        let to = parse(to).map_err(vcs_error)?;
+
+        let guard = self.lock().map_err(vcs_error)?;
+        let from = guard
+            .repo
+            .find_tree(from)
+            .map_err(|source| SandboxError::from(GitError::Commit { source }))
+            .map_err(vcs_error)?;
+        let to = guard
+            .repo
+            .find_tree(to)
+            .map_err(|source| SandboxError::from(GitError::Commit { source }))
+            .map_err(vcs_error)?;
+        let diff = guard
+            .repo
+            .diff_tree_to_tree(Some(&from), Some(&to), None)
+            .map_err(|source| SandboxError::from(GitError::Commit { source }))
+            .map_err(vcs_error)?;
+
+        let mut paths = Vec::new();
+        for delta in diff.deltas() {
+            if delta.status() == git2::Delta::Deleted
+                && let Some(path) = delta.old_file().path()
+            {
+                paths.push(path.to_path_buf());
+            }
+        }
+        Ok(paths)
+    }
+
     fn ensure_refs(&self, workspace: &Workspace) -> Result<(), VcsError> {
         let branch = workspace.branch().to_string();
         self.repo_for_branch(&branch, |repo| {
@@ -792,7 +835,7 @@ impl Vcs for GitVcs {
 }
 
 impl GitVcs {
-    fn move_shared_branch(
+    fn write_shared_branch(
         &self,
         workspace: &Workspace,
         revision: &Revision,
@@ -804,6 +847,27 @@ impl GitVcs {
                 repo,
                 &refs::branch(&branch),
                 oid,
+                "litterbox: move the branch",
+            )
+        })
+        .map_err(vcs_error)
+    }
+
+    fn move_shared_branch(
+        &self,
+        workspace: &Workspace,
+        revision: &Revision,
+        expected: &Revision,
+    ) -> Result<(), VcsError> {
+        let branch = workspace.branch().to_string();
+        let oid = revision_oid(revision).map_err(vcs_error)?;
+        let expected = revision_oid(expected).map_err(vcs_error)?;
+        self.repo_for_branch(&branch, |repo| {
+            refs::write_matching(
+                repo,
+                &refs::branch(&branch),
+                oid,
+                expected,
                 "litterbox: advance the branch",
             )
         })
@@ -857,6 +921,7 @@ fn vcs_error(error: SandboxError) -> VcsError {
     match error {
         SandboxError::SandboxExists { name } => VcsError::Exists { name },
         SandboxError::SandboxNotFound { name } => VcsError::NotFound { name },
+        SandboxError::BranchMoved { .. } => VcsError::Raced,
         SandboxError::Io(source) => VcsError::Io(source),
         other => VcsError::Backend {
             operation: "git".to_string(),
