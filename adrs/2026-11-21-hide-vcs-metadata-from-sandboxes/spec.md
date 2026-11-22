@@ -105,7 +105,7 @@ The VCS backend owns one host directory per bound sandbox, derived from the proj
 
 ### FR-012: Removal and orphans
 
-A bound directory is removed with its sandbox. `prune` releases project storage that is no longer needed and is extended to remove bound directories with no record, and its call condition widens from `stored.remote` to also cover a record whose binding is `Bound` (`orchestrator/service.rs:478-482`). A failed create removes the directory on every path that already removes the branch (`service.rs:145-147`, `172-174`, `191-193`).
+The contract names both releases: `delete_branch` releases the branch and any host directory the backend owned for that sandbox, and `prune` releases project storage that is no longer needed, including bound directories whose branch is gone. The orchestrator delivers its half: the `prune` call condition widens from `stored.remote` to also cover a record whose binding is `Bound` (`orchestrator/service.rs:478-482`), and a failed create reaches the same `delete_branch` on every path that already removes the branch (`service.rs:145-147`, `172-174`, `191-193`). Git owns no bound directory, so both releases are contractual here and the binding VCS implements them; that work lands with the jj bridge. Until then no bound directory can exist and no sweep has anything to find.
 
 **Slug:** `orphans`
 
