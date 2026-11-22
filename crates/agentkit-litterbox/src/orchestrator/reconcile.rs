@@ -3,18 +3,15 @@
 //! It reads the state through the contract, asks [`crate::orchestrator::source`]
 //! for the steps, and executes them. It names no ref and no backend.
 
-// Wired into the operations by the next change.
-#![allow(dead_code)]
-
-use std::path::Path;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use tempfile::TempDir;
 
 use crate::metadata_store::{self, StoredMerge, StoredSandbox};
 use crate::orchestrator::service::contract_error;
 use crate::orchestrator::source::{self, Action, Merge, SourceState, Step};
-use crate::sandbox::contract::Error;
+use crate::sandbox::contract::{Error, SnapshotSelector, WorkspaceBinding};
 use crate::sandbox::selected::Selected;
 use crate::vcs::{Revision, TreeId, Vcs, Workspace};
 
@@ -22,7 +19,7 @@ use crate::vcs::{Revision, TreeId, Vcs, Workspace};
 const MAX_ATTEMPTS: usize = 3;
 
 /// What one plan execution achieved.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Reconciled {
     /// The state after the plan ran.
     pub(crate) state: SourceState,
@@ -30,12 +27,18 @@ pub(crate) struct Reconciled {
     pub(crate) dropped: Option<Revision>,
 }
 
+/// The directory a snapshot reads, and the temporary one that may own it.
+struct WorkspaceSource {
+    path: PathBuf,
+    _temp: Option<TempDir>,
+}
+
 /// The facts one classification read, kept for the steps that follow.
 struct Observation {
     synced: Revision,
     branch: Revision,
     sandbox: Revision,
-    staging: Option<TempDir>,
+    source: Option<WorkspaceSource>,
 }
 
 /// One reconciliation attempt that lost a race and can be planned again.
@@ -47,6 +50,7 @@ pub(crate) struct Reconciler<'a> {
     stored: &'a StoredSandbox,
     selected: &'a Selected,
     records_dir: &'a Path,
+    merge: Mutex<Option<StoredMerge>>,
 }
 
 impl<'a> Reconciler<'a> {
@@ -62,6 +66,7 @@ impl<'a> Reconciler<'a> {
             stored,
             selected,
             records_dir,
+            merge: Mutex::new(stored.merge.clone()),
         }
     }
 
@@ -72,6 +77,11 @@ impl<'a> Reconciler<'a> {
 
     /// Plan and run the snapshot that comes after a tool.
     pub(crate) async fn after(&self, message: &str) -> Result<Reconciled, Error> {
+        self.run(Action::Snapshot, Some(message)).await
+    }
+
+    /// Plan and run an explicit snapshot.
+    pub(crate) async fn snapshot(&self, message: &str) -> Result<Reconciled, Error> {
         self.run(Action::Snapshot, Some(message)).await
     }
 
@@ -114,7 +124,12 @@ impl<'a> Reconciler<'a> {
         let branch_tree = self.vcs.tree(&branch).map_err(contract_error)?;
         let sandbox_tree = self.vcs.tree(&sandbox).map_err(contract_error)?;
 
-        let mut merge = merge_state(self.stored.merge.as_ref());
+        let mut merge = merge_state(
+            self.merge
+                .lock()
+                .map_err(|_| Error::failed("the merge state lock is poisoned".to_string()))?
+                .as_ref(),
+        );
         if merge == Merge::Pending
             && self
                 .vcs
@@ -128,9 +143,9 @@ impl<'a> Reconciler<'a> {
         // The pre-plan reads the workspace only when the result can change the
         // steps: a moved branch, a held merge, or a snapshot.
         let needs_observation = needs_observation(merge, &branch, &synced, action);
-        let (workspace_tree, staging) = if needs_observation {
-            let (staging, tree) = self.observe().await?;
-            (tree, Some(staging))
+        let (workspace_tree, observed_source) = if needs_observation {
+            let (source, tree) = self.observe().await?;
+            (tree, Some(source))
         } else {
             // The previous operation's snapshot left the sandbox at its own tip.
             (sandbox_tree.clone(), None)
@@ -152,7 +167,7 @@ impl<'a> Reconciler<'a> {
                 synced,
                 branch,
                 sandbox,
-                staging,
+                source: observed_source,
             },
         ))
     }
@@ -192,7 +207,7 @@ impl<'a> Reconciler<'a> {
                         .map_err(contract_error)?;
                 }
                 Step::Snapshot => {
-                    let Some(staging) = &observed.staging else {
+                    let Some(source) = &observed.source else {
                         return Err(Error::failed(
                             "the plan asked for a snapshot without reading the workspace"
                                 .to_string(),
@@ -200,7 +215,7 @@ impl<'a> Reconciler<'a> {
                     };
                     let revision = self
                         .vcs
-                        .snapshot(&workspace, staging.path(), message)
+                        .snapshot(&workspace, &source.path, message)
                         .map_err(contract_error)?;
                     if state.merge != Merge::Pending {
                         match self.vcs.advance(&workspace, &revision, &observed.branch) {
@@ -226,32 +241,64 @@ impl<'a> Reconciler<'a> {
         Ok(Ok(dropped))
     }
 
-    /// Download the workspace and return the tree a snapshot would commit.
-    async fn observe(&self) -> Result<(TempDir, TreeId), Error> {
+    /// Read the workspace and return the tree a snapshot would commit.
+    async fn observe(&self) -> Result<(WorkspaceSource, TreeId), Error> {
+        let workspace = self.workspace_handle();
+        let masked = self.vcs.masked_paths(&workspace);
+
+        // A bound workspace is the host directory, so reading it in place is
+        // both correct and cheaper. A copied one has to be downloaded.
+        if self.stored.binding() == WorkspaceBinding::Bound {
+            let root = self.vcs.bound_root(&workspace).map_err(contract_error)?;
+            let tree = self
+                .vcs
+                .observe(&workspace, &root)
+                .map_err(contract_error)?;
+            return Ok((
+                WorkspaceSource {
+                    path: root,
+                    _temp: None,
+                },
+                tree,
+            ));
+        }
+
         let path = self.workspace_path().await?;
         let staging = tempfile::tempdir()
             .map_err(|error| Error::failed(format!("could not create a staging dir: {error}")))?;
 
-        let ignore = Some(self.vcs.ignore_files());
+        let ignore: Arc<dyn SnapshotSelector> = Arc::new(Excluding {
+            inner: self.vcs.ignore_files(),
+            masked: masked.clone(),
+        });
         self.selected
             .core()
-            .download(&self.stored.sandbox, &path, staging.path(), ignore)
+            .download(&self.stored.sandbox, &path, staging.path(), Some(ignore))
             .await?;
         let filter = self
             .vcs
             .snapshot_filter(staging.path())
             .map_err(contract_error)?;
+        let filter: Arc<dyn SnapshotSelector> = Arc::new(Excluding {
+            inner: filter,
+            masked,
+        });
         self.selected
             .core()
             .download(&self.stored.sandbox, &path, staging.path(), Some(filter))
             .await?;
 
-        let workspace = self.workspace_handle();
         let tree = self
             .vcs
             .observe(&workspace, staging.path())
             .map_err(contract_error)?;
-        Ok((staging, tree))
+        Ok((
+            WorkspaceSource {
+                path: staging.path().to_path_buf(),
+                _temp: Some(staging),
+            },
+            tree,
+        ))
     }
 
     /// Replace the recorded workspace content with the branch tree.
@@ -291,22 +338,39 @@ impl<'a> Reconciler<'a> {
     }
 
     fn record_merge(&self, observed: &Observation) -> Result<(), Error> {
-        let mut updated = self.stored.clone();
-        updated.merge = Some(StoredMerge {
+        let merge = StoredMerge {
             base: observed.synced.to_string(),
             ours: observed.sandbox.to_string(),
             theirs: observed.branch.to_string(),
-        });
-        metadata_store::store_sandbox_at(self.records_dir, &updated.sandbox.name, &updated)
+        };
+        let mut updated = self.stored.clone();
+        updated.merge = Some(merge.clone());
+        metadata_store::store_sandbox_at(self.records_dir, &updated.sandbox.name, &updated)?;
+        *self
+            .merge
+            .lock()
+            .map_err(|_| Error::failed("the merge state lock is poisoned".to_string()))? =
+            Some(merge);
+        Ok(())
     }
 
     fn clear_merge(&self) -> Result<(), Error> {
-        if self.stored.merge.is_none() {
+        if self
+            .merge
+            .lock()
+            .map_err(|_| Error::failed("the merge state lock is poisoned".to_string()))?
+            .is_none()
+        {
             return Ok(());
         }
         let mut updated = self.stored.clone();
         updated.merge = None;
-        metadata_store::store_sandbox_at(self.records_dir, &updated.sandbox.name, &updated)
+        metadata_store::store_sandbox_at(self.records_dir, &updated.sandbox.name, &updated)?;
+        *self
+            .merge
+            .lock()
+            .map_err(|_| Error::failed("the merge state lock is poisoned".to_string()))? = None;
+        Ok(())
     }
 
     fn workspace_handle(&self) -> Workspace {
@@ -332,6 +396,21 @@ fn merge_state(merge: Option<&StoredMerge>) -> Merge {
 
 fn needs_observation(merge: Merge, branch: &Revision, synced: &Revision, action: Action) -> bool {
     merge != Merge::None || branch != synced || action == Action::Snapshot
+}
+
+/// A selector that rejects paths the sandbox must not see.
+struct Excluding {
+    inner: Arc<dyn SnapshotSelector>,
+    masked: Vec<PathBuf>,
+}
+
+impl SnapshotSelector for Excluding {
+    fn selects(&self, relative: &Path, is_dir: bool) -> Result<bool, Error> {
+        if self.masked.iter().any(|path| relative.starts_with(path)) {
+            return Ok(false);
+        }
+        self.inner.selects(relative, is_dir)
+    }
 }
 
 #[cfg(test)]
