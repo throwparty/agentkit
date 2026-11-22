@@ -8,13 +8,13 @@ Created: 2026-11-18
 
 | Metric | Value |
 |--------|-------|
-| Tickets | 20 |
-| Answered | 20 |
-| Open | 0 |
+| Tickets | 23 |
+| Answered | 22 |
+| Open | 1 |
 | Probing | 0 |
 | Abandoned | 0 |
 | Blocked | 0 |
-| Frontier | empty |
+| Frontier | T-023 |
 
 ## Tickets
 
@@ -57,7 +57,7 @@ Created: 2026-11-18
 |-------|-------|
 | State | answered |
 | Depends on | T-004 |
-| Answer | Technically yes, but no tool ecosystem uses notes for conflict or divergence; git-appraise and Gerrit use notes for review metadata only. Reject the pattern; Git uses `Blocking`, jj uses `Native`. |
+| Answer | Technically yes, but no tool ecosystem uses notes for conflict or divergence; git-appraise and Gerrit use notes for review metadata only. Reject the pattern; both VCS use host staging; native conflicts deferred. |
 | Evidence | [evidence/T-005.md](evidence/T-005.md) |
 
 ### T-006: Can `rmcp` tool results carry a structured `workspace` block alongside the existing content, and what is the exact schema?
@@ -74,7 +74,7 @@ Created: 2026-11-18
 |-------|-------|
 | State | answered |
 | Depends on | T-001, T-003, T-005 |
-| Answer | One `plan` over Base/Workspace/Merge returns ordered steps; pre-tool and post-tool; no tool is blocked, but `Blocking` holds the snapshot and branch while `Native` snapshots and allows descendants; every tool returns the post-plan `workspace` block. T-019 supersedes the Git merge branch: a dirty sandbox blocks the advance instead of merging, and the host resolves. |
+| Answer | One `plan` over Base/Workspace/Merge returns ordered steps; pre-tool and post-tool; no tool is blocked, but the hold model keeps the shared branch at the user tip while the sandbox snapshots its own branch; native conflicts deferred; every tool returns the post-plan `workspace` block. T-019 supersedes the Git merge branch: a dirty sandbox blocks the advance instead of merging, and the host resolves. |
 | Evidence | [evidence/T-007.md](evidence/T-007.md) |
 
 ### T-008: How are the `workspaces`, `synced` and `conflicts` refs represented in jj and Git, and who updates them?
@@ -135,7 +135,7 @@ Created: 2026-11-18
 |-------|-------|
 | State | answered |
 | Depends on | T-005 |
-| Answer | No. Notes are a metadata pattern for review and attribution, not conflict state; Git uses `Blocking` and jj uses `Native`. `Deferred` is rejected. |
+| Answer | No. Notes are a metadata pattern for review and attribution, not conflict state; both VCS use host staging and native conflicts are deferred. `Deferred` is rejected. |
 | Evidence | [evidence/T-005.md](evidence/T-005.md) |
 
 ### T-015: How should multiple steps of sandbox history be kept without putting bookkeeping refs in the user's repository?
@@ -151,7 +151,7 @@ Created: 2026-11-18
 | Field | Value |
 |-------|-------|
 | State | answered |
-| Answer | C is accepted: only the Git remote is external, so a conflicted jj commit is not a supported Git consumer. Export the bookmark as-is, surface export failures, scope aborts, serialise bridge operations; no separate clean export. |
+| Answer | C is accepted: only the Git remote is external, and this model never creates a conflicted jj commit; native conflicts are deferred. Export the bookmark as-is, surface export failures, scope aborts, serialise bridge operations; no separate clean export. |
 | Evidence | [evidence/T-016.md](evidence/T-016.md) |
 
 ### T-017: What is the generic VCS interface, what code is shared between backends, and what arch-lint rules keep VCS code out of the orchestration code?
@@ -175,7 +175,7 @@ Created: 2026-11-18
 | Field | Value |
 |-------|-------|
 | State | answered |
-| Answer | The sandbox never merges. It adopts when its workspace matches its own branch and holds the shared branch at the user tip when it does not. The host resolves in a linked worktree on a temporary branch under the data directory. The merge uses the synced revision as its base because Git's inferred base is wrong after a rebase. Staging is a command the user runs or an MCP tool the harness may allow; it never writes the user's checkout. Finish fast-forwards when the branch is free and prints the command when the checkout holds it. |
+| Answer | The sandbox never merges. It adopts when its workspace matches its own branch and holds the shared branch at the user tip when it does not. The host resolves in a staging workspace under the data directory (a linked worktree for Git, a jj workspace for jj). The merge uses the synced revision as its base because Git's inferred base is wrong after a rebase. Staging is a command the user runs or an MCP tool the harness may allow; it never writes the user's checkout. Finish fast-forwards when the branch is free and prints the command when the checkout holds it. |
 | Evidence | [evidence/T-019.md](evidence/T-019.md) |
 
 ### T-020: How are sandbox revisions that a rewrite drops retained?
@@ -183,12 +183,36 @@ Created: 2026-11-18
 | Field | Value |
 |-------|-------|
 | State | answered |
-| Answer | The branch reflog. Adoption reports the old tip once and names the reflog; the object stays reachable for the reflog lifetime. No new ref and no record field. The bare store logs every ref update; under direct the user's repository logs branches by default. |
+| Answer | The Git branch reflog; jj uses its operation log. Adoption reports the old tip once and names the reflog; the object stays reachable for the reflog lifetime. No new ref and no record field. The bare store logs every ref update; under direct the user's repository logs branches by default. |
 | Evidence | [evidence/T-020.md](evidence/T-020.md) |
+
+### T-021: When the bridge tip is a conflicted revision, does the sandbox fall back to the last non-conflicted history, and at which points does it check?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Answer | Yes: on every operation that reads source state, check the bridge tip; if conflicted, hold at synced and the sandbox branch and report; adopt only a non-conflicted tip. The main workspace stays buildable. |
+| Evidence | [evidence/T-021.md](evidence/T-021.md) |
+
+### T-022: How does each VCS report a conflicted tip (jj commit state, Git marker tree), and what does the MCP workspace block say?
+
+| Field | Value |
+|-------|-------|
+| State | answered |
+| Depends on | T-021 |
+| Answer | jj: `jj resolve --list -r <rev>` and the `conflict` template; Git: a marker scan of the tip tree, as a safety net behind the host staging. The workspace block reports `held`, `reason: bridge tip is conflicted`, synced, bridge_tip, paths and the next step. |
+| Evidence | [evidence/T-022.md](evidence/T-022.md) |
+
+### T-023: Can an agent resolve a deferred conflict, and if so what resolution context and knowledge does it need?
+
+| Field | Value |
+|-------|-------|
+| State | open |
+| Depends on | T-021 |
 
 ## Decision
 
-Git and jj sit behind one VCS trait with opaque revisions and capabilities. Define `vcs` and `vcs::git_common` first, add arch-lint rules, adapt the existing Git implementation to the interface, build the plan surface on Git `Blocking`, and add jj later as a second implementation that uses `vcs::git_common` and never calls `vcs::git`. Git uses `Blocking` as a hold: the shared branch stays at the user tip while the sandbox snapshots its own branch, and the host resolves the difference. jj uses `Native` (conflicts in commits, one jj workspace per sandbox, non-colocated bridge, `.jj` masked). `Deferred` and git-notes emulation are rejected. The source state is derived from Base/Workspace/Merge axes over four trees, and `Workspace` compares the workspace with the sandbox branch. One `plan` is the only consumer. No sandbox tool is blocked while diverged; only the branch advance is held. Every sandbox tool returns a proactive `workspace` block; `sandbox-status` and `sandbox-reconcile` are the model surface, and `sandbox-reconcile` stages only. `status` and `reconcile` with `--finish` and `--abort` are the operator surface. Staging is a linked worktree under the data directory on a temporary branch; the merge uses `synced` as its base because Git's inferred base is wrong after a rebase. The user's checkout is never written. Dropped tips stay in the branch reflog; no new ref is minted. History retention and restore semantics are user configuration with no default; Git uses the reflog, jj uses its op log, and the user's repository is not the history store. Open risks: the masked `.jj` is never absent — an empty mountpoint under bubblewrap/Docker, present-but-inaccessible under Seatbelt's deny rule (T-018); the non-colocated jj bridge exposes only the Git remote, so a conflicted jj commit is not a supported Git consumer, export failures must surface, aborts must be scoped and bridge operations serialised; delete warns about unmerged work and `--force` only means stop it while running.
+Git and jj sit behind one VCS trait with opaque revisions and capabilities. Define `vcs` and `vcs::git_common` first, add arch-lint rules, adapt the existing Git implementation to the interface, build the plan surface on Git `Blocking`, and add jj later as a second implementation that uses `vcs::git_common` and never calls `vcs::git`. Git uses `Blocking` as a hold: the shared branch stays at the user tip while the sandbox snapshots its own branch, and the host resolves the difference. jj uses the same hold and host-staging model (one jj workspace per sandbox, non-colocated bridge, `.jj` masked); native conflicted commits and agent-side resolution are part of the goal; T-023 is open, and the fallback is T-021/T-022. `Deferred` and git-notes emulation are rejected. The source state is derived from Base/Workspace/Merge axes over four trees, and `Workspace` compares the workspace with the sandbox branch. One `plan` is the only consumer. No sandbox tool is blocked while diverged; only the branch advance is held. Every sandbox tool returns a proactive `workspace` block; `sandbox-status` and `sandbox-reconcile` are the model surface, and `sandbox-reconcile` stages only. `status` and `reconcile` with `--finish` and `--abort` are the operator surface. Git staging is a linked worktree under the data directory on a temporary branch and jj staging is a jj workspace; the merge uses `synced` as its base because Git's inferred base is wrong after a rebase. The user's checkout is never written. Dropped tips stay in the branch reflog; no new ref is minted. History retention and restore semantics are user configuration with no default; Git uses the reflog, jj uses its op log, and the user's repository is not the history store. Open risks: the masked `.jj` is never absent — an empty mountpoint under bubblewrap/Docker, present-but-inaccessible under Seatbelt's deny rule (T-018); the non-colocated jj bridge exposes only the Git remote; the main workspace never holds a conflicted tree, so the Git consumer gap depends on the conflict living on the bridge (T-021), but export failures must surface, aborts must be scoped and bridge operations serialised; delete warns about unmerged work and `--force` only means stop it while running.
 
 ADR: `adrs/2026-11-19-decouple-vcs-from-orchestration`
 
