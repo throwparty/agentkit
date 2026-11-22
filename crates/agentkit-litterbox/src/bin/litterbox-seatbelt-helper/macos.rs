@@ -826,6 +826,11 @@ fn prepare(config: protocol::ConfigPayload) -> Result<Holder, String> {
                     .map_err(|_| "a mach service is not UTF-8".to_string())
             })
             .collect::<Result<Vec<_>, _>>()?,
+        masked_paths: config
+            .masked_paths
+            .iter()
+            .map(|value| path(value))
+            .collect(),
     };
     let profile = policy::render(&input).map_err(|error| error.to_string())?;
     Ok(Holder {
@@ -931,7 +936,7 @@ mod tests {
 
     #[test]
     fn a_config_becomes_a_profile_input() {
-        std::fs::create_dir_all("/private/tmp/lbx/ws").expect("workspace");
+        std::fs::create_dir_all("/private/tmp/lbx/ws/.jj").expect("workspace");
         std::fs::create_dir_all("/private/tmp/lbx/read").expect("read");
         let config = ConfigPayload {
             workspace: b"/private/tmp/lbx/ws".to_vec(),
@@ -944,10 +949,13 @@ mod tests {
             environment: vec![(b"PATH".to_vec(), b"/usr/bin".to_vec())],
             baseline_reads: vec![b"/usr/bin".to_vec()],
             mach_services: vec![b"com.apple.example".to_vec()],
+            masked_paths: vec![b".jj".to_vec()],
         };
         let holder = prepare(config).expect("prepared");
         assert_eq!(holder.workspace, path(b"/private/tmp/lbx/ws"));
         assert_eq!(holder.environment[0].0, b"PATH");
         assert!(holder.profile.text.contains("(param"));
+        assert!(holder.profile.text.contains("(deny file-read*"));
+        assert!(holder.profile.text.contains("(deny file-write*"));
     }
 }

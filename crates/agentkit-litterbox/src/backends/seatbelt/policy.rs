@@ -42,6 +42,9 @@ pub(crate) struct ProfileInput {
     pub(crate) tag: String,
     pub(crate) baseline_reads: Vec<PathBuf>,
     pub(crate) mach_services: Vec<String>,
+    /// Paths under the workspace the sandbox must not see, relative to the
+    /// workspace root. Rendered as a deny layer after the allow rules.
+    pub(crate) masked_paths: Vec<PathBuf>,
 }
 
 /// A rendered profile and the values to pass with it.
@@ -222,6 +225,28 @@ pub(crate) fn render(input: &ProfileInput) -> Result<RenderedProfile, RenderErro
         }
     }
 
+    // A masked path is denied after every allow rule: SBPL resolves
+    // last-match-wins, so the deny overrides the workspace allow for that
+    // subtree. A masked path that does not exist is skipped — there is nothing
+    // to hide.
+    if !input.masked_paths.is_empty() {
+        let mut denied = Vec::new();
+        for relative in &input.masked_paths {
+            let absolute = workspace.join(relative);
+            if let Ok(resolved) = resolve(&absolute) {
+                push_path(&mut denied, resolved);
+            }
+        }
+        if !denied.is_empty() {
+            let mut filters = Vec::with_capacity(denied.len());
+            for path in &denied {
+                filters.push(subpath_filter(&mut parameters, path)?);
+            }
+            write_block(&mut text, "(deny file-read*", &filters);
+            write_block(&mut text, "(deny file-write*", &filters);
+        }
+    }
+
     if parameters.values.len() > MAX_PARAMETERS {
         return Err(RenderError::TooManyParameters {
             count: parameters.values.len(),
@@ -388,6 +413,7 @@ mod tests {
             tag: "demo".to_string(),
             baseline_reads: Vec::new(),
             mach_services: Vec::new(),
+            masked_paths: Vec::new(),
         }
     }
 
@@ -526,6 +552,52 @@ mod tests {
     }
 
     #[test]
+    fn a_masked_path_is_denied_after_the_allows() {
+        let workspace = workspace();
+        std::fs::create_dir_all(workspace.path().join(".jj")).expect("jj dir");
+        std::fs::write(workspace.path().join(".jj").join("secret"), b"secret").expect("secret");
+        let mut masked = input(workspace.path());
+        masked.masked_paths = vec![PathBuf::from(".jj")];
+        let rendered = render(&masked).expect("renders");
+
+        let allow_write = rendered
+            .text
+            .find("(allow file-write*")
+            .expect("allow write");
+        let deny_read = rendered.text.find("(deny file-read*").expect("deny read");
+        let deny_write = rendered.text.find("(deny file-write*").expect("deny write");
+        assert!(deny_read > allow_write, "the read deny follows the allows");
+        assert!(
+            deny_write > allow_write,
+            "the write deny follows the allows"
+        );
+
+        let canonical = workspace.path().canonicalize().expect("canonical");
+        let target = canonical.join(".jj");
+        assert!(
+            rendered
+                .parameters
+                .iter()
+                .any(|parameter| parameter.value.to_bytes() == target.as_os_str().as_bytes()),
+            "the masked path is a parameter, not inline"
+        );
+        assert!(
+            !rendered.text.contains(".jj"),
+            "no masked path reaches the text"
+        );
+    }
+
+    #[test]
+    fn a_missing_masked_path_is_skipped() {
+        let workspace = workspace();
+        let mut masked = input(workspace.path());
+        masked.masked_paths = vec![PathBuf::from(".does-not-exist")];
+        let rendered = render(&masked).expect("renders");
+        assert!(!rendered.text.contains("(deny file-read*"));
+        assert!(!rendered.text.contains("(deny file-write*"));
+    }
+
+    #[test]
     fn the_tag_service_and_endpoint_are_validated() {
         let workspace = workspace();
         let mut bad_tag = input(workspace.path());
@@ -615,6 +687,7 @@ mod tests {
             tag: "demo".to_string(),
             baseline_reads: Vec::new(),
             mach_services: services.iter().map(|service| service.to_string()).collect(),
+            masked_paths: Vec::new(),
         }
     }
 
