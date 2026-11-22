@@ -3,6 +3,8 @@ use std::path::Path;
 use crate::domain::SandboxError;
 
 const REMOTE_NAME: &str = "litterbox";
+const BRANCH_REFSPEC: &str = "+refs/heads/litterbox/*:refs/remotes/litterbox/*";
+const SANDBOX_REFSPEC: &str = "+refs/litterbox/workspaces/*:refs/remotes/litterbox/workspaces/*";
 
 pub fn install_remote(repo_path: &Path, bare_path: &Path) -> Result<(), SandboxError> {
     let mut repo = git2::Repository::open(repo_path)
@@ -25,6 +27,21 @@ pub fn install_remote_in(
         Ok(remote) => {
             let existing = remote.url().unwrap_or("");
             if existing == bare_url {
+                let specs = remote.fetch_refspecs().map_err(|source| {
+                    SandboxError::from(crate::vcs::git_common::GitError::Open { source })
+                })?;
+                let carried = specs
+                    .iter()
+                    .filter_map(Result::ok)
+                    .flatten()
+                    .any(|spec| spec == SANDBOX_REFSPEC);
+                drop(remote);
+                if !carried {
+                    repo.remote_add_fetch(name, SANDBOX_REFSPEC)
+                        .map_err(|source| {
+                            SandboxError::from(crate::vcs::git_common::GitError::Open { source })
+                        })?;
+                }
                 Ok(false)
             } else {
                 Err(SandboxError::Config(format!(
@@ -33,9 +50,14 @@ pub fn install_remote_in(
             }
         }
         Err(e) if e.code() == git2::ErrorCode::NotFound => {
-            repo.remote(name, &bare_url).map_err(|source| {
-                SandboxError::from(crate::vcs::git_common::GitError::BranchCreate { source })
-            })?;
+            repo.remote_with_fetch(name, &bare_url, BRANCH_REFSPEC)
+                .map_err(|source| {
+                    SandboxError::from(crate::vcs::git_common::GitError::BranchCreate { source })
+                })?;
+            repo.remote_add_fetch(name, SANDBOX_REFSPEC)
+                .map_err(|source| {
+                    SandboxError::from(crate::vcs::git_common::GitError::Open { source })
+                })?;
             Ok(true)
         }
         Err(source) => Err(SandboxError::from(crate::vcs::git_common::GitError::Open {
@@ -152,6 +174,38 @@ mod tests {
         assert_eq!(
             remote.url().unwrap_or(""),
             bare_path.path().to_str().unwrap()
+        );
+    }
+
+    #[test]
+    fn install_remote_carries_the_sandbox_branch_refspec() {
+        let (tempdir, _repo) = init_repo();
+        let bare_path = TempDir::new().expect("bare dir");
+
+        install_remote(tempdir.path(), bare_path.path()).expect("install");
+
+        let repo = Repository::open(tempdir.path()).expect("open repo");
+        let remote = repo.find_remote("litterbox").expect("remote");
+        let specs: Vec<String> = remote
+            .fetch_refspecs()
+            .expect("specs")
+            .iter()
+            .filter_map(Result::ok)
+            .flatten()
+            .map(str::to_string)
+            .collect();
+
+        assert!(
+            specs
+                .iter()
+                .any(|spec| spec == "+refs/heads/litterbox/*:refs/remotes/litterbox/*"),
+            "{specs:?}"
+        );
+        assert!(
+            specs
+                .iter()
+                .any(|spec| spec.contains("refs/litterbox/workspaces/*")),
+            "{specs:?}"
         );
     }
 

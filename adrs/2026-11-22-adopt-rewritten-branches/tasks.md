@@ -28,7 +28,7 @@ Extend `vcs` with `tree` and `sandbox_tip` and `set_sandbox_tip` and `advance` a
 | Depends On |  |
 | References | backend-writes |
 
-### T-003: Git refs and locality
+### T-003: [x] Git refs and locality
 
 Add `src/vcs/git/refs.rs` with `branch_ref` and `sandbox_ref` and `synced_ref` resolved through `repo_for_branch`. `prepare` creates all three at the base. `delete_branch` removes all three. `ensure_refs` initialises the two bookkeeping refs from the branch tip and logs it. `install_remote_in` adds the workspaces refspec. `open` sets `core.logAllRefUpdates=always` on the bare store.
 

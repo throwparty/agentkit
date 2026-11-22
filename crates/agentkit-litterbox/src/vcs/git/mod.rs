@@ -7,6 +7,7 @@
 
 mod config;
 pub mod path;
+mod refs;
 pub mod remote;
 mod scm;
 mod store;
