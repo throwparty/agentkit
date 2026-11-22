@@ -35,6 +35,7 @@ const HOST_PREPARE_BUDGET: Duration = Duration::from_secs(30 * 60);
 pub struct Sandboxes {
     config: Config,
     vcs: Arc<dyn Vcs>,
+    vcs_tool: String,
     remote: bool,
     binding: Option<WorkspaceBinding>,
     project_slug: String,
@@ -75,9 +76,14 @@ impl Sandboxes {
         let project_slug = resolve_project_slug(&config)?;
         let records_dir = metadata_store::directory(&project_slug);
 
+        let vcs_tool = config
+            .vcs_tool
+            .clone()
+            .unwrap_or_else(|| "git".to_string());
         Ok(Self {
             config,
             vcs,
+            vcs_tool,
             remote,
             binding,
             project_slug,
@@ -113,6 +119,7 @@ impl Sandboxes {
             // Tests model a machine that configured its workspace; a test
             // about the missing key clears it with `with_binding`.
             binding: Some(WorkspaceBinding::Copied),
+            vcs_tool: "git".to_string(),
             project_slug,
             records_dir,
             fixed: Some(fixed),
@@ -143,10 +150,12 @@ impl Sandboxes {
     fn configured_binding(&self) -> Result<WorkspaceBinding, Error> {
         let Some(binding) = self.binding else {
             return Err(Error::Misconfigured {
-                message: "no workspace binding is configured; set `binding = 'copied'` or \
-                          `binding = 'bound'` under [vcs.git] in \
-                          .agentkit/litterbox/config.local.toml"
-                    .to_string(),
+                message: format!(
+                    "no workspace binding is configured; set `binding = 'copied'` or \
+                     `binding = 'bound'` under [vcs.{}] in \
+                     .agentkit/litterbox/config.local.toml",
+                    self.vcs_tool
+                ),
             });
         };
 
@@ -154,9 +163,10 @@ impl Sandboxes {
             return Err(Error::Misconfigured {
                 message: format!(
                     "the configured workspace binding '{}' is not one this VCS can honour; \
-                     set `binding = 'copied'` under [vcs.git] in \
+                     set `binding = 'copied'` under [vcs.{}] in \
                      .agentkit/litterbox/config.local.toml, or select a VCS that binds",
-                    binding.as_str()
+                    binding.as_str(),
+                    self.vcs_tool
                 ),
             });
         }
