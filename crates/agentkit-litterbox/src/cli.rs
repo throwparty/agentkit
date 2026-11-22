@@ -5,7 +5,7 @@ use crate::config::Config;
 use crate::config_loader;
 use crate::mcp;
 use crate::orchestrator::{
-    HostReport, InspectionReport, PlannedStep, Preflight, Sandboxes, preflight_host,
+    HostReport, InspectionReport, PlannedStep, Preflight, Sandboxes, StagedMerge, preflight_host,
 };
 use crate::sandbox::contract::{
     ContributionSupport, Error, ProvisioningClass, SandboxStatus, StoreView,
@@ -334,7 +334,7 @@ async fn handle_reconcile(
 
     if finish {
         return match sandboxes.finish(&name).await {
-            Ok(crate::vcs::Finished::Landed { branch }) => {
+            Ok(StagedMerge::Landed { branch }) => {
                 if json {
                     match serde_json::to_string_pretty(&serde_json::json!({
                         "landed": true,
@@ -348,7 +348,7 @@ async fn handle_reconcile(
                 }
                 ExitCode::from(0)
             }
-            Ok(crate::vcs::Finished::Deferred { command }) => {
+            Ok(StagedMerge::Deferred { command }) => {
                 println!("run this in your checkout, then run --finish again: {command}");
                 ExitCode::from(0)
             }

@@ -118,6 +118,21 @@ impl InspectionReport {
     }
 }
 
+/// What finishing a staged merge did.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub enum StagedMerge {
+    /// The branch was fast-forwarded to the merge commit.
+    Landed {
+        /// The new branch tip.
+        branch: String,
+    },
+    /// The user's checkout holds the branch, so the command to run is printed.
+    Deferred {
+        /// The command the user runs in their checkout.
+        command: String,
+    },
+}
+
 /// What a delete removed and what it could not stop.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Deletion {

@@ -13,7 +13,7 @@ pub mod service;
 pub mod source;
 
 pub use bulk::PauseSummary;
-pub use outcome::{Deletion, InspectionReport, Performed, Recovery};
+pub use outcome::{Deletion, InspectionReport, Performed, Recovery, StagedMerge};
 pub use service::{
     HostReport, HostRequirement, Listing, PausedPolicy, PlannedStep, Preflight, SandboxIo,
     Sandboxes, preflight, preflight_host, resolve_project_slug,
