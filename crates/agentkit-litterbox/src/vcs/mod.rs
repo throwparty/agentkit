@@ -10,6 +10,7 @@ mod conflict;
 mod error;
 pub mod git;
 pub mod git_common;
+pub mod jj;
 mod reconcile;
 mod types;
 

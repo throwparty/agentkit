@@ -75,6 +75,9 @@ pub struct Config {
     pub allow_project_setup: bool,
     /// Projects allowed to run their own setup command, by namespace.
     pub allowed_projects: Vec<String>,
+    /// The VCS selected for this workspace, if any. A missing value is an
+    /// error at open, not a default.
+    pub vcs_tool: Option<String>,
     /// Workspace-owned VCS settings, keyed by tool name.
     pub vcs_settings: BTreeMap<String, toml::Value>,
     /// Settings that were accepted but ignored, and why.
@@ -461,6 +464,9 @@ pub fn merge(local: ProjectFile, project: ProjectFile) -> Result<Config, ConfigE
         ));
     }
 
+    let mut vcs_settings = local.vcs;
+    let vcs_tool = take_vcs_tool(&mut vcs_settings)?;
+
     Ok(Config {
         backend: local.backend,
         backend_settings: backends,
@@ -480,9 +486,33 @@ pub fn merge(local: ProjectFile, project: ProjectFile) -> Result<Config, ConfigE
         accept_degraded: local.accept_degraded,
         allow_project_setup: local.allow_project_setup,
         allowed_projects: local.allowed_projects,
-        vcs_settings: local.vcs,
+        vcs_settings,
+        vcs_tool,
         notices,
     })
+}
+
+/// Take the VCS selector out of the workspace's `[vcs]` table.
+///
+/// The value is a tool name; a missing key is `None` (an error at open), and
+/// anything but `git` or `jj` is refused here rather than surfaced later.
+fn take_vcs_tool(
+    vcs: &mut BTreeMap<String, toml::Value>,
+) -> Result<Option<String>, ConfigError> {
+    let Some(value) = vcs.remove("tool") else {
+        return Ok(None);
+    };
+    let toml::Value::String(tool) = value else {
+        return Err(ConfigError::ParseError(
+            "vcs.tool must be a string, 'git' or 'jj'".to_string(),
+        ));
+    };
+    match tool.as_str() {
+        "git" | "jj" => Ok(Some(tool)),
+        other => Err(ConfigError::ParseError(format!(
+            "vcs.tool is '{other}'; it must be 'git' or 'jj'"
+        ))),
+    }
 }
 
 /// Take a backend's `provision` sequence out of its table.

@@ -11,16 +11,40 @@ use crate::config::Config;
 use crate::domain::{SandboxError, ScmMode};
 use crate::orchestrator::{Sandboxes, resolve_project_slug};
 use crate::vcs::git::{GitVcs, GitVcsConfig, VcsStore};
+use crate::vcs::jj::JjVcs;
 
 /// Build the orchestrator for the project the current directory belongs to.
 pub fn open(config: Config) -> Result<Sandboxes, SandboxError> {
     let project_slug = resolve_project_slug(&config)?;
+    let tool = config.vcs_tool.clone().ok_or_else(|| {
+        SandboxError::Config(
+            "no VCS is selected; set `tool = 'git'` or `tool = 'jj'` under [vcs] in \
+             .agentkit/litterbox/config.local.toml"
+                .to_string(),
+        )
+    })?;
+
+    if tool == "jj" {
+        open_jj(config, &project_slug)
+    } else {
+        open_git_project(config, &project_slug)
+    }
+}
+
+/// Build the orchestrator over the Git backend.
+fn open_git_project(config: Config, project_slug: &str) -> Result<Sandboxes, SandboxError> {
     let git = git_settings(&config)?;
     let mode = git.snapshot_mode.unwrap_or_default();
     let remote = mode == ScmMode::Remote;
-    let vcs = open_git(&config, &project_slug, mode)?;
+    let vcs = open_git(&config, project_slug, mode)?;
 
     Sandboxes::with_vcs(config, Arc::new(vcs), remote, git.binding)
+}
+
+/// Build the orchestrator over the jj backend.
+fn open_jj(config: Config, project_slug: &str) -> Result<Sandboxes, SandboxError> {
+    let vcs = JjVcs::open(project_slug)?;
+    Sandboxes::with_vcs(config, Arc::new(vcs), true, None)
 }
 
 /// Git's section from the workspace's VCS settings.
