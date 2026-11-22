@@ -9,6 +9,7 @@ pub mod lock;
 pub mod machine;
 pub mod outcome;
 pub mod service;
+pub mod source;
 
 pub use bulk::PauseSummary;
 pub use outcome::{Deletion, InspectionReport, Performed, Recovery};
