@@ -117,6 +117,84 @@ fn git_cannot_bind_a_host_directory() {
     }
 }
 
+fn ref_oid(dir: &std::path::Path, name: &str) -> Option<String> {
+    Repository::open(dir)
+        .ok()?
+        .refname_to_id(name)
+        .ok()
+        .map(|oid| oid.to_string())
+}
+
+#[test]
+fn prepare_creates_the_branch_and_the_bookkeeping_refs() {
+    let dir = repo_with_commit();
+    let vcs = GitVcs::open(dir.path()).expect("vcs");
+    let prepared = vcs.prepare("example").expect("prepare");
+
+    let branch = ref_oid(dir.path(), "refs/heads/litterbox/example").expect("branch");
+    assert_eq!(prepared.base.as_str(), branch);
+    assert_eq!(
+        ref_oid(dir.path(), "refs/litterbox/workspaces/example"),
+        Some(branch.clone())
+    );
+    assert_eq!(
+        ref_oid(dir.path(), "refs/litterbox/synced/example"),
+        Some(branch)
+    );
+}
+
+#[test]
+fn delete_removes_the_branch_and_the_bookkeeping_refs() {
+    let dir = repo_with_commit();
+    let vcs = GitVcs::open(dir.path()).expect("vcs");
+    vcs.prepare("example").expect("prepare");
+
+    vcs.delete_branch("example").expect("delete");
+
+    assert_eq!(ref_oid(dir.path(), "refs/heads/litterbox/example"), None);
+    assert_eq!(
+        ref_oid(dir.path(), "refs/litterbox/workspaces/example"),
+        None
+    );
+    assert_eq!(ref_oid(dir.path(), "refs/litterbox/synced/example"), None);
+    assert!(matches!(
+        vcs.delete_branch("example").expect_err("missing"),
+        Error::NotFound { .. }
+    ));
+}
+
+#[test]
+fn ensure_refs_recreates_a_legacy_records_bookkeeping_refs() {
+    let dir = repo_with_commit();
+    let vcs = GitVcs::open(dir.path()).expect("vcs");
+    let prepared = vcs.prepare("example").expect("prepare");
+
+    {
+        let repo = Repository::open(dir.path()).expect("open");
+        for name in [
+            "refs/litterbox/workspaces/example",
+            "refs/litterbox/synced/example",
+        ] {
+            repo.find_reference(name)
+                .expect("ref")
+                .delete()
+                .expect("delete");
+        }
+    }
+
+    vcs.ensure_refs(&prepared.workspace).expect("ensure");
+
+    let branch = ref_oid(dir.path(), "refs/heads/litterbox/example").expect("branch");
+    assert_eq!(
+        ref_oid(dir.path(), "refs/litterbox/workspaces/example"),
+        Some(branch.clone())
+    );
+    assert_eq!(
+        ref_oid(dir.path(), "refs/litterbox/synced/example"),
+        Some(branch)
+    );
+}
+
 #[test]
 fn preparing_an_existing_branch_reports_exists() {
     let dir = repo_with_commit();

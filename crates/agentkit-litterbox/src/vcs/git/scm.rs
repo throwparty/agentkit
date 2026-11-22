@@ -15,6 +15,8 @@ use crate::vcs::{
     HistoryPolicy, Merge, Prepared, RestoreMode, Revision, TreeId, Vcs, Workspace,
 };
 
+use super::refs;
+
 /// How many times a snapshot may rebuild its commit while another moves the ref.
 const MAX_SNAPSHOT_ATTEMPTS: usize = 8;
 
@@ -37,15 +39,28 @@ pub struct GitScm {
 }
 
 impl GitScm {
+    fn open_repository(path: &Path, mode: ScmMode) -> Result<Repository, SandboxError> {
+        let repo = Repository::open(path)
+            .map_err(|source| SandboxError::from(GitError::Open { source }))?;
+        if matches!(mode, ScmMode::Remote) {
+            let mut config = repo
+                .config()
+                .map_err(|source| SandboxError::from(GitError::Open { source }))?;
+            config
+                .set_str("core.logAllRefUpdates", "always")
+                .map_err(|source| SandboxError::from(GitError::Open { source }))?;
+        }
+        Ok(repo)
+    }
+
     pub fn open(path: &Path, mode: ScmMode) -> Result<Self, SandboxError> {
-        Repository::open(path)
-            .map(|repo| Self {
-                repo,
-                mode,
-                snapshot_branch: None,
-                host_repo_path: None,
-            })
-            .map_err(|source| SandboxError::from(GitError::Open { source }))
+        let repo = Self::open_repository(path, mode)?;
+        Ok(Self {
+            repo,
+            mode,
+            snapshot_branch: None,
+            host_repo_path: None,
+        })
     }
 
     pub fn open_with_host(
@@ -53,14 +68,13 @@ impl GitScm {
         mode: ScmMode,
         host_repo_path: Option<PathBuf>,
     ) -> Result<Self, SandboxError> {
-        Repository::open(path)
-            .map(|repo| Self {
-                repo,
-                mode,
-                snapshot_branch: None,
-                host_repo_path,
-            })
-            .map_err(|source| SandboxError::from(GitError::Open { source }))
+        let repo = Self::open_repository(path, mode)?;
+        Ok(Self {
+            repo,
+            mode,
+            snapshot_branch: None,
+            host_repo_path,
+        })
     }
 
     pub fn open_direct(path: &Path) -> Result<Self, SandboxError> {
@@ -392,9 +406,30 @@ impl Vcs for GitVcs {
 
     fn prepare(&self, sandbox: &str) -> Result<Prepared, VcsError> {
         let branch = self.create_branch(sandbox).map_err(vcs_error)?;
+        let oid = self
+            .repo_for_branch(&branch, |repo| {
+                let oid = repo
+                    .refname_to_id(&refs::branch(&branch))
+                    .map_err(|source| SandboxError::from(GitError::Reference { source }))?;
+                refs::write(
+                    repo,
+                    &refs::sandbox(&branch),
+                    oid,
+                    "litterbox: create the sandbox branch",
+                )?;
+                refs::write(
+                    repo,
+                    &refs::synced(&branch),
+                    oid,
+                    "litterbox: record the synced revision",
+                )?;
+                Ok(oid)
+            })
+            .map_err(vcs_error)?;
+
         Ok(Prepared {
             workspace: Workspace::from_branch(branch),
-            base: Revision::new("HEAD"),
+            base: Revision::new(oid.to_string()),
         })
     }
 
@@ -484,6 +519,8 @@ impl Vcs for GitVcs {
     fn delete_branch(&self, sandbox: &str) -> Result<(), VcsError> {
         let branch = GitScm::branch_name(sandbox);
         self.repo_for_branch(&branch, |repo| {
+            refs::delete(repo, &refs::sandbox(&branch))?;
+            refs::delete(repo, &refs::synced(&branch))?;
             let mut found = repo.find_branch(&branch, BranchType::Local).map_err(|_| {
                 SandboxError::SandboxNotFound {
                     name: sandbox.to_string(),
@@ -565,6 +602,38 @@ impl Vcs for GitVcs {
 
     fn set_synced(&self, _workspace: &Workspace, _revision: &Revision) -> Result<(), VcsError> {
         Err(unsupported("set_synced"))
+    }
+
+    fn ensure_refs(&self, workspace: &Workspace) -> Result<(), VcsError> {
+        let branch = workspace.branch().to_string();
+        self.repo_for_branch(&branch, |repo| {
+            let oid = repo
+                .refname_to_id(&refs::branch(&branch))
+                .map_err(|source| SandboxError::from(GitError::Reference { source }))?;
+
+            if refs::read(repo, &refs::sandbox(&branch))?.is_none() {
+                refs::write(
+                    repo,
+                    &refs::sandbox(&branch),
+                    oid,
+                    "litterbox: initialise the sandbox branch",
+                )?;
+                tracing::info!(branch = %branch, "initialised the sandbox branch ref");
+            }
+
+            if refs::read(repo, &refs::synced(&branch))?.is_none() {
+                refs::write(
+                    repo,
+                    &refs::synced(&branch),
+                    oid,
+                    "litterbox: initialise the synced revision",
+                )?;
+                tracing::info!(branch = %branch, "initialised the synced ref");
+            }
+
+            Ok(())
+        })
+        .map_err(vcs_error)
     }
 
     fn merge(
