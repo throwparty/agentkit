@@ -10,6 +10,8 @@ pub enum SandboxError {
     SandboxNotFound { name: String },
     #[error("SCM error: {message}")]
     Vcs { message: String },
+    #[error("The branch moved during the operation. Expected {expected} but found {current}.")]
+    BranchMoved { expected: String, current: String },
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
     #[error("Configuration error: {0}")]

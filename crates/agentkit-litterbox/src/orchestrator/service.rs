@@ -1538,7 +1538,7 @@ impl From<VcsError> for SandboxError {
     }
 }
 
-fn contract_error(error: VcsError) -> Error {
+pub(crate) fn contract_error(error: VcsError) -> Error {
     match error {
         VcsError::Exists { name } => Error::Conflict { name },
         VcsError::NotFound { name } => Error::NotFound { name },
@@ -1557,6 +1557,7 @@ fn contract_error(error: VcsError) -> Error {
         },
         VcsError::Io(source) => Error::failed(source.to_string()),
         VcsError::Backend { message, .. } => Error::failed(message),
+        VcsError::Raced => Error::failed("the branch moved during the operation".to_string()),
     }
 }
 

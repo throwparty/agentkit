@@ -35,6 +35,9 @@ pub enum Error {
         /// The backend's message, preserved from the previous error type.
         message: String,
     },
+    /// The ref moved under the operation.
+    #[error("the branch moved during the operation")]
+    Raced,
     /// Local I/O failed.
     #[error(transparent)]
     Io(#[from] std::io::Error),
