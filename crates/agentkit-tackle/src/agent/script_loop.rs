@@ -53,11 +53,39 @@ pub struct ModelLoopDispatcher {
 
 impl PromptDispatcher for ModelLoopDispatcher {
     fn dispatch(&self, session: &SessionId, text: &str) -> Result<(), HostError> {
-        self.notices.script_model_call(session);
+        // Script turns run on internal ephemeral forks (titling, compaction
+        // summaries), whose ids the client never learns: the notice belongs to
+        // the session the client opened.
+        self.notices
+            .script_model_call(&visible_session(&self.state, session));
         let completion = block_on(run_script_turn(&self.state, session, text))?;
         self.sink.publish(session, completion);
         Ok(())
     }
+}
+
+/// The session a client knows for `session`: an ephemeral fork's nearest
+/// non-ephemeral ancestor, or `session` itself. A session the store cannot
+/// resolve — or an ephemeral one with no origin — stands in for itself, so a
+/// notice is never silently lost.
+fn visible_session(state: &TackleState, session: &SessionId) -> SessionId {
+    let mut current = session.clone();
+    loop {
+        let Ok(Some(row)) = block_on(state.db.get_session(&current)) else {
+            break;
+        };
+        if row.kind != crate::store::SessionKind::Ephemeral {
+            break;
+        }
+        let Some(parent) = row.forked_from_session_id else {
+            break;
+        };
+        if parent == current {
+            break;
+        }
+        current = parent;
+    }
+    current
 }
 
 /// Builds a [`SessionAccess`] whose script-issued prompts run real model
@@ -321,6 +349,45 @@ mod tests {
             recording.0.lock().unwrap().as_slice(),
             std::slice::from_ref(&session.id),
             "a script-issued prompt surfaces one model-call notice"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn ephemeral_forks_surface_their_model_call_on_the_origin_session() {
+        // Titling and compaction prompt an ephemeral fork the client never
+        // learns about: the notice must name the session the client opened.
+        let state = state_with_endpoint("http://127.0.0.1:1");
+        let origin = state
+            .db
+            .create_session(
+                SessionKind::Interactive,
+                "/work",
+                None,
+                None,
+                r#"{"actor": "default"}"#,
+            )
+            .await
+            .unwrap();
+        let fork = state
+            .db
+            .create_session(
+                SessionKind::Ephemeral,
+                "/work",
+                Some(&origin.id),
+                None,
+                r#"{"actor": "summariser"}"#,
+            )
+            .await
+            .unwrap();
+
+        let recording = Arc::new(Recording(Mutex::new(Vec::new())));
+        let access = access(&state, 0, recording.clone());
+        let _ = access.send_prompt(&fork.id, "summarise this");
+
+        assert_eq!(
+            recording.0.lock().unwrap().as_slice(),
+            std::slice::from_ref(&origin.id),
+            "an ephemeral fork's model-call notice belongs to its origin"
         );
     }
 }

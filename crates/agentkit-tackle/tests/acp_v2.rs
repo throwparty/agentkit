@@ -625,6 +625,91 @@ async fn v2_titling_surfaces_the_session_title() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn v2_titling_notices_name_the_session_the_client_opened() {
+    // Titling prompts an internal ephemeral fork; the client only ever sees
+    // the session it opened, so the notice must be addressed to that session.
+    let dir = tempfile::tempdir().unwrap();
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ScriptedModel)
+        .mount(&server)
+        .await;
+    let agent = spawn_agent(
+        dir.path(),
+        &model_config(&server.uri()).replace("enabled = false", "enabled = true"),
+    );
+
+    let notices: Arc<Mutex<Vec<(v2::SessionId, String)>>> = Arc::default();
+    let handler = Arc::clone(&notices);
+
+    Client
+        .v2()
+        .on_receive_notification(
+            async move |notification: v2::UpdateSessionNotification, _cx| {
+                if let v2::SessionUpdate::Notice(notice) = &notification.update {
+                    handler
+                        .lock()
+                        .unwrap()
+                        .push((notification.session_id.clone(), notice.title.clone()));
+                }
+                Ok(())
+            },
+            on_receive_notification!(),
+        )
+        .connect_with(agent, |connection: V2ConnectionTo<Agent>| async move {
+            connection
+                .send_request(v2::InitializeRequest::new(
+                    ProtocolVersion::V2,
+                    v2::Implementation::new("test-client", "1.0.0"),
+                ))
+                .block_task()
+                .await?;
+            let created = connection
+                .send_request(v2::NewSessionRequest::new(std::env::current_dir().unwrap()))
+                .block_task()
+                .await?;
+            connection
+                .send_request(v2::PromptRequest::new(
+                    created.session_id.clone(),
+                    vec![v2::ContentBlock::Text(v2::TextContent::new("hello"))],
+                ))
+                .block_task()
+                .await?;
+
+            let titling = || {
+                notices
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|(_, title)| title.contains("background model call"))
+                    .cloned()
+                    .collect::<Vec<_>>()
+            };
+            let mut noticed = false;
+            for _ in 0..200 {
+                if !titling().is_empty() {
+                    noticed = true;
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            assert!(
+                noticed,
+                "the titling notice reaches the client: {:?}",
+                notices.lock().unwrap()
+            );
+            assert!(
+                titling().iter().all(|(id, _)| id == &created.session_id),
+                "every titling notice names the session the client opened: {:?}",
+                titling()
+            );
+            Ok(())
+        })
+        .await
+        .expect("v2 titling notices");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn v2_advertises_each_mcp_tool_as_a_direct_command() {
     let dir = tempfile::tempdir().unwrap();
     let server = MockServer::start().await;
