@@ -90,6 +90,7 @@ pub struct TestBackend {
     provision_failure: Option<String>,
     workspace: String,
     refuse_bound: bool,
+    unavailable: bool,
 }
 
 impl Default for TestBackend {
@@ -114,6 +115,7 @@ impl TestBackend {
             provision_failure: None,
             workspace: "/sandbox".to_string(),
             refuse_bound: false,
+            unavailable: false,
         }
     }
 
@@ -132,6 +134,7 @@ impl TestBackend {
             provision_failure: None,
             workspace: "/sandbox".to_string(),
             refuse_bound: false,
+            unavailable: false,
         }
     }
 
@@ -150,6 +153,7 @@ impl TestBackend {
             provision_failure: Some(identity.to_string()),
             workspace: "/sandbox".to_string(),
             refuse_bound: false,
+            unavailable: false,
         }
     }
 
@@ -186,6 +190,17 @@ impl TestBackend {
         self
     }
 
+    /// A backend whose create reports that this host cannot run it.
+    ///
+    /// Stands in for a mechanism the host policy blocks, so a test can check
+    /// that a live suite skips instead of failing.
+    pub fn unavailable() -> Self {
+        Self {
+            unavailable: true,
+            ..Self::new()
+        }
+    }
+
     /// A backend that records the mask it was given and refuses to mask.
     ///
     /// Stands in for a mechanism that cannot hide a bound workspace's VCS
@@ -193,6 +208,7 @@ impl TestBackend {
     pub fn refusing_bound() -> Self {
         Self {
             refuse_bound: true,
+            unavailable: false,
             ..Self::new()
         }
     }
@@ -251,6 +267,13 @@ impl Backend for TestBackend {
                 .lock()
                 .map_err(|_| Error::failed("test backend lock poisoned"))?
                 .push(request.clone());
+            if self.unavailable {
+                return Err(Error::Unavailable {
+                    backend: "test".to_string(),
+                    reason: "the host policy blocks this mechanism".to_string(),
+                    remedy: "run the test on a host that allows it".to_string(),
+                });
+            }
             if self.refuse_bound
                 && request.workspace.binding == crate::sandbox::contract::WorkspaceBinding::Bound
             {

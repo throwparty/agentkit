@@ -1766,6 +1766,20 @@ mod seam_tests {
     }
 
     #[tokio::test]
+    async fn a_host_that_cannot_run_a_sandbox_skips_instead_of_failing() {
+        let dir = scratch();
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::unavailable());
+        let (sandboxes, _vcs) =
+            orchestrator(dir.path(), records.path().to_path_buf(), backend, None);
+
+        assert!(
+            !created_or_skip(&sandboxes).await,
+            "an unavailable host is a skip, not a failure"
+        );
+    }
+
+    #[tokio::test]
     async fn a_bound_sandbox_hides_the_vcs_metadata_from_a_real_bubblewrap_sandbox() {
         // Resolve tools the way the host does, without naming a backend.
         let on_path = |name: &str| {
@@ -1827,7 +1841,9 @@ mod seam_tests {
         )
         .with_binding(Some(WorkspaceBinding::Bound));
 
-        sandboxes.create("demo").await.expect("create");
+        if !created_or_skip(&sandboxes).await {
+            return;
+        }
 
         let script = "read a < README.md; echo readme=$a; \
                       if read b < .git/HEAD 2>/dev/null; then echo git-leaked=$b; \
@@ -1862,6 +1878,23 @@ mod seam_tests {
         );
 
         sandboxes.delete("demo", true).await.expect("delete");
+    }
+
+    /// Create a sandbox, or skip the test when this host cannot run one.
+    ///
+    /// CI runs on a runner whose AppArmor policy blocks unprivileged user
+    /// namespaces, so a bubblewrap create refuses as `Unavailable` rather than
+    /// starting. The host suites already skip with the requirement named
+    /// instead of failing; this is the same rule for the seam tests.
+    async fn created_or_skip(sandboxes: &Sandboxes) -> bool {
+        match sandboxes.create("demo").await {
+            Ok(_) => true,
+            Err(Error::Unavailable { reason, remedy, .. }) => {
+                eprintln!("skipping: {reason}; {remedy}");
+                false
+            }
+            Err(error) => panic!("create failed: {error}"),
+        }
     }
 
     /// Removes what a live sandbox test made, even when an assertion panics.
@@ -1978,7 +2011,9 @@ mod seam_tests {
         )
         .with_binding(Some(WorkspaceBinding::Bound));
 
-        sandboxes.create("demo").await.expect("create");
+        if !created_or_skip(&sandboxes).await {
+            return;
+        }
 
         let script = "read a < README.md; echo readme=$a; \
                       if read b < .git/HEAD 2>/dev/null; then echo git-leaked=$b; \
