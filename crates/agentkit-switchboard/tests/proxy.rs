@@ -145,12 +145,12 @@ async fn forwarder_preserves_upstream_content_type() {
         oauth: None,
     };
 
-    let body = serde_json::to_vec(&json!({
+    let parsed = json!({
         "model": "gpt-4o",
         "messages": [{"role": "user", "content": "hi"}],
         "stream": true,
-    }))
-    .unwrap();
+    });
+    let body = serde_json::to_vec(&parsed).unwrap();
 
     let outcome = forward_request(
         ForwardRequest {
@@ -165,6 +165,7 @@ async fn forwarder_preserves_upstream_content_type() {
             mutations: None,
             surface: ApiSurface::OpenaiChatCompletions,
             model: "gpt-4o",
+            parsed_body: &parsed,
         },
         &OpenAiChatCompletionsProvider,
     )

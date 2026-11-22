@@ -33,6 +33,9 @@ pub struct ForwardRequest<'a> {
     pub mutations: Option<Arc<MutationSet>>,
     pub surface: ApiSurface,
     pub model: &'a str,
+    /// The already-parsed [`ForwardRequest::body`], supplied by the caller so
+    /// the body is not deserialized a second time on the request path.
+    pub parsed_body: &'a Value,
 }
 
 /// Fail the request rather than forward an unmutated one.
@@ -138,11 +141,10 @@ pub async fn forward_request(
         mutations,
         surface,
         model,
+        parsed_body,
     } = request;
 
-    let parsed_body = serde_json::from_slice::<serde_json::Value>(&body).ok();
-
-    let target_url = http.build_url(base_url, parsed_body.as_ref().unwrap_or(&Value::Null));
+    let target_url = http.build_url(base_url, parsed_body);
 
     let mut request_body = body.to_vec();
 
@@ -248,8 +250,7 @@ pub async fn forward_request(
     let upstream_header_map = reqwest_resp.headers().clone();
 
     let request_streaming = parsed_body
-        .as_ref()
-        .and_then(|value| value.get("stream"))
+        .get("stream")
         .and_then(|value| value.as_bool())
         .unwrap_or(false);
 
@@ -364,6 +365,7 @@ mod tests {
         static CREDENTIAL: OnceLock<ResolvedCredential> = OnceLock::new();
         static BILLING: OnceLock<BillingModel> = OnceLock::new();
         static BODY: OnceLock<axum::body::Bytes> = OnceLock::new();
+        static PARSED: OnceLock<Value> = OnceLock::new();
 
         ForwardRequest {
             method: Method::POST,
@@ -373,6 +375,8 @@ mod tests {
                     axum::body::Bytes::from_static(br#"{"model":"gpt-4o","messages":[]}"#)
                 })
                 .clone(),
+            parsed_body: PARSED
+                .get_or_init(|| serde_json::json!({"model": "gpt-4o", "messages": []})),
             credential: CREDENTIAL.get_or_init(|| ResolvedCredential {
                 value: "test-token".to_string(),
                 source: crate::credential::CredentialSource::None,
