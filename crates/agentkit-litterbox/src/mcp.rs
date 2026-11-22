@@ -89,6 +89,12 @@ pub struct GrepArgs {
     pub include: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct SandboxReconcileArgs {
+    /// Name of the sandbox to reconcile
+    pub sandbox: String,
+}
+
 pub struct SandboxServer {
     tool_router: ToolRouter<Self>,
     project: std::sync::OnceLock<Sandboxes>,
@@ -158,6 +164,21 @@ impl SandboxServer {
             forwarded_ports,
         };
         let content = ContentBlock::json(response)
+            .map_err(|error| McpError::internal_error(error.to_string(), None))?;
+        Ok(CallToolResult::success(vec![content]))
+    }
+
+    #[tool(
+        name = "sandbox-reconcile",
+        description = "Stage a merge with a rewritten sandbox branch in a host worktree"
+    )]
+    async fn sandbox_reconcile(
+        &self,
+        Parameters(args): Parameters<SandboxReconcileArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let project = self.project()?;
+        let staged = project.stage(&args.sandbox).await.map_err(map_contract)?;
+        let content = ContentBlock::json(staged)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
         Ok(CallToolResult::success(vec![content]))
     }
@@ -1370,6 +1391,7 @@ mod tests {
                 "read".to_string(),
                 "sandbox-create".to_string(),
                 "sandbox-ports".to_string(),
+                "sandbox-reconcile".to_string(),
                 "write".to_string(),
             ]
         );
@@ -1409,6 +1431,7 @@ mod tests {
                 "read" => vec!["limit", "offset", "path", "sandbox"],
                 "sandbox-create" => vec!["name"],
                 "sandbox-ports" => vec!["sandbox"],
+                "sandbox-reconcile" => vec!["sandbox"],
                 "write" => vec!["content", "path", "sandbox"],
                 other => panic!("unexpected tool {other}"),
             }
