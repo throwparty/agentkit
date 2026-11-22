@@ -7,6 +7,9 @@
 
 mod config;
 pub mod path;
+mod reconcile;
+#[cfg(test)]
+mod reconcile_tests;
 mod refs;
 pub mod remote;
 mod scm;
