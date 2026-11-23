@@ -30,6 +30,17 @@ pub struct Staged {
     pub conflicts: Vec<PathBuf>,
 }
 
+/// The conflict a resolution began.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Begun {
+    /// The revision the workspace now holds.
+    pub revision: Revision,
+    /// The commit the resolution must be squashed into, when the conflict came
+    /// from a commit the user's side owns rather than from a merge Litterbox
+    /// created.
+    pub target: Option<Revision>,
+}
+
 /// The outcome of finishing a staged merge.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum Finished {

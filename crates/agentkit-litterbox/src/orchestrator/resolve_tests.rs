@@ -98,7 +98,7 @@ async fn begin_without_a_conflict_reports_the_state() {
         .await
         .expect_err("no conflict");
     assert!(
-        error.to_string().contains("no conflict"),
+        error.to_string().contains("without a conflict"),
         "the message names the state: {error}"
     );
     assert!(
@@ -123,10 +123,18 @@ async fn finish_refuses_while_conflicts_remain_and_clears_when_they_are_gone() {
     );
 
     let clean = TempDir::new().expect("tempdir");
-    let resolved = vcs_with("branch-tip", &["file.txt"], "sandbox-tip", &[]);
+    let resolved = Arc::new(
+        TestVcs::new()
+            .with_tip("branch-tip")
+            .with_sandbox_tip("sandbox-tip")
+            .with_synced("synced-revision")
+            .with_conflicts_for("resolution-revision", &["file.txt"]),
+    );
+    let as_dyn: Arc<dyn Vcs> = resolved.clone();
     let record = stored();
-    let resolver = Resolver::new(&resolved, &record, &selected, clean.path());
+    let resolver = Resolver::new(&as_dyn, &record, &selected, clean.path());
     resolver.begin().await.expect("begin");
+    resolved.clear_conflicts("resolution-revision");
     resolver.finish().expect("finish");
     let reloaded = current(
         metadata_store::load_sandbox_at(clean.path(), "demo")
@@ -140,21 +148,23 @@ async fn finish_refuses_while_conflicts_remain_and_clears_when_they_are_gone() {
 async fn finish_reports_a_path_the_resolution_dropped() {
     let dir = TempDir::new().expect("tempdir");
     let selected = selected();
-    let vcs: Arc<dyn Vcs> = Arc::new(
+    let test = Arc::new(
         TestVcs::new()
             .with_tip("branch-tip")
             .with_sandbox_tip("sandbox-tip")
             .with_synced("synced-revision")
-            .with_conflicts_for("branch-tip", &["file.txt"])
+            .with_conflicts_for("resolution-revision", &["file.txt"])
             .with_tree("resolution-revision", "resolved-tree")
             .with_tree("branch-tip", "theirs-tree")
             .with_tree("sandbox-tip", "ours-tree")
             .with_deleted("ours-tree", "resolved-tree", "ours-only.txt"),
     );
+    let vcs: Arc<dyn Vcs> = test.clone();
 
     let record = stored();
     let resolver = Resolver::new(&vcs, &record, &selected, dir.path());
     resolver.begin().await.expect("begin");
+    test.clear_conflicts("resolution-revision");
     let finished = resolver.finish().expect("finish");
 
     assert_eq!(

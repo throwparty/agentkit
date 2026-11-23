@@ -223,7 +223,7 @@ Add the new modules to the arch-lint scopes and confirm that no Git type crosses
 | Depends On | T-016 |
 | References | no-new-dependency,gates,gates-pass |
 
-### T-018: Resolve a conflicted shared-branch tip
+### T-018: [x] Resolve a conflicted shared-branch tip
 
 When the shared branch tip is itself conflicted, begin records the commit that introduced the conflict and creates a child of it carrying the conflict; finish squashes the resolution into that commit so descendants stop reporting a conflict, and Git commits a child of the marker tree.
 

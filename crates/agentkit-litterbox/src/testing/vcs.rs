@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::sandbox::contract::{BindingSupport, SnapshotSelector};
 use crate::vcs::{
-    Capabilities, Conflict, ConflictModel, ConflictSides, Error, ExportSupport, Finished,
+    Begun, Capabilities, Conflict, ConflictModel, ConflictSides, Error, ExportSupport, Finished,
     HistoryPolicy, Merge, Prepared, Report, RestoreMode, Revision, Staged, TreeId, Vcs, Workspace,
     git_common,
 };
@@ -50,6 +50,7 @@ struct State {
     failure: Failure,
     sides: Option<ConflictSides>,
 
+    resolution_target: Option<String>,
     resolution: String,
     masked: Vec<String>,
     bound: Vec<String>,
@@ -79,6 +80,7 @@ impl TestVcs {
                 sandbox_tip: "0123456789abcdef".to_string(),
                 synced: "0123456789abcdef".to_string(),
                 sides: None,
+                resolution_target: None,
                 resolution: "resolution-revision".to_string(),
                 observed_tree: "tree".to_string(),
                 ancestor: true,
@@ -187,6 +189,11 @@ impl TestVcs {
             .trees
             .insert(revision.to_string(), tree.to_string());
         self
+    }
+
+    /// Forget the conflicts a revision reported, as a resolution would.
+    pub fn clear_conflicts(&self, revision: &str) {
+        self.state().conflicts_by_revision.remove(revision);
     }
 
     /// Remove the common ancestor from the sides a conflict reports.
@@ -464,10 +471,18 @@ impl Vcs for TestVcs {
         Err(unsupported("merge"))
     }
 
-    fn resolve_begin(&self, _workspace: &Workspace) -> Result<Revision, Error> {
+    fn resolve_begin(&self, _workspace: &Workspace) -> Result<Begun, Error> {
         let revision = self.state().resolution.clone();
         self.state().sandbox_tip = revision.clone();
-        Ok(Revision::new(revision))
+        Ok(Begun {
+            revision: Revision::new(revision),
+            target: self.state().resolution_target.clone().map(Revision::new),
+        })
+    }
+
+    fn resolve_squash(&self, _workspace: &Workspace, target: &Revision) -> Result<(), Error> {
+        self.state().tips_set.push(target.as_str().to_string());
+        Ok(())
     }
 
     fn resolve_abandon(&self, _workspace: &Workspace, ours: &Revision) -> Result<Revision, Error> {

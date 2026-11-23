@@ -11,7 +11,7 @@ use crate::vcs::git_common::GitError;
 use crate::vcs::git_common::archive;
 pub use crate::vcs::git_common::{SnapshotFilter, branch_name_for};
 use crate::vcs::{
-    Capabilities, Conflict, ConflictModel, ConflictSides, Error as VcsError, ExportSupport,
+    Begun, Capabilities, Conflict, ConflictModel, ConflictSides, Error as VcsError, ExportSupport,
     Finished, HistoryPolicy, Merge, Prepared, Report, RestoreMode, Revision, Staged, TreeId, Vcs,
     Workspace,
 };
@@ -910,17 +910,33 @@ impl Vcs for GitVcs {
         Err(unsupported("merge"))
     }
 
-    fn resolve_begin(&self, workspace: &Workspace) -> Result<Revision, VcsError> {
+    fn resolve_begin(&self, workspace: &Workspace) -> Result<Begun, VcsError> {
         let base = self.synced(workspace)?;
         let ours = self.sandbox_tip(workspace)?;
         let theirs = self.tip(workspace)?;
+        let conflicted = self.conflicts(&theirs)?;
         let repo = {
             let guard = self.lock().map_err(vcs_error)?;
             guard.repo.path().to_path_buf()
         };
-        let revision = reconcile::begin(&repo, &base, &ours, &theirs)?;
+        // A tip that already conflicts is the user's own commit: the resolution
+        // is a child of it and finish fast-forwards the branch. A clean tip
+        // that moved needs the divergence merge instead.
+        let (revision, target) = if conflicted.is_empty() {
+            (reconcile::begin(&repo, &base, &ours, &theirs)?, None)
+        } else {
+            (
+                reconcile::begin_on(&repo, &theirs, "litterbox: resolve the shared branch")?,
+                Some(theirs.clone()),
+            )
+        };
         self.set_sandbox_tip(workspace, &revision)?;
-        Ok(revision)
+        Ok(Begun { revision, target })
+    }
+
+    fn resolve_squash(&self, workspace: &Workspace, target: &Revision) -> Result<(), VcsError> {
+        let revision = self.sandbox_tip(workspace)?;
+        self.advance(workspace, &revision, target)
     }
 
     fn resolve_abandon(
