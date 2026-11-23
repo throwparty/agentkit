@@ -63,6 +63,31 @@ to = [
 doc = "adrs/2026-11-19-decouple-vcs-from-orchestration"
 
 [[allow-dep]]
+from = "litterbox-vcs-jj"
+to = [
+  "litterbox-contract",
+  "litterbox-shared",
+  "litterbox-vcs",
+  "litterbox-vcs-git-common"
+]
+doc = "adrs/2026-11-22-litterbox-jj-support"
+
+[[deny-scope-dep]]
+from = "litterbox-vcs-git"
+to = ["litterbox-vcs-jj"]
+message = "the Git backend and the jj backend are siblings; neither imports the other."
+
+[[deny-scope-dep]]
+from = "litterbox-vcs-jj"
+to = ["litterbox-vcs-git"]
+message = "the jj backend and the Git backend are siblings; neither imports the other."
+
+[[independent]]
+name = "vcs-backends"
+scopes = ["litterbox-vcs-git", "litterbox-vcs-jj"]
+doc = "adrs/2026-11-22-litterbox-jj-support"
+
+[[allow-dep]]
 from = "litterbox-compose"
 to = [
   "litterbox-config",
@@ -70,7 +95,8 @@ to = [
   "litterbox-orchestrator",
   "litterbox-shared",
   "litterbox-vcs",
-  "litterbox-vcs-git"
+  "litterbox-vcs-git",
+  "litterbox-vcs-jj"
 ]
 doc = "adrs/2026-11-19-decouple-vcs-from-orchestration"
 
@@ -104,6 +130,7 @@ to = [
   "litterbox-vcs",
   "litterbox-vcs-git-common",
   "litterbox-vcs-git",
+  "litterbox-vcs-jj",
   "litterbox-shared",
   "litterbox-provision",
   "litterbox-kinds",
@@ -123,6 +150,7 @@ to = [
   "litterbox-vcs",
   "litterbox-vcs-git-common",
   "litterbox-vcs-git",
+  "litterbox-vcs-jj",
   "litterbox-shared",
   "litterbox-provision",
   "litterbox-kinds",
@@ -142,6 +170,7 @@ to = [
   "litterbox-vcs",
   "litterbox-vcs-git-common",
   "litterbox-vcs-git",
+  "litterbox-vcs-jj",
   "litterbox-provision",
   "litterbox-kinds",
   "litterbox-prepare"
@@ -160,6 +189,7 @@ to = [
   "litterbox-vcs",
   "litterbox-vcs-git-common",
   "litterbox-vcs-git",
+  "litterbox-vcs-jj",
   "litterbox-provision",
   "litterbox-kinds",
   "litterbox-prepare",
@@ -178,6 +208,7 @@ to = [
   "litterbox-vcs",
   "litterbox-vcs-git-common",
   "litterbox-vcs-git",
+  "litterbox-vcs-jj",
   "litterbox-provision",
   "litterbox-kinds",
   "litterbox-prepare"
@@ -193,6 +224,7 @@ to = [
   "litterbox-vcs",
   "litterbox-vcs-git-common",
   "litterbox-vcs-git",
+  "litterbox-vcs-jj",
   "litterbox-provision",
   "litterbox-kinds",
   "litterbox-prepare"
@@ -208,6 +240,7 @@ to = [
   "litterbox-vcs",
   "litterbox-vcs-git-common",
   "litterbox-vcs-git",
+  "litterbox-vcs-jj",
   "litterbox-provision",
   "litterbox-kinds",
   "litterbox-prepare"
@@ -226,6 +259,7 @@ to = [
   "litterbox-vcs",
   "litterbox-vcs-git-common",
   "litterbox-vcs-git",
+  "litterbox-vcs-jj",
   "litterbox-provision",
   "litterbox-prepare"
 ]
@@ -245,6 +279,7 @@ to = [
   "litterbox-vcs",
   "litterbox-vcs-git-common",
   "litterbox-vcs-git",
+  "litterbox-vcs-jj",
   "litterbox-shared",
   "litterbox-kinds",
   "litterbox-prepare"
@@ -257,7 +292,8 @@ to = [
   "litterbox-backend-docker",
   "litterbox-backend-bubblewrap",
   "litterbox-vcs-git-common",
-  "litterbox-vcs-git"
+  "litterbox-vcs-git",
+  "litterbox-vcs-jj"
 ]
 message = "the orchestrator selects a backend through the registry and a VCS through the contract; it does not name a mechanism."
 
@@ -270,13 +306,14 @@ to = [
   "litterbox-registry",
   "litterbox-orchestrator",
   "litterbox-vcs-git",
+  "litterbox-vcs-jj",
   "litterbox-vcs-git-common"
 ]
 message = "the contract imports no mechanism and no backend; backends import the contract, never the reverse."
 
 [[deny-scope-dep]]
 from = "litterbox-vcs-git-common"
-to = ["litterbox-vcs-git"]
+to = ["litterbox-vcs-git", "litterbox-vcs-jj"]
 message = "the Git common module is a storage primitive; the Git backend imports it, never the reverse."
 
 [[deny-scope-dep]]
@@ -293,6 +330,7 @@ to = [
   "litterbox-vcs",
   "litterbox-vcs-git-common",
   "litterbox-vcs-git",
+  "litterbox-vcs-jj",
   "litterbox-shared",
   "litterbox-prepare"
 ]
@@ -313,6 +351,7 @@ to = [
   "litterbox-vcs",
   "litterbox-vcs-git-common",
   "litterbox-vcs-git",
+  "litterbox-vcs-jj",
   "litterbox-shared",
   "litterbox-provision",
   "litterbox-prepare"
@@ -334,6 +373,7 @@ to = [
   "litterbox-vcs",
   "litterbox-vcs-git-common",
   "litterbox-vcs-git",
+  "litterbox-vcs-jj",
   "litterbox-shared",
   "litterbox-provision"
 ]
@@ -449,7 +489,8 @@ name = "litterbox-vcs"
 paths = ["crates/agentkit-litterbox/src/vcs/*.rs"]
 exclude = [
   "crates/agentkit-litterbox/src/vcs/git_common/**",
-  "crates/agentkit-litterbox/src/vcs/git/**"
+  "crates/agentkit-litterbox/src/vcs/git/**",
+  "crates/agentkit-litterbox/src/vcs/jj/**"
 ]
 
 [[scopes]]
@@ -459,6 +500,10 @@ paths = ["crates/agentkit-litterbox/src/vcs/git_common/**"]
 [[scopes]]
 name = "litterbox-vcs-git"
 paths = ["crates/agentkit-litterbox/src/vcs/git/**"]
+
+[[scopes]]
+name = "litterbox-vcs-jj"
+paths = ["crates/agentkit-litterbox/src/vcs/jj/**"]
 
 [[scopes]]
 name = "litterbox-compose"

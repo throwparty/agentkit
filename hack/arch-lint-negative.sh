@@ -142,6 +142,16 @@ plant "crates/agentkit-litterbox/src/mcp.rs" \
   "mcp-to-git-common" \
   "litterbox-mcp"
 
+plant "crates/agentkit-litterbox/src/vcs/git/mod.rs" \
+  "use crate::vcs::jj::JjVcs as _;" \
+  "git-to-jj" \
+  "litterbox-vcs-git"
+
+plant "crates/agentkit-litterbox/src/vcs/jj/mod.rs" \
+  "use crate::vcs::git::GitVcs as _;" \
+  "jj-to-git" \
+  "litterbox-vcs-jj"
+
 plant "crates/agentkit-litterbox/src/backends/docker/backend.rs" \
   "use crate::vcs::git::GitVcs as _;" \
   "backend-to-git" \
