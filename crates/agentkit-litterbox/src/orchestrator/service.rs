@@ -1849,7 +1849,11 @@ mod seam_tests {
         }
     }
 
-    fn orchestrator_vcs(records: &Path, backend: Arc<TestBackend>, vcs: Arc<TestVcs>) -> Sandboxes {
+    fn orchestrator_vcs(
+        records: &Path,
+        backend: Arc<TestBackend>,
+        vcs: Arc<dyn crate::vcs::Vcs>,
+    ) -> Sandboxes {
         let config = Config {
             project: crate::config::ProjectConfig {
                 slug: Some("project".to_string()),
@@ -1868,6 +1872,98 @@ mod seam_tests {
     }
 
     #[tokio::test]
+    async fn a_git_divergence_resolves_through_the_surface() {
+        use crate::vcs::Revision;
+        use crate::vcs::Vcs as _;
+        use crate::vcs::Workspace as VcsWorkspace;
+        use crate::vcs::git::GitVcs;
+
+        let host = TempDir::new().expect("host");
+        let run = |args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .current_dir(host.path())
+                .env("GIT_AUTHOR_NAME", "Test")
+                .env("GIT_AUTHOR_EMAIL", "test@example.com")
+                .env("GIT_COMMITTER_NAME", "Test")
+                .env("GIT_COMMITTER_EMAIL", "test@example.com")
+                .args(args)
+                .status()
+                .expect("git runs");
+            assert!(status.success(), "git {args:?}");
+        };
+        run(&["init", "-q"]);
+        std::fs::write(host.path().join("greeting.txt"), "base\n").expect("write");
+        run(&["add", "."]);
+        run(&["commit", "-qm", "base"]);
+
+        let vcs = Arc::new(GitVcs::open(host.path()).expect("vcs"));
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let sandboxes = orchestrator_vcs(records.path(), backend, vcs.clone());
+        sandboxes.create("demo").await.expect("create");
+
+        let stored = metadata_store::load_sandbox_at(records.path(), "demo")
+            .expect("load")
+            .expect("present");
+        let stored = match stored {
+            metadata_store::LoadedSandbox::Current(stored) => *stored,
+            metadata_store::LoadedSandbox::Corrupt { .. } => panic!("corrupt record"),
+        };
+        let workspace = VcsWorkspace::from_branch(&stored.branch_name);
+
+        // The sandbox rewrites the file.
+        let ours = TempDir::new().expect("ours");
+        std::fs::write(ours.path().join("greeting.txt"), "ours\n").expect("write");
+        vcs.snapshot(&workspace, ours.path(), "ours")
+            .expect("snapshot");
+
+        // The user rewrites the branch tip the same way.
+        std::fs::write(host.path().join("greeting.txt"), "theirs\n").expect("write");
+        run(&["commit", "-qam", "theirs"]);
+        let theirs = std::process::Command::new("git")
+            .current_dir(host.path())
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .expect("rev-parse");
+        let theirs = String::from_utf8_lossy(&theirs.stdout).trim().to_string();
+        vcs.set_tip(&workspace, &Revision::new(theirs))
+            .expect("branch tip");
+
+        let begun = sandboxes
+            .begin_resolution("demo")
+            .await
+            .expect("the divergence conflicts");
+        assert_eq!(begun.conflicts.len(), 1, "{:?}", begun.conflicts);
+
+        let status = sandboxes.source_status("demo").await.expect("status");
+        assert!(status.resolution, "the status reports the open resolution");
+
+        let resolved = TempDir::new().expect("resolved");
+        std::fs::write(resolved.path().join("greeting.txt"), "resolved\n").expect("write");
+        vcs.snapshot(&workspace, resolved.path(), "resolve")
+            .expect("snapshot");
+
+        let finished = sandboxes
+            .finish_resolution("demo")
+            .await
+            .expect("the resolution lands");
+        assert!(
+            finished.dropped_from_ours.is_empty(),
+            "{:?}",
+            finished.dropped_from_ours
+        );
+
+        let landed = vcs.tip(&workspace).expect("branch tip");
+        assert!(
+            vcs.conflicts(&landed).expect("conflicts").is_empty(),
+            "the branch tip is clean"
+        );
+        let status = sandboxes.source_status("demo").await.expect("status");
+        assert!(!status.resolution, "finish clears the resolution");
+        assert_eq!(status.state, "clean");
+    }
+
+    #[tokio::test]
     async fn deleting_mid_resolution_leaves_no_record_and_no_branch() {
         let records = TempDir::new().expect("records");
         let backend = Arc::new(TestBackend::new());
@@ -1877,7 +1973,7 @@ mod seam_tests {
                 .with_conflicts_for("branch-tip", &["file.txt"])
                 .with_conflicts_for("resolution-revision", &["file.txt"]),
         );
-        let sandboxes = orchestrator_vcs(records.path(), backend, Arc::clone(&vcs));
+        let sandboxes = orchestrator_vcs(records.path(), backend, vcs.clone());
         sandboxes.create("demo").await.expect("create");
         sandboxes
             .begin_resolution("demo")
@@ -1914,7 +2010,7 @@ mod seam_tests {
         let records = TempDir::new().expect("records");
         let backend = Arc::new(TestBackend::new());
         let vcs = Arc::new(TestVcs::new());
-        let sandboxes = orchestrator_vcs(records.path(), backend, Arc::clone(&vcs));
+        let sandboxes = orchestrator_vcs(records.path(), backend, vcs.clone());
         sandboxes.create("demo").await.expect("create");
 
         let ours = sandboxes
@@ -1948,7 +2044,7 @@ mod seam_tests {
         let records = TempDir::new().expect("records");
         let backend = Arc::new(TestBackend::new());
         let vcs = Arc::new(TestVcs::new().without_base());
-        let sandboxes = orchestrator_vcs(records.path(), backend, Arc::clone(&vcs));
+        let sandboxes = orchestrator_vcs(records.path(), backend, vcs.clone());
         sandboxes.create("demo").await.expect("create");
 
         let error = sandboxes
@@ -1963,7 +2059,7 @@ mod seam_tests {
         let records = TempDir::new().expect("records");
         let backend = Arc::new(TestBackend::new());
         let vcs = Arc::new(TestVcs::new());
-        let sandboxes = orchestrator_vcs(records.path(), backend, Arc::clone(&vcs));
+        let sandboxes = orchestrator_vcs(records.path(), backend, vcs.clone());
         sandboxes.create("demo").await.expect("create");
 
         let destination = TempDir::new().expect("destination");
@@ -1986,7 +2082,7 @@ mod seam_tests {
         let records = TempDir::new().expect("records");
         let backend = Arc::new(TestBackend::new());
         let vcs = Arc::new(TestVcs::new().with_observed_tree("edited"));
-        let sandboxes = orchestrator_vcs(records.path(), backend, Arc::clone(&vcs));
+        let sandboxes = orchestrator_vcs(records.path(), backend, vcs.clone());
         sandboxes.create("demo").await.expect("create");
 
         let performed = sandboxes
@@ -2015,7 +2111,7 @@ mod seam_tests {
                 .with_observed_tree("edited")
                 .with_ancestor(false),
         );
-        let sandboxes = orchestrator_vcs(records.path(), backend, Arc::clone(&vcs));
+        let sandboxes = orchestrator_vcs(records.path(), backend, vcs.clone());
         sandboxes.create("demo").await.expect("create");
 
         sandboxes
