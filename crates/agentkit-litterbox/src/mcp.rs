@@ -26,7 +26,7 @@ mod error;
 use crate::config_loader;
 use crate::orchestrator::SandboxIo;
 use crate::orchestrator::Sandboxes;
-use crate::orchestrator::outcome::{Performed, Recovery};
+use crate::orchestrator::outcome::{Performed, Recovery, WorkspaceBlock};
 use crate::sandbox::contract::{Error, Execution, Forward};
 
 use docs::TOOL_DOCS;
@@ -139,11 +139,12 @@ impl SandboxServer {
     ) -> Result<CallToolResult, McpError> {
         let project = self.project()?;
         let performed = project.create(&args.name).await.map_err(map_contract)?;
+        let block = performed.block();
         let record = performed.value;
         let inspection = project.inspect(&record.name).await.map_err(map_contract)?;
         let content = ContentBlock::json(inspection)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
-        success_with_recovery(content, performed.recovery)
+        success_with_recovery(content, performed.recovery, block)
     }
 
     #[tool(
@@ -193,7 +194,8 @@ impl SandboxServer {
             read_in_sandbox(project, &args.sandbox, &args.path, args.offset, args.limit)
                 .await
                 .map_err(ToolError::into_mcp)?;
-        success_with_recovery(ContentBlock::text(performed.value), performed.recovery)
+        let block = performed.block();
+        success_with_recovery(ContentBlock::text(performed.value), performed.recovery, block)
     }
 
     #[tool(name = "write", description = "Write a file into the sandbox")]
@@ -205,7 +207,8 @@ impl SandboxServer {
         let performed = write_in_sandbox(project, &args.sandbox, &args.path, &args.content)
             .await
             .map_err(ToolError::into_mcp)?;
-        mutation_result(None, performed.recovery)
+        let block = performed.block();
+        mutation_result(None, performed.recovery, block)
     }
 
     #[tool(
@@ -220,7 +223,8 @@ impl SandboxServer {
         let performed = patch_in_sandbox(project, &args.sandbox, &args.path, &args.diff)
             .await
             .map_err(ToolError::into_mcp)?;
-        mutation_result(None, performed.recovery)
+        let block = performed.block();
+        mutation_result(None, performed.recovery, block)
     }
 
     #[tool(
@@ -241,11 +245,12 @@ impl SandboxServer {
         )
         .await
         .map_err(ToolError::into_mcp)?;
+        let block = performed.block();
         let recovery = performed.recovery;
         let result = performed.value;
         let content = ContentBlock::json(result)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
-        success_with_recovery(content, recovery)
+        success_with_recovery(content, recovery, block)
     }
 
     #[tool(name = "ls", description = "List directory entries")]
@@ -255,9 +260,10 @@ impl SandboxServer {
         let performed = ls_in_sandbox(project, &args.sandbox, &args.path, recursive)
             .await
             .map_err(ToolError::into_mcp)?;
+        let block = performed.block();
         let content = ContentBlock::json(performed.value)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
-        success_with_recovery(content, performed.recovery)
+        success_with_recovery(content, performed.recovery, block)
     }
 
     #[tool(name = "glob", description = "Find files matching a glob pattern")]
@@ -270,9 +276,10 @@ impl SandboxServer {
             glob_in_sandbox(project, &args.sandbox, &args.pattern, args.path.as_deref())
                 .await
                 .map_err(ToolError::into_mcp)?;
+        let block = performed.block();
         let content = ContentBlock::json(performed.value)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
-        success_with_recovery(content, performed.recovery)
+        success_with_recovery(content, performed.recovery, block)
     }
 
     #[tool(name = "grep", description = "Search file contents for a pattern")]
@@ -290,9 +297,10 @@ impl SandboxServer {
         )
         .await
         .map_err(ToolError::into_mcp)?;
+        let block = performed.block();
         let content = ContentBlock::json(performed.value)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
-        success_with_recovery(content, performed.recovery)
+        success_with_recovery(content, performed.recovery, block)
     }
 }
 
@@ -614,6 +622,7 @@ struct MutationResult {
 fn mutation_result(
     snapshot_error: Option<String>,
     recovery: Option<Recovery>,
+    block: Option<WorkspaceBlock>,
 ) -> Result<CallToolResult, McpError> {
     let content = ContentBlock::json(&MutationResult { snapshot_error })
         .map_err(|error| McpError::internal_error(error.to_string(), None))?;
@@ -624,12 +633,14 @@ fn mutation_result(
                 .map_err(|error| McpError::internal_error(error.to_string(), None))?,
         );
     }
+    append_block(&mut blocks, block)?;
     Ok(CallToolResult::success(blocks))
 }
 
 fn success_with_recovery(
     content: ContentBlock,
     recovery: Option<Recovery>,
+    block: Option<WorkspaceBlock>,
 ) -> Result<CallToolResult, McpError> {
     let mut blocks = vec![content];
     if let Some(recovery) = recovery {
@@ -638,7 +649,21 @@ fn success_with_recovery(
                 .map_err(|error| McpError::internal_error(error.to_string(), None))?,
         );
     }
+    append_block(&mut blocks, block)?;
     Ok(CallToolResult::success(blocks))
+}
+
+fn append_block(
+    blocks: &mut Vec<ContentBlock>,
+    block: Option<WorkspaceBlock>,
+) -> Result<(), McpError> {
+    if let Some(block) = block {
+        blocks.push(
+            ContentBlock::json(block)
+                .map_err(|error| McpError::internal_error(error.to_string(), None))?,
+        );
+    }
+    Ok(())
 }
 
 #[allow(clippy::result_large_err)]
