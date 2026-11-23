@@ -2,7 +2,7 @@
 
 ## Tasks
 
-### T-001: The tool selector
+### T-001: [x] The tool selector
 
 Add `[vcs] tool` to the configuration and read it in `compose::open`. With no selector, `open` fails naming the file and both values; `git` builds `GitVcs` as today and `jj` routes to a placeholder `vcs::jj` module that returns `Unsupported`. The committed project file cannot set it (a `[vcs]` key there is ignored with a notice).
 
@@ -15,7 +15,7 @@ Add `[vcs] tool` to the configuration and read it in `compose::open`. With no se
 | Depends On |  |
 | References | tool-selector |
 
-### T-002: Type the `[vcs.jj]` section
+### T-002: [x] Type the `[vcs.jj]` section
 
 Add `vcs::jj::config` with `JjVcsConfig { binding }`, `deny_unknown_fields`, and no `snapshot-mode`; a mode for jj is refused. Parse it only when jj is selected. `[vcs.git]` keeps its existing shape.
 
@@ -28,7 +28,7 @@ Add `vcs::jj::config` with `JjVcsConfig { binding }`, `deny_unknown_fields`, and
 | Depends On | T-001 |
 | References | vcs-sections |
 
-### T-003: Record the tool per sandbox
+### T-003: [x] Record the tool per sandbox
 
 Add `StoredSandbox.vcs: Option<String>` with `serde(default)` and an accessor that reads an absent field as `git`. Create writes the selected tool; repair preserves the recorded value; reading never rewrites it.
 
@@ -41,7 +41,7 @@ Add `StoredSandbox.vcs: Option<String>` with `serde(default)` and an accessor th
 | Depends On |  |
 | References | recorded-tool,legacy-record |
 
-### T-004: Refuse a record this process cannot serve
+### T-004: [x] Refuse a record this process cannot serve
 
 In `orchestrator/service.rs`, refuse every source operation when a record's `vcs` differs from the selected tool, before any VCS call; `list` reports it with the reason. Make the binding misconfiguration message name the selected tool's section instead of hardcoding `[vcs.git]`.
 
@@ -54,7 +54,7 @@ In `orchestrator/service.rs`, refuse every source operation when a record's `vcs
 | Depends On | T-001,T-003 |
 | References | tool-mismatch |
 
-### T-005: The arch-lint boundary
+### T-005: [x] The arch-lint boundary
 
 Add the `litterbox-vcs-jj` scope (`vcs/jj/**`), add it to every deny list that names the Git scopes and to the `litterbox-vcs` deny, add it to `litterbox-compose`'s allow list, and add the `[[independent]]` rule over `litterbox-vcs-git` and `litterbox-vcs-jj`. Add a negative-script case for each direction.
 
@@ -67,7 +67,7 @@ Add the `litterbox-vcs-jj` scope (`vcs/jj/**`), add it to every deny list that n
 | Depends On | T-002 |
 | References | boundaries,backends-apart |
 
-### T-006: The clone
+### T-006: [x] The clone
 
 Add `vcs::jj::clone`: resolve `vcs/jj/<slug>`, create it with `jj git clone <user-repo> <dest>` when absent, lay out `workspaces/<name>` and `reconcile/<name>`, and hold a clone-level file lock that serialises snapshot, bookmark moves and staging.
 
@@ -80,7 +80,7 @@ Add `vcs::jj::clone`: resolve `vcs/jj/<slug>`, create it with `jj git clone <use
 | Depends On | T-002 |
 | References | jj-clone,clone-serialisation |
 
-### T-007: The subprocess driver
+### T-007: [x] The subprocess driver
 
 Add `vcs::jj::ops`: run `jj` and `git`, probe and pin a minimum jj version, and read facts via `jj log --no-graph -T commit_id`, `git rev-parse <rev>^{tree}` and `jj resolve --list -r <rev>`. Map exit codes and stderr to `vcs::Error`.
 
@@ -93,7 +93,7 @@ Add `vcs::jj::ops`: run `jj` and `git`, probe and pin a minimum jj version, and 
 | Depends On | T-002 |
 | References | git-view,local-and-lazy,missing-prerequisite |
 
-### T-008: JjVcs: prepare, identity and snapshot
+### T-008: [x] JjVcs: prepare, identity and snapshot
 
 Implement the core of `JjVcs`: `capabilities` (Blocking, op_log true, Both, GitExport), `masked_paths` (`.jj`), `bound_root`, `identity`, `materialise` (git archive), `snapshot_filter` and `ignore_files` (git_common), `prepare`, `snapshot` (sync the copy into the workspace under `Copied`, then jj snapshots), `tip`/`set_tip`, `synced`/`set_synced`, `tree` (rev-parse), `sandbox_tip`/`set_sandbox_tip`, `advance` (move the bookmark), `observe`, `is_ancestor` and `ensure_refs`.
 
@@ -106,7 +106,7 @@ Implement the core of `JjVcs`: `capabilities` (Blocking, op_log true, Both, GitE
 | Depends On | T-005,T-006,T-007 |
 | References | three-revisions,prepare,snapshot,adoption-and-hold,masking,capabilities |
 
-### T-009: JjVcs: conflicts, report, stage, finish, discard
+### T-009: [x] JjVcs: conflicts, report, stage, finish, discard
 
 Implement `conflicts` (`jj resolve --list -r <rev>`), `report`, `stage` (a workspace at `reconcile/<name>` running `jj new <synced>` + `jj restore --from <tip>` per side then `jj new <theirs'> <ours'>`), `finish` and `discard_stage`. `merge`, `resolve`, `abort`, `history` and `restore` stay `Unsupported`.
 
@@ -119,7 +119,7 @@ Implement `conflicts` (`jj resolve --list -r <rev>`), `report`, `stage` (a works
 | Depends On | T-008 |
 | References | conflicted-tip-fallback,staging,finish-and-discard |
 
-### T-010: JjVcs: removal and exposure
+### T-010: [x] JjVcs: removal and exposure
 
 Implement `state_path` (the clone's `.git`), `expose` (git remote add in the user's checkout), `delete_branch` (forget the workspace, delete the bookmark), `prune` (stale workspaces and an empty clone) and `sandboxes` (the `litterbox/*` bookmarks, never `default`).
 
@@ -132,7 +132,7 @@ Implement `state_path` (the clone's `.git`), `expose` (git remote add in the use
 | Depends On | T-008 |
 | References | removal,git-view |
 
-### T-011: Hold a conflicted shared branch
+### T-011: [x] Hold a conflicted shared branch
 
 In `orchestrator/reconcile.rs`, ask `Vcs::conflicts` for the shared branch during classification; a non-empty answer holds at `synced` and the sandbox branch without adopting, and the operation still runs. `Error::Unsupported` reads as no check; any other error fails.
 
@@ -145,7 +145,7 @@ In `orchestrator/reconcile.rs`, ask `Vcs::conflicts` for the shared branch durin
 | Depends On | T-009 |
 | References | conflicted-tip-fallback |
 
-### T-012: The workspace block
+### T-012: [x] The workspace block
 
 In `src/mcp.rs`, append a `workspace` block (`state`, `reason`, `synced`, `branch`, `sandbox`, `conflicts`, `next`) to every tool that operates on one sandbox, derived from the post-plan state. A conflicted tip reports `held` with reason `shared branch is conflicted`; a `Pending` divergence reports `held` with its own reason.
 
@@ -158,7 +158,7 @@ In `src/mcp.rs`, append a `workspace` block (`state`, `reason`, `synced`, `branc
 | Depends On | T-011 |
 | References | workspace-block |
 
-### T-013: Tests, gates and smoke
+### T-013: [x] Tests, gates and smoke
 
 Add the remaining unit and orchestrator tests, then run the gates and the smoke: the jj selector end to end (create, snapshot, rewrite adoption, dirty hold, conflicted-tip hold, stage, resolve, finish, discard) and the Git selector under both `snapshot-mode` values.
 
