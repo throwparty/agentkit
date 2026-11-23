@@ -11,7 +11,7 @@ use crate::config::Config;
 use crate::domain::{SandboxError, ScmMode};
 use crate::orchestrator::{Sandboxes, resolve_project_slug};
 use crate::vcs::git::{GitVcs, GitVcsConfig, VcsStore};
-use crate::vcs::jj::JjVcs;
+use crate::vcs::jj::{JjVcs, JjVcsConfig};
 
 /// Build the orchestrator for the project the current directory belongs to.
 pub fn open(config: Config) -> Result<Sandboxes, SandboxError> {
@@ -43,8 +43,14 @@ fn open_git_project(config: Config, project_slug: &str) -> Result<Sandboxes, San
 
 /// Build the orchestrator over the jj backend.
 fn open_jj(config: Config, project_slug: &str) -> Result<Sandboxes, SandboxError> {
+    let section = config
+        .vcs_settings
+        .get("jj")
+        .cloned()
+        .unwrap_or(toml::Value::Table(Default::default()));
+    let jj = JjVcsConfig::from_section(&section).map_err(SandboxError::Config)?;
     let vcs = JjVcs::open(project_slug)?;
-    Sandboxes::with_vcs(config, Arc::new(vcs), true, None)
+    Sandboxes::with_vcs(config, Arc::new(vcs), true, jj.binding)
 }
 
 /// Git's section from the workspace's VCS settings.
