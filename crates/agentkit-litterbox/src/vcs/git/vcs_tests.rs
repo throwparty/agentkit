@@ -39,6 +39,53 @@ fn the_backend_reports_its_conflict_model_and_binding() {
 }
 
 #[test]
+fn conflict_sides_read_each_side_of_a_merge() {
+    let dir = repo_with_commit();
+    let repo = Repository::open(dir.path()).expect("open");
+    let signature = Signature::now("test", "test@example.com").expect("signature");
+
+    let commit_with = |body: &str, parents: &[&git2::Commit<'_>]| -> git2::Oid {
+        fs::write(dir.path().join("greeting.txt"), body).expect("write");
+        let mut index = repo.index().expect("index");
+        index
+            .add_all(["*"].iter(), IndexAddOption::DEFAULT, None)
+            .expect("add");
+        index.write().expect("write index");
+        let tree_id = index.write_tree().expect("tree");
+        let tree = repo.find_tree(tree_id).expect("find tree");
+        repo.commit(None, &signature, &signature, body, &tree, parents)
+            .expect("commit")
+    };
+
+    let head = repo.head().expect("head").peel_to_commit().expect("commit");
+    let ours = commit_with("ours\n", &[&head]);
+    let ours_commit = repo.find_commit(ours).expect("ours");
+    let theirs = commit_with("theirs\n", &[&head]);
+    let theirs_commit = repo.find_commit(theirs).expect("theirs");
+    let merge = commit_with("merge\n", &[&ours_commit, &theirs_commit]);
+
+    let vcs = GitVcs::open(dir.path()).expect("vcs");
+    let sides = vcs
+        .conflict_sides(
+            &Revision::new(merge.to_string()),
+            std::path::Path::new("greeting.txt"),
+        )
+        .expect("sides");
+
+    let read = |tree: &crate::vcs::TreeId| {
+        String::from_utf8(
+            vcs.blob(tree, std::path::Path::new("greeting.txt"))
+                .expect("blob")
+                .expect("present"),
+        )
+        .expect("utf8")
+    };
+    assert_eq!(read(&sides.ours), "ours\n");
+    assert_eq!(read(&sides.theirs), "theirs\n");
+    assert_eq!(read(sides.base.as_ref().expect("base")), "hello\n");
+}
+
+#[test]
 fn a_blob_reads_one_path_from_one_tree() {
     let dir = repo_with_commit();
     let vcs = GitVcs::open(dir.path()).expect("vcs");

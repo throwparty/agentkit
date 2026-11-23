@@ -83,6 +83,37 @@ pub fn blob(cwd: &Path, tree: &str, path: &str) -> Result<Option<Vec<u8>>, Error
     Ok(Some(output.stdout))
 }
 
+/// The trees of the first parent, the second parent and their merge base.
+///
+/// The first parent is the sandbox side. A revision that is not a merge has no
+/// sides to report.
+pub fn conflict_sides(
+    cwd: &Path,
+    revision: &str,
+) -> Result<(Option<String>, String, String), Error> {
+    let ours = git(cwd, &["rev-parse", &format!("{revision}^1^{{tree}}")])?;
+    let theirs = match git(cwd, &["rev-parse", &format!("{revision}^2^{{tree}}")]) {
+        Ok(tree) => tree,
+        Err(_) => {
+            return Err(Error::Backend {
+                operation: "read the sides of a conflict".to_string(),
+                message: format!("{revision} is not a merge"),
+            });
+        }
+    };
+    let base = git(
+        cwd,
+        &[
+            "merge-base",
+            &format!("{revision}^1"),
+            &format!("{revision}^2"),
+        ],
+    )
+    .ok()
+    .and_then(|commit| git(cwd, &["rev-parse", &format!("{commit}^{{tree}}")]).ok());
+    Ok((base, ours, theirs))
+}
+
 /// The conflicted paths a revision carries, with their side counts.
 ///
 /// jj exits non-zero and says "No conflicts found" when the revision is clean,

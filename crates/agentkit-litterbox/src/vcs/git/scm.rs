@@ -918,12 +918,42 @@ impl Vcs for GitVcs {
         reconcile::marker_conflicts(&repo, revision.as_str())
     }
 
-    fn conflict_sides(
-        &self,
-        _revision: &Revision,
-        _path: &Path,
-    ) -> Result<ConflictSides, VcsError> {
-        Err(unsupported("conflict_sides"))
+    fn conflict_sides(&self, revision: &Revision, _path: &Path) -> Result<ConflictSides, VcsError> {
+        let oid = revision_oid(revision).map_err(vcs_error)?;
+        let guard = self.lock().map_err(vcs_error)?;
+        let commit = guard
+            .repo
+            .find_commit(oid)
+            .map_err(|source| SandboxError::from(GitError::Commit { source }))
+            .map_err(vcs_error)?;
+        if commit.parent_count() < 2 {
+            return Err(VcsError::Unsupported {
+                operation: "read the sides of a conflict".to_string(),
+                backend: "git".to_string(),
+                primitive: "a merge revision with two parents".to_string(),
+                reason: "the revision is not a merge".to_string(),
+                remedy: "materialise the merge first".to_string(),
+            });
+        }
+        let parent = |index: usize| -> Result<git2::Commit<'_>, VcsError> {
+            commit
+                .parent(index)
+                .map_err(|source| SandboxError::from(GitError::Commit { source }))
+                .map_err(vcs_error)
+        };
+        let ours = parent(0)?;
+        let theirs = parent(1)?;
+        let base = guard
+            .repo
+            .merge_base(ours.id(), theirs.id())
+            .ok()
+            .and_then(|oid| guard.repo.find_commit(oid).ok())
+            .map(|commit| TreeId::new(commit.tree_id().to_string()));
+        Ok(ConflictSides {
+            base,
+            ours: TreeId::new(ours.tree_id().to_string()),
+            theirs: TreeId::new(theirs.tree_id().to_string()),
+        })
     }
 
     fn resolve(&self, _revision: &Revision, _paths: &[PathBuf]) -> Result<Revision, VcsError> {

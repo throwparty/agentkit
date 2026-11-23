@@ -54,7 +54,7 @@ Add `blob(tree, path) -> Option<Vec<u8>>` to the contract and implement it on bo
 | Depends On | T-001 |
 | References | conflict-sides,no-new-dependency |
 
-### T-005: Git conflict sides
+### T-005: [x] Git conflict sides
 
 Implement `GitVcs::conflict_sides` from the stage entries of a `merge-tree` run against the recorded base.
 
