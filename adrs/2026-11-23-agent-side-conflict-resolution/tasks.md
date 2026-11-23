@@ -106,7 +106,7 @@ Begin writes the conflicted revision into the workspace directory: `materialise`
 | Depends On | T-007 |
 | References | resolution-context,bound-resolution,copied-resolution,snapshot-during-resolution |
 
-### T-009: Abandon
+### T-009: [x] Abandon
 
 Abandon rebuilds the merge from its recorded parents, writes it again, and restores the sandbox branch tree when no merge was needed.
 

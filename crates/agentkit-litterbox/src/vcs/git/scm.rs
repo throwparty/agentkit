@@ -923,6 +923,15 @@ impl Vcs for GitVcs {
         Ok(revision)
     }
 
+    fn resolve_abandon(
+        &self,
+        workspace: &Workspace,
+        ours: &Revision,
+    ) -> Result<Revision, VcsError> {
+        self.set_sandbox_tip(workspace, ours)?;
+        Ok(Revision::new(ours.as_str().to_string()))
+    }
+
     fn conflicts(&self, revision: &Revision) -> Result<Vec<Conflict>, VcsError> {
         let repo = {
             let guard = self.lock().map_err(vcs_error)?;

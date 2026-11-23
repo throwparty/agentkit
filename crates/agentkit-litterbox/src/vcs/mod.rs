@@ -128,6 +128,12 @@ pub trait Vcs: Send + Sync {
         Err(not_implemented("open a resolution"))
     }
 
+    /// Put the workspace back on `ours`, the revision it held before the
+    /// resolution began, and report the revision it now holds.
+    fn resolve_abandon(&self, _workspace: &Workspace, _ours: &Revision) -> Result<Revision, Error> {
+        Err(not_implemented("abandon a resolution"))
+    }
+
     /// The conflicts a revision carries.
     fn conflicts(&self, revision: &Revision) -> Result<Vec<Conflict>, Error>;
 

@@ -97,6 +97,7 @@ impl<'a> Resolver<'a> {
             ));
         }
         let synced = self.vcs.synced(&workspace).map_err(contract_error)?;
+        let ours = self.vcs.sandbox_tip(&workspace).map_err(contract_error)?;
         let revision = self.vcs.resolve_begin(&workspace).map_err(contract_error)?;
         if self.stored.binding() == WorkspaceBinding::Copied {
             self.publish(&workspace, &revision).await?;
@@ -104,6 +105,7 @@ impl<'a> Resolver<'a> {
         let conflicts = self.vcs.conflicts(&revision).map_err(contract_error)?;
         self.record(Some(StoredResolution {
             synced: synced.as_str().to_string(),
+            ours: ours.as_str().to_string(),
         }))?;
         Ok(Resolved { synced, conflicts })
     }
@@ -147,9 +149,19 @@ impl<'a> Resolver<'a> {
         })
     }
 
-    /// Close a resolution and leave the sandbox on its own branch.
-    pub(crate) fn abandon(&self) -> Result<Resolved, Error> {
+    /// Close a resolution and put the workspace back on the revision it held
+    /// before the resolution began.
+    pub(crate) async fn abandon(&self) -> Result<Resolved, Error> {
         let open = self.open()?;
+        let workspace = self.workspace();
+        let ours = Revision::new(open.ours.clone());
+        let revision = self
+            .vcs
+            .resolve_abandon(&workspace, &ours)
+            .map_err(contract_error)?;
+        if self.stored.binding() == WorkspaceBinding::Copied {
+            self.publish(&workspace, &revision).await?;
+        }
         self.record(None)?;
         Ok(Resolved {
             synced: Revision::new(open.synced),

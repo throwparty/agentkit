@@ -145,7 +145,7 @@ async fn abandon_clears_the_record() {
     let record = stored();
     let resolver = Resolver::new(&vcs, &record, &selected, dir.path());
     resolver.begin().await.expect("begin");
-    resolver.abandon().expect("abandon");
+    resolver.abandon().await.expect("abandon");
 
     let reloaded = current(
         metadata_store::load_sandbox_at(dir.path(), "demo")
@@ -156,6 +156,7 @@ async fn abandon_clears_the_record() {
     assert!(
         Resolver::new(&vcs, &reloaded, &selected, dir.path())
             .abandon()
+            .await
             .is_err(),
         "abandon with nothing open is refused"
     );
