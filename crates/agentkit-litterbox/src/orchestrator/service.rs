@@ -1868,6 +1868,47 @@ mod seam_tests {
     }
 
     #[tokio::test]
+    async fn deleting_mid_resolution_leaves_no_record_and_no_branch() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(
+            TestVcs::new()
+                .with_tip("branch-tip")
+                .with_conflicts_for("branch-tip", &["file.txt"]),
+        );
+        let sandboxes = orchestrator_vcs(records.path(), backend, Arc::clone(&vcs));
+        sandboxes.create("demo").await.expect("create");
+        sandboxes
+            .begin_resolution("demo")
+            .await
+            .expect("the conflict is open");
+
+        let stored = metadata_store::load_sandbox_at(records.path(), "demo")
+            .expect("load")
+            .expect("present");
+        assert!(
+            matches!(
+                stored,
+                metadata_store::LoadedSandbox::Current(current) if current.resolution.is_some()
+            ),
+            "the record holds the resolution before the delete"
+        );
+
+        sandboxes.delete("demo", true).await.expect("delete");
+
+        assert!(
+            metadata_store::load_sandbox_at(records.path(), "demo")
+                .expect("load")
+                .is_none(),
+            "no record survives the delete"
+        );
+        assert!(
+            vcs.deleted().contains(&"demo".to_string()),
+            "the branch goes with it"
+        );
+    }
+
+    #[tokio::test]
     async fn a_side_read_returns_the_side_content() {
         let records = TempDir::new().expect("records");
         let backend = Arc::new(TestBackend::new());
