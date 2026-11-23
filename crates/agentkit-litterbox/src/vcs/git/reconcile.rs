@@ -86,6 +86,39 @@ pub(crate) fn begin(
     Ok(Revision::new(text(&commit)))
 }
 
+/// Create a revision that carries the conflict a commit already holds.
+///
+/// The child shares the parent's tree, so the working copy shows the markers
+/// until the agent edits them and the next snapshot records the resolution.
+pub(crate) fn begin_on(
+    repo: &Path,
+    parent: &Revision,
+    message: &str,
+) -> Result<Revision, VcsError> {
+    let tree = git(
+        repo,
+        &["rev-parse", &format!("{}^{{tree}}", parent.as_str())],
+    )?;
+    if !tree.status.success() {
+        return Err(failed("read the conflicted tree", &tree));
+    }
+    let commit = git(
+        repo,
+        &[
+            "commit-tree",
+            text(&tree).as_str(),
+            "-p",
+            parent.as_str(),
+            "-m",
+            message,
+        ],
+    )?;
+    if !commit.status.success() {
+        return Err(failed("create the resolution revision", &commit));
+    }
+    Ok(Revision::new(text(&commit)))
+}
+
 /// The conflicted paths in a committed tree, read from its markers.
 ///
 /// Git has no conflicted commit, so a marker tree is the only evidence that a

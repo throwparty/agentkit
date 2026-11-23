@@ -17,7 +17,7 @@ mod types;
 pub use capabilities::{Capabilities, ConflictModel, ExportSupport};
 pub use conflict::{Conflict, ConflictSides, HistoryPolicy, Merge, RestoreMode};
 pub use error::Error;
-pub use reconcile::{Finished, Report, Staged};
+pub use reconcile::{Begun, Finished, Report, Staged};
 pub use types::{BranchName, Prepared, Revision, TreeId, Workspace};
 
 use std::path::{Path, PathBuf};
@@ -124,8 +124,16 @@ pub trait Vcs: Send + Sync {
     /// whose conflicts live in commits moves the sandbox branch; a backend
     /// whose conflicts live in an index creates the commit it will be written
     /// from.
-    fn resolve_begin(&self, _workspace: &Workspace) -> Result<Revision, Error> {
+    fn resolve_begin(&self, _workspace: &Workspace) -> Result<Begun, Error> {
         Err(not_implemented("open a resolution"))
+    }
+
+    /// Squash the resolution into `target`, the commit the user's side owns.
+    ///
+    /// A divergence lands by advancing the branch instead; this is for a
+    /// shared-branch tip that was committed without resolving.
+    fn resolve_squash(&self, _workspace: &Workspace, _target: &Revision) -> Result<(), Error> {
+        Err(not_implemented("squash a resolution"))
     }
 
     /// Put the workspace back on `ours`, the revision it held before the

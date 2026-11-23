@@ -93,23 +93,34 @@ impl<'a> Resolver<'a> {
             )));
         }
         let workspace = self.workspace();
-        let branch = self.vcs.tip(&workspace).map_err(contract_error)?;
-        let conflicts = self.vcs.conflicts(&branch).map_err(contract_error)?;
-        if conflicts.is_empty() {
-            return Err(Error::failed(
-                "the shared branch carries no conflict to resolve".to_string(),
-            ));
-        }
         let synced = self.vcs.synced(&workspace).map_err(contract_error)?;
         let ours = self.vcs.sandbox_tip(&workspace).map_err(contract_error)?;
-        let revision = self.vcs.resolve_begin(&workspace).map_err(contract_error)?;
-        if self.stored.binding() == WorkspaceBinding::Copied {
-            self.publish(&workspace, &revision).await?;
+        let begun = self.vcs.resolve_begin(&workspace).map_err(contract_error)?;
+        let conflicts = self
+            .vcs
+            .conflicts(&begun.revision)
+            .map_err(contract_error)?;
+        if conflicts.is_empty() {
+            // Nothing conflicted, so there is nothing to resolve: put the
+            // workspace back the way it was rather than leaving a merge behind.
+            let restored = self
+                .vcs
+                .resolve_abandon(&workspace, &ours)
+                .map_err(contract_error)?;
+            if self.stored.binding() == WorkspaceBinding::Copied {
+                self.publish(&workspace, &restored).await?;
+            }
+            return Err(Error::failed(
+                "the branches merge without a conflict; there is nothing to resolve".to_string(),
+            ));
         }
-        let conflicts = self.vcs.conflicts(&revision).map_err(contract_error)?;
+        if self.stored.binding() == WorkspaceBinding::Copied {
+            self.publish(&workspace, &begun.revision).await?;
+        }
         self.record(Some(StoredResolution {
             synced: synced.as_str().to_string(),
             ours: ours.as_str().to_string(),
+            target: begun.target.as_ref().map(|r| r.as_str().to_string()),
         }))?;
         Ok(Resolved {
             synced,
@@ -169,11 +180,20 @@ impl<'a> Resolver<'a> {
             .deleted_paths(&theirs, &resolved)
             .map_err(contract_error)?;
 
+        if let Some(target) = &open.target {
+            // The conflict came from a commit the user's side owns, so the
+            // resolution has to land in that commit rather than beside it.
+            self.vcs
+                .resolve_squash(&workspace, &Revision::new(target.clone()))
+                .map_err(contract_error)?;
+        } else {
+            self.vcs
+                .advance(&workspace, &revision, &branch)
+                .map_err(contract_error)?;
+        }
+        let landed = self.vcs.tip(&workspace).map_err(contract_error)?;
         self.vcs
-            .advance(&workspace, &revision, &branch)
-            .map_err(contract_error)?;
-        self.vcs
-            .set_synced(&workspace, &revision)
+            .set_synced(&workspace, &landed)
             .map_err(contract_error)?;
         self.record(None)?;
         Ok(Resolved {

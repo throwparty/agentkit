@@ -119,7 +119,11 @@ pub fn conflict_sides(
 /// jj exits non-zero and says "No conflicts found" when the revision is clean,
 /// which is not an error. Each line reads `path    N-sided conflict`.
 pub fn conflicts(cwd: &Path, revision: &str) -> Result<Vec<(PathBuf, usize)>, Error> {
-    let output = run("jj", cwd, &["resolve", "--list", "-r", revision])?;
+    let output = run(
+        "jj",
+        cwd,
+        &["--ignore-working-copy", "resolve", "--list", "-r", revision],
+    )?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         if stderr.contains("No conflicts found") {
@@ -163,7 +167,18 @@ pub fn conflict_regions(cwd: &Path, revision: &str, path: &Path) -> usize {
     let Some(path_text) = path.to_str() else {
         return 0;
     };
-    let Ok(output) = run("jj", cwd, &["file", "show", "-r", revision, path_text]) else {
+    let Ok(output) = run(
+        "jj",
+        cwd,
+        &[
+            "--ignore-working-copy",
+            "file",
+            "show",
+            "-r",
+            revision,
+            path_text,
+        ],
+    ) else {
         return 0;
     };
     if !output.status.success() {
