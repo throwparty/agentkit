@@ -110,13 +110,13 @@ Every MCP tool that mutates a sandbox appends the workspace block. While a resol
 
 ### FR-006: Finishing
 
-`sandbox-reconcile` with `finish` asks the backend whether the working copy still reports conflicts. When it does, the call fails and names the paths. When it does not, Litterbox performs the write. For Git it commits the working copy tree with the shared tip and the sandbox tip as parents and moves the branch. For a jj divergence it moves the bookmark to the resolved commit. For a jj conflicted tip it squashes the resolution into the commit that introduced the conflict. The agent writes no ref.
+`sandbox-reconcile` with `finish` asks the backend whether the working copy still reports conflicts. When it does, the call fails and names the paths. When it does not, Litterbox performs the write. For a divergence, on either backend, it advances the shared branch to the revision under resolution with a compare-and-swap against the tip the plan read, then records that revision as `synced`; the revision descends from both tips, so no second commit is minted. For a jj conflicted tip it squashes the resolution into the commit that introduced the conflict. The agent writes no ref.
 
 **Slug:** `finish-resolution`
 
 ### FR-007: The per-side report
 
-Before the write, `finish` reports how the resolved tree differs from each side: the paths added, changed or removed relative to `base`, `ours` and `theirs`. The report does not block the write. It exists because a resolution can remove every marker and still lose a side.
+Before the write, `finish` reports how the resolved tree differs from each side: the paths the sandbox side held and the resolution dropped, and the paths the shared branch held and the resolution dropped. The report does not block the write. It exists because a resolution can remove every marker and still lose a side.
 
 **Slug:** `resolution-report`
 
@@ -158,7 +158,7 @@ Tools that change `/src` still snapshot. During resolution the snapshot commits 
 
 ### FR-014: The open resolution
 
-An open resolution is recorded on the sandbox together with the `synced` revision it began from. The record survives a restart, is cleared by `finish` and `abandon`, and is removed when the sandbox is deleted. The revision under resolution is read from the working copy on every operation and is never stored, because resolving rewrites it.
+An open resolution is recorded on the sandbox with the `synced` revision it began from and the sandbox branch tip it replaced. The record survives a restart, is cleared by `finish` and `abandon`, and is removed when the sandbox is deleted. The revision under resolution is read from the working copy on every operation and is never stored, because resolving rewrites it; the recorded sandbox tip is a parent of that revision and resolving never rewrites it.
 
 **Slug:** `open-resolution`
 
