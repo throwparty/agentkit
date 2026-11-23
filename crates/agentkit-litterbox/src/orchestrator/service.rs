@@ -1526,7 +1526,9 @@ impl Sandboxes {
         let selected = self
             .select_for(&stored.sandbox, "resolve a conflict")
             .await?;
-        Resolver::new(&self.vcs, &stored, &selected, &self.records_dir).abandon()
+        Resolver::new(&self.vcs, &stored, &selected, &self.records_dir)
+            .abandon()
+            .await
     }
 
     /// The ports a sandbox forwards, or the reason its mechanism forwards none.

@@ -436,6 +436,10 @@ impl Vcs for TestVcs {
         Ok(Revision::new(self.state().resolution.clone()))
     }
 
+    fn resolve_abandon(&self, _workspace: &Workspace, ours: &Revision) -> Result<Revision, Error> {
+        Ok(Revision::new(ours.as_str().to_string()))
+    }
+
     fn conflicts(&self, revision: &Revision) -> Result<Vec<Conflict>, Error> {
         let state = self.state();
         if let Some(conflicts) = state.conflicts_by_revision.get(revision.as_str()) {

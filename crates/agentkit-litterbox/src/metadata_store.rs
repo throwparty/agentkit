@@ -31,6 +31,11 @@ pub struct StoredMerge {
 pub struct StoredResolution {
     /// The revision both sides last agreed on when resolution began.
     pub synced: String,
+    /// The sandbox branch tip when resolution began.
+    ///
+    /// Resolving rewrites the revision under resolution, never its parents, so
+    /// this stays addressable and is what abandon restores.
+    pub ours: String,
 }
 
 /// A sandbox as persisted: the contract's record plus the branch it was paired

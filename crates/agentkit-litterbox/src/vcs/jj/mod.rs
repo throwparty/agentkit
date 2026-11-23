@@ -558,6 +558,13 @@ impl Vcs for JjVcs {
         Ok(Revision::new(ops::commit_id(&path, "@")?))
     }
 
+    fn resolve_abandon(&self, workspace: &Workspace, ours: &Revision) -> Result<Revision, Error> {
+        let _guard = self.lock();
+        let path = self.workspace(sandbox_of(workspace));
+        ops::jj_ok(&path, &["new", ours.as_str()])?;
+        Ok(Revision::new(ops::commit_id(&path, "@")?))
+    }
+
     fn conflicts(&self, revision: &Revision) -> Result<Vec<Conflict>, Error> {
         Ok(ops::conflicts(&self.root, revision.as_str())?
             .into_iter()
@@ -843,7 +850,7 @@ mod tests {
 
         vcs.set_synced(&workspace, &Revision::new(base))
             .expect("synced");
-        vcs.set_sandbox_tip(&workspace, &Revision::new(ours))
+        vcs.set_sandbox_tip(&workspace, &Revision::new(ours.clone()))
             .expect("sandbox tip");
         vcs.set_tip(&workspace, &Revision::new(theirs))
             .expect("branch tip");
@@ -857,6 +864,19 @@ mod tests {
             vcs.sandbox_tip(&workspace).expect("sandbox tip"),
             revision,
             "the working copy holds the conflict"
+        );
+
+        let restored = vcs
+            .resolve_abandon(&workspace, &Revision::new(ours))
+            .expect("abandon");
+        assert!(
+            vcs.conflicts(&restored).expect("conflicts").is_empty(),
+            "the restored revision carries no conflict"
+        );
+        assert_eq!(
+            vcs.sandbox_tip(&workspace).expect("sandbox tip"),
+            restored,
+            "the working copy is back on the sandbox side"
         );
     }
 

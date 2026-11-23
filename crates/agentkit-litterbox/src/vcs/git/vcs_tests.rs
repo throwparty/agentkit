@@ -90,6 +90,24 @@ fn resolve_begin_writes_a_conflicted_merge() {
         revision,
         "the sandbox branch holds the conflict"
     );
+
+    let restored = vcs
+        .resolve_abandon(&workspace, &Revision::new(ours_commit.id().to_string()))
+        .expect("abandon");
+    assert_eq!(
+        vcs.sandbox_tip(&workspace).expect("sandbox tip"),
+        restored,
+        "abandon puts the sandbox branch back"
+    );
+    assert!(
+        vcs.conflicts(&restored).expect("conflicts").is_empty(),
+        "the restored revision carries no conflict"
+    );
+    let again = TempDir::new().expect("staging");
+    vcs.materialise(&workspace, &restored, again.path())
+        .expect("materialise");
+    let restored_text = fs::read_to_string(again.path().join("greeting.txt")).expect("read");
+    assert!(!restored_text.contains("<<<<<<<"), "{restored_text}");
 }
 
 #[test]
