@@ -184,7 +184,7 @@ Add the `resolution` object to the block appended by every mutating tool, derive
 | Depends On | T-007,T-001 |
 | References | state-reporting |
 
-### T-015: Delete during resolution
+### T-015: [x] Delete during resolution
 
 Remove the workspace and the record when a sandbox with an open resolution is deleted.
 
