@@ -4,6 +4,7 @@
 //! at `vcs/jj/<slug>`; each sandbox is one jj workspace. It imports `vcs` and
 //! `vcs::git_common` and never `vcs::git`.
 
+mod clone;
 mod config;
 
 pub use config::JjVcsConfig;
@@ -34,19 +35,12 @@ impl JjVcs {
     pub fn open(project_slug: &str) -> Result<Self, SandboxError> {
         let host = std::env::current_dir().map_err(SandboxError::Io)?;
         Ok(Self {
-            root: path_for(project_slug),
+            root: clone::root(project_slug),
             slug: project_slug.to_string(),
             host,
             lock: Mutex::new(()),
         })
     }
-}
-
-fn path_for(slug: &str) -> PathBuf {
-    agentkit_common::data_dir("litterbox")
-        .join("vcs")
-        .join("jj")
-        .join(slug)
 }
 
 fn sandbox_of(workspace: &Workspace) -> &str {
@@ -98,7 +92,7 @@ impl Vcs for JjVcs {
     }
 
     fn bound_root(&self, workspace: &Workspace) -> Result<PathBuf, Error> {
-        Ok(self.root.join("workspaces").join(sandbox_of(workspace)))
+        Ok(clone::workspace(&self.root, sandbox_of(workspace)))
     }
 
     fn identity(&self, _workspace: &Workspace) -> Result<TreeId, Error> {
