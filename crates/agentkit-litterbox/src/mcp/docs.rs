@@ -45,8 +45,16 @@ pub(super) const TOOL_DOCS: &[ToolDoc] = &[
     },
     ToolDoc {
         name: "sandbox-reconcile",
-        description: "Stage a merge with a rewritten sandbox branch in a host worktree.",
-        params: &[SANDBOX_NAME_PARAM],
+        description: "Begin, finish or abandon a conflict resolution in the sandbox.",
+        params: &[
+            SANDBOX_NAME_PARAM,
+            ParamDoc {
+                name: "action",
+                type_name: "string",
+                required: false,
+                description: "One of begin, finish or abandon. Defaults to begin.",
+            },
+        ],
     },
     ToolDoc {
         name: "read",

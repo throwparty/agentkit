@@ -1498,7 +1498,6 @@ impl Sandboxes {
     }
 
     /// Begin resolving a conflict inside the sandbox.
-    #[expect(dead_code, reason = "the MCP tool arrives in T-011")]
     pub(crate) async fn begin_resolution(&self, name: &str) -> Result<Resolved, Error> {
         let stored = self.stored(name)?;
         let selected = self
@@ -1510,7 +1509,6 @@ impl Sandboxes {
     }
 
     /// Finish a resolution, refusing while the working copy still conflicts.
-    #[expect(dead_code, reason = "the MCP tool arrives in T-011")]
     pub(crate) async fn finish_resolution(&self, name: &str) -> Result<Resolved, Error> {
         let stored = self.stored(name)?;
         let selected = self
@@ -1520,7 +1518,6 @@ impl Sandboxes {
     }
 
     /// Abandon a resolution and leave the sandbox on its own branch.
-    #[expect(dead_code, reason = "the MCP tool arrives in T-011")]
     pub(crate) async fn abandon_resolution(&self, name: &str) -> Result<Resolved, Error> {
         let stored = self.stored(name)?;
         let selected = self
