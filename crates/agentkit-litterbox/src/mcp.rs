@@ -98,6 +98,12 @@ pub struct SandboxReconcileArgs {
     pub action: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct SandboxStatusArgs {
+    /// Name of the sandbox to report on
+    pub sandbox: String,
+}
+
 pub struct SandboxServer {
     tool_router: ToolRouter<Self>,
     project: std::sync::OnceLock<Sandboxes>,
@@ -168,6 +174,24 @@ impl SandboxServer {
             forwarded_ports,
         };
         let content = ContentBlock::json(response)
+            .map_err(|error| McpError::internal_error(error.to_string(), None))?;
+        Ok(CallToolResult::success(vec![content]))
+    }
+
+    #[tool(
+        name = "sandbox-status",
+        description = "Report a sandbox's source state and the conflicts it carries"
+    )]
+    async fn sandbox_status(
+        &self,
+        Parameters(args): Parameters<SandboxStatusArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let project = self.project()?;
+        let status = project
+            .source_status(&args.sandbox)
+            .await
+            .map_err(map_contract)?;
+        let content = ContentBlock::json(status)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
         Ok(CallToolResult::success(vec![content]))
     }
@@ -1450,6 +1474,7 @@ mod tests {
                 "sandbox-create".to_string(),
                 "sandbox-ports".to_string(),
                 "sandbox-reconcile".to_string(),
+                "sandbox-status".to_string(),
                 "write".to_string(),
             ]
         );
@@ -1490,6 +1515,7 @@ mod tests {
                 "sandbox-create" => vec!["name"],
                 "sandbox-ports" => vec!["sandbox"],
                 "sandbox-reconcile" => vec!["action", "sandbox"],
+                "sandbox-status" => vec!["sandbox"],
                 "write" => vec!["content", "path", "sandbox"],
                 other => panic!("unexpected tool {other}"),
             }

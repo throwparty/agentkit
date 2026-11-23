@@ -145,7 +145,7 @@ Add `action` with the values `begin`, `finish` and `abandon` to the MCP tool and
 | Depends On | T-007 |
 | References | begin-resolution,finish-resolution,no-host-writes,mcp-host-isolation |
 
-### T-012: Add sandbox-status
+### T-012: [x] Add sandbox-status
 
 New MCP tool returning the source state, the revisions, and per-path hunk and side counts, with no region text.
 
