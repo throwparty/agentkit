@@ -1164,6 +1164,7 @@ mod tests {
             branch_name: "branch".to_string(),
             remote: false,
             binding: None,
+            vcs: None,
             merge: None,
         };
         let dir = tempfile::tempdir().expect("tempdir");

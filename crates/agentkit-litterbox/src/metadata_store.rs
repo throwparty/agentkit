@@ -37,6 +37,10 @@ pub struct StoredSandbox {
     /// existed has no field, which is a legacy fact rather than a default.
     #[serde(default)]
     pub binding: Option<crate::sandbox::contract::WorkspaceBinding>,
+    /// The VCS tool that owns this sandbox's source. A record written before
+    /// the choice existed has no field, which is a legacy fact, not a default.
+    #[serde(default)]
+    pub vcs: Option<String>,
     /// The held reconciliation, when one is pending.
     #[serde(default)]
     pub merge: Option<StoredMerge>,
@@ -50,6 +54,13 @@ impl StoredSandbox {
     pub fn binding(&self) -> crate::sandbox::contract::WorkspaceBinding {
         self.binding
             .unwrap_or(crate::sandbox::contract::WorkspaceBinding::Copied)
+    }
+
+    /// The tool this sandbox's source belongs to.
+    ///
+    /// A record without the field predates the choice and was a Git sandbox.
+    pub fn vcs(&self) -> &str {
+        self.vcs.as_deref().unwrap_or("git")
     }
 }
 
@@ -261,6 +272,7 @@ mod record_tests {
             branch_name: "litterbox/demo".to_string(),
             remote: false,
             binding: None,
+            vcs: None,
             merge: None,
         }
     }
