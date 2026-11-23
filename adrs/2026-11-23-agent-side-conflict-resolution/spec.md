@@ -1,6 +1,6 @@
 # Agent-side conflict resolution
 
-**Status:** draft  **Created:** 2026-11-23  **Author:** Luke Carrier
+**Status:** implemented  **Created:** 2026-11-23  **Author:** Luke Carrier
 
 A conflicted tree is not buildable. Litterbox holds the branch advance when the shared branch moves and hands the divergence to the user; the user resolves it in a host staging workspace (`adrs/2026-11-22-adopt-rewritten-branches`). An agent that must resolve a conflict itself has nowhere to do it: the main workspace is the only tree it has, and making that tree conflicted stops the edit, build, test loop it depends on.
 
