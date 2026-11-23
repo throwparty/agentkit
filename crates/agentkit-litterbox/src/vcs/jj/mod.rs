@@ -6,6 +6,7 @@
 
 mod clone;
 mod config;
+mod ops;
 
 pub use config::JjVcsConfig;
 
@@ -34,6 +35,7 @@ impl JjVcs {
     /// Build the backend for one project.
     pub fn open(project_slug: &str) -> Result<Self, SandboxError> {
         let host = std::env::current_dir().map_err(SandboxError::Io)?;
+        ops::probe(&host).map_err(|error| SandboxError::Config(error.to_string()))?;
         Ok(Self {
             root: clone::root(project_slug),
             slug: project_slug.to_string(),

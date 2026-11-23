@@ -18,11 +18,13 @@ pub fn workspace(root: &Path, sandbox: &str) -> PathBuf {
 }
 
 /// One sandbox's staging workspace.
+#[allow(dead_code)] // wired into staging in T-009
 pub fn reconcile(root: &Path, sandbox: &str) -> PathBuf {
     root.join("reconcile").join(sandbox)
 }
 
 /// Create the clone from `host` when it is absent, and return its root.
+#[allow(dead_code)] // wired into prepare in T-008
 pub fn ensure(root: &Path, host: &Path) -> Result<(), Error> {
     if root.join(".jj").is_dir() {
         return Ok(());
