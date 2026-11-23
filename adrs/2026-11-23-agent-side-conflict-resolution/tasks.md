@@ -93,7 +93,7 @@ Add `orchestrator/resolve.rs` with begin, finish and abandon entry points, plus 
 | Depends On | T-001 |
 | References | open-resolution,begin-resolution,second-begin,begin-without-conflict,introducing-commit |
 
-### T-008: Materialise the conflict
+### T-008: [x] Materialise the conflict
 
 Begin writes the conflicted revision into the workspace directory: `materialise` with the snapshot filter for Git and jj `Copied`, and `jj new <shared> <sandbox>` for jj `Bound`.
 

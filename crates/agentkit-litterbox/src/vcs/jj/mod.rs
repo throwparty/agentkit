@@ -540,6 +540,24 @@ impl Vcs for JjVcs {
         Err(unsupported("merge"))
     }
 
+    fn resolve_begin(&self, workspace: &Workspace) -> Result<Revision, Error> {
+        let ours = self.sandbox_tip(workspace)?;
+        let theirs = self.tip(workspace)?;
+        let path = self.workspace(sandbox_of(workspace));
+        let _guard = self.lock();
+        ops::jj_ok(
+            &path,
+            &[
+                "new",
+                ours.as_str(),
+                theirs.as_str(),
+                "-m",
+                "litterbox: resolve the divergence",
+            ],
+        )?;
+        Ok(Revision::new(ops::commit_id(&path, "@")?))
+    }
+
     fn conflicts(&self, revision: &Revision) -> Result<Vec<Conflict>, Error> {
         Ok(ops::conflicts(&self.root, revision.as_str())?
             .into_iter()
@@ -795,6 +813,51 @@ mod tests {
             .status()
             .expect("jj runs");
         assert!(status.success(), "jj {args:?}");
+    }
+
+    #[test]
+    fn resolve_begin_writes_a_conflicted_merge() {
+        unsafe {
+            std::env::set_var("JJ_USER", "Test");
+            std::env::set_var("JJ_EMAIL", "test@example.com");
+        }
+
+        let host = repository();
+        let data = TempDir::new().expect("data");
+        let root = data.path().join("clone");
+        let vcs = JjVcs::open_at(root.clone(), host.path().to_path_buf()).expect("backend");
+        let prepared = vcs.prepare("demo").expect("prepare");
+        let workspace = prepared.workspace.clone();
+
+        std::fs::write(root.join("file.txt"), numbered("base")).expect("write");
+        jj(&root, &["describe", "-m", "base"]);
+        let base = super::ops::commit_id(&root, "@").expect("base id");
+
+        jj(&root, &["new", &base, "-m", "ours"]);
+        std::fs::write(root.join("file.txt"), numbered("ours")).expect("write");
+        let ours = super::ops::commit_id(&root, "@").expect("ours id");
+
+        jj(&root, &["new", &base, "-m", "theirs"]);
+        std::fs::write(root.join("file.txt"), numbered("theirs")).expect("write");
+        let theirs = super::ops::commit_id(&root, "@").expect("theirs id");
+
+        vcs.set_synced(&workspace, &Revision::new(base))
+            .expect("synced");
+        vcs.set_sandbox_tip(&workspace, &Revision::new(ours))
+            .expect("sandbox tip");
+        vcs.set_tip(&workspace, &Revision::new(theirs))
+            .expect("branch tip");
+
+        let revision = vcs.resolve_begin(&workspace).expect("begin");
+        let conflicts = vcs.conflicts(&revision).expect("conflicts");
+        assert_eq!(conflicts.len(), 1, "{conflicts:?}");
+        assert_eq!(conflicts[0].path, Path::new("file.txt"));
+        assert_eq!(conflicts[0].sides, 2);
+        assert_eq!(
+            vcs.sandbox_tip(&workspace).expect("sandbox tip"),
+            revision,
+            "the working copy holds the conflict"
+        );
     }
 
     #[test]

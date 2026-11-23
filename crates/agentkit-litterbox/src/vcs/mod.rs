@@ -116,6 +116,18 @@ pub trait Vcs: Send + Sync {
     /// Merge three revisions according to this backend's conflict model.
     fn merge(&self, base: &Revision, ours: &Revision, theirs: &Revision) -> Result<Merge, Error>;
 
+    /// Create the conflict between the shared branch and the sandbox branch
+    /// and report the revision that now holds it.
+    ///
+    /// The first parent is the sandbox side, so [`Self::conflict_sides`] reads
+    /// `ours` from the sandbox and `theirs` from the shared branch. A backend
+    /// whose conflicts live in commits moves the sandbox branch; a backend
+    /// whose conflicts live in an index creates the commit it will be written
+    /// from.
+    fn resolve_begin(&self, _workspace: &Workspace) -> Result<Revision, Error> {
+        Err(not_implemented("open a resolution"))
+    }
+
     /// The conflicts a revision carries.
     fn conflicts(&self, revision: &Revision) -> Result<Vec<Conflict>, Error>;
 

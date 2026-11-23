@@ -1501,21 +1501,32 @@ impl Sandboxes {
     #[expect(dead_code, reason = "the MCP tool arrives in T-011")]
     pub(crate) async fn begin_resolution(&self, name: &str) -> Result<Resolved, Error> {
         let stored = self.stored(name)?;
-        Resolver::new(&self.vcs, &stored, &self.records_dir).begin()
+        let selected = self
+            .select_for(&stored.sandbox, "resolve a conflict")
+            .await?;
+        Resolver::new(&self.vcs, &stored, &selected, &self.records_dir)
+            .begin()
+            .await
     }
 
     /// Finish a resolution, refusing while the working copy still conflicts.
     #[expect(dead_code, reason = "the MCP tool arrives in T-011")]
     pub(crate) async fn finish_resolution(&self, name: &str) -> Result<Resolved, Error> {
         let stored = self.stored(name)?;
-        Resolver::new(&self.vcs, &stored, &self.records_dir).finish()
+        let selected = self
+            .select_for(&stored.sandbox, "resolve a conflict")
+            .await?;
+        Resolver::new(&self.vcs, &stored, &selected, &self.records_dir).finish()
     }
 
     /// Abandon a resolution and leave the sandbox on its own branch.
     #[expect(dead_code, reason = "the MCP tool arrives in T-011")]
     pub(crate) async fn abandon_resolution(&self, name: &str) -> Result<Resolved, Error> {
         let stored = self.stored(name)?;
-        Resolver::new(&self.vcs, &stored, &self.records_dir).abandon()
+        let selected = self
+            .select_for(&stored.sandbox, "resolve a conflict")
+            .await?;
+        Resolver::new(&self.vcs, &stored, &selected, &self.records_dir).abandon()
     }
 
     /// The ports a sandbox forwards, or the reason its mechanism forwards none.

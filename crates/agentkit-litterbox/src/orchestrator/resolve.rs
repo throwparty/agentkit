@@ -12,6 +12,8 @@ use std::sync::Arc;
 use crate::metadata_store::{self, StoredResolution, StoredSandbox};
 use crate::orchestrator::service::contract_error;
 use crate::sandbox::contract::Error;
+use crate::sandbox::contract::WorkspaceBinding;
+use crate::sandbox::selected::Selected;
 use crate::vcs::{Conflict, Revision, Vcs, Workspace};
 
 /// What one resolution action achieved.
@@ -27,6 +29,7 @@ pub(crate) struct Resolved {
 pub(crate) struct Resolver<'a> {
     vcs: &'a Arc<dyn Vcs>,
     stored: &'a StoredSandbox,
+    selected: &'a Selected,
     records_dir: &'a Path,
     resolution: std::sync::Mutex<Option<StoredResolution>>,
 }
@@ -36,11 +39,13 @@ impl<'a> Resolver<'a> {
     pub(crate) fn new(
         vcs: &'a Arc<dyn Vcs>,
         stored: &'a StoredSandbox,
+        selected: &'a Selected,
         records_dir: &'a Path,
     ) -> Self {
         Self {
             vcs,
             stored,
+            selected,
             records_dir,
             resolution: std::sync::Mutex::new(stored.resolution.clone()),
         }
@@ -74,8 +79,9 @@ impl<'a> Resolver<'a> {
         Ok(())
     }
 
-    /// Open a resolution and report the conflicts it has to settle.
-    pub(crate) fn begin(&self) -> Result<Resolved, Error> {
+    /// Open a resolution, write the conflict into the workspace, and report
+    /// the conflicts it has to settle.
+    pub(crate) async fn begin(&self) -> Result<Resolved, Error> {
         if let Some(open) = self.resolution.lock().ok().and_then(|open| open.clone()) {
             return Err(Error::failed(format!(
                 "a resolution is already open from {}",
@@ -91,10 +97,35 @@ impl<'a> Resolver<'a> {
             ));
         }
         let synced = self.vcs.synced(&workspace).map_err(contract_error)?;
+        let revision = self.vcs.resolve_begin(&workspace).map_err(contract_error)?;
+        if self.stored.binding() == WorkspaceBinding::Copied {
+            self.publish(&workspace, &revision).await?;
+        }
+        let conflicts = self.vcs.conflicts(&revision).map_err(contract_error)?;
         self.record(Some(StoredResolution {
             synced: synced.as_str().to_string(),
         }))?;
         Ok(Resolved { synced, conflicts })
+    }
+
+    /// Write a revision into a copied sandbox's workspace.
+    async fn publish(&self, workspace: &Workspace, revision: &Revision) -> Result<(), Error> {
+        let staging = tempfile::tempdir()
+            .map_err(|error| Error::failed(format!("could not create a staging dir: {error}")))?;
+        self.vcs
+            .materialise(workspace, revision, staging.path())
+            .map_err(contract_error)?;
+        let path = self
+            .selected
+            .core()
+            .inspect(&self.stored.sandbox)
+            .await?
+            .workspace;
+        self.selected
+            .core()
+            .upload(&self.stored.sandbox, staging.path(), &path)
+            .await?;
+        Ok(())
     }
 
     /// Close a resolution, refusing while the working copy still conflicts.
@@ -128,148 +159,5 @@ impl<'a> Resolver<'a> {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use tempfile::TempDir;
-
-    use super::Resolver;
-    use crate::metadata_store::{self, StoredSandbox};
-    use crate::sandbox::contract::SandboxRecord;
-    use crate::testing::vcs::TestVcs;
-    use crate::vcs::Vcs;
-
-    fn current(loaded: &crate::metadata_store::LoadedSandbox) -> &StoredSandbox {
-        match loaded {
-            crate::metadata_store::LoadedSandbox::Current(stored) => stored,
-            crate::metadata_store::LoadedSandbox::Corrupt { path, reason } => {
-                panic!("the record at {} is corrupt: {reason}", path.display())
-            }
-        }
-    }
-
-    fn stored() -> StoredSandbox {
-        StoredSandbox {
-            sandbox: SandboxRecord {
-                name: "demo".to_string(),
-                backend: "test".to_string(),
-                project_slug: "project".to_string(),
-                data: toml::Value::Table(toml::Table::new()),
-            },
-            branch_name: "litterbox/demo".to_string(),
-            remote: false,
-            binding: None,
-            vcs: None,
-            merge: None,
-            resolution: None,
-        }
-    }
-
-    fn vcs_with(branch: &str, conflicts: &[&str], sandbox: &str, left: &[&str]) -> Arc<dyn Vcs> {
-        let vcs = TestVcs::new()
-            .with_tip(branch)
-            .with_sandbox_tip(sandbox)
-            .with_synced("synced-revision")
-            .with_conflicts_for(branch, conflicts);
-        let vcs = if left.is_empty() {
-            vcs
-        } else {
-            vcs.with_conflicts_for(sandbox, left)
-        };
-        Arc::new(vcs)
-    }
-
-    #[test]
-    fn begin_records_the_resolution_and_a_second_begin_is_refused() {
-        let dir = TempDir::new().expect("tempdir");
-        let stored = stored();
-        let vcs = vcs_with("branch-tip", &["file.txt"], "sandbox-tip", &[]);
-
-        let resolver = Resolver::new(&vcs, &stored, dir.path());
-        let began = resolver.begin().expect("begin");
-        assert_eq!(began.synced.as_str(), "synced-revision");
-        assert_eq!(began.conflicts.len(), 1);
-
-        let reloaded = metadata_store::load_sandbox_at(dir.path(), "demo")
-            .expect("load")
-            .expect("present");
-        assert_eq!(
-            current(&reloaded)
-                .resolution
-                .clone()
-                .expect("recorded")
-                .synced,
-            "synced-revision",
-            "the record outlives the call"
-        );
-
-        let refused = Resolver::new(&vcs, current(&reloaded), dir.path()).begin();
-        assert!(refused.is_err(), "a second begin must be refused");
-    }
-
-    #[test]
-    fn begin_without_a_conflict_reports_the_state() {
-        let dir = TempDir::new().expect("tempdir");
-        let stored = stored();
-        let vcs = vcs_with("branch-tip", &[], "sandbox-tip", &[]);
-
-        let error = Resolver::new(&vcs, &stored, dir.path())
-            .begin()
-            .expect_err("no conflict");
-        assert!(
-            error.to_string().contains("no conflict"),
-            "the message names the state: {error}"
-        );
-        assert!(
-            metadata_store::load_sandbox_at(dir.path(), "demo")
-                .expect("load")
-                .is_none(),
-            "a refused begin writes no record"
-        );
-    }
-
-    #[test]
-    fn finish_refuses_while_conflicts_remain_and_clears_when_they_are_gone() {
-        let dir = TempDir::new().expect("tempdir");
-        let dirty = vcs_with("branch-tip", &["file.txt"], "sandbox-tip", &["file.txt"]);
-        let record = stored();
-        let resolver = Resolver::new(&dirty, &record, dir.path());
-        resolver.begin().expect("begin");
-        assert!(
-            resolver.finish().is_err(),
-            "finish refuses while the working copy conflicts"
-        );
-
-        let clean = TempDir::new().expect("tempdir");
-        let resolved = vcs_with("branch-tip", &["file.txt"], "sandbox-tip", &[]);
-        let record = stored();
-        let resolver = Resolver::new(&resolved, &record, clean.path());
-        resolver.begin().expect("begin");
-        resolver.finish().expect("finish");
-        let reloaded = metadata_store::load_sandbox_at(clean.path(), "demo")
-            .expect("load")
-            .expect("present");
-        assert!(current(&reloaded).resolution.is_none(), "finish clears it");
-    }
-
-    #[test]
-    fn abandon_clears_the_record() {
-        let dir = TempDir::new().expect("tempdir");
-        let vcs = vcs_with("branch-tip", &["file.txt"], "sandbox-tip", &["file.txt"]);
-        let record = stored();
-        let resolver = Resolver::new(&vcs, &record, dir.path());
-        resolver.begin().expect("begin");
-        resolver.abandon().expect("abandon");
-
-        let reloaded = metadata_store::load_sandbox_at(dir.path(), "demo")
-            .expect("load")
-            .expect("present");
-        assert!(current(&reloaded).resolution.is_none());
-        assert!(
-            Resolver::new(&vcs, current(&reloaded), dir.path())
-                .abandon()
-                .is_err(),
-            "abandon with nothing open is refused"
-        );
-    }
-}
+#[path = "resolve_tests.rs"]
+mod resolution_tests;
