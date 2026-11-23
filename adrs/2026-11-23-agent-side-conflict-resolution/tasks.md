@@ -28,7 +28,7 @@ Implement `GitVcs::conflicts` by scanning the tree a snapshot would commit for l
 | Depends On | T-001 |
 | References | git-conflict-scan,conflict-report,git-no-index |
 
-### T-003: jj conflict counts
+### T-003: [x] jj conflict counts
 
 Parse `path    N-sided conflict` in `vcs/jj/ops.rs` so the side count is kept rather than dropped, and count conflict regions in the materialised tree.
 
