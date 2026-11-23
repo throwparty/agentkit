@@ -1,0 +1,30 @@
+-- sides per path from the marker file
+left/right pairs: 2
+-- jj diff --git hunk headers for the conflict
+0
+-- does a conflict in an ancestor survive a clean descendant?
+file.txt    2-sided conflict
+
+== git ==
+-- merge-tree with the recorded base
+exit: 1
+tree: 0b17439ea5ca5c4ea53afe3d8e38474892ea8e5f
+-- conflicted paths from merge-tree output
+100644 60e0dd76498aa54855cef6f7e88af73f68a577f7 1	file.txt
+100644 828480a948eb6eb7fbe088c3ecc098feab53254f 2	file.txt
+100644 d94389294b623845c93eff4360820864fe7a3829 3	file.txt
+
+Auto-merging file.txt
+CONFLICT (content): Merge conflict in file.txt
+-- index stages after a real merge (unmerged paths and their stages)
+1 file.txt
+2 file.txt
+3 file.txt
+-- stage count per path
+      3 file.txt
+-- MERGE_HEAD present
+yes
+-- marker regions in the worktree
+2
+-- marker regions in the conflicted tree, via archive
+2

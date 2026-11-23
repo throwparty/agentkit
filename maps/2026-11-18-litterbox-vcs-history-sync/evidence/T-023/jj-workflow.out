@@ -1,0 +1,74 @@
+Initialized repo in "."
+Warning: This setting will only impact future commits.
+The author of the working copy will stay "Luke Carrier <luke@carrier.family>".
+To change the working copy author, use "jj metaedit --update-author".
+Warning: This setting will only impact future commits.
+The author of the working copy will stay "Luke Carrier <luke@carrier.family>".
+To change the working copy author, use "jj metaedit --update-author".
+Working copy  (@) now at: mzxsqmqt 69b67ed1 base
+Parent commit (@-)      : zzzzzzzz 00000000 (empty) (no description set)
+Created 1 bookmarks pointing to mzxsqmqt 69b67ed1 litterbox/probe | base
+Working copy  (@) now at: msvrvnru 34337705 (empty) theirs: user rewrote the file
+Parent commit (@-)      : mzxsqmqt 69b67ed1 litterbox/probe | base
+Working copy  (@) now at: wwunyyuw 20d7855f (empty) ours: sandbox rewrote the file
+Parent commit (@-)      : mzxsqmqt 69b67ed1 litterbox/probe | base
+Added 0 files, modified 1 files, removed 0 files
+== flow 1: Litterbox introduces the merge
+Working copy  (@) now at: kllxmwyu 0e5d3952 (conflict) (empty) merge the divergence
+Parent commit (@-)      : msvrvnru 2590e2a9 theirs: user rewrote the file
+Parent commit (@-)      : wwunyyuw 2bab4219 ours: sandbox rewrote the file
+Added 0 files, modified 1 files, removed 0 files
+Warning: There are unresolved conflicts at these paths:
+file.txt    2-sided conflict
+-- conflicts
+file.txt    2-sided conflict
+-- marker regions in the working copy: 2
+-- conflicts() matches: 0e5d39526214 merge the divergence
+-- resolve in place
+-- conflicts on the captured id after the edit
+file.txt    2-sided conflict
+-- marker regions: 0
+-- the commit id the working copy holds now: 97cbf119a8c906c2277be1826bbb3715418f88ff
+   (was 0e5d39526214d3eaa1dbe00a6ee931447d7a6a5c before the edit)
+Error: No conflicts found at this revision
+-- conflicts on the rewritten commit: []
+-- conflicts() after resolving: []
+Moved 1 bookmarks to kllxmwyu 97cbf119 litterbox/probe* | merge the divergence
+-- bookmark: 97cbf119a8c9
+-- sandbox commit still present: 2bab42199ccc
+
+== flow 2: the user's shared-branch tip is itself conflicted
+Working copy  (@) now at: nnnmorlt f37245f2 (conflict) (empty) user merge, committed without resolving
+Parent commit (@-)      : msvrvnru 2590e2a9 theirs: user rewrote the file
+Parent commit (@-)      : wwunyyuw 2bab4219 ours: sandbox rewrote the file
+Added 0 files, modified 1 files, removed 0 files
+Warning: There are unresolved conflicts at these paths:
+file.txt    2-sided conflict
+Moved 1 bookmarks to nnnmorlt f37245f2 litterbox/probe* | (conflict) (empty) user merge, committed without resolving
+-- tip conflicts
+file.txt    2-sided conflict
+-- the inherited conflict reaches a clean child
+Working copy  (@) now at: kmslknpo 516cac33 (conflict) (empty) resolve the user's merge
+Parent commit (@-)      : nnnmorlt f37245f2 litterbox/probe | (conflict) (empty) user merge, committed without resolving
+Warning: There are unresolved conflicts at these paths:
+file.txt    2-sided conflict
+   conflicts on the child: 1 path(s)
+-- resolve in the child
+Error: No conflicts found at this revision
+   conflicts after the edit: []
+-- squash into the introducing commit
+   exit: 0
+   Working copy  (@) now at: zwqnwwnw 43ff0df2 (empty) (no description set)
+   Parent commit (@-)      : nnnmorlt 4802bf03 litterbox/probe | user merge, committed without resolving
+-- bookmark now: 4802bf037b52
+Error: No conflicts found at this revision
+-- conflicts on the rewritten introducing commit: []
+-- conflicts() anywhere: []
+-- marker regions in the working copy: 0
+-- sandbox commit still present: 2bab42199ccc
+-- graph
+4802bf037b52 user merge, committed without resolving
+2bab42199ccc ours: sandbox rewrote the file
+2590e2a98356 theirs: user rewrote the file
+69b67ed14c2c base
+000000000000 
