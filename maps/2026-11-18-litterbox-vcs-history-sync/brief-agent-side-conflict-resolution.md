@@ -61,30 +61,27 @@ spec.
 
 ## Open
 
-1. The check for resolution. Decision 8 says the VCS report is enough. T-024 shows that report
-   passing on two trees that destroyed content. Does resolution gain a diff against each side, and
-   if so, is it enforced or reported? Enforcement has a trap: a deliberate union drops a side.
-   Recommendation: report it, do not enforce. The agent sees a diff against base, ours and theirs
-   for each path and has to justify the result. Litterbox refuses only what the VCS refuses.
-2. Which host writes are permitted. Decision 3 forbids the agent touching a host tree. An earlier
-   answer here accepted that the user must allow the agent to run source control operations on their
-   host machine for now, and a fix to a conflicted tip needs a rewrite of a commit the user owns.
-   Nothing in the map resolves this. Recommendation: Litterbox performs the host write and the agent
-   never does. The agent's authority ends at "resolved". The commit, the ref move and any rewrite
-   belong to Litterbox and use the same consent check that staging already requires.
-3. How the three sides reach the agent, if at all. Three files for each conflicted path do not make
-   a second tree, and without them the agent is back to editing markers, which failed twice.
-   Options: a read-only path in the sandbox, or a side selector on `read`.
-4. The MCP tools. `sandbox-reconcile` stages on the host today, which decision 3 forbids from MCP.
-   Either it becomes the entry for the sandbox and host staging stays in the CLI, or a separate tool
-   appears. Separately, the map's decision names `sandbox-status` and no such tool exists.
-5. The `Vcs` contract. `stage` needs to mean "materialise the conflict as the working copy" and to
-   run again after an abandon. `discard_stage` needs a meaning for the sandbox. `conflicts` needs
-   counts and the three sides. `finish` needs a Git version that commits a tree on the host and a jj
-   version that squashes into the commit that introduced the conflict.
-6. Landing a fix to a conflicted tip. A divergence is resolved by a new merge commit. A conflicted
-   tip means rewriting a commit the user owns in Litterbox's clone for the user to fetch. Nothing
-   has ruled whether that is allowed.
+The first three questions below were ruled on after this brief was written. They are kept here with
+their answers so the brief and the ADR do not disagree.
+
+1. ~~The check for resolution.~~ **Ruled: report it, do not enforce it.** `finish` refuses only when
+   the VCS still reports conflicts. It returns a diff against base, ours and theirs for every
+   conflicted path, and the agent has to justify the result. Enforcement has a trap: a deliberate
+   union drops a side.
+2. ~~Which host writes are permitted.~~ **Ruled: Litterbox performs every host write.** The agent's
+   authority ends at `finish`. The commit, the ref move and any rewrite of a user-owned commit
+   belong to Litterbox and use the same consent check staging already requires.
+3. ~~How the three sides reach the agent.~~ **Ruled: an optional side on `read`.** `base`, `ours`
+   and `theirs` are served from the backend. No path, mount or extra tool.
+4. ~~The MCP tools.~~ **Ruled: `sandbox-reconcile` carries begin, finish and abandon; `sandbox-status`
+   is added; `read` gains a side.** `sandbox-reconcile` stopped staging a host worktree, so no MCP
+   call writes one.
+5. ~~The `Vcs` contract.~~ **Ruled: `blob`, `resolve_begin` and `resolve_abandon` join the contract,
+   and `Conflict` gains counts.** `stage`, `finish` and `discard_stage` keep meaning the host
+   staging path the operator uses.
+6. Landing a fix to a conflicted tip. A divergence is resolved by advancing the branch to a merge
+   revision. A conflicted tip still needs the resolution squashed into the commit that introduced
+   the conflict, and nothing has ruled whether rewriting a commit the user owns is allowed.
 
 ## Evidence
 
