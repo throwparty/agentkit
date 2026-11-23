@@ -265,6 +265,7 @@ impl Sandboxes {
             branch_name,
             remote: self.remote,
             binding: Some(binding),
+            vcs: Some(self.vcs_tool.clone()),
             merge: None,
         };
 
@@ -456,6 +457,7 @@ impl Sandboxes {
             branch_name: stored.branch_name.clone(),
             remote: stored.remote,
             binding: stored.binding,
+            vcs: stored.vcs.clone(),
             merge: stored.merge.clone(),
         };
         if let Err(error) =
@@ -1711,6 +1713,7 @@ mod seam_tests {
             branch_name: format!("litterbox/{name}"),
             remote: false,
             binding: None,
+            vcs: None,
             merge: None,
         }
     }
