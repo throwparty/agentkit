@@ -50,7 +50,6 @@ struct State {
     failure: Failure,
     sides: Option<ConflictSides>,
 
-    resolution_target: Option<String>,
     resolution: String,
     masked: Vec<String>,
     bound: Vec<String>,
@@ -80,7 +79,6 @@ impl TestVcs {
                 sandbox_tip: "0123456789abcdef".to_string(),
                 synced: "0123456789abcdef".to_string(),
                 sides: None,
-                resolution_target: None,
                 resolution: "resolution-revision".to_string(),
                 observed_tree: "tree".to_string(),
                 ancestor: true,
@@ -476,13 +474,7 @@ impl Vcs for TestVcs {
         self.state().sandbox_tip = revision.clone();
         Ok(Begun {
             revision: Revision::new(revision),
-            target: self.state().resolution_target.clone().map(Revision::new),
         })
-    }
-
-    fn resolve_squash(&self, _workspace: &Workspace, target: &Revision) -> Result<(), Error> {
-        self.state().tips_set.push(target.as_str().to_string());
-        Ok(())
     }
 
     fn resolve_abandon(&self, _workspace: &Workspace, ours: &Revision) -> Result<Revision, Error> {

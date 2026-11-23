@@ -73,7 +73,7 @@ An agent cannot resolve a conflict in the sandbox because the only tree it has i
 - Blocking a commit on a semantic judgement of the resolution.
 - Native conflicts in the main workspace outside resolution.
 - Undo, history retention, and the lifecycle delta.
-- Rewriting history the user has already published beyond the sandbox branch.
+- Rewriting a commit the user owns. A shared-branch tip that already carries a conflict is reported and left alone; Litterbox resolves only the merge it creates.
 
 
 ## Functional Requirements
@@ -86,7 +86,7 @@ Beginning resolution materialises the conflicted revision into `/src` in place o
 
 ### FR-002: Beginning is a tool
 
-`sandbox-reconcile` gains an action. `begin` snapshots the workspace, then materialises the conflict, and reports the revision it started from. It fails when a resolution is already open for the sandbox and names the revision of the open one.
+`sandbox-reconcile` gains an action. `begin` refuses when the shared branch tip already carries a conflict, because that commit belongs to the user and Litterbox resolves only the merge it creates. Otherwise it snapshots the workspace, materialises the merge, and reports the revision it started from. It fails when a resolution is already open for the sandbox and names the revision of the open one.
 
 **Slug:** `begin-resolution`
 
@@ -110,7 +110,7 @@ Every MCP tool that mutates a sandbox appends the workspace block. While a resol
 
 ### FR-006: Finishing
 
-`sandbox-reconcile` with `finish` asks the backend whether the working copy still reports conflicts. When it does, the call fails and names the paths. When it does not, Litterbox performs the write. For a divergence, on either backend, it advances the shared branch to the revision under resolution with a compare-and-swap against the tip the plan read, then records that revision as `synced`; the revision descends from both tips, so no second commit is minted. For a jj conflicted tip it squashes the resolution into the commit that introduced the conflict. The agent writes no ref.
+`sandbox-reconcile` with `finish` asks the backend whether the working copy still reports conflicts. When it does, the call fails and names the paths. When it does not, Litterbox performs the write. For a divergence, on either backend, it advances the shared branch to the revision under resolution with a compare-and-swap against the tip the plan read, then records that revision as `synced`; the revision descends from both tips, so no second commit is minted. The agent writes no ref.
 
 **Slug:** `finish-resolution`
 
@@ -208,11 +208,11 @@ The same sequence on a jj sandbox. The resolution revision is the working copy, 
 
 **Slug:** `jj-divergence-resolved`
 
-### AC-003: A conflicted tip fixed where it started
+### AC-003: A broken shared-branch tip is reported, not resolved
 
-Point the shared bookmark at a conflicted commit. Begin resolution, resolve, and `finish`. The commit that introduced the conflict is rewritten clean, its descendants carry no conflict, and the bookmark points at the rewritten commit.
+Point the shared bookmark at a commit that already carries a conflict. `begin` fails, the message says Litterbox resolves only the merge it creates and names the fix to make in the checkout, no resolution record is written, and the sandbox keeps holding at `synced`. Fix the tip in the checkout and push it; the next operation adopts the clean tip.
 
-**Slug:** `jj-tip-fixed`
+**Slug:** `tip-refused`
 
 ### AC-004: A lost side is reported
 

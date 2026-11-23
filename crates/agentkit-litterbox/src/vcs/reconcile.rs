@@ -35,10 +35,6 @@ pub struct Staged {
 pub struct Begun {
     /// The revision the workspace now holds.
     pub revision: Revision,
-    /// The commit the resolution must be squashed into, when the conflict came
-    /// from a commit the user's side owns rather than from a merge Litterbox
-    /// created.
-    pub target: Option<Revision>,
 }
 
 /// The outcome of finishing a staged merge.

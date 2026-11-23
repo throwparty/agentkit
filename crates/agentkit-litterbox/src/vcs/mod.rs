@@ -128,14 +128,6 @@ pub trait Vcs: Send + Sync {
         Err(not_implemented("open a resolution"))
     }
 
-    /// Squash the resolution into `target`, the commit the user's side owns.
-    ///
-    /// A divergence lands by advancing the branch instead; this is for a
-    /// shared-branch tip that was committed without resolving.
-    fn resolve_squash(&self, _workspace: &Workspace, _target: &Revision) -> Result<(), Error> {
-        Err(not_implemented("squash a resolution"))
-    }
-
     /// Put the workspace back on `ours`, the revision it held before the
     /// resolution began, and report the revision it now holds.
     fn resolve_abandon(&self, _workspace: &Workspace, _ours: &Revision) -> Result<Revision, Error> {

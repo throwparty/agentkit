@@ -123,7 +123,7 @@ Answers base, ours and theirs
 
 Owns begin, finish and abandon
 
-New `orchestrator/resolve.rs`. Begin refuses an open resolution, asks the backend for the conflicted revision, publishes it into a copied sandbox and records the `synced` revision plus the sandbox tip it replaced. The revision under resolution is read fresh from the working copy and never stored, because resolving rewrites it. Finish re-reads the conflict state, builds the per-side report from the recorded tip and the shared branch, advances the branch by compare-and-swap, records the new `synced` and clears the record. Abandon hands the backend the recorded tip and publishes whatever it restores. It names no ref and no backend.
+New `orchestrator/resolve.rs`. Begin refuses an open resolution, asks the backend for the conflicted revision, publishes it into a copied sandbox and records the `synced` revision plus the sandbox tip it replaced. The revision under resolution is read fresh from the working copy and never stored, because resolving rewrites it. Finish re-reads the conflict state, builds the per-side report from the recorded tip and the shared branch, advances the branch by compare-and-swap, records the new `synced` and clears the record. Begin refuses a tip that already carries a conflict, because that commit belongs to the user. Abandon hands the backend the recorded tip and publishes whatever it restores. It names no ref and no backend.
 
 
 ### workspace materialisation
@@ -169,7 +169,7 @@ Reading. The agent calls `sandbox-status` and gets paths with hunk and side coun
 
 Editing. `write`, `patch` and `bash` behave as they do today. Each one plans, runs the tool and snapshots, so the resolution is committed to the revision under resolution.
 
-Finish. The agent calls `sandbox-reconcile` with `finish`. The orchestrator re-reads the conflict state. If the backend still reports a conflict the call fails and names the paths. Otherwise it builds the per-side report from the recorded sandbox tip, the shared branch and the resolved tree, advances the shared branch to the revision under resolution, records it as `synced` and returns the report. The advance is a compare-and-swap, so a branch that moved is replanned. A jj conflicted tip is the exception: the write squashes the resolution into the commit that introduced the conflict.
+Finish. The agent calls `sandbox-reconcile` with `finish`. The orchestrator re-reads the conflict state. If the backend still reports a conflict the call fails and names the paths. Otherwise it builds the per-side report from the recorded sandbox tip, the shared branch and the resolved tree, advances the shared branch to the revision under resolution, records it as `synced` and returns the report. The advance is a compare-and-swap, so a branch that moved is replanned.
 
 Abandon. The agent calls `sandbox-reconcile` with `abandon`. The orchestrator hands the backend the recorded sandbox tip, publishes whatever the backend restores and clears the open resolution. No repository-wide operation runs.
 

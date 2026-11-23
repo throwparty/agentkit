@@ -93,6 +93,22 @@ impl<'a> Resolver<'a> {
             )));
         }
         let workspace = self.workspace();
+        let branch = self.vcs.tip(&workspace).map_err(contract_error)?;
+        let conflicted = self.vcs.conflicts(&branch).map_err(contract_error)?;
+        if !conflicted.is_empty() {
+            // The broken commit belongs to the user, and only they can replace
+            // it. Litterbox reports it and holds until they do.
+            return Err(Error::Denied {
+                operation: "resolve the shared branch".to_string(),
+                reason: format!(
+                    "the shared branch tip already carries a conflict in {} path(s). Litterbox \
+                     resolves only the merge it creates; fix the tip in your checkout and push \
+                     it, for example `jj edit <revision>`, resolve, then `jj bookmark set \
+                     <branch> -r @`",
+                    conflicted.len()
+                ),
+            });
+        }
         let synced = self.vcs.synced(&workspace).map_err(contract_error)?;
         let ours = self.vcs.sandbox_tip(&workspace).map_err(contract_error)?;
         let begun = self.vcs.resolve_begin(&workspace).map_err(contract_error)?;
@@ -120,7 +136,6 @@ impl<'a> Resolver<'a> {
         self.record(Some(StoredResolution {
             synced: synced.as_str().to_string(),
             ours: ours.as_str().to_string(),
-            target: begun.target.as_ref().map(|r| r.as_str().to_string()),
         }))?;
         Ok(Resolved {
             synced,
@@ -180,17 +195,9 @@ impl<'a> Resolver<'a> {
             .deleted_paths(&theirs, &resolved)
             .map_err(contract_error)?;
 
-        if let Some(target) = &open.target {
-            // The conflict came from a commit the user's side owns, so the
-            // resolution has to land in that commit rather than beside it.
-            self.vcs
-                .resolve_squash(&workspace, &Revision::new(target.clone()))
-                .map_err(contract_error)?;
-        } else {
-            self.vcs
-                .advance(&workspace, &revision, &branch)
-                .map_err(contract_error)?;
-        }
+        self.vcs
+            .advance(&workspace, &revision, &branch)
+            .map_err(contract_error)?;
         let landed = self.vcs.tip(&workspace).map_err(contract_error)?;
         self.vcs
             .set_synced(&workspace, &landed)

@@ -60,7 +60,7 @@ async fn begin_records_the_resolution_and_a_second_begin_is_refused() {
     let dir = TempDir::new().expect("tempdir");
     let stored = stored();
     let selected = selected();
-    let vcs = vcs_with("branch-tip", &["file.txt"], "sandbox-tip", &["file.txt"]);
+    let vcs = vcs_with("branch-tip", &[], "sandbox-tip", &["file.txt"]);
 
     let began = Resolver::new(&vcs, &stored, &selected, dir.path())
         .begin()
@@ -84,6 +84,32 @@ async fn begin_records_the_resolution_and_a_second_begin_is_refused() {
         .begin()
         .await;
     assert!(refused.is_err(), "a second begin must be refused");
+}
+
+#[tokio::test]
+async fn begin_refuses_a_shared_branch_tip_that_already_conflicts() {
+    let dir = TempDir::new().expect("tempdir");
+    let selected = selected();
+    let stored = stored();
+    let vcs = vcs_with("branch-tip", &["file.txt"], "sandbox-tip", &[]);
+
+    let error = Resolver::new(&vcs, &stored, &selected, dir.path())
+        .begin()
+        .await
+        .expect_err("a broken tip is the owner's to fix");
+
+    let message = error.to_string();
+    assert!(
+        message.contains("resolves only the merge it creates"),
+        "{message}"
+    );
+    assert!(message.contains("jj edit"), "it names the fix: {message}");
+    assert!(
+        metadata_store::load_sandbox_at(dir.path(), "demo")
+            .expect("load")
+            .is_none(),
+        "a refused begin writes no record"
+    );
 }
 
 #[tokio::test]
@@ -113,7 +139,7 @@ async fn begin_without_a_conflict_reports_the_state() {
 async fn finish_refuses_while_conflicts_remain_and_clears_when_they_are_gone() {
     let dir = TempDir::new().expect("tempdir");
     let selected = selected();
-    let dirty = vcs_with("branch-tip", &["file.txt"], "sandbox-tip", &["file.txt"]);
+    let dirty = vcs_with("branch-tip", &[], "sandbox-tip", &["file.txt"]);
     let record = stored();
     let resolver = Resolver::new(&dirty, &record, &selected, dir.path());
     resolver.begin().await.expect("begin");
@@ -182,7 +208,7 @@ async fn finish_reports_a_path_the_resolution_dropped() {
 async fn abandon_clears_the_record() {
     let dir = TempDir::new().expect("tempdir");
     let selected = selected();
-    let vcs = vcs_with("branch-tip", &["file.txt"], "sandbox-tip", &["file.txt"]);
+    let vcs = vcs_with("branch-tip", &[], "sandbox-tip", &["file.txt"]);
     let record = stored();
     let resolver = Resolver::new(&vcs, &record, &selected, dir.path());
     resolver.begin().await.expect("begin");

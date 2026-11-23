@@ -79,9 +79,11 @@ their answers so the brief and the ADR do not disagree.
 5. ~~The `Vcs` contract.~~ **Ruled: `blob`, `resolve_begin` and `resolve_abandon` join the contract,
    and `Conflict` gains counts.** `stage`, `finish` and `discard_stage` keep meaning the host
    staging path the operator uses.
-6. Landing a fix to a conflicted tip. A divergence is resolved by advancing the branch to a merge
-   revision. A conflicted tip still needs the resolution squashed into the commit that introduced
-   the conflict, and nothing has ruled whether rewriting a commit the user owns is allowed.
+6. ~~Landing a fix to a conflicted tip.~~ **Ruled: Litterbox does not rewrite a commit the user
+   owns.** A shared-branch tip that already carries a conflict is reported and the sandbox keeps
+   holding. The owner fixes it in their checkout and pushes; the next operation adopts the clean
+   tip. Litterbox resolves only the merge it creates, which is the same rule on both backends
+   because a Git commit cannot carry conflict state.
 
 ## Evidence
 
