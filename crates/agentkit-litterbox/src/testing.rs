@@ -928,6 +928,14 @@ pub async fn exercise_lifecycle<S: Lifecycle + ?Sized>(backend: &S) -> Result<()
     Ok(())
 }
 
+/// A Git backend over a host repository, for tests that need a real one.
+///
+/// The orchestrator may not name a backend, so tests reach the real Git
+/// through this helper instead.
+pub fn git_backend(host: &std::path::Path) -> Result<Arc<dyn crate::vcs::Vcs>, Error> {
+    Ok(Arc::new(crate::vcs::git::GitVcs::open(host)?))
+}
+
 /// An operation the mechanism does not provide is refused structurally.
 pub fn exercise_absent_facet() -> Result<(), Error> {
     let core: Arc<dyn Backend> = Arc::new(TestBackend::new());

@@ -210,7 +210,7 @@ End-to-end tests for a Git divergence, a jj divergence and a jj conflicted tip, 
 | Depends On | T-009,T-010,T-011,T-012,T-013,T-014,T-018 |
 | References | git-divergence-resolved,jj-divergence-resolved,jj-tip-fixed,main-workspace-buildable,lost-side-reported |
 
-### T-017: Boundaries and gates
+### T-017: [x] Boundaries and gates
 
 Add the new modules to the arch-lint scopes and confirm that no Git type crosses into `vcs::jj` or the orchestrator.
 

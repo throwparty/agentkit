@@ -1874,9 +1874,7 @@ mod seam_tests {
     #[tokio::test]
     async fn a_git_divergence_resolves_through_the_surface() {
         use crate::vcs::Revision;
-        use crate::vcs::Vcs as _;
         use crate::vcs::Workspace as VcsWorkspace;
-        use crate::vcs::git::GitVcs;
 
         let host = TempDir::new().expect("host");
         let run = |args: &[&str]| {
@@ -1896,7 +1894,7 @@ mod seam_tests {
         run(&["add", "."]);
         run(&["commit", "-qm", "base"]);
 
-        let vcs = Arc::new(GitVcs::open(host.path()).expect("vcs"));
+        let vcs = crate::testing::git_backend(host.path()).expect("vcs");
         let records = TempDir::new().expect("records");
         let backend = Arc::new(TestBackend::new());
         let sandboxes = orchestrator_vcs(records.path(), backend, vcs.clone());
