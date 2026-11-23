@@ -98,14 +98,18 @@ impl<'a> Resolver<'a> {
         if !conflicted.is_empty() {
             // The broken commit belongs to the user, and only they can replace
             // it. Litterbox reports it and holds until they do.
+            let fix = match self.stored.vcs() {
+                "jj" => "for example `jj edit <revision>`, resolve, then `jj bookmark set <branch> -r @`",
+                _ => "for example `git commit --amend` or a new commit, then push",
+            };
             return Err(Error::Denied {
                 operation: "resolve the shared branch".to_string(),
                 reason: format!(
                     "the shared branch tip already carries a conflict in {} path(s). Litterbox \
                      resolves only the merge it creates; fix the tip in your checkout and push \
-                     it, for example `jj edit <revision>`, resolve, then `jj bookmark set \
-                     <branch> -r @`",
-                    conflicted.len()
+                     it, {}",
+                    conflicted.len(),
+                    fix
                 ),
             });
         }
