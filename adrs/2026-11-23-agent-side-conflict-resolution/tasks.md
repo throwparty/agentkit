@@ -41,7 +41,7 @@ Parse `path    N-sided conflict` in `vcs/jj/ops.rs` so the side count is kept ra
 | Depends On | T-001 |
 | References | conflict-report,introducing-commit |
 
-### T-004: Add Vcs::blob
+### T-004: [x] Add Vcs::blob
 
 Add `blob(tree, path) -> Option<Vec<u8>>` to the contract and implement it on both backends, using git2 for Git and the clone's Git backend for jj.
 
