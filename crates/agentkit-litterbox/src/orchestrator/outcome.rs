@@ -20,6 +20,27 @@ pub struct Recovery {
     pub branch: String,
 }
 
+/// The model-facing workspace block appended to a single-sandbox tool result.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct WorkspaceBlock {
+    /// `clean` or `held`.
+    pub state: String,
+    /// Why the branch is held, when it is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// The revision both sides last agreed on.
+    pub synced: String,
+    /// The shared branch tip.
+    pub branch: String,
+    /// The sandbox branch tip.
+    pub sandbox: String,
+    /// The conflicted paths, when there are any.
+    pub conflicts: Vec<String>,
+    /// The next step the user takes, when one is needed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next: Option<String>,
+}
+
 /// One operation's result, plus the repair it performed on the way.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Performed<T> {
@@ -71,6 +92,11 @@ impl<T> Performed<T> {
     /// The source state after the reconciliation, when one ran.
     pub fn state(&self) -> Option<&SourceState> {
         self.reconciliation.as_ref().map(|done| &done.state)
+    }
+
+    /// The workspace block the operation should report, when a plan ran.
+    pub fn block(&self) -> Option<WorkspaceBlock> {
+        self.reconciliation.as_ref().map(|done| done.block.clone())
     }
 
     /// The sandbox tip adoption dropped, when it dropped one.
@@ -146,4 +172,47 @@ pub struct Deletion {
     pub compute_stopped: bool,
     /// Anything the caller should know, such as compute it could not identify.
     pub detail: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::WorkspaceBlock;
+
+    fn block(
+        state: &str,
+        reason: Option<&str>,
+        conflicts: &[&str],
+        next: Option<&str>,
+    ) -> WorkspaceBlock {
+        WorkspaceBlock {
+            state: state.to_string(),
+            reason: reason.map(str::to_string),
+            synced: "s".to_string(),
+            branch: "b".to_string(),
+            sandbox: "x".to_string(),
+            conflicts: conflicts.iter().map(|path| path.to_string()).collect(),
+            next: next.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn a_held_block_carries_its_reason_and_conflicts() {
+        let text = toml::to_string(&block(
+            "held",
+            Some("shared branch is conflicted"),
+            &["src/lib.rs"],
+            Some("resolve"),
+        ))
+        .expect("toml");
+        assert!(text.contains("state = \"held\""), "{text}");
+        assert!(text.contains("shared branch is conflicted"), "{text}");
+        assert!(text.contains("src/lib.rs"), "{text}");
+    }
+
+    #[test]
+    fn a_clean_block_omits_reason_and_next() {
+        let text = toml::to_string(&block("clean", None, &[], None)).expect("toml");
+        assert!(!text.contains("reason"), "{text}");
+        assert!(!text.contains("next"), "{text}");
+    }
 }

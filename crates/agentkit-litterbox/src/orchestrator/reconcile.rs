@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use tempfile::TempDir;
 
 use crate::metadata_store::{self, StoredMerge, StoredSandbox};
+use crate::orchestrator::outcome::WorkspaceBlock;
 use crate::orchestrator::service::contract_error;
 use crate::orchestrator::source::{self, Action, Merge, SourceState, Step};
 use crate::sandbox::contract::{Error, SnapshotSelector, WorkspaceBinding};
@@ -25,6 +26,8 @@ pub(crate) struct Reconciled {
     pub(crate) state: SourceState,
     /// The sandbox tip adoption dropped, when it dropped one.
     pub(crate) dropped: Option<Revision>,
+    /// The model-facing block for this operation.
+    pub(crate) block: WorkspaceBlock,
 }
 
 /// The directory a snapshot reads, and the temporary one that may own it.
@@ -39,6 +42,7 @@ struct Observation {
     branch: Revision,
     sandbox: Revision,
     source: Option<WorkspaceSource>,
+    block: WorkspaceBlock,
 }
 
 /// One reconciliation attempt that lost a race and can be planned again.
@@ -106,8 +110,13 @@ impl<'a> Reconciler<'a> {
         let (state, observed) = self.classify(action).await?;
         let steps = source::plan(state, action, self.vcs.capabilities().conflict_model);
 
+        let block = observed.block.clone();
         match self.execute(state, &steps, &observed, message).await? {
-            Ok(dropped) => Ok(Ok(Reconciled { state, dropped })),
+            Ok(dropped) => Ok(Ok(Reconciled {
+                state,
+                dropped,
+                block,
+            })),
             Err(Raced) => Ok(Err(Raced)),
         }
     }
@@ -127,9 +136,9 @@ impl<'a> Reconciler<'a> {
         // A conflicted shared branch is held: nothing is adopted, and a
         // snapshot stays on the sandbox branch. A backend with no conflict
         // check reports none, which leaves its behaviour unchanged.
-        let conflicted = match self.vcs.conflicts(&branch) {
-            Ok(conflicts) => !conflicts.is_empty(),
-            Err(crate::vcs::Error::Unsupported { .. }) => false,
+        let conflicted: Vec<std::path::PathBuf> = match self.vcs.conflicts(&branch) {
+            Ok(conflicts) => conflicts.into_iter().map(|conflict| conflict.path).collect(),
+            Err(crate::vcs::Error::Unsupported { .. }) => Vec::new(),
             Err(error) => return Err(contract_error(error)),
         };
 
@@ -149,7 +158,7 @@ impl<'a> Reconciler<'a> {
             merge = Merge::None;
         }
 
-        if conflicted {
+        if !conflicted.is_empty() {
             merge = Merge::Pending;
         }
 
@@ -174,6 +183,35 @@ impl<'a> Reconciler<'a> {
             merge,
         );
 
+        let held = !conflicted.is_empty() || merge == Merge::Pending;
+        let block = WorkspaceBlock {
+            state: if held { "held" } else { "clean" }.to_string(),
+            reason: if !conflicted.is_empty() {
+                Some("shared branch is conflicted".to_string())
+            } else if merge == Merge::Pending {
+                Some("the sandbox has unsaved work and the branch moved".to_string())
+            } else {
+                None
+            },
+            synced: synced.as_str().to_string(),
+            branch: branch.as_str().to_string(),
+            sandbox: sandbox.as_str().to_string(),
+            conflicts: conflicted
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect(),
+            next: if !conflicted.is_empty() {
+                Some(
+                    "resolve the shared branch and push; the sandbox is on the last good revision"
+                        .to_string(),
+                )
+            } else if merge == Merge::Pending {
+                Some("run `litterbox reconcile`".to_string())
+            } else {
+                None
+            },
+        };
+
         Ok((
             state,
             Observation {
@@ -181,6 +219,7 @@ impl<'a> Reconciler<'a> {
                 branch,
                 sandbox,
                 source: observed_source,
+                block,
             },
         ))
     }
