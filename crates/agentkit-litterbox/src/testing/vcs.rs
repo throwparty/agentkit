@@ -51,6 +51,7 @@ struct State {
     bound: Vec<String>,
     bindings: Option<BindingSupport>,
     bound_root: Option<PathBuf>,
+    conflicts: Vec<Conflict>,
 }
 
 impl Default for TestVcs {
@@ -118,6 +119,17 @@ impl TestVcs {
     /// Configure whether `is_ancestor` answers yes.
     pub fn with_ancestor(mut self, ancestor: bool) -> Self {
         self.state_mut().ancestor = ancestor;
+        self
+    }
+
+    /// Report these conflicted paths for any revision.
+    pub fn with_conflicts(mut self, paths: &[&str]) -> Self {
+        self.state_mut().conflicts = paths
+            .iter()
+            .map(|path| Conflict {
+                path: PathBuf::from(path),
+            })
+            .collect();
         self
     }
 
@@ -377,7 +389,7 @@ impl Vcs for TestVcs {
     }
 
     fn conflicts(&self, _revision: &Revision) -> Result<Vec<Conflict>, Error> {
-        Err(unsupported("conflicts"))
+        Ok(self.state().conflicts.clone())
     }
 
     fn conflict_sides(&self, _revision: &Revision, _path: &Path) -> Result<ConflictSides, Error> {
