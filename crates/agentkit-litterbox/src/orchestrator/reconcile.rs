@@ -124,6 +124,15 @@ impl<'a> Reconciler<'a> {
         let branch_tree = self.vcs.tree(&branch).map_err(contract_error)?;
         let sandbox_tree = self.vcs.tree(&sandbox).map_err(contract_error)?;
 
+        // A conflicted shared branch is held: nothing is adopted, and a
+        // snapshot stays on the sandbox branch. A backend with no conflict
+        // check reports none, which leaves its behaviour unchanged.
+        let conflicted = match self.vcs.conflicts(&branch) {
+            Ok(conflicts) => !conflicts.is_empty(),
+            Err(crate::vcs::Error::Unsupported { .. }) => false,
+            Err(error) => return Err(contract_error(error)),
+        };
+
         let mut merge = merge_state(
             self.merge
                 .lock()
@@ -138,6 +147,10 @@ impl<'a> Reconciler<'a> {
         {
             self.clear_merge()?;
             merge = Merge::None;
+        }
+
+        if conflicted {
+            merge = Merge::Pending;
         }
 
         // The pre-plan reads the workspace only when the result can change the
