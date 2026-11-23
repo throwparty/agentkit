@@ -1,0 +1,34 @@
+== the merge Litterbox computes
+merge-tree exit: 1
+conflict tree:   93c8c50dd499e146733e63351e221d57afc4ed69
+
+== materialise the conflict tree into /src (files only)
+entries in /src: file.txt other.txt 
+has .git:        no
+marker regions:  2
+
+== the agent edits the markers away (no VCS involved)
+marker regions after edit: 0
+
+== the host turns the resolved directory into a merge commit
+resolved tree: 2fd30e1d0f8d4738c1c134f9213778646a02f70d
+merge commit:  cc93af4c70e6653291ff60eb7559bfd67c739271
+parents:       0eaae93db342bedec5ca04a5e9301d68223ddb20 263dc2c1a887490cf89f3f0d327c303f3fb04c20
+
+== move the shared branch and check the result
+-- status
+(empty means clean)
+-- markers in the tip tree
+0
+0
+-- graph
+*   cc93af4 (HEAD -> litterbox/probe) resolve the divergence
+|\  
+| * 263dc2c (ours) ours: sandbox rewrote the file
+* | 0eaae93 (theirs) theirs: user rewrote the file
+|/  
+* 5633085 (main) base
+-- is the sandbox tip contained?
+yes: ours is an ancestor
+-- does a plain merge of the two sides now conflict?
+still conflicts
