@@ -70,6 +70,19 @@ pub fn tree_id(cwd: &Path, revision: &str) -> Result<String, Error> {
     git(cwd, &["rev-parse", &format!("{revision}^{{tree}}")])
 }
 
+/// The content of one path inside a tree, through the clone's Git backend.
+///
+/// A path the tree does not hold answers `None`; the clone is local, so this
+/// is a read and not a fetch.
+pub fn blob(cwd: &Path, tree: &str, path: &str) -> Result<Option<Vec<u8>>, Error> {
+    let spec = format!("{tree}:{path}");
+    let output = run("git", cwd, &["show", &spec])?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    Ok(Some(output.stdout))
+}
+
 /// The conflicted paths a revision carries, with their side counts.
 ///
 /// jj exits non-zero and says "No conflicts found" when the revision is clean,

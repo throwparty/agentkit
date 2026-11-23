@@ -698,6 +698,33 @@ impl Vcs for GitVcs {
         Ok(TreeId::new(tree.id().to_string()))
     }
 
+    fn blob(&self, tree: &TreeId, path: &Path) -> Result<Option<Vec<u8>>, VcsError> {
+        let oid = tree
+            .as_str()
+            .parse::<git2::Oid>()
+            .map_err(|source| SandboxError::from(GitError::Commit { source }))
+            .map_err(vcs_error)?;
+        let guard = self.lock().map_err(vcs_error)?;
+        let tree = guard
+            .repo
+            .find_tree(oid)
+            .map_err(|source| SandboxError::from(GitError::Commit { source }))
+            .map_err(vcs_error)?;
+        let entry = match tree.get_path(path) {
+            Ok(entry) => entry,
+            Err(error) if error.code() == git2::ErrorCode::NotFound => return Ok(None),
+            Err(source) => return Err(vcs_error(SandboxError::from(GitError::Commit { source }))),
+        };
+        let object = entry
+            .to_object(&guard.repo)
+            .map_err(|source| SandboxError::from(GitError::Commit { source }))
+            .map_err(vcs_error)?;
+        match object.as_blob() {
+            Some(blob) => Ok(Some(blob.content().to_vec())),
+            None => Ok(None),
+        }
+    }
+
     fn observe(&self, workspace: &Workspace, staging: &Path) -> Result<TreeId, VcsError> {
         let branch = workspace.branch().to_string();
         self.set_snapshot_ref(refs::sandbox(&branch))

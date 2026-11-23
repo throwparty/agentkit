@@ -147,6 +147,14 @@ pub trait Vcs: Send + Sync {
         Err(not_implemented("resolve a tree"))
     }
 
+    /// The content of `path` inside `tree`, when the tree holds it.
+    ///
+    /// This is how a surface serves one side of a conflicted file without a
+    /// second checkout.
+    fn blob(&self, _tree: &TreeId, _path: &Path) -> Result<Option<Vec<u8>>, Error> {
+        Err(not_implemented("read a blob"))
+    }
+
     /// The revision at the sandbox branch tip.
     fn sandbox_tip(&self, _workspace: &Workspace) -> Result<Revision, Error> {
         Err(not_implemented("read the sandbox branch"))

@@ -39,6 +39,24 @@ fn the_backend_reports_its_conflict_model_and_binding() {
 }
 
 #[test]
+fn a_blob_reads_one_path_from_one_tree() {
+    let dir = repo_with_commit();
+    let vcs = GitVcs::open(dir.path()).expect("vcs");
+    let prepared = vcs.prepare("example").expect("prepare");
+    let tree = vcs.tree(&prepared.base).expect("tree");
+
+    let content = vcs
+        .blob(&tree, std::path::Path::new("greeting.txt"))
+        .expect("blob");
+    assert_eq!(content.as_deref(), Some(b"hello\n".as_slice()));
+
+    let absent = vcs
+        .blob(&tree, std::path::Path::new("absent.txt"))
+        .expect("blob");
+    assert!(absent.is_none(), "a path the tree does not hold is None");
+}
+
+#[test]
 fn prepare_materialise_snapshot_and_tip_round_trip() {
     let dir = repo_with_commit();
     let vcs = GitVcs::open(dir.path()).expect("vcs");

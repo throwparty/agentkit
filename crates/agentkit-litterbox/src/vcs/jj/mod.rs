@@ -286,6 +286,13 @@ impl Vcs for JjVcs {
         self.tree(&tip)
     }
 
+    fn blob(&self, tree: &TreeId, path: &Path) -> Result<Option<Vec<u8>>, Error> {
+        let Some(path_text) = path.to_str() else {
+            return Ok(None);
+        };
+        ops::blob(&self.root, tree.as_str(), path_text)
+    }
+
     fn materialise(
         &self,
         _workspace: &Workspace,
@@ -783,6 +790,30 @@ mod tests {
             .status()
             .expect("jj runs");
         assert!(status.success(), "jj {args:?}");
+    }
+
+    #[test]
+    fn a_blob_reads_one_path_from_one_tree() {
+        unsafe {
+            std::env::set_var("JJ_USER", "Test");
+            std::env::set_var("JJ_EMAIL", "test@example.com");
+        }
+
+        let host = repository();
+        let data = TempDir::new().expect("data");
+        let vcs =
+            JjVcs::open_at(data.path().join("clone"), host.path().to_path_buf()).expect("backend");
+        let prepared = vcs.prepare("demo").expect("prepare");
+        let tree = vcs.tree(&prepared.base).expect("tree");
+
+        let content = vcs
+            .blob(&tree, Path::new("README.md"))
+            .expect("blob")
+            .expect("the file is in the tree");
+        assert_eq!(content, b"hello");
+
+        let absent = vcs.blob(&tree, Path::new("absent.txt")).expect("blob");
+        assert!(absent.is_none(), "a path the tree does not hold is None");
     }
 
     #[test]
