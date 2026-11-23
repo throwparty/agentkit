@@ -17,8 +17,8 @@ use crate::domain::SandboxError;
 use crate::sandbox::contract::{BindingSupport, SnapshotSelector};
 use crate::vcs::git_common::IgnoreFiles;
 use crate::vcs::{
-    Capabilities, Conflict, ConflictModel, ConflictSides, Error, ExportSupport, HistoryPolicy,
-    Merge, Prepared, RestoreMode, Revision, TreeId, Vcs, Workspace,
+    Capabilities, Conflict, ConflictModel, ConflictSides, Error, ExportSupport, Finished,
+    HistoryPolicy, Merge, Prepared, Report, RestoreMode, Revision, Staged, TreeId, Vcs, Workspace,
 };
 
 /// A jj-backed VCS.
@@ -190,6 +190,50 @@ fn copy_tree(from: &Path, to: &Path) -> Result<(), Error> {
     prune(to, Path::new(""), &keep)
 }
 
+fn merge_conflicts(
+    root: &Path,
+    base: &Revision,
+    branch: &Revision,
+    sandbox: &Revision,
+) -> Result<Vec<PathBuf>, Error> {
+    let output = std::process::Command::new("git")
+        .current_dir(root)
+        .args([
+            "merge-tree",
+            "--write-tree",
+            &format!("--merge-base={}", base.as_str()),
+            branch.as_str(),
+            sandbox.as_str(),
+        ])
+        .output()
+        .map_err(Error::Io)?;
+    match output.status.code() {
+        Some(0) => Ok(Vec::new()),
+        Some(1) => Ok(parse_conflict_paths(&String::from_utf8_lossy(
+            &output.stdout,
+        ))),
+        _ => Err(Error::Backend {
+            operation: "report".to_string(),
+            message: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        }),
+    }
+}
+
+fn parse_conflict_paths(stdout: &str) -> Vec<PathBuf> {
+    let mut paths: Vec<PathBuf> = Vec::new();
+    for line in stdout.lines() {
+        let Some((meta, path)) = line.split_once('\t') else {
+            continue;
+        };
+        if matches!(meta.split_whitespace().last(), Some("1" | "2" | "3"))
+            && !paths.iter().any(|seen| seen == Path::new(path))
+        {
+            paths.push(PathBuf::from(path));
+        }
+    }
+    paths
+}
+
 impl Vcs for JjVcs {
     fn capabilities(&self) -> Capabilities {
         Capabilities {
@@ -295,22 +339,94 @@ impl Vcs for JjVcs {
     }
 
     fn sandboxes(&self) -> Result<Vec<String>, Error> {
-        Ok(Vec::new())
+        if !self.root.join(".jj").is_dir() {
+            return Ok(Vec::new());
+        }
+        let output = ops::git(
+            &self.root,
+            &[
+                "for-each-ref",
+                "--format=%(refname:short)",
+                "refs/heads/litterbox/",
+            ],
+        )?;
+        let mut names: Vec<String> = output
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("litterbox/"))
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .collect();
+        names.sort();
+        names.dedup();
+        Ok(names)
     }
 
-    fn delete_branch(&self, _sandbox: &str) -> Result<(), Error> {
-        Err(unsupported("delete_branch"))
+    fn delete_branch(&self, sandbox: &str) -> Result<(), Error> {
+        let _guard = self.lock();
+        let branch = branch_name(sandbox);
+        let workspace = self.workspace(sandbox);
+        let has_branch = ops::git(
+            &self.root,
+            &["rev-parse", "--verify", &format!("refs/heads/{branch}")],
+        )
+        .is_ok();
+        let has_workspace = workspace.is_dir();
+        if !has_branch && !has_workspace {
+            return Err(Error::NotFound {
+                name: sandbox.to_string(),
+            });
+        }
+        let _ = ops::jj_ok(&self.root, &["workspace", "forget", sandbox]);
+        if has_workspace {
+            let _ = std::fs::remove_dir_all(&workspace);
+        }
+        let _ = ops::jj_ok(&self.root, &["bookmark", "delete", &branch]);
+        let _ = ops::git(&self.root, &["update-ref", "-d", &synced_ref(sandbox)]);
+        Ok(())
     }
 
     fn state_path(&self) -> Option<PathBuf> {
         Some(self.root.clone())
     }
 
-    fn expose(&self, _name: &str) -> Result<bool, Error> {
-        Err(unsupported("expose"))
+    fn expose(&self, name: &str) -> Result<bool, Error> {
+        let output = std::process::Command::new("git")
+            .current_dir(&self.host)
+            .args(["remote", "add", name])
+            .arg(&self.root)
+            .output()
+            .map_err(Error::Io)?;
+        if output.status.success() {
+            return Ok(true);
+        }
+        let existing = ops::git(&self.host, &["remote", "get-url", name])?;
+        if Path::new(existing.trim()) == self.root {
+            return Ok(false);
+        }
+        Err(Error::Backend {
+            operation: "expose".to_string(),
+            message: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        })
     }
 
     fn prune(&self) -> Result<(), Error> {
+        if !self.root.join(".jj").is_dir() {
+            return Ok(());
+        }
+        let names = self.sandboxes()?;
+        let dir = self.root.join("workspaces");
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if !names.contains(&name) {
+                    let _ = ops::jj_ok(&self.root, &["workspace", "forget", &name]);
+                    let _ = std::fs::remove_dir_all(entry.path());
+                }
+            }
+        }
+        if names.is_empty() {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
         Ok(())
     }
 
@@ -429,8 +545,125 @@ impl Vcs for JjVcs {
         Err(unsupported("merge"))
     }
 
-    fn conflicts(&self, _revision: &Revision) -> Result<Vec<Conflict>, Error> {
-        Err(unsupported("conflicts"))
+    fn conflicts(&self, revision: &Revision) -> Result<Vec<Conflict>, Error> {
+        Ok(ops::conflicts(&self.root, revision.as_str())?
+            .into_iter()
+            .map(|path| Conflict { path })
+            .collect())
+    }
+
+    fn report(&self, workspace: &Workspace) -> Result<Report, Error> {
+        let base = self.synced(workspace)?;
+        let branch = self.tip(workspace)?;
+        let sandbox = self.sandbox_tip(workspace)?;
+        let path = clone::reconcile(&self.root, sandbox_of(workspace));
+        let worktree = path.is_dir().then_some(path);
+        let conflicts = merge_conflicts(&self.root, &base, &branch, &sandbox)?;
+        Ok(Report {
+            base,
+            branch,
+            sandbox,
+            conflicts,
+            worktree,
+            reflog: None,
+        })
+    }
+
+    fn stage(&self, workspace: &Workspace) -> Result<Staged, Error> {
+        let _guard = self.lock();
+        let sandbox = sandbox_of(workspace);
+        let path = clone::reconcile(&self.root, sandbox);
+        if path.exists() {
+            return Err(Error::Backend {
+                operation: "stage the merge".to_string(),
+                message: format!(
+                    "a staging workspace already exists at {}; finish or discard it first",
+                    path.display()
+                ),
+            });
+        }
+        let base = self.synced(workspace)?;
+        let branch = self.tip(workspace)?;
+        let sandbox_tip = self.sandbox_tip(workspace)?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(Error::Io)?;
+        }
+        let name = format!("{sandbox}-staging");
+        let path_text = path.to_str().ok_or_else(|| Error::Backend {
+            operation: "stage the merge".to_string(),
+            message: "the staging path is not UTF-8".to_string(),
+        })?;
+        ops::jj_ok(
+            &self.root,
+            &["workspace", "add", "--name", &name, "-r", base.as_str(), path_text],
+        )?;
+        ops::jj_ok(&path, &["new", base.as_str(), "-m", "litterbox staging: theirs"])?;
+        ops::jj_ok(&path, &["restore", "--from", branch.as_str()])?;
+        let theirs = ops::commit_id(&path, "@")?;
+        ops::jj_ok(&path, &["new", base.as_str(), "-m", "litterbox staging: ours"])?;
+        ops::jj_ok(&path, &["restore", "--from", sandbox_tip.as_str()])?;
+        let ours = ops::commit_id(&path, "@")?;
+        ops::jj_ok(
+            &path,
+            &["new", &theirs, &ours, "-m", "litterbox staging: merge"],
+        )?;
+        let conflicts = ops::conflicts(&path, "@")?;
+        Ok(Staged {
+            path,
+            branch,
+            conflicts,
+        })
+    }
+
+    fn finish(&self, workspace: &Workspace) -> Result<Finished, Error> {
+        let _guard = self.lock();
+        let sandbox = sandbox_of(workspace);
+        let path = clone::reconcile(&self.root, sandbox);
+        if !path.is_dir() {
+            return Err(Error::Backend {
+                operation: "finish the merge".to_string(),
+                message: format!("no staging workspace at {}", path.display()),
+            });
+        }
+        if !ops::conflicts(&path, "@")?.is_empty() {
+            return Err(Error::Backend {
+                operation: "finish the merge".to_string(),
+                message: "the staging workspace has unresolved paths".to_string(),
+            });
+        }
+        let merged = ops::commit_id(&path, "@")?;
+        let tip = self.tip(workspace)?;
+        if !self.is_ancestor(&tip, &Revision::new(&merged))? {
+            return Err(Error::Backend {
+                operation: "finish the merge".to_string(),
+                message: format!(
+                    "the staged revision {merged} does not descend from {}",
+                    tip.as_str()
+                ),
+            });
+        }
+        ops::jj_ok(
+            &self.root,
+            &["bookmark", "set", workspace.branch().as_str(), "-r", &merged],
+        )?;
+        let name = format!("{sandbox}-staging");
+        let _ = ops::jj_ok(&self.root, &["workspace", "forget", &name]);
+        let _ = std::fs::remove_dir_all(&path);
+        Ok(Finished::Landed {
+            branch: Revision::new(merged),
+        })
+    }
+
+    fn discard_stage(&self, workspace: &Workspace) -> Result<(), Error> {
+        let _guard = self.lock();
+        let sandbox = sandbox_of(workspace);
+        let path = clone::reconcile(&self.root, sandbox);
+        let name = format!("{sandbox}-staging");
+        let _ = ops::jj_ok(&self.root, &["workspace", "forget", &name]);
+        if path.is_dir() {
+            let _ = std::fs::remove_dir_all(&path);
+        }
+        Ok(())
     }
 
     fn conflict_sides(&self, _revision: &Revision, _path: &Path) -> Result<ConflictSides, Error> {
@@ -547,6 +780,58 @@ mod tests {
         assert_eq!(vcs.tip(&workspace).expect("tip"), snapshot);
         vcs.set_synced(&workspace, &snapshot).expect("record synced");
         assert_eq!(vcs.synced(&workspace).expect("synced"), snapshot);
+    }
+
+    #[test]
+    fn staging_matches_merge_tree_and_discards() {
+        unsafe {
+            std::env::set_var("JJ_USER", "Test");
+            std::env::set_var("JJ_EMAIL", "test@example.com");
+        }
+
+        let host = repository();
+        let data = TempDir::new().expect("data");
+        let vcs = JjVcs::open_at(data.path().join("clone"), host.path().to_path_buf())
+            .expect("backend");
+        let prepared = vcs.prepare("demo").expect("prepare");
+        let workspace = prepared.workspace.clone();
+
+        let staging = TempDir::new().expect("staging");
+        std::fs::write(staging.path().join("README.md"), "hello").expect("write");
+        std::fs::write(staging.path().join("file.txt"), "sandbox\n").expect("write");
+        let sandbox = vcs.snapshot(&workspace, staging.path(), "sandbox").expect("snapshot");
+
+        super::ops::jj_ok(&vcs.root, &["new", prepared.base.as_str(), "-m", "user"])
+            .expect("new");
+        std::fs::write(vcs.root.join("file.txt"), "user\n").expect("write");
+        super::ops::jj_ok(
+            &vcs.root,
+            &["bookmark", "set", "litterbox/demo", "-r", "@"],
+        )
+        .expect("bookmark");
+        let branch = vcs.tip(&workspace).expect("tip");
+        assert_ne!(branch, prepared.base);
+        assert_ne!(branch, sandbox);
+
+        let report = vcs.report(&workspace).expect("report");
+        assert_eq!(
+            report.conflicts,
+            vec![std::path::PathBuf::from("file.txt")]
+        );
+        assert!(report.worktree.is_none(), "nothing is staged yet");
+
+        let staged = vcs.stage(&workspace).expect("stage");
+        assert_eq!(
+            staged.conflicts,
+            vec![std::path::PathBuf::from("file.txt")]
+        );
+        assert!(staged.path.is_dir());
+
+        let second = vcs.stage(&workspace).expect_err("a second stage refuses");
+        assert!(second.to_string().contains("already exists"), "{second}");
+
+        vcs.discard_stage(&workspace).expect("discard");
+        assert!(!super::clone::reconcile(&vcs.root, "demo").exists());
     }
 }
 
