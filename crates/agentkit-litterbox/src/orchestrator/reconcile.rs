@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use tempfile::TempDir;
 
 use crate::metadata_store::{self, StoredMerge, StoredSandbox};
-use crate::orchestrator::outcome::WorkspaceBlock;
+use crate::orchestrator::outcome::{ResolutionView, WorkspaceBlock};
 use crate::orchestrator::service::contract_error;
 use crate::orchestrator::source::{self, Action, Merge, SourceState, Step};
 use crate::sandbox::contract::{Error, SnapshotSelector, WorkspaceBinding};
@@ -213,6 +213,14 @@ impl<'a> Reconciler<'a> {
             } else {
                 None
             },
+            resolution: self.stored.resolution.as_ref().map(|open| ResolutionView {
+                synced: open.synced.clone(),
+                conflicts: conflicted
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect(),
+                next: "resolve the conflicts in the workspace, then finish or abandon".to_string(),
+            }),
         };
 
         Ok((

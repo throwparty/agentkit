@@ -171,7 +171,7 @@ Add `side` to `ReadArgs`. When it is present, answer from `conflict_sides` and `
 | Depends On | T-005,T-006 |
 | References | conflict-sides,no-base-side |
 
-### T-014: The workspace block
+### T-014: [x] The workspace block
 
 Add the `resolution` object to the block appended by every mutating tool, derived from the post-plan state.
 

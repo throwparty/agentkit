@@ -50,6 +50,17 @@ pub struct SourceStatus {
     pub conflicts: Vec<ConflictView>,
 }
 
+/// The resolution an operation observed, when one is open.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct ResolutionView {
+    /// The revision both sides agreed on when resolution began.
+    pub synced: String,
+    /// The conflicted paths the working copy still carries.
+    pub conflicts: Vec<String>,
+    /// What the agent does next.
+    pub next: String,
+}
+
 /// The model-facing workspace block appended to a single-sandbox tool result.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct WorkspaceBlock {
@@ -69,6 +80,9 @@ pub struct WorkspaceBlock {
     /// The next step the user takes, when one is needed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next: Option<String>,
+    /// The resolution the operation observed, when one is open.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<ResolutionView>,
 }
 
 /// One operation's result, plus the repair it performed on the way.
@@ -222,6 +236,7 @@ mod tests {
             sandbox: "x".to_string(),
             conflicts: conflicts.iter().map(|path| path.to_string()).collect(),
             next: next.map(str::to_string),
+            resolution: None,
         }
     }
 
