@@ -137,7 +137,10 @@ impl<'a> Reconciler<'a> {
         // snapshot stays on the sandbox branch. A backend with no conflict
         // check reports none, which leaves its behaviour unchanged.
         let conflicted: Vec<std::path::PathBuf> = match self.vcs.conflicts(&branch) {
-            Ok(conflicts) => conflicts.into_iter().map(|conflict| conflict.path).collect(),
+            Ok(conflicts) => conflicts
+                .into_iter()
+                .map(|conflict| conflict.path)
+                .collect(),
             Err(crate::vcs::Error::Unsupported { .. }) => Vec::new(),
             Err(error) => return Err(contract_error(error)),
         };

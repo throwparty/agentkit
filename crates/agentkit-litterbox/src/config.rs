@@ -496,9 +496,7 @@ pub fn merge(local: ProjectFile, project: ProjectFile) -> Result<Config, ConfigE
 ///
 /// The value is a tool name; a missing key is `None` (an error at open), and
 /// anything but `git` or `jj` is refused here rather than surfaced later.
-fn take_vcs_tool(
-    vcs: &mut BTreeMap<String, toml::Value>,
-) -> Result<Option<String>, ConfigError> {
+fn take_vcs_tool(vcs: &mut BTreeMap<String, toml::Value>) -> Result<Option<String>, ConfigError> {
     let Some(value) = vcs.remove("tool") else {
         return Ok(None);
     };

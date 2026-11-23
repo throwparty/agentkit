@@ -883,8 +883,12 @@ impl Vcs for GitVcs {
         Err(unsupported("merge"))
     }
 
-    fn conflicts(&self, _revision: &Revision) -> Result<Vec<Conflict>, VcsError> {
-        Err(unsupported("conflicts"))
+    fn conflicts(&self, revision: &Revision) -> Result<Vec<Conflict>, VcsError> {
+        let repo = {
+            let guard = self.lock().map_err(vcs_error)?;
+            guard.repo.path().to_path_buf()
+        };
+        reconcile::marker_conflicts(&repo, revision.as_str())
     }
 
     fn conflict_sides(
@@ -1330,6 +1334,45 @@ mod tests {
         }
 
         (tempdir, repo)
+    }
+
+    #[test]
+    fn a_marker_tree_reports_its_regions() {
+        let (tempdir, repo) = init_repo();
+        let marker = "a\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> abc\n\
+                      b\n<<<<<<< HEAD\nours2\n=======\ntheirs2\n>>>>>>> abc\n";
+        fs::write(tempdir.path().join("conflicted.txt"), marker).expect("write file");
+
+        let mut index = repo.index().expect("index");
+        index
+            .add_all(["*"].iter(), IndexAddOption::DEFAULT, None)
+            .expect("add all");
+        index.write().expect("index write");
+        let tree_id = index.write_tree().expect("write tree");
+        let signature = Signature::now("Litterbox", "noreply@example.com").expect("signature");
+        let parent = repo.head().expect("head").peel_to_commit().expect("commit");
+        let tree = repo.find_tree(tree_id).expect("find tree");
+        repo.commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            "conflicted",
+            &tree,
+            &[&parent],
+        )
+        .expect("commit");
+
+        let conflicts =
+            crate::vcs::git::reconcile::marker_conflicts(repo.path(), "HEAD").expect("scan");
+        assert_eq!(conflicts.len(), 1, "{conflicts:?}");
+        assert_eq!(conflicts[0].path, Path::new("conflicted.txt"));
+        assert_eq!(conflicts[0].hunks, 2, "two regions");
+        assert_eq!(conflicts[0].sides, 2, "Git markers carry two sides");
+        assert!(!conflicts[0].base, "no diff3 base section");
+
+        let clean =
+            crate::vcs::git::reconcile::marker_conflicts(repo.path(), "HEAD^").expect("scan");
+        assert!(clean.is_empty(), "{clean:?}");
     }
 
     #[test]

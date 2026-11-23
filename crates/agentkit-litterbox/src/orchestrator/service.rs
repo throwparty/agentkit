@@ -76,10 +76,7 @@ impl Sandboxes {
         let project_slug = resolve_project_slug(&config)?;
         let records_dir = metadata_store::directory(&project_slug);
 
-        let vcs_tool = config
-            .vcs_tool
-            .clone()
-            .unwrap_or_else(|| "git".to_string());
+        let vcs_tool = config.vcs_tool.clone().unwrap_or_else(|| "git".to_string());
         Ok(Self {
             config,
             vcs,
