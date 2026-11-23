@@ -692,8 +692,13 @@ impl Vcs for JjVcs {
         Ok(())
     }
 
-    fn conflict_sides(&self, _revision: &Revision, _path: &Path) -> Result<ConflictSides, Error> {
-        Err(unsupported("conflict_sides"))
+    fn conflict_sides(&self, revision: &Revision, _path: &Path) -> Result<ConflictSides, Error> {
+        let (base, ours, theirs) = ops::conflict_sides(&self.root, revision.as_str())?;
+        Ok(ConflictSides {
+            base: base.map(TreeId::new),
+            ours: TreeId::new(ours),
+            theirs: TreeId::new(theirs),
+        })
     }
 
     fn resolve(&self, _revision: &Revision, _paths: &[PathBuf]) -> Result<Revision, Error> {
@@ -841,15 +846,36 @@ mod tests {
         std::fs::write(root.join("file.txt"), numbered("ours")).expect("write");
         let ours = super::ops::commit_id(&root, "@").expect("ours id");
 
-        jj(&root, &["new", &theirs, &ours, "-m", "merge"]);
+        jj(&root, &["new", &ours, &theirs, "-m", "merge"]);
         let merge = super::ops::commit_id(&root, "@").expect("merge id");
 
-        let conflicts = vcs.conflicts(&Revision::new(merge)).expect("conflicts");
+        let conflicts = vcs
+            .conflicts(&Revision::new(merge.clone()))
+            .expect("conflicts");
         assert_eq!(conflicts.len(), 1, "{conflicts:?}");
         assert_eq!(conflicts[0].path, Path::new("file.txt"));
         assert_eq!(conflicts[0].sides, 2, "both sides changed the file");
         assert_eq!(conflicts[0].hunks, 2, "each side rewrote two regions");
         assert!(conflicts[0].base, "the merge has a common ancestor");
+
+        let sides = vcs
+            .conflict_sides(&Revision::new(merge), Path::new("file.txt"))
+            .expect("sides");
+        let side = |tree: &crate::vcs::TreeId| {
+            String::from_utf8(
+                vcs.blob(tree, Path::new("file.txt"))
+                    .expect("blob")
+                    .expect("present"),
+            )
+            .expect("utf8")
+        };
+        assert!(
+            side(&sides.ours).starts_with("ours 1"),
+            "{}",
+            side(&sides.ours)
+        );
+        assert!(side(&sides.theirs).starts_with("theirs 1"));
+        assert!(side(sides.base.as_ref().expect("base")).starts_with("base 1"));
 
         let clean = vcs.conflicts(&Revision::new(ours)).expect("clean");
         assert!(clean.is_empty(), "an unconflicted revision reports nothing");
