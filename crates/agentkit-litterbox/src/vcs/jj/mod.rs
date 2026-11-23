@@ -833,5 +833,30 @@ mod tests {
         vcs.discard_stage(&workspace).expect("discard");
         assert!(!super::clone::reconcile(&vcs.root, "demo").exists());
     }
+
+    #[test]
+    fn a_sandbox_is_listed_exposed_deleted_and_pruned() {
+        unsafe {
+            std::env::set_var("JJ_USER", "Test");
+            std::env::set_var("JJ_EMAIL", "test@example.com");
+        }
+
+        let host = repository();
+        let data = TempDir::new().expect("data");
+        let vcs = JjVcs::open_at(data.path().join("clone"), host.path().to_path_buf())
+            .expect("backend");
+        vcs.prepare("demo").expect("prepare");
+
+        assert_eq!(vcs.sandboxes().expect("list"), vec!["demo".to_string()]);
+        assert!(vcs.expose("litterbox").expect("expose"));
+        assert!(!vcs.expose("litterbox").expect("already present"));
+
+        vcs.delete_branch("demo").expect("delete");
+        assert!(vcs.sandboxes().expect("list").is_empty());
+        assert!(vcs.delete_branch("demo").is_err(), "a gone sandbox is NotFound");
+
+        vcs.prune().expect("prune");
+        assert!(!vcs.root.join(".jj").exists(), "the clone is released");
+    }
 }
 
