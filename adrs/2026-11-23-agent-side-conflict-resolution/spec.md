@@ -1,0 +1,294 @@
+# Agent-side conflict resolution
+
+**Status:** draft  **Created:** 2026-11-23  **Author:** Luke Carrier
+
+A conflicted tree is not buildable. Litterbox holds the branch advance when the shared branch moves and hands the divergence to the user; the user resolves it in a host staging workspace (`adrs/2026-11-22-adopt-rewritten-branches`). An agent that must resolve a conflict itself has nowhere to do it: the main workspace is the only tree it has, and making that tree conflicted stops the edit, build, test loop it depends on.
+
+The map `maps/2026-11-18-litterbox-vcs-history-sync` left this open as T-023, with T-024 testing which jj workflow agents understand. Both answered. The brief is `maps/2026-11-18-litterbox-vcs-history-sync/brief-agent-side-conflict-resolution.md`; the evidence is `evidence/T-023/` and `evidence/T-024.md` in the same map.
+
+The two implemented ADRs exclude this work by name. `adrs/2026-11-22-adopt-rewritten-branches` lists conflict mechanics in the sandbox as a non-goal. `adrs/2026-11-22-litterbox-jj-support` lists agent-side conflict resolution as a non-goal. No other ADR covers the topic.
+
+The probes behind this spec established the following. Git round-trips a tree of files with no metadata: `merge-tree --write-tree --merge-base` writes a marker tree, a directory with no `.git` can be edited by anything that edits files, and the host can commit the result with both tips as parents. `jj new <theirs> <ours>` gives a conflicted commit that is both the working copy and the sandbox branch. A conflicted tip taints its descendants, and `jj new <tip>` then `jj squash --use-destination-message` rewrites the commit that introduced the conflict clean. `jj resolve --list` exits 2 when the revision is clean and 1 on error. Resolving changes the commit id, so a stored id goes stale. Rebuilding the merge from its two parents reproduces the conflict and needs no saved state; `jj op restore` is repository-wide and would rewind every other sandbox in the shared clone.
+
+Two runs of an agent against an identical conflicted fixture produced trees that passed every check Litterbox can run (the conflict query, a marker scan, bookmark consistency, ancestry) while one had deleted a whole side and the other had conflict-header text as file content. Only a diff against each side caught either. Character-level editing of markers failed twice. A three-way merge of the three versions resolved correctly.
+
+Three rulings shape the design. Litterbox performs every host write on the resolution path and the agent writes no ref. `read` serves the three sides of a conflicted path. The check for resolution reports a per-side diff and refuses only what the VCS refuses.
+
+
+```mermaid
+stateDiagram-v2
+    direction LR
+
+    state "clean" as clean
+    state "conflicted" as conflicted
+
+    [*] --> clean: create or repair\nmaterialise the base or branch tip
+
+    clean --> clean: snapshot\n(tree already equals the branch)
+    clean --> clean: adopt history
+    clean --> clean: adopt content\n(materialise the branch tip)
+    clean --> conflicted: begin resolution\n(materialise the merge, or jj new theirs ours)
+    clean --> conflicted: begin at an introducing commit\n(jj new the conflicted tip)
+
+    conflicted --> conflicted: write, patch, bash\n(edits not yet in the VCS)
+    conflicted --> conflicted: snapshot, VCS still reports conflicts
+    conflicted --> clean: snapshot, VCS reports no conflicts
+    conflicted --> clean: abandon\n(materialise the previous tree)
+
+    clean --> [*]: delete
+
+    note right of clean
+        The shared branch may have moved. That is
+        a branch state, not a tree state: the tree
+        is clean and the branch advance is held.
+    end note
+
+    note right of conflicted
+        The only sign of resolution is what the VCS
+        reports for the revision /src holds. There
+        is no separate mode flag.
+    end note
+
+```
+
+
+## Problem
+
+An agent cannot resolve a conflict in the sandbox because the only tree it has is the one it builds in, a conflicted working copy cannot build, and the sandbox holds no VCS metadata or tools with which to write the result.
+
+## Goals
+
+- An agent resolves a divergence and a conflicted shared-branch tip without leaving the sandbox.
+- The main workspace stays buildable outside resolution.
+- The agent sees which paths conflict, how much, and what each side changed.
+- The agent's resolution reaches the branch without the agent touching host state.
+- A wrong resolution can be abandoned and redone.
+- A resolution that loses a side is visible before it is committed.
+
+## Non-goals
+
+- A second sandbox, a second tree, or an extra mount for resolution.
+- Giving the sandbox VCS metadata or VCS binaries.
+- History inspection by the agent, and a VCS MCP server.
+- Blocking a commit on a semantic judgement of the resolution.
+- Native conflicts in the main workspace outside resolution.
+- Undo, history retention, and the lifecycle delta.
+- Rewriting history the user has already published beyond the sandbox branch.
+
+
+## Functional Requirements
+
+### FR-001: The resolution context
+
+Beginning resolution materialises the conflicted revision into `/src` in place of the sandbox branch tree. For Git and for jj under `Copied` the backend writes the tree. For jj under `Bound` it creates a merge commit with `jj new` and the shared and sandbox revisions as parents. No second tree, second sandbox, or extra mount is created. Paths the snapshot filter ignores stay in place.
+
+**Slug:** `resolution-context`
+
+### FR-002: Beginning is a tool
+
+`sandbox-reconcile` gains an action. `begin` snapshots the workspace, then materialises the conflict, and reports the revision it started from. It fails when a resolution is already open for the sandbox and names the revision of the open one.
+
+**Slug:** `begin-resolution`
+
+### FR-003: The conflict report
+
+`sandbox-status` reports each conflicted path with the number of conflict regions and the number of sides. It reports no region text. jj answers from `jj resolve --list` for the sides plus a count of conflict regions in the materialised tree. Git answers from a count over the tree a snapshot would commit.
+
+**Slug:** `conflict-report`
+
+### FR-004: The three sides
+
+`read` accepts an optional side for a path under resolution: `base`, `ours` or `theirs`. The backend answers from that revision. A side the revision does not carry fails with an error naming the absent side. This gives the agent the three versions a three-way merge needs without a second tree.
+
+**Slug:** `conflict-sides`
+
+### FR-005: State on every mutation
+
+Every MCP tool that mutates a sandbox appends the workspace block. While a resolution is open the block gains a `resolution` object naming the revision the conflict came from, the conflicted paths and their counts, and the next step. The block is derived from the operation's post-plan state and writes nothing.
+
+**Slug:** `state-reporting`
+
+### FR-006: Finishing
+
+`sandbox-reconcile` with `finish` asks the backend whether the working copy still reports conflicts. When it does, the call fails and names the paths. When it does not, Litterbox performs the write. For Git it commits the working copy tree with the shared tip and the sandbox tip as parents and moves the branch. For a jj divergence it moves the bookmark to the resolved commit. For a jj conflicted tip it squashes the resolution into the commit that introduced the conflict. The agent writes no ref.
+
+**Slug:** `finish-resolution`
+
+### FR-007: The per-side report
+
+Before the write, `finish` reports how the resolved tree differs from each side: the paths added, changed or removed relative to `base`, `ours` and `theirs`. The report does not block the write. It exists because a resolution can remove every marker and still lose a side.
+
+**Slug:** `resolution-report`
+
+### FR-008: Abandoning
+
+`sandbox-reconcile` with `abandon` rebuilds the merge from its recorded parents and materialises it again, or restores the sandbox branch tree when no merge was needed. It runs no repository-wide operation and no operation log restore.
+
+**Slug:** `abandon-resolution`
+
+### FR-009: The Git conflict check
+
+`GitVcs` answers `conflicts` by scanning the tree a snapshot would commit for lines that begin with one of the three conflict markers. A tree carrying markers is conflicted and a clean tree is not. An absent revision is an error.
+
+**Slug:** `git-conflict-scan`
+
+### FR-010: jj under Bound
+
+Under `Bound` the resolution revision is created with `jj new` and never by editing an existing revision, because the working-copy revision is the sandbox branch. Snapshots during resolution commit to that revision and do not move the shared branch.
+
+**Slug:** `bound-resolution`
+
+### FR-011: Tracking the introducing revision
+
+Resolution tracks the revision it began from by position, through the ref it came from or the parent chain. It never stores the commit id across a resolution, because resolving rewrites the revision and the old id keeps reporting a conflict.
+
+**Slug:** `introducing-commit`
+
+### FR-012: No host writes from MCP
+
+`sandbox-reconcile` stops staging a host worktree. Host staging stays with the operator `reconcile` command. The agent writes only inside the sandbox, and every host write on the resolution path is Litterbox's own.
+
+**Slug:** `no-host-writes`
+
+### FR-013: Snapshots during resolution
+
+Tools that change `/src` still snapshot. During resolution the snapshot commits to the revision under resolution rather than to the shared branch, so the agent's edits are the resolution.
+
+**Slug:** `snapshot-during-resolution`
+
+### FR-014: The open resolution
+
+An open resolution is recorded on the sandbox together with the `synced` revision it began from. The record survives a restart, is cleared by `finish` and `abandon`, and is removed when the sandbox is deleted. The revision under resolution is read from the working copy on every operation and is never stored, because resolving rewrites it.
+
+**Slug:** `open-resolution`
+
+## Non-functional Requirements
+
+### NFR-001: No new dependency
+
+`git2` stays inside `vcs::git` and `vcs::git_common`. `arch-lint check` and `hack/arch-lint-negative.sh` pass unchanged, and `vcs::jj` still names no Git module.
+
+**Slug:** `no-new-dependency`
+
+### NFR-002: Local and lazy
+
+The resolution path uses no network and no watcher. Conflict state is read when an operation plans, not on a timer.
+
+**Slug:** `local-and-lazy`
+
+### NFR-003: Bounded reports
+
+The conflict report is bounded by the number of conflicted paths. It never carries file content, and the per-side report carries paths, not diffs.
+
+**Slug:** `bounded-reports`
+
+### NFR-004: No lost writes
+
+The final branch move is a compare-and-swap against the tip the plan read. A tip that moves under a `finish` is abandoned and replanned a bounded number of times, then the operation fails naming both tips.
+
+**Slug:** `no-lost-writes`
+
+### NFR-005: The gates
+
+`cargo test -p agentkit-litterbox`, `cargo clippy -p agentkit-litterbox --all-targets -- -D warnings`, `arch-lint check` and `bash hack/arch-lint-negative.sh` pass.
+
+**Slug:** `gates`
+
+## Acceptance Criteria
+
+### AC-001: A Git divergence resolved in the sandbox
+
+Rewrite the branch so it diverges from a dirty sandbox. Call `sandbox-reconcile` with `begin`. `/src` carries markers, `sandbox-status` lists the path with its counts, and `read` returns the three sides. Resolve and call `finish`. The branch holds a merge commit whose parents are the old tips, the tree has no markers, and the next operation adopts.
+
+**Slug:** `git-divergence-resolved`
+
+### AC-002: A jj divergence resolved in the sandbox
+
+The same sequence on a jj sandbox. The resolution revision is the working copy, `finish` moves the bookmark, `conflicts()` is empty, and the sandbox's own commit survives.
+
+**Slug:** `jj-divergence-resolved`
+
+### AC-003: A conflicted tip fixed where it started
+
+Point the shared bookmark at a conflicted commit. Begin resolution, resolve, and `finish`. The commit that introduced the conflict is rewritten clean, its descendants carry no conflict, and the bookmark points at the rewritten commit.
+
+**Slug:** `jj-tip-fixed`
+
+### AC-004: A lost side is reported
+
+Produce a resolution that keeps only one side and call `finish`. The conflict query reports no conflicts, the write proceeds, and the per-side report names the paths that differ from the other side.
+
+**Slug:** `lost-side-reported`
+
+### AC-005: Abandon restores
+
+Begin resolution, edit `/src`, then abandon. `/src` holds the sandbox branch tree again, no conflict is open, and the shared branch has not moved.
+
+**Slug:** `abandon-restores`
+
+### AC-006: The main workspace builds outside resolution
+
+Across every case, a command in the sandbox succeeds whenever no resolution is open and the conflict report is empty.
+
+**Slug:** `main-workspace-buildable`
+
+### AC-007: MCP writes nothing on the host
+
+Call every MCP tool involved in resolution and confirm no file, ref or directory outside the sandbox and Litterbox's own data directory changed. In particular, no staging worktree is created.
+
+**Slug:** `mcp-host-isolation`
+
+### AC-008: The gates pass
+
+`cargo test -p agentkit-litterbox`, `cargo clippy`, `arch-lint check` and `hack/arch-lint-negative.sh` pass.
+
+**Slug:** `gates-pass`
+
+## Edge Cases
+
+### EC-001: Beginning with no conflict
+
+Calling `begin` when the sandbox branch and the shared branch agree, or when they disagree without a merge conflict, fails and reports the state instead of materialising a tree.
+
+**Slug:** `begin-without-conflict`
+### EC-002: The branch moves during resolution
+
+A `finish` against a branch tip the plan did not read is abandoned and replanned. The resolution in `/src` survives, and the operation reports the new tip.
+
+**Slug:** `branch-moves-during-resolution`
+### EC-003: The agent stops mid-resolution
+
+A resolution left open across operations keeps reporting conflicted. Snapshots continue on the revision under resolution, and the shared branch stays where it was.
+
+**Slug:** `stalled-resolution`
+### EC-004: Deleting during resolution
+
+Deleting a sandbox with an open resolution removes the branch and the workspace. No host directory is left behind and no resolution state outlives the sandbox.
+
+**Slug:** `delete-during-resolution`
+### EC-005: Git has no index in the source tree
+
+The source tree holds files only. The per-side report and the conflict check read the tree, never an index, and `finish` builds an index on the host from the resolved files.
+
+**Slug:** `git-no-index`
+### EC-006: A copied jj sandbox
+
+Under `Copied` the sandbox holds no `.jj`. Resolution writes the conflicted tree into the sandbox and `finish` reads it back, and the sandbox gains no metadata.
+
+**Slug:** `copied-resolution`
+### EC-007: A stale revision id
+
+An operation that held a commit id from before a resolution resolves the revision by ref or parent chain. It must not report the stale revision as conflicted.
+
+**Slug:** `stale-revision`
+### EC-008: A conflict with no base
+
+An add on both sides has no base. `read` reports the base as absent for that path, and the per-side report treats it as an addition rather than a change.
+
+**Slug:** `no-base-side`
+### EC-009: A second begin
+
+A second `begin` for a sandbox with an open resolution fails and names the revision of the open one. It does not overwrite the working copy.
+
+**Slug:** `second-begin`
+

@@ -1,0 +1,32 @@
+stateDiagram-v2
+    direction LR
+
+    state "clean" as clean
+    state "conflicted" as conflicted
+
+    [*] --> clean: create or repair\nmaterialise the base or branch tip
+
+    clean --> clean: snapshot\n(tree already equals the branch)
+    clean --> clean: adopt history
+    clean --> clean: adopt content\n(materialise the branch tip)
+    clean --> conflicted: begin resolution\n(materialise the merge, or jj new theirs ours)
+    clean --> conflicted: begin at an introducing commit\n(jj new the conflicted tip)
+
+    conflicted --> conflicted: write, patch, bash\n(edits not yet in the VCS)
+    conflicted --> conflicted: snapshot, VCS still reports conflicts
+    conflicted --> clean: snapshot, VCS reports no conflicts
+    conflicted --> clean: abandon\n(materialise the previous tree)
+
+    clean --> [*]: delete
+
+    note right of clean
+        The shared branch may have moved. That is
+        a branch state, not a tree state: the tree
+        is clean and the branch advance is held.
+    end note
+
+    note right of conflicted
+        The only sign of resolution is what the VCS
+        reports for the revision /src holds. There
+        is no separate mode flag.
+    end note

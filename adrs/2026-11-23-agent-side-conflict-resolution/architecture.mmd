@@ -1,0 +1,47 @@
+flowchart TB
+    subgraph mcp["MCP tools"]
+        reconcile["sandbox-reconcile\n(begin, finish, abandon)"]
+        status["sandbox-status\n(paths, counts, state)"]
+        read["read\n(optional side)"]
+        other["write, patch, bash\n(snapshot as today)"]
+    end
+
+    subgraph orch["orchestrator"]
+        resolve["resolve\n(begin, finish, abandon)"]
+        source["source::plan\n(four trees, unchanged)"]
+        adapter["reconcile adapter\n(classify, execute)"]
+        workspace["workspace directory\n(/src on the host)"]
+    end
+
+    subgraph vcs["vcs contract"]
+        c1["conflicts\n(path, hunks, sides, base)"]
+        c2["conflict_sides\n(base, ours, theirs trees)"]
+        c3["blob\n(tree, path)"]
+        c4["stage, finish, discard_stage"]
+    end
+
+    subgraph backends["backends"]
+        git["GitVcs\nmarker scan, merge-tree stages"]
+        jjv["JjVcs\nresolve --list, jj file show"]
+    end
+
+    reconcile --> resolve
+    status --> c1
+    read --> c2
+    read --> c3
+    other --> adapter
+    resolve --> workspace
+    resolve --> c1
+    resolve --> c4
+    adapter --> source
+    source --> c1
+    resolve --> git
+    resolve --> jjv
+    c1 --> git
+    c1 --> jjv
+    c2 --> git
+    c2 --> jjv
+    c3 --> git
+    c3 --> jjv
+    c4 --> git
+    c4 --> jjv

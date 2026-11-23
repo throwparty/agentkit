@@ -54,10 +54,7 @@ impl JjVcs {
     }
 
     fn write_synced(&self, sandbox: &str, revision: &str) -> Result<(), Error> {
-        ops::git(
-            &self.root,
-            &["update-ref", &synced_ref(sandbox), revision],
-        )?;
+        ops::git(&self.root, &["update-ref", &synced_ref(sandbox), revision])?;
         Ok(())
     }
 }
@@ -468,11 +465,7 @@ impl Vcs for JjVcs {
         Ok(Revision::new(ops::commit_id(&target, "@")?))
     }
 
-    fn set_sandbox_tip(
-        &self,
-        workspace: &Workspace,
-        revision: &Revision,
-    ) -> Result<(), Error> {
+    fn set_sandbox_tip(&self, workspace: &Workspace, revision: &Revision) -> Result<(), Error> {
         let target = self.workspace(sandbox_of(workspace));
         ops::jj_ok(&target, &["new", revision.as_str()])?;
         Ok(())
@@ -524,12 +517,7 @@ impl Vcs for JjVcs {
 
     fn ensure_refs(&self, workspace: &Workspace) -> Result<(), Error> {
         let sandbox = sandbox_of(workspace);
-        if ops::git(
-            &self.root,
-            &["rev-parse", "--verify", &synced_ref(sandbox)],
-        )
-        .is_err()
-        {
+        if ops::git(&self.root, &["rev-parse", "--verify", &synced_ref(sandbox)]).is_err() {
             let tip = self.tip(workspace)?;
             self.write_synced(sandbox, tip.as_str())?;
         }
@@ -548,7 +536,15 @@ impl Vcs for JjVcs {
     fn conflicts(&self, revision: &Revision) -> Result<Vec<Conflict>, Error> {
         Ok(ops::conflicts(&self.root, revision.as_str())?
             .into_iter()
-            .map(|path| Conflict { path })
+            .map(|(path, sides)| {
+                let hunks = ops::conflict_regions(&self.root, revision.as_str(), &path);
+                Conflict {
+                    path,
+                    hunks,
+                    sides,
+                    base: true,
+                }
+            })
             .collect())
     }
 
@@ -595,19 +591,36 @@ impl Vcs for JjVcs {
         })?;
         ops::jj_ok(
             &self.root,
-            &["workspace", "add", "--name", &name, "-r", base.as_str(), path_text],
+            &[
+                "workspace",
+                "add",
+                "--name",
+                &name,
+                "-r",
+                base.as_str(),
+                path_text,
+            ],
         )?;
-        ops::jj_ok(&path, &["new", base.as_str(), "-m", "litterbox staging: theirs"])?;
+        ops::jj_ok(
+            &path,
+            &["new", base.as_str(), "-m", "litterbox staging: theirs"],
+        )?;
         ops::jj_ok(&path, &["restore", "--from", branch.as_str()])?;
         let theirs = ops::commit_id(&path, "@")?;
-        ops::jj_ok(&path, &["new", base.as_str(), "-m", "litterbox staging: ours"])?;
+        ops::jj_ok(
+            &path,
+            &["new", base.as_str(), "-m", "litterbox staging: ours"],
+        )?;
         ops::jj_ok(&path, &["restore", "--from", sandbox_tip.as_str()])?;
         let ours = ops::commit_id(&path, "@")?;
         ops::jj_ok(
             &path,
             &["new", &theirs, &ours, "-m", "litterbox staging: merge"],
         )?;
-        let conflicts = ops::conflicts(&path, "@")?;
+        let conflicts = ops::conflicts(&path, "@")?
+            .into_iter()
+            .map(|(conflicted, _)| conflicted)
+            .collect();
         Ok(Staged {
             path,
             branch,
@@ -644,7 +657,13 @@ impl Vcs for JjVcs {
         }
         ops::jj_ok(
             &self.root,
-            &["bookmark", "set", workspace.branch().as_str(), "-r", &merged],
+            &[
+                "bookmark",
+                "set",
+                workspace.branch().as_str(),
+                "-r",
+                &merged,
+            ],
         )?;
         let name = format!("{sandbox}-staging");
         let _ = ops::jj_ok(&self.root, &["workspace", "forget", &name]);
@@ -755,8 +774,8 @@ mod tests {
 
         let host = repository();
         let data = TempDir::new().expect("data");
-        let vcs = JjVcs::open_at(data.path().join("clone"), host.path().to_path_buf())
-            .expect("backend");
+        let vcs =
+            JjVcs::open_at(data.path().join("clone"), host.path().to_path_buf()).expect("backend");
 
         let prepared = vcs.prepare("demo").expect("prepare");
         let workspace = prepared.workspace.clone();
@@ -771,14 +790,17 @@ mod tests {
         let staging = TempDir::new().expect("staging");
         std::fs::write(staging.path().join("README.md"), "hello").expect("write");
         std::fs::write(staging.path().join("new.txt"), "new").expect("write");
-        let snapshot = vcs.snapshot(&workspace, staging.path(), "snap").expect("snapshot");
+        let snapshot = vcs
+            .snapshot(&workspace, staging.path(), "snap")
+            .expect("snapshot");
         assert_ne!(snapshot, prepared.base);
         assert_eq!(vcs.sandbox_tip(&workspace).expect("sandbox tip"), snapshot);
 
         vcs.advance(&workspace, &snapshot, &prepared.base)
             .expect("advance");
         assert_eq!(vcs.tip(&workspace).expect("tip"), snapshot);
-        vcs.set_synced(&workspace, &snapshot).expect("record synced");
+        vcs.set_synced(&workspace, &snapshot)
+            .expect("record synced");
         assert_eq!(vcs.synced(&workspace).expect("synced"), snapshot);
     }
 
@@ -791,40 +813,32 @@ mod tests {
 
         let host = repository();
         let data = TempDir::new().expect("data");
-        let vcs = JjVcs::open_at(data.path().join("clone"), host.path().to_path_buf())
-            .expect("backend");
+        let vcs =
+            JjVcs::open_at(data.path().join("clone"), host.path().to_path_buf()).expect("backend");
         let prepared = vcs.prepare("demo").expect("prepare");
         let workspace = prepared.workspace.clone();
 
         let staging = TempDir::new().expect("staging");
         std::fs::write(staging.path().join("README.md"), "hello").expect("write");
         std::fs::write(staging.path().join("file.txt"), "sandbox\n").expect("write");
-        let sandbox = vcs.snapshot(&workspace, staging.path(), "sandbox").expect("snapshot");
+        let sandbox = vcs
+            .snapshot(&workspace, staging.path(), "sandbox")
+            .expect("snapshot");
 
-        super::ops::jj_ok(&vcs.root, &["new", prepared.base.as_str(), "-m", "user"])
-            .expect("new");
+        super::ops::jj_ok(&vcs.root, &["new", prepared.base.as_str(), "-m", "user"]).expect("new");
         std::fs::write(vcs.root.join("file.txt"), "user\n").expect("write");
-        super::ops::jj_ok(
-            &vcs.root,
-            &["bookmark", "set", "litterbox/demo", "-r", "@"],
-        )
-        .expect("bookmark");
+        super::ops::jj_ok(&vcs.root, &["bookmark", "set", "litterbox/demo", "-r", "@"])
+            .expect("bookmark");
         let branch = vcs.tip(&workspace).expect("tip");
         assert_ne!(branch, prepared.base);
         assert_ne!(branch, sandbox);
 
         let report = vcs.report(&workspace).expect("report");
-        assert_eq!(
-            report.conflicts,
-            vec![std::path::PathBuf::from("file.txt")]
-        );
+        assert_eq!(report.conflicts, vec![std::path::PathBuf::from("file.txt")]);
         assert!(report.worktree.is_none(), "nothing is staged yet");
 
         let staged = vcs.stage(&workspace).expect("stage");
-        assert_eq!(
-            staged.conflicts,
-            vec![std::path::PathBuf::from("file.txt")]
-        );
+        assert_eq!(staged.conflicts, vec![std::path::PathBuf::from("file.txt")]);
         assert!(staged.path.is_dir());
 
         let second = vcs.stage(&workspace).expect_err("a second stage refuses");
@@ -843,8 +857,8 @@ mod tests {
 
         let host = repository();
         let data = TempDir::new().expect("data");
-        let vcs = JjVcs::open_at(data.path().join("clone"), host.path().to_path_buf())
-            .expect("backend");
+        let vcs =
+            JjVcs::open_at(data.path().join("clone"), host.path().to_path_buf()).expect("backend");
         vcs.prepare("demo").expect("prepare");
 
         assert_eq!(vcs.sandboxes().expect("list"), vec!["demo".to_string()]);
@@ -853,10 +867,12 @@ mod tests {
 
         vcs.delete_branch("demo").expect("delete");
         assert!(vcs.sandboxes().expect("list").is_empty());
-        assert!(vcs.delete_branch("demo").is_err(), "a gone sandbox is NotFound");
+        assert!(
+            vcs.delete_branch("demo").is_err(),
+            "a gone sandbox is NotFound"
+        );
 
         vcs.prune().expect("prune");
         assert!(!vcs.root.join(".jj").exists(), "the clone is released");
     }
 }
-

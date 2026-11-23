@@ -123,13 +123,36 @@ impl TestVcs {
     }
 
     /// Report these conflicted paths for any revision.
+    ///
+    /// Each path reports one region, two content sides and a base. Use
+    /// [`Self::with_conflict_detail`] when a test needs other counts.
     pub fn with_conflicts(mut self, paths: &[&str]) -> Self {
         self.state_mut().conflicts = paths
             .iter()
             .map(|path| Conflict {
                 path: PathBuf::from(path),
+                hunks: 1,
+                sides: 2,
+                base: true,
             })
             .collect();
+        self
+    }
+
+    /// Report one conflicted path with explicit counts.
+    pub fn with_conflict_detail(
+        mut self,
+        path: &str,
+        hunks: usize,
+        sides: usize,
+        base: bool,
+    ) -> Self {
+        self.state_mut().conflicts.push(Conflict {
+            path: PathBuf::from(path),
+            hunks,
+            sides,
+            base,
+        });
         self
     }
 
