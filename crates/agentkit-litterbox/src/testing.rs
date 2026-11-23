@@ -1166,6 +1166,7 @@ mod tests {
             binding: None,
             vcs: None,
             merge: None,
+            resolution: None,
         };
         let dir = tempfile::tempdir().expect("tempdir");
         crate::metadata_store::store_sandbox_at(dir.path(), "demo", &stored).expect("store");
