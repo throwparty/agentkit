@@ -197,7 +197,7 @@ Remove the workspace and the record when a sandbox with an open resolution is de
 | Depends On | T-007 |
 | References | delete-during-resolution,open-resolution |
 
-### T-016: The acceptance suite
+### T-016: [x] The acceptance suite
 
 End-to-end tests for a Git divergence, a jj divergence and a jj conflicted tip, plus the main workspace build check.
 
