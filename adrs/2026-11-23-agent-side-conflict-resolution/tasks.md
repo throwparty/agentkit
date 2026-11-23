@@ -15,7 +15,7 @@ Add `hunks`, `sides` and `base` to `vcs::Conflict` and update every construction
 | Depends On |  |
 | References | conflict-report |
 
-### T-002: Git marker scan
+### T-002: [x] Git marker scan
 
 Implement `GitVcs::conflicts` by scanning the tree a snapshot would commit for lines beginning with the three conflict markers and counting regions per path. Replace the `Unsupported` return at `vcs/git/scm.rs:886`.
 

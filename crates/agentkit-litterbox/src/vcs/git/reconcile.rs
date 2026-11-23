@@ -41,6 +41,62 @@ fn text(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
+/// The conflicted paths in a committed tree, read from its markers.
+///
+/// Git has no conflicted commit, so a marker tree is the only evidence that a
+/// conflict reached history. A region opens at `<<<<<<<`, and `|||||||` marks a
+/// common base. The scan is the safety net behind the host staging path.
+pub(crate) fn marker_conflicts(
+    repo: &Path,
+    revision: &str,
+) -> Result<Vec<crate::vcs::Conflict>, VcsError> {
+    let output = git(
+        repo,
+        &[
+            "grep",
+            "--no-color",
+            "-n",
+            "-I",
+            "-E",
+            r"^(<<<<<<<|\|\|\|\|\|\|\|)",
+            revision,
+            "--",
+            ".",
+        ],
+    )?;
+    if !output.status.success() && output.status.code() != Some(1) {
+        return Err(failed("scan the revision for conflict markers", &output));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut found: Vec<crate::vcs::Conflict> = Vec::new();
+    for line in stdout.lines() {
+        let mut parts = line.splitn(4, ':');
+        let (_, path, _, content) = (parts.next(), parts.next(), parts.next(), parts.next());
+        let (Some(path), Some(content)) = (path, content) else {
+            continue;
+        };
+        let entry = found
+            .iter_mut()
+            .find(|conflict| conflict.path == Path::new(path));
+        if content.starts_with("<<<<<<<") {
+            match entry {
+                Some(conflict) => conflict.hunks += 1,
+                None => found.push(crate::vcs::Conflict {
+                    path: PathBuf::from(path),
+                    hunks: 1,
+                    sides: 2,
+                    base: false,
+                }),
+            }
+        } else if content.starts_with("|||||||")
+            && let Some(conflict) = entry
+        {
+            conflict.base = true;
+        }
+    }
+    Ok(found)
+}
+
 /// The conflict paths in a `merge-tree` result.
 fn conflict_paths(stdout: &str) -> Vec<PathBuf> {
     let mut paths: Vec<PathBuf> = Vec::new();

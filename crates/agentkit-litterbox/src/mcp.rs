@@ -195,7 +195,11 @@ impl SandboxServer {
                 .await
                 .map_err(ToolError::into_mcp)?;
         let block = performed.block();
-        success_with_recovery(ContentBlock::text(performed.value), performed.recovery, block)
+        success_with_recovery(
+            ContentBlock::text(performed.value),
+            performed.recovery,
+            block,
+        )
     }
 
     #[tool(name = "write", description = "Write a file into the sandbox")]
