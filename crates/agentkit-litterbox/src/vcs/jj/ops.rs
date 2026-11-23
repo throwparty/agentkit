@@ -70,11 +70,11 @@ pub fn tree_id(cwd: &Path, revision: &str) -> Result<String, Error> {
     git(cwd, &["rev-parse", &format!("{revision}^{{tree}}")])
 }
 
-/// The conflicted paths a revision carries.
+/// The conflicted paths a revision carries, with their side counts.
 ///
 /// jj exits non-zero and says "No conflicts found" when the revision is clean,
-/// which is not an error.
-pub fn conflicts(cwd: &Path, revision: &str) -> Result<Vec<PathBuf>, Error> {
+/// which is not an error. Each line reads `path    N-sided conflict`.
+pub fn conflicts(cwd: &Path, revision: &str) -> Result<Vec<(PathBuf, usize)>, Error> {
     let output = run("jj", cwd, &["resolve", "--list", "-r", revision])?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -87,17 +87,49 @@ pub fn conflicts(cwd: &Path, revision: &str) -> Result<Vec<PathBuf>, Error> {
         });
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut paths = Vec::new();
+    let mut conflicts = Vec::new();
     for line in stdout.lines() {
         let line = line.trim();
         if line.is_empty() {
             continue;
         }
-        if let Some(path) = line.split_whitespace().next() {
-            paths.push(PathBuf::from(path));
-        }
+        let (path, rest) = match line.rsplit_once("  ") {
+            Some((path, rest)) => (path.trim_end(), rest),
+            None => (line, ""),
+        };
+        conflicts.push((PathBuf::from(path), sides(rest)));
     }
-    Ok(paths)
+    Ok(conflicts)
+}
+
+/// The side count from the words after the path, defaulting to two.
+fn sides(rest: &str) -> usize {
+    rest.split(|character: char| !character.is_ascii_digit())
+        .find(|digits| !digits.is_empty())
+        .and_then(|digits| digits.parse().ok())
+        .unwrap_or(2)
+}
+
+/// The number of conflict regions a path holds in a revision.
+///
+/// jj materialises the markers for `jj file show`, so a region is a line that
+/// opens a conflict. A path jj cannot show reports no regions rather than
+/// failing the whole listing.
+pub fn conflict_regions(cwd: &Path, revision: &str, path: &Path) -> usize {
+    let Some(path_text) = path.to_str() else {
+        return 0;
+    };
+    let Ok(output) = run("jj", cwd, &["file", "show", "-r", revision, path_text]) else {
+        return 0;
+    };
+    if !output.status.success() {
+        return 0;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout
+        .lines()
+        .filter(|line| line.starts_with("<<<<<<<"))
+        .count()
 }
 
 fn parse_version(text: &str) -> Option<(u32, u32)> {
@@ -188,5 +220,70 @@ mod tests {
         assert_eq!(super::parse_version("jj 0.47.1"), Some((0, 47)));
         assert_eq!(super::parse_version("jj 1.2.0"), Some((1, 2)));
         assert_eq!(super::parse_version("nonsense"), None);
+    }
+
+    #[test]
+    fn the_side_count_parses() {
+        assert_eq!(super::sides("2-sided conflict"), 2);
+        assert_eq!(super::sides("3-sided conflict"), 3);
+        assert_eq!(super::sides(""), 2);
+    }
+
+    fn jj(dir: &Path, args: &[&str]) {
+        let status = std::process::Command::new("jj")
+            .current_dir(dir)
+            .args(args)
+            .status()
+            .expect("jj runs");
+        assert!(status.success(), "jj {args:?}");
+    }
+
+    fn numbered(label: &str) -> String {
+        let mut text = String::new();
+        for index in 1..=24 {
+            if index == 1 || index == 20 {
+                text.push_str(&format!("{label} {index}\n"));
+            } else {
+                text.push_str(&format!("filler {index}\n"));
+            }
+        }
+        text
+    }
+
+    #[test]
+    fn a_conflicted_revision_reports_its_sides_and_regions() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        jj(root, &["git", "init", "--colocate", "."]);
+        jj(root, &["config", "set", "--repo", "user.name", "Test"]);
+        jj(
+            root,
+            &["config", "set", "--repo", "user.email", "test@example.com"],
+        );
+
+        std::fs::write(root.join("file.txt"), numbered("base")).expect("write");
+        jj(root, &["describe", "-m", "base"]);
+        let base = super::commit_id(root, "@").expect("base id");
+
+        jj(root, &["new", &base, "-m", "theirs"]);
+        std::fs::write(root.join("file.txt"), numbered("theirs")).expect("write");
+        let theirs = super::commit_id(root, "@").expect("theirs id");
+
+        jj(root, &["new", &base, "-m", "ours"]);
+        std::fs::write(root.join("file.txt"), numbered("ours")).expect("write");
+        let ours = super::commit_id(root, "@").expect("ours id");
+
+        jj(root, &["new", &theirs, &ours, "-m", "merge"]);
+        let merge = super::commit_id(root, "@").expect("merge id");
+
+        let conflicts = super::conflicts(root, &merge).expect("conflicts");
+        assert_eq!(conflicts.len(), 1, "{conflicts:?}");
+        assert_eq!(conflicts[0].0, Path::new("file.txt"));
+        assert_eq!(conflicts[0].1, 2, "both sides changed the same regions");
+        assert_eq!(
+            super::conflict_regions(root, &merge, &conflicts[0].0),
+            2,
+            "each side rewrote two regions"
+        );
     }
 }

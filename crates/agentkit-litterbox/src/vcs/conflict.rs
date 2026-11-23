@@ -7,6 +7,14 @@ use super::{Revision, TreeId};
 pub struct Conflict {
     /// The path, relative to the workspace root.
     pub path: PathBuf,
+    /// How many separate conflict regions the path holds.
+    pub hunks: usize,
+    /// How many content sides the conflict has, excluding any common base.
+    pub sides: usize,
+    /// Whether the conflict has a common ancestor to merge against.
+    ///
+    /// An addition on both sides has none.
+    pub base: bool,
 }
 
 /// The three sides of one conflicted path.
