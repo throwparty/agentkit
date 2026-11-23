@@ -740,7 +740,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::JjVcs;
-    use crate::vcs::Vcs;
+    use crate::vcs::{Revision, Vcs};
 
     fn git(dir: &Path, args: &[&str]) {
         let status = std::process::Command::new("git")
@@ -762,6 +762,66 @@ mod tests {
         git(dir.path(), &["add", "."]);
         git(dir.path(), &["commit", "-qm", "init"]);
         dir
+    }
+
+    fn numbered(label: &str) -> String {
+        let mut text = String::new();
+        for index in 1..=24 {
+            if index == 1 || index == 20 {
+                text.push_str(&format!("{label} {index}\n"));
+            } else {
+                text.push_str(&format!("filler {index}\n"));
+            }
+        }
+        text
+    }
+
+    fn jj(dir: &Path, args: &[&str]) {
+        let status = std::process::Command::new("jj")
+            .current_dir(dir)
+            .args(args)
+            .status()
+            .expect("jj runs");
+        assert!(status.success(), "jj {args:?}");
+    }
+
+    #[test]
+    fn conflicts_report_their_sides_and_regions() {
+        unsafe {
+            std::env::set_var("JJ_USER", "Test");
+            std::env::set_var("JJ_EMAIL", "test@example.com");
+        }
+
+        let host = repository();
+        let data = TempDir::new().expect("data");
+        let root = data.path().join("clone");
+        let vcs = JjVcs::open_at(root.clone(), host.path().to_path_buf()).expect("backend");
+        vcs.prepare("demo").expect("prepare");
+
+        std::fs::write(root.join("file.txt"), numbered("base")).expect("write");
+        jj(&root, &["describe", "-m", "base"]);
+        let base = super::ops::commit_id(&root, "@").expect("base id");
+
+        jj(&root, &["new", &base, "-m", "theirs"]);
+        std::fs::write(root.join("file.txt"), numbered("theirs")).expect("write");
+        let theirs = super::ops::commit_id(&root, "@").expect("theirs id");
+
+        jj(&root, &["new", &base, "-m", "ours"]);
+        std::fs::write(root.join("file.txt"), numbered("ours")).expect("write");
+        let ours = super::ops::commit_id(&root, "@").expect("ours id");
+
+        jj(&root, &["new", &theirs, &ours, "-m", "merge"]);
+        let merge = super::ops::commit_id(&root, "@").expect("merge id");
+
+        let conflicts = vcs.conflicts(&Revision::new(merge)).expect("conflicts");
+        assert_eq!(conflicts.len(), 1, "{conflicts:?}");
+        assert_eq!(conflicts[0].path, Path::new("file.txt"));
+        assert_eq!(conflicts[0].sides, 2, "both sides changed the file");
+        assert_eq!(conflicts[0].hunks, 2, "each side rewrote two regions");
+        assert!(conflicts[0].base, "the merge has a common ancestor");
+
+        let clean = vcs.conflicts(&Revision::new(ours)).expect("clean");
+        assert!(clean.is_empty(), "an unconflicted revision reports nothing");
     }
 
     #[test]
