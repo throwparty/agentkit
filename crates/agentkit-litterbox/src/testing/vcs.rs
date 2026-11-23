@@ -48,6 +48,8 @@ struct State {
     synced_set: Vec<String>,
     sandbox_set: Vec<String>,
     failure: Failure,
+    sides: Option<ConflictSides>,
+
     resolution: String,
     masked: Vec<String>,
     bound: Vec<String>,
@@ -76,6 +78,7 @@ impl TestVcs {
                 tip: "0123456789abcdef".to_string(),
                 sandbox_tip: "0123456789abcdef".to_string(),
                 synced: "0123456789abcdef".to_string(),
+                sides: None,
                 resolution: "resolution-revision".to_string(),
                 observed_tree: "tree".to_string(),
                 ancestor: true,
@@ -186,6 +189,16 @@ impl TestVcs {
         self
     }
 
+    /// Remove the common ancestor from the sides a conflict reports.
+    pub fn without_base(mut self) -> Self {
+        let sides = self.sides();
+        self.state_mut().sides = Some(ConflictSides {
+            base: None,
+            ..sides
+        });
+        self
+    }
+
     /// Report that `from` holds a path `to` does not.
     pub fn with_deleted(mut self, from: &str, to: &str, path: &str) -> Self {
         self.state_mut()
@@ -290,6 +303,14 @@ impl TestVcs {
 
     fn state_mut(&mut self) -> std::sync::MutexGuard<'_, State> {
         self.state.lock().expect("TestVcs mutex")
+    }
+
+    fn sides(&self) -> ConflictSides {
+        self.state().sides.clone().unwrap_or(ConflictSides {
+            base: Some(TreeId::new("base-tree")),
+            ours: TreeId::new("ours-tree"),
+            theirs: TreeId::new("theirs-tree"),
+        })
     }
 }
 
@@ -462,7 +483,13 @@ impl Vcs for TestVcs {
     }
 
     fn conflict_sides(&self, _revision: &Revision, _path: &Path) -> Result<ConflictSides, Error> {
-        Err(unsupported("conflict_sides"))
+        Ok(self.sides())
+    }
+
+    fn blob(&self, tree: &TreeId, path: &Path) -> Result<Option<Vec<u8>>, Error> {
+        Ok(Some(
+            format!("{} from {}", path.display(), tree.as_str()).into_bytes(),
+        ))
     }
 
     fn resolve(&self, _revision: &Revision, _paths: &[PathBuf]) -> Result<Revision, Error> {

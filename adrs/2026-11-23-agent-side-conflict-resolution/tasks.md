@@ -158,7 +158,7 @@ New MCP tool returning the source state, the revisions, and per-path hunk and si
 | Depends On | T-002,T-003 |
 | References | conflict-report,stalled-resolution,bounded-reports |
 
-### T-013: read gains a side
+### T-013: [x] read gains a side
 
 Add `side` to `ReadArgs`. When it is present, answer from `conflict_sides` and `blob` instead of running `cat` in the sandbox.
 

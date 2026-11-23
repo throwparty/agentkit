@@ -1562,6 +1562,42 @@ impl Sandboxes {
         })
     }
 
+    /// Read one side of a conflicted path in the sandbox.
+    pub(crate) async fn read_side(
+        &self,
+        name: &str,
+        path: &str,
+        side: &str,
+    ) -> Result<String, Error> {
+        let stored = self.stored(name)?;
+        self.ensure_tool(&stored)?;
+        let workspace = VcsWorkspace::from_branch(&stored.branch_name);
+        let revision = self.vcs.sandbox_tip(&workspace).map_err(contract_error)?;
+        let relative = std::path::Path::new(path);
+        let sides = self
+            .vcs
+            .conflict_sides(&revision, relative)
+            .map_err(contract_error)?;
+        let tree = match side {
+            "base" => sides
+                .base
+                .ok_or_else(|| Error::failed(format!("{path} has no base side to read")))?,
+            "ours" => sides.ours,
+            "theirs" => sides.theirs,
+            other => {
+                return Err(Error::failed(format!(
+                    "unknown side '{other}'; use base, ours or theirs"
+                )));
+            }
+        };
+        let bytes = self
+            .vcs
+            .blob(&tree, relative)
+            .map_err(contract_error)?
+            .ok_or_else(|| Error::failed(format!("{path} is not in the {side} side")))?;
+        Ok(String::from_utf8_lossy(&bytes).to_string())
+    }
+
     /// The ports a sandbox forwards, or the reason its mechanism forwards none.
     pub async fn forwards(&self, name: &str) -> Result<Vec<Forward>, Error> {
         let stored = self.stored(name)?;
@@ -1829,6 +1865,55 @@ mod seam_tests {
             records.to_path_buf(),
             selected(backend),
         )
+    }
+
+    #[tokio::test]
+    async fn a_side_read_returns_the_side_content() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(TestVcs::new());
+        let sandboxes = orchestrator_vcs(records.path(), backend, Arc::clone(&vcs));
+        sandboxes.create("demo").await.expect("create");
+
+        let ours = sandboxes
+            .read_side("demo", "file.txt", "ours")
+            .await
+            .expect("ours");
+        assert!(ours.contains("ours-tree"), "{ours}");
+        let theirs = sandboxes
+            .read_side("demo", "file.txt", "theirs")
+            .await
+            .expect("theirs");
+        assert!(theirs.contains("theirs-tree"), "{theirs}");
+        let base = sandboxes
+            .read_side("demo", "file.txt", "base")
+            .await
+            .expect("base");
+        assert!(base.contains("base-tree"), "{base}");
+
+        let unknown = sandboxes
+            .read_side("demo", "file.txt", "sideways")
+            .await
+            .expect_err("an unknown side is refused");
+        assert!(
+            unknown.to_string().contains("use base, ours or theirs"),
+            "{unknown}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_side_read_without_a_base_names_it() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(TestVcs::new().without_base());
+        let sandboxes = orchestrator_vcs(records.path(), backend, Arc::clone(&vcs));
+        sandboxes.create("demo").await.expect("create");
+
+        let error = sandboxes
+            .read_side("demo", "file.txt", "base")
+            .await
+            .expect_err("no base");
+        assert!(error.to_string().contains("no base side"), "{error}");
     }
 
     #[tokio::test]

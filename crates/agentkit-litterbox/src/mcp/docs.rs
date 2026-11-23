@@ -79,6 +79,12 @@ pub(super) const TOOL_DOCS: &[ToolDoc] = &[
                 required: false,
                 description: "Maximum number of lines to read.",
             },
+            ParamDoc {
+                name: "side",
+                type_name: "string",
+                required: false,
+                description: "Read one side of a conflicted path: base, ours or theirs.",
+            },
         ],
     },
     ToolDoc {

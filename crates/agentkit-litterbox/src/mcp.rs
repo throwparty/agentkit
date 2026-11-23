@@ -43,6 +43,9 @@ pub struct ReadArgs {
     pub path: String,
     pub offset: Option<usize>,
     pub limit: Option<usize>,
+    /// Read one side of a conflicted path: base, ours or theirs.
+    #[serde(default)]
+    pub side: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -237,12 +240,23 @@ impl SandboxServer {
         Ok(CallToolResult::success(vec![content]))
     }
 
-    #[tool(name = "read", description = "Read a file from the sandbox")]
+    #[tool(
+        name = "read",
+        description = "Read a file from the sandbox, or one side of a conflicted path"
+    )]
     async fn read(
         &self,
         Parameters(args): Parameters<ReadArgs>,
     ) -> Result<CallToolResult, McpError> {
         let project = self.project()?;
+        if let Some(side) = &args.side {
+            let content = project
+                .read_side(&args.sandbox, &args.path, side)
+                .await
+                .map_err(map_contract)?;
+            let slice = slice_content(&content, args.offset, args.limit);
+            return Ok(CallToolResult::success(vec![ContentBlock::text(slice)]));
+        }
         let performed =
             read_in_sandbox(project, &args.sandbox, &args.path, args.offset, args.limit)
                 .await
@@ -1511,7 +1525,7 @@ mod tests {
                 "grep" => vec!["include", "path", "pattern", "sandbox"],
                 "ls" => vec!["path", "recursive", "sandbox"],
                 "patch" => vec!["diff", "path", "sandbox"],
-                "read" => vec!["limit", "offset", "path", "sandbox"],
+                "read" => vec!["limit", "offset", "path", "sandbox", "side"],
                 "sandbox-create" => vec!["name"],
                 "sandbox-ports" => vec!["sandbox"],
                 "sandbox-reconcile" => vec!["action", "sandbox"],
