@@ -31,10 +31,6 @@ pub struct StoredMerge {
 pub struct StoredResolution {
     /// The revision both sides last agreed on when resolution began.
     pub synced: String,
-    /// The commit the resolution must be squashed into, when the conflict
-    /// came from a commit the user's side owns.
-    #[serde(default)]
-    pub target: Option<String>,
     /// The sandbox branch tip when resolution began.
     ///
     /// Resolving rewrites the revision under resolution, never its parents, so

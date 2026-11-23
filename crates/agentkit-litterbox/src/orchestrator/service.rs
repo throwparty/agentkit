@@ -1968,7 +1968,6 @@ mod seam_tests {
         let vcs = Arc::new(
             TestVcs::new()
                 .with_tip("branch-tip")
-                .with_conflicts_for("branch-tip", &["file.txt"])
                 .with_conflicts_for("resolution-revision", &["file.txt"]),
         );
         let sandboxes = orchestrator_vcs(records.path(), backend, vcs.clone());

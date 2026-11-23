@@ -914,29 +914,13 @@ impl Vcs for GitVcs {
         let base = self.synced(workspace)?;
         let ours = self.sandbox_tip(workspace)?;
         let theirs = self.tip(workspace)?;
-        let conflicted = self.conflicts(&theirs)?;
         let repo = {
             let guard = self.lock().map_err(vcs_error)?;
             guard.repo.path().to_path_buf()
         };
-        // A tip that already conflicts is the user's own commit: the resolution
-        // is a child of it and finish fast-forwards the branch. A clean tip
-        // that moved needs the divergence merge instead.
-        let (revision, target) = if conflicted.is_empty() {
-            (reconcile::begin(&repo, &base, &ours, &theirs)?, None)
-        } else {
-            (
-                reconcile::begin_on(&repo, &theirs, "litterbox: resolve the shared branch")?,
-                Some(theirs.clone()),
-            )
-        };
+        let revision = reconcile::begin(&repo, &base, &ours, &theirs)?;
         self.set_sandbox_tip(workspace, &revision)?;
-        Ok(Begun { revision, target })
-    }
-
-    fn resolve_squash(&self, workspace: &Workspace, target: &Revision) -> Result<(), VcsError> {
-        let revision = self.sandbox_tip(workspace)?;
-        self.advance(workspace, &revision, target)
+        Ok(Begun { revision })
     }
 
     fn resolve_abandon(

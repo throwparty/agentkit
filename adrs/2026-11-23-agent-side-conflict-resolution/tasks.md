@@ -199,7 +199,7 @@ Remove the workspace and the record when a sandbox with an open resolution is de
 
 ### T-016: [x] The acceptance suite
 
-End-to-end tests for a Git divergence, a jj divergence and a jj conflicted tip, plus the main workspace build check.
+End-to-end tests for a Git divergence and a jj divergence, a check that a broken shared-branch tip is refused, and the main workspace build check.
 
 
 | Field | Value |
@@ -207,8 +207,8 @@ End-to-end tests for a Git divergence, a jj divergence and a jj conflicted tip, 
 | Success Criteria | The three end-to-end criteria pass, and a command in the sandbox succeeds whenever no resolution is open. |
 | Complexity | 🔴 High |
 | Effort | 8-12h |
-| Depends On | T-009,T-010,T-011,T-012,T-013,T-014,T-018 |
-| References | git-divergence-resolved,jj-divergence-resolved,jj-tip-fixed,main-workspace-buildable,lost-side-reported |
+| Depends On | T-009,T-010,T-011,T-012,T-013,T-014 |
+| References | git-divergence-resolved,jj-divergence-resolved,tip-refused,main-workspace-buildable,lost-side-reported |
 
 ### T-017: [x] Boundaries and gates
 
@@ -222,17 +222,4 @@ Add the new modules to the arch-lint scopes and confirm that no Git type crosses
 | Effort | 2-3h |
 | Depends On | T-016 |
 | References | no-new-dependency,gates,gates-pass |
-
-### T-018: [x] Resolve a conflicted shared-branch tip
-
-When the shared branch tip is itself conflicted, begin records the commit that introduced the conflict and creates a child of it carrying the conflict; finish squashes the resolution into that commit so descendants stop reporting a conflict, and Git commits a child of the marker tree.
-
-
-| Field | Value |
-|-------|-------|
-| Success Criteria | A jj conflicted tip is fixed in the commit that introduced it, `conflicts()` is empty afterwards, and the bookmark points at the rewritten commit; a Git marker-tree tip is resolved by a child commit and the marker scan is clean. |
-| Complexity | 🔴 High |
-| Effort | 6-8h |
-| Depends On | T-010 |
-| References | finish-resolution,introducing-commit,jj-tip-fixed |
 

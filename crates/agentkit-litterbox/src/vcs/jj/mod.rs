@@ -543,37 +543,21 @@ impl Vcs for JjVcs {
     fn resolve_begin(&self, workspace: &Workspace) -> Result<Begun, Error> {
         let ours = self.sandbox_tip(workspace)?;
         let theirs = self.tip(workspace)?;
-        let conflicted = self.conflicts(&theirs)?;
         let path = self.workspace(sandbox_of(workspace));
         let _guard = self.lock();
-        let (message, parents, target) = if conflicted.is_empty() {
-            (
+        ops::jj_ok(
+            &path,
+            &[
+                "new",
+                ours.as_str(),
+                theirs.as_str(),
+                "-m",
                 "litterbox: resolve the divergence",
-                vec![ours.as_str(), theirs.as_str()],
-                None,
-            )
-        } else {
-            (
-                "litterbox: resolve the shared branch",
-                vec![theirs.as_str()],
-                Some(theirs.clone()),
-            )
-        };
-        let mut args = vec!["new"];
-        args.extend(parents);
-        args.extend(["-m", message]);
-        ops::jj_ok(&path, &args)?;
+            ],
+        )?;
         Ok(Begun {
             revision: Revision::new(ops::commit_id(&path, "@")?),
-            target,
         })
-    }
-
-    fn resolve_squash(&self, workspace: &Workspace, _target: &Revision) -> Result<(), Error> {
-        let path = self.workspace(sandbox_of(workspace));
-        let _guard = self.lock();
-        ops::jj_ok(&path, &["squash", "--use-destination-message"])?;
-        Ok(())
     }
 
     fn resolve_abandon(&self, workspace: &Workspace, ours: &Revision) -> Result<Revision, Error> {
@@ -896,61 +880,6 @@ mod tests {
             vcs.sandbox_tip(&workspace).expect("sandbox tip"),
             restored,
             "the working copy is back on the sandbox side"
-        );
-    }
-
-    #[test]
-    fn a_conflicted_tip_is_resolved_into_itself() {
-        unsafe {
-            std::env::set_var("JJ_USER", "Test");
-            std::env::set_var("JJ_EMAIL", "test@example.com");
-        }
-
-        let host = repository();
-        let data = TempDir::new().expect("data");
-        let root = data.path().join("clone");
-        let vcs = JjVcs::open_at(root.clone(), host.path().to_path_buf()).expect("backend");
-        let prepared = vcs.prepare("demo").expect("prepare");
-        let workspace = prepared.workspace.clone();
-
-        std::fs::write(root.join("file.txt"), numbered("base")).expect("write");
-        jj(&root, &["describe", "-m", "base"]);
-        let base = super::ops::commit_id(&root, "@").expect("base id");
-
-        jj(&root, &["new", &base, "-m", "ours"]);
-        std::fs::write(root.join("file.txt"), numbered("ours")).expect("write");
-        let ours = super::ops::commit_id(&root, "@").expect("ours id");
-
-        jj(&root, &["new", &base, "-m", "theirs"]);
-        std::fs::write(root.join("file.txt"), numbered("theirs")).expect("write");
-        let theirs = super::ops::commit_id(&root, "@").expect("theirs id");
-
-        jj(&root, &["new", &ours, &theirs, "-m", "unresolved"]);
-        let tip = super::ops::commit_id(&root, "@").expect("tip id");
-
-        vcs.set_synced(&workspace, &Revision::new(base))
-            .expect("synced");
-        vcs.set_sandbox_tip(&workspace, &Revision::new(ours))
-            .expect("sandbox tip");
-        vcs.set_tip(&workspace, &Revision::new(tip.clone()))
-            .expect("branch tip");
-
-        let begun = vcs.resolve_begin(&workspace).expect("begin");
-        assert_eq!(
-            begun.target.as_ref().map(|target| target.as_str()),
-            Some(tip.as_str()),
-            "the conflicted tip is the commit to fix"
-        );
-
-        let target = vcs.workspace(super::sandbox_of(&workspace));
-        std::fs::write(target.join("file.txt"), numbered("resolved")).expect("write");
-        vcs.resolve_squash(&workspace, &Revision::new(tip))
-            .expect("squash");
-
-        let landed = vcs.tip(&workspace).expect("branch tip");
-        assert!(
-            vcs.conflicts(&landed).expect("conflicts").is_empty(),
-            "the rewritten commit is clean"
         );
     }
 
