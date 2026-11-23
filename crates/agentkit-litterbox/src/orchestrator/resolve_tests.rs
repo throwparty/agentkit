@@ -90,7 +90,8 @@ async fn begin_records_the_resolution_and_a_second_begin_is_refused() {
 async fn begin_refuses_a_shared_branch_tip_that_already_conflicts() {
     let dir = TempDir::new().expect("tempdir");
     let selected = selected();
-    let stored = stored();
+    let mut stored = stored();
+    stored.vcs = Some("jj".to_string());
     let vcs = vcs_with("branch-tip", &["file.txt"], "sandbox-tip", &[]);
 
     let error = Resolver::new(&vcs, &stored, &selected, dir.path())
@@ -109,6 +110,30 @@ async fn begin_refuses_a_shared_branch_tip_that_already_conflicts() {
             .expect("load")
             .is_none(),
         "a refused begin writes no record"
+    );
+}
+
+#[tokio::test]
+async fn the_refusal_names_a_git_fix_for_a_git_sandbox() {
+    let dir = TempDir::new().expect("tempdir");
+    let selected = selected();
+    let mut stored = stored();
+    stored.vcs = Some("git".to_string());
+    let vcs = vcs_with("branch-tip", &["file.txt"], "sandbox-tip", &[]);
+
+    let error = Resolver::new(&vcs, &stored, &selected, dir.path())
+        .begin()
+        .await
+        .expect_err("a broken tip is the owner's to fix");
+
+    let message = error.to_string();
+    assert!(
+        message.contains("git commit --amend"),
+        "the fix matches the tool: {message}"
+    );
+    assert!(
+        !message.contains("jj edit"),
+        "a Git sandbox is not told to run jj: {message}"
     );
 }
 
