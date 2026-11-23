@@ -93,6 +93,9 @@ pub struct GrepArgs {
 pub struct SandboxReconcileArgs {
     /// Name of the sandbox to reconcile
     pub sandbox: String,
+    /// What to do: begin, finish or abandon
+    #[serde(default)]
+    pub action: Option<String>,
 }
 
 pub struct SandboxServer {
@@ -171,15 +174,41 @@ impl SandboxServer {
 
     #[tool(
         name = "sandbox-reconcile",
-        description = "Stage a merge with a rewritten sandbox branch in a host worktree"
+        description = "Begin, finish or abandon a conflict resolution in the sandbox"
     )]
     async fn sandbox_reconcile(
         &self,
         Parameters(args): Parameters<SandboxReconcileArgs>,
     ) -> Result<CallToolResult, McpError> {
         let project = self.project()?;
-        let staged = project.stage(&args.sandbox).await.map_err(map_contract)?;
-        let content = ContentBlock::json(staged)
+        let action = args.action.clone().unwrap_or_else(|| "begin".to_string());
+        let resolved = match action.as_str() {
+            "begin" => project.begin_resolution(&args.sandbox).await,
+            "finish" => project.finish_resolution(&args.sandbox).await,
+            "abandon" => project.abandon_resolution(&args.sandbox).await,
+            other => {
+                return Err(McpError::invalid_params(
+                    format!("unknown action '{other}'; use begin, finish or abandon"),
+                    None,
+                ));
+            }
+        }
+        .map_err(map_contract)?;
+        let response = serde_json::json!({
+            "sandbox": args.sandbox,
+            "action": action,
+            "state": if resolved.conflicts.is_empty() { "clean" } else { "conflicted" },
+            "synced": resolved.synced.as_str(),
+            "conflicts": resolved.conflicts.iter().map(|conflict| serde_json::json!({
+                "path": conflict.path,
+                "hunks": conflict.hunks,
+                "sides": conflict.sides,
+                "base": conflict.base,
+            })).collect::<Vec<_>>(),
+            "dropped_from_ours": resolved.dropped_from_ours,
+            "dropped_from_theirs": resolved.dropped_from_theirs,
+        });
+        let content = ContentBlock::json(response)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
         Ok(CallToolResult::success(vec![content]))
     }
@@ -1460,7 +1489,7 @@ mod tests {
                 "read" => vec!["limit", "offset", "path", "sandbox"],
                 "sandbox-create" => vec!["name"],
                 "sandbox-ports" => vec!["sandbox"],
-                "sandbox-reconcile" => vec!["sandbox"],
+                "sandbox-reconcile" => vec!["action", "sandbox"],
                 "write" => vec!["content", "path", "sandbox"],
                 other => panic!("unexpected tool {other}"),
             }

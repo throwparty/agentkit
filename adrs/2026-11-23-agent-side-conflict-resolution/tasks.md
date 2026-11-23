@@ -132,7 +132,7 @@ Finish re-reads the conflict state, fails when the backend still reports one, co
 | Depends On | T-005,T-006,T-008 |
 | References | finish-resolution,resolution-report,no-lost-writes,introducing-commit,branch-moves-during-resolution |
 
-### T-011: sandbox-reconcile carries the actions
+### T-011: [x] sandbox-reconcile carries the actions
 
 Add `action` with the values `begin`, `finish` and `abandon` to the MCP tool and stop it staging a host worktree.
 
