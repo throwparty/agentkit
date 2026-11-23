@@ -44,6 +44,11 @@ pub(super) const TOOL_DOCS: &[ToolDoc] = &[
         params: &[SANDBOX_NAME_PARAM],
     },
     ToolDoc {
+        name: "sandbox-status",
+        description: "Report a sandbox's source state and the conflicts it carries.",
+        params: &[SANDBOX_NAME_PARAM],
+    },
+    ToolDoc {
         name: "sandbox-reconcile",
         description: "Begin, finish or abandon a conflict resolution in the sandbox.",
         params: &[

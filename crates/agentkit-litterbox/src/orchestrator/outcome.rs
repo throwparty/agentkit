@@ -20,6 +20,36 @@ pub struct Recovery {
     pub branch: String,
 }
 
+/// One conflicted path, as the model sees it.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct ConflictView {
+    /// The path, relative to the workspace root.
+    pub path: String,
+    /// How many separate conflict regions the path holds.
+    pub hunks: usize,
+    /// How many content sides the conflict has.
+    pub sides: usize,
+    /// Whether the conflict has a common ancestor.
+    pub base: bool,
+}
+
+/// The source state a status call reports.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct SourceStatus {
+    /// The revision both sides last agreed on.
+    pub synced: String,
+    /// The shared branch tip.
+    pub branch: String,
+    /// The sandbox branch tip.
+    pub sandbox: String,
+    /// `clean` or `conflicted`.
+    pub state: String,
+    /// Whether a resolution is open.
+    pub resolution: bool,
+    /// The conflicts the shared branch carries, with counts and no text.
+    pub conflicts: Vec<ConflictView>,
+}
+
 /// The model-facing workspace block appended to a single-sandbox tool result.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct WorkspaceBlock {

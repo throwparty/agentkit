@@ -11,7 +11,9 @@ use crate::config::Config;
 use crate::domain::SandboxError;
 use crate::metadata_store::{self, LoadedSandbox, StoredSandbox};
 use crate::orchestrator::lock;
-use crate::orchestrator::outcome::{Deletion, InspectionReport, Performed, Recovery, StagedMerge};
+use crate::orchestrator::outcome::{
+    Deletion, InspectionReport, Performed, Recovery, SourceStatus, StagedMerge,
+};
 use crate::orchestrator::reconcile::Reconciler;
 use crate::orchestrator::resolve::{Resolved, Resolver};
 use crate::orchestrator::source::Action;
@@ -1526,6 +1528,38 @@ impl Sandboxes {
         Resolver::new(&self.vcs, &stored, &selected, &self.records_dir)
             .abandon()
             .await
+    }
+
+    /// Report the sandbox's source state and the conflicts it carries.
+    pub(crate) async fn source_status(&self, name: &str) -> Result<SourceStatus, Error> {
+        let stored = self.stored(name)?;
+        self.ensure_tool(&stored)?;
+        let workspace = VcsWorkspace::from_branch(&stored.branch_name);
+        self.vcs.ensure_refs(&workspace).map_err(contract_error)?;
+        let synced = self.vcs.synced(&workspace).map_err(contract_error)?;
+        let branch = self.vcs.tip(&workspace).map_err(contract_error)?;
+        let sandbox = self.vcs.sandbox_tip(&workspace).map_err(contract_error)?;
+        let conflicts = self.vcs.conflicts(&branch).map_err(contract_error)?;
+        Ok(SourceStatus {
+            synced: synced.as_str().to_string(),
+            branch: branch.as_str().to_string(),
+            sandbox: sandbox.as_str().to_string(),
+            state: if conflicts.is_empty() {
+                "clean".to_string()
+            } else {
+                "conflicted".to_string()
+            },
+            resolution: stored.resolution.is_some(),
+            conflicts: conflicts
+                .into_iter()
+                .map(|conflict| crate::orchestrator::outcome::ConflictView {
+                    path: conflict.path.to_string_lossy().to_string(),
+                    hunks: conflict.hunks,
+                    sides: conflict.sides,
+                    base: conflict.base,
+                })
+                .collect(),
+        })
     }
 
     /// The ports a sandbox forwards, or the reason its mechanism forwards none.
