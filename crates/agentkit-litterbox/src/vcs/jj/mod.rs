@@ -4,6 +4,10 @@
 //! at `vcs/jj/<slug>`; each sandbox is one jj workspace. It imports `vcs` and
 //! `vcs::git_common` and never `vcs::git`.
 
+mod config;
+
+pub use config::JjVcsConfig;
+
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
