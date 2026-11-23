@@ -1,6 +1,6 @@
 # jj as a Second VCS Backend
 
-**Status:** draft  **Created:** 2026-11-22  **Author:** Luke Carrier
+**Status:** implemented  **Created:** 2026-11-22  **Author:** Luke Carrier
 
 Litterbox pairs a sandbox with a VCS branch. `adrs/2026-11-19-decouple-vcs-from-orchestration` put that pairing behind `vcs::Vcs` (`crates/agentkit-litterbox/src/vcs/mod.rs:32-211`) and named `vcs::jj` as the later second implementation (`vcs/mod.rs:5-6`). The module does not exist. `GitVcs` is the only implementation: it reports `ConflictModel::Blocking`, `op_log: false`, `BindingSupport::Copied` and `ExportSupport::None` (`vcs/git/scm.rs:447-455`), returns an empty mask (`:486-488`) and refuses `bound_root` (`:490-500`).
 
@@ -73,7 +73,7 @@ The orchestrator holds one backend, built once at open. Every operation that rea
 
 ### FR-006: Three revisions
 
-Each sandbox addresses three revisions: the shared branch as the bookmark `litterbox/<name>`, the `theirs` side; the sandbox branch as the workspace's working-copy commit, the `ours` side; and the synced revision, a record field, as what both sides last agreed on and the merge base. Moving the sandbox branch or the synced revision never moves the shared bookmark, and no operation merges in the sandbox.
+Each sandbox addresses three revisions: the shared branch as the bookmark `litterbox/<name>`, the `theirs` side; the sandbox branch as the workspace's working-copy commit, the `ours` side; and the synced revision, a Git ref in the clone (`refs/litterbox/synced/<name>`), as what both sides last agreed on and the merge base. Moving the sandbox branch or the synced revision never moves the shared bookmark, and no operation merges in the sandbox.
 
 **Slug:** `three-revisions`
 
@@ -139,7 +139,7 @@ Every MCP tool that operates on one sandbox appends a `workspace` block to its r
 
 ### FR-017: Removal
 
-`delete_branch` removes the sandbox workspace, the shared bookmark (the branch), and the `synced` record field. `prune` removes workspaces whose bookmark is gone and releases the clone once no `litterbox/*` bookmark remains, so deleting the last sandbox through `Bound` or the Git view is what triggers it (`orchestrator/service.rs:576-582`). `sandboxes` reports the sandbox names the clone exposes and never `default`. The branch remains the authoritative record of which sandboxes exist.
+`delete_branch` removes the sandbox workspace, the shared bookmark (the branch), and the `synced` ref. `prune` removes workspaces whose bookmark is gone and releases the clone once no `litterbox/*` bookmark remains, so deleting the last sandbox through `Bound` or the Git view is what triggers it (`orchestrator/service.rs:576-582`). `sandboxes` reports the sandbox names the clone exposes and never `default`. The branch remains the authoritative record of which sandboxes exist.
 
 **Slug:** `removal`
 
