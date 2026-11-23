@@ -47,6 +47,7 @@ struct State {
     synced_set: Vec<String>,
     sandbox_set: Vec<String>,
     failure: Failure,
+    resolution: String,
     masked: Vec<String>,
     bound: Vec<String>,
     bindings: Option<BindingSupport>,
@@ -74,6 +75,7 @@ impl TestVcs {
                 tip: "0123456789abcdef".to_string(),
                 sandbox_tip: "0123456789abcdef".to_string(),
                 synced: "0123456789abcdef".to_string(),
+                resolution: "resolution-revision".to_string(),
                 observed_tree: "tree".to_string(),
                 ancestor: true,
                 ..State::default()
@@ -428,6 +430,10 @@ impl Vcs for TestVcs {
         _theirs: &Revision,
     ) -> Result<Merge, Error> {
         Err(unsupported("merge"))
+    }
+
+    fn resolve_begin(&self, _workspace: &Workspace) -> Result<Revision, Error> {
+        Ok(Revision::new(self.state().resolution.clone()))
     }
 
     fn conflicts(&self, revision: &Revision) -> Result<Vec<Conflict>, Error> {

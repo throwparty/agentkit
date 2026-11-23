@@ -910,6 +910,19 @@ impl Vcs for GitVcs {
         Err(unsupported("merge"))
     }
 
+    fn resolve_begin(&self, workspace: &Workspace) -> Result<Revision, VcsError> {
+        let base = self.synced(workspace)?;
+        let ours = self.sandbox_tip(workspace)?;
+        let theirs = self.tip(workspace)?;
+        let repo = {
+            let guard = self.lock().map_err(vcs_error)?;
+            guard.repo.path().to_path_buf()
+        };
+        let revision = reconcile::begin(&repo, &base, &ours, &theirs)?;
+        self.set_sandbox_tip(workspace, &revision)?;
+        Ok(revision)
+    }
+
     fn conflicts(&self, revision: &Revision) -> Result<Vec<Conflict>, VcsError> {
         let repo = {
             let guard = self.lock().map_err(vcs_error)?;

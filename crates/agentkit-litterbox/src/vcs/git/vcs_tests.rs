@@ -39,6 +39,60 @@ fn the_backend_reports_its_conflict_model_and_binding() {
 }
 
 #[test]
+fn resolve_begin_writes_a_conflicted_merge() {
+    let dir = repo_with_commit();
+    let repo = Repository::open(dir.path()).expect("open");
+    let signature = Signature::now("test", "test@example.com").expect("signature");
+
+    let commit_with = |body: &str, parents: &[&git2::Commit<'_>]| -> git2::Oid {
+        fs::write(dir.path().join("greeting.txt"), body).expect("write");
+        let mut index = repo.index().expect("index");
+        index
+            .add_all(["*"].iter(), IndexAddOption::DEFAULT, None)
+            .expect("add");
+        index.write().expect("write index");
+        let tree_id = index.write_tree().expect("tree");
+        let tree = repo.find_tree(tree_id).expect("find tree");
+        repo.commit(None, &signature, &signature, body, &tree, parents)
+            .expect("commit")
+    };
+
+    let base = repo.head().expect("head").peel_to_commit().expect("commit");
+    let ours = commit_with("ours\n", &[&base]);
+    let ours_commit = repo.find_commit(ours).expect("ours");
+    let theirs = commit_with("theirs\n", &[&base]);
+    let theirs_commit = repo.find_commit(theirs).expect("theirs");
+
+    let vcs = GitVcs::open(dir.path()).expect("vcs");
+    let prepared = vcs.prepare("example").expect("prepare");
+    let workspace = prepared.workspace;
+    vcs.set_synced(&workspace, &Revision::new(base.id().to_string()))
+        .expect("synced");
+    vcs.set_sandbox_tip(&workspace, &Revision::new(ours_commit.id().to_string()))
+        .expect("sandbox tip");
+    vcs.set_tip(&workspace, &Revision::new(theirs_commit.id().to_string()))
+        .expect("branch tip");
+
+    let revision = vcs.resolve_begin(&workspace).expect("begin");
+
+    let conflicts = vcs.conflicts(&revision).expect("conflicts");
+    assert_eq!(conflicts.len(), 1, "{conflicts:?}");
+    assert_eq!(conflicts[0].path, std::path::Path::new("greeting.txt"));
+
+    let staged = TempDir::new().expect("staging");
+    vcs.materialise(&workspace, &revision, staged.path())
+        .expect("materialise");
+    let written = fs::read_to_string(staged.path().join("greeting.txt")).expect("read");
+    assert!(written.contains("<<<<<<<"), "the workspace carries markers");
+
+    assert_eq!(
+        vcs.sandbox_tip(&workspace).expect("sandbox tip"),
+        revision,
+        "the sandbox branch holds the conflict"
+    );
+}
+
+#[test]
 fn conflict_sides_read_each_side_of_a_merge() {
     let dir = repo_with_commit();
     let repo = Repository::open(dir.path()).expect("open");

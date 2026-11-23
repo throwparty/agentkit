@@ -41,6 +41,51 @@ fn text(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
+/// Create the conflicted merge revision for a sandbox and report it.
+///
+/// The first parent is the sandbox branch, so the sides read `ours` from the
+/// sandbox and `theirs` from the shared branch. The tree comes from
+/// `merge-tree`, which writes markers without needing a worktree.
+pub(crate) fn begin(
+    repo: &Path,
+    base: &Revision,
+    ours: &Revision,
+    theirs: &Revision,
+) -> Result<Revision, VcsError> {
+    let merged = git(
+        repo,
+        &[
+            "merge-tree",
+            "--write-tree",
+            &format!("--merge-base={}", base.as_str()),
+            ours.as_str(),
+            theirs.as_str(),
+        ],
+    )?;
+    let stdout = String::from_utf8_lossy(&merged.stdout);
+    let tree = stdout.lines().next().unwrap_or_default().trim().to_string();
+    if tree.is_empty() {
+        return Err(failed("create the conflict tree", &merged));
+    }
+    let commit = git(
+        repo,
+        &[
+            "commit-tree",
+            &tree,
+            "-p",
+            ours.as_str(),
+            "-p",
+            theirs.as_str(),
+            "-m",
+            "litterbox: resolve the divergence",
+        ],
+    )?;
+    if !commit.status.success() {
+        return Err(failed("create the conflict revision", &commit));
+    }
+    Ok(Revision::new(text(&commit)))
+}
+
 /// The conflicted paths in a committed tree, read from its markers.
 ///
 /// Git has no conflicted commit, so a marker tree is the only evidence that a
