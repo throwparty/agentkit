@@ -119,7 +119,7 @@ Abandon rebuilds the merge from its recorded parents, writes it again, and resto
 | Depends On | T-008 |
 | References | abandon-resolution,abandon-restores |
 
-### T-010: Finish and the per-side report
+### T-010: [x] Finish and the per-side report
 
 Finish re-reads the conflict state, fails when the backend still reports one, computes the difference from base, ours and theirs, performs the host write, and returns the report alongside the new tip.
 

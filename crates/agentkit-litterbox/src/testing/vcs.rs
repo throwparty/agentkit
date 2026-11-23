@@ -30,6 +30,7 @@ struct State {
     prepared: Vec<String>,
     materialised: Vec<(String, String)>,
     snapshots: Vec<(String, String)>,
+    deleted_paths: std::collections::BTreeMap<(String, String), Vec<PathBuf>>,
     deleted: Vec<String>,
     exposed: Vec<String>,
     prunes: usize,
@@ -182,6 +183,16 @@ impl TestVcs {
         self.state_mut()
             .trees
             .insert(revision.to_string(), tree.to_string());
+        self
+    }
+
+    /// Report that `from` holds a path `to` does not.
+    pub fn with_deleted(mut self, from: &str, to: &str, path: &str) -> Self {
+        self.state_mut()
+            .deleted_paths
+            .entry((from.to_string(), to.to_string()))
+            .or_default()
+            .push(PathBuf::from(path));
         self
     }
 
@@ -433,7 +444,9 @@ impl Vcs for TestVcs {
     }
 
     fn resolve_begin(&self, _workspace: &Workspace) -> Result<Revision, Error> {
-        Ok(Revision::new(self.state().resolution.clone()))
+        let revision = self.state().resolution.clone();
+        self.state().sandbox_tip = revision.clone();
+        Ok(Revision::new(revision))
     }
 
     fn resolve_abandon(&self, _workspace: &Workspace, ours: &Revision) -> Result<Revision, Error> {
@@ -510,8 +523,13 @@ impl Vcs for TestVcs {
         Ok(())
     }
 
-    fn deleted_paths(&self, _from: &TreeId, _to: &TreeId) -> Result<Vec<PathBuf>, Error> {
-        Ok(Vec::new())
+    fn deleted_paths(&self, from: &TreeId, to: &TreeId) -> Result<Vec<PathBuf>, Error> {
+        let state = self.state();
+        Ok(state
+            .deleted_paths
+            .get(&(from.as_str().to_string(), to.as_str().to_string()))
+            .cloned()
+            .unwrap_or_default())
     }
 
     fn observe(&self, _workspace: &Workspace, _staging: &Path) -> Result<TreeId, Error> {

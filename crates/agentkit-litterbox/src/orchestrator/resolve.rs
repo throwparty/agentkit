@@ -6,7 +6,7 @@
 //! resolution is read from the working copy on every operation, never stored,
 //! because resolving rewrites it.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::metadata_store::{self, StoredResolution, StoredSandbox};
@@ -23,6 +23,10 @@ pub(crate) struct Resolved {
     pub(crate) synced: Revision,
     /// The conflicts the working copy still carries.
     pub(crate) conflicts: Vec<Conflict>,
+    /// Paths the sandbox side had that the resolution dropped.
+    pub(crate) dropped_from_ours: Vec<PathBuf>,
+    /// Paths the shared branch had that the resolution dropped.
+    pub(crate) dropped_from_theirs: Vec<PathBuf>,
 }
 
 /// The actions one sandbox's resolution can take.
@@ -107,7 +111,12 @@ impl<'a> Resolver<'a> {
             synced: synced.as_str().to_string(),
             ours: ours.as_str().to_string(),
         }))?;
-        Ok(Resolved { synced, conflicts })
+        Ok(Resolved {
+            synced,
+            conflicts,
+            dropped_from_ours: Vec::new(),
+            dropped_from_theirs: Vec::new(),
+        })
     }
 
     /// Write a revision into a copied sandbox's workspace.
@@ -131,6 +140,9 @@ impl<'a> Resolver<'a> {
     }
 
     /// Close a resolution, refusing while the working copy still conflicts.
+    ///
+    /// Nothing blocks the write on the report. A union legitimately drops a
+    /// side, so the report names what is gone and the VCS verdict decides.
     pub(crate) fn finish(&self) -> Result<Resolved, Error> {
         let open = self.open()?;
         let workspace = self.workspace();
@@ -142,10 +154,33 @@ impl<'a> Resolver<'a> {
                 conflicts.len()
             )));
         }
+
+        let branch = self.vcs.tip(&workspace).map_err(contract_error)?;
+        let resolved = self.vcs.tree(&revision).map_err(contract_error)?;
+        let ours_revision = Revision::new(open.ours.clone());
+        let ours = self.vcs.tree(&ours_revision).map_err(contract_error)?;
+        let theirs = self.vcs.tree(&branch).map_err(contract_error)?;
+        let dropped_from_ours = self
+            .vcs
+            .deleted_paths(&ours, &resolved)
+            .map_err(contract_error)?;
+        let dropped_from_theirs = self
+            .vcs
+            .deleted_paths(&theirs, &resolved)
+            .map_err(contract_error)?;
+
+        self.vcs
+            .advance(&workspace, &revision, &branch)
+            .map_err(contract_error)?;
+        self.vcs
+            .set_synced(&workspace, &revision)
+            .map_err(contract_error)?;
         self.record(None)?;
         Ok(Resolved {
             synced: Revision::new(open.synced),
             conflicts,
+            dropped_from_ours,
+            dropped_from_theirs,
         })
     }
 
@@ -166,6 +201,8 @@ impl<'a> Resolver<'a> {
         Ok(Resolved {
             synced: Revision::new(open.synced),
             conflicts: Vec::new(),
+            dropped_from_ours: Vec::new(),
+            dropped_from_theirs: Vec::new(),
         })
     }
 }

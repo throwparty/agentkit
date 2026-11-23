@@ -46,12 +46,11 @@ fn vcs_with(branch: &str, conflicts: &[&str], sandbox: &str, left: &[&str]) -> A
         .with_tip(branch)
         .with_sandbox_tip(sandbox)
         .with_synced("synced-revision")
-        .with_conflicts_for(branch, conflicts)
-        .with_conflicts_for("resolution-revision", conflicts);
+        .with_conflicts_for(branch, conflicts);
     let vcs = if left.is_empty() {
         vcs
     } else {
-        vcs.with_conflicts_for(sandbox, left)
+        vcs.with_conflicts_for("resolution-revision", left)
     };
     Arc::new(vcs)
 }
@@ -61,7 +60,7 @@ async fn begin_records_the_resolution_and_a_second_begin_is_refused() {
     let dir = TempDir::new().expect("tempdir");
     let stored = stored();
     let selected = selected();
-    let vcs = vcs_with("branch-tip", &["file.txt"], "sandbox-tip", &[]);
+    let vcs = vcs_with("branch-tip", &["file.txt"], "sandbox-tip", &["file.txt"]);
 
     let began = Resolver::new(&vcs, &stored, &selected, dir.path())
         .begin()
@@ -135,6 +134,38 @@ async fn finish_refuses_while_conflicts_remain_and_clears_when_they_are_gone() {
             .expect("present"),
     );
     assert!(reloaded.resolution.is_none(), "finish clears it");
+}
+
+#[tokio::test]
+async fn finish_reports_a_path_the_resolution_dropped() {
+    let dir = TempDir::new().expect("tempdir");
+    let selected = selected();
+    let vcs: Arc<dyn Vcs> = Arc::new(
+        TestVcs::new()
+            .with_tip("branch-tip")
+            .with_sandbox_tip("sandbox-tip")
+            .with_synced("synced-revision")
+            .with_conflicts_for("branch-tip", &["file.txt"])
+            .with_tree("resolution-revision", "resolved-tree")
+            .with_tree("branch-tip", "theirs-tree")
+            .with_tree("sandbox-tip", "ours-tree")
+            .with_deleted("ours-tree", "resolved-tree", "ours-only.txt"),
+    );
+
+    let record = stored();
+    let resolver = Resolver::new(&vcs, &record, &selected, dir.path());
+    resolver.begin().await.expect("begin");
+    let finished = resolver.finish().expect("finish");
+
+    assert_eq!(
+        finished.dropped_from_ours,
+        vec![std::path::PathBuf::from("ours-only.txt")],
+        "the report names what the resolution lost"
+    );
+    assert!(
+        finished.dropped_from_theirs.is_empty(),
+        "the other side lost nothing"
+    );
 }
 
 #[tokio::test]
