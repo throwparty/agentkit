@@ -52,6 +52,7 @@ struct State {
     bindings: Option<BindingSupport>,
     bound_root: Option<PathBuf>,
     conflicts: Vec<Conflict>,
+    conflicts_by_revision: std::collections::BTreeMap<String, Vec<Conflict>>,
 }
 
 impl Default for TestVcs {
@@ -153,6 +154,24 @@ impl TestVcs {
             sides,
             base,
         });
+        self
+    }
+
+    /// Report these conflicted paths for one revision only.
+    pub fn with_conflicts_for(mut self, revision: &str, paths: &[&str]) -> Self {
+        let conflicts = paths
+            .iter()
+            .map(|path| Conflict {
+                path: PathBuf::from(path),
+                hunks: 1,
+                sides: 2,
+                base: true,
+            })
+            .collect();
+        self.state_mut()
+            .conflicts_by_revision
+            .insert(revision.to_string(), conflicts);
+        self.state_mut().conflicts.clear();
         self
     }
 
@@ -411,8 +430,12 @@ impl Vcs for TestVcs {
         Err(unsupported("merge"))
     }
 
-    fn conflicts(&self, _revision: &Revision) -> Result<Vec<Conflict>, Error> {
-        Ok(self.state().conflicts.clone())
+    fn conflicts(&self, revision: &Revision) -> Result<Vec<Conflict>, Error> {
+        let state = self.state();
+        if let Some(conflicts) = state.conflicts_by_revision.get(revision.as_str()) {
+            return Ok(conflicts.clone());
+        }
+        Ok(state.conflicts.clone())
     }
 
     fn conflict_sides(&self, _revision: &Revision, _path: &Path) -> Result<ConflictSides, Error> {

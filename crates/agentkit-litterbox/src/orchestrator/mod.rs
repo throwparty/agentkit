@@ -9,6 +9,7 @@ pub mod lock;
 pub mod machine;
 pub mod outcome;
 pub mod reconcile;
+pub(crate) mod resolve;
 pub mod service;
 pub mod source;
 

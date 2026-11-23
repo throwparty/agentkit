@@ -23,6 +23,16 @@ pub struct StoredMerge {
     pub theirs: String,
 }
 
+/// A resolution the agent is working on in the sandbox.
+///
+/// Only the revision both sides agreed on is kept. The revision under
+/// resolution is read from the working copy, because resolving rewrites it.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct StoredResolution {
+    /// The revision both sides last agreed on when resolution began.
+    pub synced: String,
+}
+
 /// A sandbox as persisted: the contract's record plus the branch it was paired
 /// with. The SCM mode stays out of the contract on purpose.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -44,6 +54,9 @@ pub struct StoredSandbox {
     /// The held reconciliation, when one is pending.
     #[serde(default)]
     pub merge: Option<StoredMerge>,
+    /// The resolution the agent is working on, when one is open.
+    #[serde(default)]
+    pub resolution: Option<StoredResolution>,
 }
 
 impl StoredSandbox {
@@ -68,7 +81,7 @@ impl StoredSandbox {
 #[derive(Clone, Debug)]
 pub enum LoadedSandbox {
     /// A record written by this version.
-    Current(StoredSandbox),
+    Current(Box<StoredSandbox>),
     /// A record that cannot be read at all.
     Corrupt {
         /// The file holding it.
@@ -238,7 +251,7 @@ fn load_sandbox_in(dir: &Path, name: &str) -> Result<Option<LoadedSandbox>, Erro
                 stored.sandbox.name
             ),
         })),
-        Ok(stored) => Ok(Some(LoadedSandbox::Current(stored))),
+        Ok(stored) => Ok(Some(LoadedSandbox::Current(Box::new(stored)))),
         Err(error) => Ok(Some(LoadedSandbox::Corrupt {
             path,
             reason: format!("the record does not match the schema: {error}"),
@@ -274,6 +287,7 @@ mod record_tests {
             binding: None,
             vcs: None,
             merge: None,
+            resolution: None,
         }
     }
 

@@ -13,6 +13,7 @@ use crate::metadata_store::{self, LoadedSandbox, StoredSandbox};
 use crate::orchestrator::lock;
 use crate::orchestrator::outcome::{Deletion, InspectionReport, Performed, Recovery, StagedMerge};
 use crate::orchestrator::reconcile::Reconciler;
+use crate::orchestrator::resolve::{Resolved, Resolver};
 use crate::orchestrator::source::Action;
 use crate::provision::StepOutcome;
 use crate::provision::kind::KindDescription;
@@ -264,6 +265,7 @@ impl Sandboxes {
             binding: Some(binding),
             vcs: Some(self.vcs_tool.clone()),
             merge: None,
+            resolution: None,
         };
 
         if let Err(error) =
@@ -456,6 +458,7 @@ impl Sandboxes {
             binding: stored.binding,
             vcs: stored.vcs.clone(),
             merge: stored.merge.clone(),
+            resolution: stored.resolution.clone(),
         };
         if let Err(error) =
             metadata_store::store_sandbox_at(&self.records_dir, &updated.sandbox.name, &updated)
@@ -901,7 +904,7 @@ impl Sandboxes {
         match metadata_store::load_sandbox_at(&self.records_dir, &name)? {
             Some(LoadedSandbox::Current(stored)) => {
                 self.ensure_tool(&stored)?;
-                Ok(stored)
+                Ok(*stored)
             }
             Some(LoadedSandbox::Corrupt { path, reason }) => Err(Error::failed(format!(
                 "sandbox '{name}' has an unreadable record at {}: {reason}",
@@ -1494,6 +1497,27 @@ impl Sandboxes {
         self.vcs.discard_stage(&workspace).map_err(contract_error)
     }
 
+    /// Begin resolving a conflict inside the sandbox.
+    #[expect(dead_code, reason = "the MCP tool arrives in T-011")]
+    pub(crate) async fn begin_resolution(&self, name: &str) -> Result<Resolved, Error> {
+        let stored = self.stored(name)?;
+        Resolver::new(&self.vcs, &stored, &self.records_dir).begin()
+    }
+
+    /// Finish a resolution, refusing while the working copy still conflicts.
+    #[expect(dead_code, reason = "the MCP tool arrives in T-011")]
+    pub(crate) async fn finish_resolution(&self, name: &str) -> Result<Resolved, Error> {
+        let stored = self.stored(name)?;
+        Resolver::new(&self.vcs, &stored, &self.records_dir).finish()
+    }
+
+    /// Abandon a resolution and leave the sandbox on its own branch.
+    #[expect(dead_code, reason = "the MCP tool arrives in T-011")]
+    pub(crate) async fn abandon_resolution(&self, name: &str) -> Result<Resolved, Error> {
+        let stored = self.stored(name)?;
+        Resolver::new(&self.vcs, &stored, &self.records_dir).abandon()
+    }
+
     /// The ports a sandbox forwards, or the reason its mechanism forwards none.
     pub async fn forwards(&self, name: &str) -> Result<Vec<Forward>, Error> {
         let stored = self.stored(name)?;
@@ -1741,6 +1765,7 @@ mod seam_tests {
             binding: None,
             vcs: None,
             merge: None,
+            resolution: None,
         }
     }
 

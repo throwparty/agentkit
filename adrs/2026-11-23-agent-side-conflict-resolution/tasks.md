@@ -80,7 +80,7 @@ Implement `JjVcs::conflict_sides` from the parents of the resolution revision, r
 | Depends On | T-004 |
 | References | conflict-sides,no-base-side |
 
-### T-007: The resolution record and the three actions
+### T-007: [x] The resolution record and the three actions
 
 Add `orchestrator/resolve.rs` with begin, finish and abandon entry points, plus the stored field that records an open resolution with its `synced` revision. The live revision is read fresh on every operation and never stored.
 
