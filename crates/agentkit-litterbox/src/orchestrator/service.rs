@@ -748,7 +748,16 @@ impl Sandboxes {
             seen.insert(entry.name.clone());
             match entry.loaded {
                 Ok(LoadedSandbox::Current(stored)) => {
-                    listing.sandboxes.push(stored.sandbox);
+                    if stored.vcs() == self.vcs_tool {
+                        listing.sandboxes.push(stored.sandbox);
+                    } else {
+                        listing.corrupt.push(format!(
+                            "{}: uses the {} VCS, not {}",
+                            entry.name,
+                            stored.vcs(),
+                            self.vcs_tool
+                        ));
+                    }
                 }
                 Ok(LoadedSandbox::Corrupt { path, reason }) => {
                     listing
@@ -893,7 +902,10 @@ impl Sandboxes {
     fn stored(&self, name: &str) -> Result<StoredSandbox, Error> {
         let name = self.valid_name(name)?;
         match metadata_store::load_sandbox_at(&self.records_dir, &name)? {
-            Some(LoadedSandbox::Current(stored)) => Ok(stored),
+            Some(LoadedSandbox::Current(stored)) => {
+                self.ensure_tool(&stored)?;
+                Ok(stored)
+            }
             Some(LoadedSandbox::Corrupt { path, reason }) => Err(Error::failed(format!(
                 "sandbox '{name}' has an unreadable record at {}: {reason}",
                 path.display()
@@ -902,6 +914,23 @@ impl Sandboxes {
                 name: name.to_string(),
             }),
         }
+    }
+
+    /// Refuse a record whose source belongs to another tool.
+    ///
+    /// The orchestrator holds one backend, so a record it cannot serve is an
+    /// error rather than something to reinterpret with the wrong backend.
+    fn ensure_tool(&self, stored: &StoredSandbox) -> Result<(), Error> {
+        let tool = stored.vcs();
+        if tool == self.vcs_tool {
+            return Ok(());
+        }
+        Err(Error::failed(format!(
+            "sandbox '{}' uses the {tool} VCS but this workspace selects {}; \
+             set `tool = '{tool}'` under [vcs] in \
+             .agentkit/litterbox/config.local.toml to operate on it",
+            stored.sandbox.name, self.vcs_tool
+        )))
     }
 
     /// Whether this project and the selected backend own the record.
@@ -2397,6 +2426,32 @@ mod seam_tests {
             WorkspaceBinding::Bound,
             "the record keeps the binding it was created with"
         );
+    }
+
+    #[tokio::test]
+    async fn a_record_from_another_tool_is_refused_and_listed() {
+        let dir = scratch();
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let (sandboxes, _vcs) =
+            orchestrator(dir.path(), records.path().to_path_buf(), backend, None);
+
+        let mut stored = record("demo", "test");
+        stored.vcs = Some("jj".to_string());
+        metadata_store::store_sandbox_at(sandboxes.records_dir(), "demo", &stored).expect("store");
+
+        let listing = sandboxes.list().expect("list");
+        assert!(
+            listing.corrupt.iter().any(|line| line.contains("jj")),
+            "the mismatch is reported: {:?}",
+            listing.corrupt
+        );
+
+        let error = sandboxes.inspect("demo").await.expect_err("wrong tool");
+        let message = error.to_string();
+        assert!(message.contains("jj"), "{message}");
+        assert!(message.contains("git"), "{message}");
+        assert!(message.contains("config.local.toml"), "{message}");
     }
 
     #[tokio::test]
