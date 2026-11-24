@@ -191,9 +191,15 @@ that is where the agent's own work lives. The recovery block reports
 `source: sandbox`.
 
 When the sandbox branch is absent, repair falls back to the shared branch and
-reports `source: shared` with a `fallback` naming the missing ref. This is the
-case for a record written before the branch split. If both refs are gone, repair
-refuses and names the delete command.
+reports `source: shared` with a `fallback` naming the missing ref and the
+recovery. This is the case for a record written before the branch split. In Git,
+`git fsck --lost-found` in the store may still list the sandbox work, and
+`git update-ref refs/litterbox/workspaces/<name> <commit>` restores the ref. In
+jj, `jj op log` names the commit and `jj workspace add --name <name> --revision
+<commit>` re-attaches the workspace. Continuing from the shared branch is the
+alternative; pushing the sandbox branch is not a recovery.
+
+If both refs are gone, repair refuses and names the delete command.
 
 An open resolution is different. Its revision and its recorded `ours` parent
 are only addressable through the sandbox ref. If that ref is gone, repair

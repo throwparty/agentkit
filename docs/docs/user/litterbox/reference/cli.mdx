@@ -156,7 +156,8 @@ Creating a sandbox is only available over MCP. There is no `create` command.
 A missing sandbox is repaired on the next command that needs live compute. If the
 workspace is gone, repair materialises the sandbox branch first and reports
 `source: sandbox`. When that branch is absent it falls back to the shared branch and
-reports `source: shared` with the missing ref. An open resolution whose sandbox
+reports `source: shared` with the missing ref and the Git `fsck`/`update-ref` or jj
+op-log/workspace-add recovery. An open resolution whose sandbox
 branch is gone is refused with the recorded `synced`/`ours` and the Git or jj
 recovery; `status` prints the same continuation with `sandbox absent`.
 
