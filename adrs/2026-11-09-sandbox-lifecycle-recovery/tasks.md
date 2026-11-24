@@ -340,3 +340,16 @@ Run `cargo test -p agentkit-litterbox`, `cargo clippy -p agentkit-litterbox --al
 | Depends On | T-023,T-024,T-025 |
 | References | verification,tests-and-clippy,no-new-tool-or-verb |
 
+### T-027: [x] Name the recovery in the repair fallback
+
+When repair materialises the shared tip because the sandbox ref is absent and no resolution is open, build `Recovery.fallback` with the VCS-specific recovery: in Git, `git fsck --lost-found` in the store lists the dangling sandbox work and `git update-ref refs/litterbox/workspaces/<name> <commit>` restores it; in jj, `jj op log` or `jj log -r 'all()'` names the commit and `jj workspace add --name <name> --revision <commit>` re-attaches it. Both say not to push the sandbox branch and that continuing from the shared branch is the alternative. Keep the fallback a successful repair, not a refusal.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | The fallback names the missing ref, the VCS store, the Git or jj recovery and the shared branch; the repair still succeeds and reports `source: shared`. A Git and a jj test assert the text. Nothing changes when the workspace survives. |
+| Complexity | 🟢 Low |
+| Effort | 2-3h |
+| Depends On | T-018 |
+| References | repair-source,repair-preserves-workspace,recovery-warning,sandbox-branch-absent |
+

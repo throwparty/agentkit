@@ -41,7 +41,8 @@ pub fn cli_section() -> String {
          A missing sandbox is repaired on the next command that needs live compute. If the\n\
          workspace is gone, repair materialises the sandbox branch first and reports\n\
          `source: sandbox`. When that branch is absent it falls back to the shared branch and\n\
-         reports `source: shared` with the missing ref. An open resolution whose sandbox\n\
+         reports `source: shared` with the missing ref and the Git `fsck`/`update-ref` or jj\n\
+         op-log/workspace-add recovery. An open resolution whose sandbox\n\
          branch is gone is refused with the recorded `synced`/`ours` and the Git or jj\n\
          recovery; `status` prints the same continuation with `sandbox absent`.\n\
          \n\
@@ -87,7 +88,10 @@ pub fn mcp_section() -> String {
          \n\
          When only the sandbox revision is absent and a resolution is open, `sandbox-status`\n\
          returns `resolving`, `sandbox: null`, the recorded `synced`/`ours` and a `next` that\n\
-         names the Git reflog/fsck or jj op-log recovery and the delete fallback.\n",
+         names the Git reflog/fsck or jj op-log recovery and the delete fallback.\n\
+         \n\
+         When repair falls back to the shared branch, its recovery block's `fallback` names the\n\
+         missing ref and the Git `fsck`/`update-ref` or jj op-log/workspace-add recovery.\n",
     );
     section.push_str(LINK);
     section

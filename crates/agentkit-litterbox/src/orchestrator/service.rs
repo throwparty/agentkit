@@ -427,10 +427,7 @@ impl Sandboxes {
                     Ok(revision) => (
                         revision,
                         "shared".to_string(),
-                        Some(format!(
-                            "{sandbox_ref} is absent; materialised from the shared branch {}",
-                            stored.branch_name
-                        )),
+                        Some(self.shared_fallback_note(&stored)),
                     ),
                     Err(VcsError::NotFound { .. }) => {
                         return Err(Error::Unavailable {
@@ -1707,6 +1704,33 @@ impl Sandboxes {
                  `sandbox-reconcile begin`. Do not push the sandbox branch. If neither is \
                  recoverable, run `litterbox delete {name} --ignore-unmerged` (add \
                  `--ignore-invalid` when the record cannot be read) and create it again."
+            ),
+        }
+    }
+
+    /// The fallback when repair has to materialise the shared tip.
+    fn shared_fallback_note(&self, stored: &StoredSandbox) -> String {
+        let name = &stored.sandbox.name;
+        let branch = &stored.branch_name;
+        let sandbox_ref = sandbox_ref(branch);
+        let store = self
+            .vcs
+            .state_path()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "the VCS store".to_string());
+        match stored.vcs() {
+            "jj" => format!(
+                "the jj workspace for '{name}' is absent; materialised from the shared branch \
+                 {branch}. If the sandbox work is recoverable, `jj op log` or `jj log -r 'all()'` \
+                 in the clone at {store} names it; re-attach it with `jj workspace add --name \
+                 {name} --revision <commit>`, or continue from the shared branch. Do not push the \
+                 sandbox branch."
+            ),
+            _ => format!(
+                "{sandbox_ref} is absent; materialised from the shared branch {branch}. If the \
+                 sandbox work is recoverable, `git fsck --lost-found` in the VCS store at {store} \
+                 lists it; restore it with `git update-ref {sandbox_ref} <commit>`, or continue \
+                 from the shared branch. Do not push the sandbox branch."
             ),
         }
     }
@@ -3277,6 +3301,8 @@ mod seam_tests {
             fallback.contains("refs/litterbox/workspaces/demo"),
             "{fallback}"
         );
+        assert!(fallback.contains("fsck --lost-found"), "{fallback}");
+        assert!(fallback.contains("Do not push"), "{fallback}");
         assert_eq!(
             vcs.materialised()
                 .last()
@@ -3284,6 +3310,37 @@ mod seam_tests {
             Some("shared-tip"),
             "the shared branch is the fallback source"
         );
+    }
+
+    #[tokio::test]
+    async fn a_jj_repair_without_a_sandbox_workspace_reports_the_operation_log() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(
+            TestVcs::new()
+                .with_tip("shared-tip")
+                .without_sandbox_branch(),
+        );
+        let mut sandboxes = orchestrator_vcs(records.path(), backend.clone(), vcs);
+        sandboxes.create("demo").await.expect("create");
+        let mut stored = current_record(records.path(), "demo");
+        stored.vcs = Some("jj".to_string());
+        metadata_store::store_sandbox_at(records.path(), "demo", &stored).expect("store");
+        sandboxes.vcs_tool = "jj".to_string();
+        backend.mark_missing("demo");
+
+        let performed = sandboxes
+            .exec("demo", &["true".to_string()])
+            .await
+            .expect("the command repairs the sandbox");
+        let fallback = performed
+            .recovery
+            .expect("the repair is reported")
+            .fallback
+            .expect("the fallback is reported");
+        assert!(fallback.contains("jj op log"), "{fallback}");
+        assert!(fallback.contains("workspace add"), "{fallback}");
+        assert!(!fallback.contains("fsck"), "{fallback}");
     }
 
     #[tokio::test]

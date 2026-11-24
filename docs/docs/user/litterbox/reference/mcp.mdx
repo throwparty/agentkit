@@ -147,4 +147,7 @@ When only the sandbox revision is absent and a resolution is open, `sandbox-stat
 returns `resolving`, `sandbox: null`, the recorded `synced`/`ours` and a `next` that
 names the Git reflog/fsck or jj op-log recovery and the delete fallback.
 
+When repair falls back to the shared branch, its recovery block's `fallback` names the
+missing ref and the Git `fsck`/`update-ref` or jj op-log/workspace-add recovery.
+
 See [Sandbox lifecycle](../lifecycle) for the state diagram, the failure classes and how to recover a missing sandbox.
