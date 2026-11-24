@@ -209,7 +209,7 @@ Created: 2026-11-18
 |-------|-------|
 | State | answered |
 | Depends on | T-021, T-024 |
-| Answer | Yes, in the sandbox's own tree and never a second tree or second sandbox: the conflicted revision is materialised as the working copy, the VCS reports paths with a hunk count and a side count, abandon re-materialises the merge from its recorded parents, and the agent's writes land as ordinary snapshots. Resolved is the VCS conflict report; whether that is enough is open, because T-024 produced trees that reported clean and had destroyed content. |
+| Answer | Yes, in the sandbox's own tree and never a second tree or second sandbox: the conflicted revision is materialised as the working copy, the VCS reports paths with a hunk count and a side count, abandon re-materialises the merge from its recorded parents, and the agent's writes land as ordinary snapshots. Resolved is the VCS conflict report. T-024 produced trees that reported clean and had destroyed content, so `finish` also reports the paths each side lost. The report informs and does not stop the write, because a union legitimately drops a side; the cost is accepted and recorded in NFR-006. |
 | Evidence | [evidence/T-023/README.md](evidence/T-023/README.md) |
 
 ### T-024: Which jj workflow do agents understand: resolving at the introducing commit, or resolving in a child and squashing into it?
