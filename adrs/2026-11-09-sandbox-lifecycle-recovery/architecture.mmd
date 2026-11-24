@@ -4,26 +4,31 @@ flowchart TD
 
     ORCH --> LOAD[Load stored record]
     LOAD -->|no record| NOTFOUND[not-found]
-    LOAD -->|corrupt record| CORRUPT[unavailable; remedy delete --force]
+    LOAD -->|corrupt record| CORRUPT[unavailable; remedy the named delete flags]
     LOAD -->|current record| STATUS[Inspect status]
 
-    STATUS -->|active| RUN[Perform operation]
+    STATUS -->|active| SOURCE{Source state}
     STATUS -->|paused and joins| PAUSED[conflict; remedy resume]
     STATUS -->|missing| REPAIR[Repair]
 
+    SOURCE -->|clean| RUN[Perform operation]
+    SOURCE -->|diverged or resolving| RUN
+    RUN -->|snapshot| BRANCHONLY[Commit the sandbox branch; do not advance the shared branch]
+
     REPAIR --> LOCK[Per-sandbox advisory lock]
-    LOCK --> BRANCH{Branch exists?}
-    BRANCH -->|no| NOBRANCH[unavailable; remedy delete --force then create]
-    BRANCH -->|yes| PROVISION[Resolve provision and run host preparation]
+    LOCK --> PROVISION[Resolve provision and run host preparation]
     PROVISION -->|refuses| PREPFAIL[structured provisioning failure]
-    PROVISION --> WORKSPACE{Workspace exists?}
-    WORKSPACE -->|yes| REUSE[Reuse workspace]
-    WORKSPACE -->|no| MATERIALISE[Materialise from branch; run sandbox steps]
-    REUSE --> CREATE[Backend create in reuse mode]
-    MATERIALISE --> CREATE
+    PROVISION --> SANDBOXTIP{Sandbox ref exists?}
+    SANDBOXTIP -->|yes| MATERIALISE[Materialise the sandbox tip; run sandbox steps if the workspace is new]
+    SANDBOXTIP -->|no, resolution open| NORES[unavailable; resolution is not addressable]
+    SANDBOXTIP -->|no| TIP{Shared ref exists?}
+    TIP -->|yes| FALLBACK[Materialise the shared tip; report the fallback]
+    TIP -->|no| NOBRANCH[unavailable; remedy the named delete flags then create]
+    MATERIALISE --> CREATE[Backend create in reuse mode]
+    FALLBACK --> CREATE
     CREATE --> READY[Start compute and write current payload]
-    READY --> STORE[Write record and release lock]
-    STORE --> RECOVERY[Recovery outcome]
+    READY --> STORE[Write record, keeping merge and resolution]
+    STORE --> RECOVERY[Recovery outcome with source and fallback]
     RECOVERY --> RUN
 
     RUN --> RESULT[Result plus optional recovery]
@@ -31,5 +36,10 @@ flowchart TD
     RESULT --> MCP
 
     ORCH --> LIST[List records first, then branches]
-    LIST --> REPORT[Inspection report: inspected, unknown, failed]
+    LIST --> REPORT[Inspection report plus the record's source state]
     REPORT --> CLI
+
+    ORCH --> DELETE[Delete guards: running, invalid, unmerged]
+    DELETE -->|guard holds| DENIED[denied; name the flag]
+    DELETE -->|flags passed| REMOVE[Remove staging, compute, refs and record]
+    REMOVE --> CLI

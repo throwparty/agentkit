@@ -223,3 +223,120 @@ Run `cargo test -p agentkit-litterbox` and `cargo clippy -p agentkit-litterbox -
 | Depends On | T-015,T-016 |
 | References | verification,tests-and-clippy,no-new-tool-or-verb |
 
+### T-018: [ ] Materialise repair from the sandbox branch
+
+In `orchestrator/service.rs`, change `repair` to read `self.vcs.sandbox_tip(&workspace)` before `self.vcs.tip(&workspace)` and pass the chosen revision to `materialise`. Use the sandbox tip whenever it exists; fall back to the shared tip only when `sandbox_tip` returns `NotFound` and no resolution is open. A `NotFound` from `tip` alone does not block repair when the sandbox ref exists. Add `source` (`sandbox` or `shared`) and `fallback` to `Recovery`; `fallback` names `refs/litterbox/workspaces/<name>` when the shared tip was used. Serialise both in the MCP recovery block and include them in the CLI warning. Keep the existing `unavailable` remedy when both calls return `NotFound`. Extend `TestVcs` with absent `tip`/`sandbox_tip` and keep the materialise log.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | A `Pending` sandbox with a live sandbox branch materialises the sandbox tip, not the shared tip. An absent sandbox branch materialises the shared tip and reports `source: shared` plus a `fallback`. A shared ref that is absent while the sandbox ref is live still repairs from the sandbox tip. Both absent returns the existing remedy. A sandbox ref equal to the shared tip reports `source: sandbox`. No repair creates a branch. |
+| Complexity | 🟡 Medium |
+| Effort | 3-5h |
+| Depends On | T-005 |
+| References | repair-source,repair-preserves-workspace,repair-failure,recovery-warning,workspace-missing,branch-missing,record-without-branch,sandbox-branch-absent,sandbox-branch-equals-tip,repair-preserves-sandbox-work |
+
+### T-019: [ ] Keep an open resolution through repair
+
+Copy `stored.resolution` into the rewritten record in `repair`, as `merge` already is. Do not call `resolve_begin`, `set_sandbox_tip` or `set_tip`. When the sandbox revision cannot be read (Git `NotFound`, jj missing workspace) and a resolution is open, return `unavailable` with a reason naming the recorded `synced`/`ours`, instead of falling back to the shared tip. T-025 adds the shared VCS continuation.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | A missing sandbox with an open resolution and a live sandbox branch repairs, keeps the resolution record unchanged, and the workspace holds the revision under resolution. An absent sandbox branch with an open resolution refuses, names the recorded revisions and does not clear the record. `finish` and `abandon` remain the only clearing operations. |
+| Complexity | 🟢 Low |
+| Effort | 2-3h |
+| Depends On | T-018 |
+| References | repair-open-resolution,open-resolution,resolution-without-sandbox-branch,repair-keeps-resolution,repair-preserves-sandbox-work |
+
+### T-020: [ ] Rename the source state to diverged and report it
+
+Change the model-facing source state from `clean`/`held` to `clean`/`diverged`/`resolving` in `orchestrator/reconcile.rs`'s `WorkspaceBlock` and in `SourceStatus`. `diverged` holds when the record has a stored merge or the shared tip reports conflicts; `resolving` holds when `stored.resolution` is `Some` and wins over `diverged`. Add a `reason` to `SourceStatus` (and the MCP response) that names an unsaved-work divergence or a conflicted shared tip. `Sandboxes::list` adds the record's source state without inspecting the workspace, and `handle_list` prints it. Update the `WorkspaceBlock.reason` text to carry the same distinction. Leave the plan steps unchanged.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | `sandbox-status` and every mutating tool's block report `clean`, `diverged` or `resolving`. A pending merge reports `diverged` with the unsaved-work reason; a conflicted shared tip reports `diverged` with the conflict reason; an open resolution reports `resolving`. `sandbox-status` carries that reason. `litterbox list` prints the source state from the record. No tool is refused in either state and the plan still snapshots to the sandbox branch. |
+| Complexity | 🟡 Medium |
+| Effort | 3-5h |
+| Depends On | T-018 |
+| References | source-state-matrix,source-state,commands-while-diverged,list-records-and-branches |
+
+### T-021: [ ] Refuse paused resolution actions and keep status answering
+
+Add the paused check to `begin_resolution`, `finish_resolution` and `abandon_resolution` in `orchestrator/service.rs`, using the same `ensure_live(.., PausedPolicy::Refuse)` path as `exec`, before the resolver inspects or writes the workspace. Do not add the check to `source_status`.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | `sandbox-reconcile` with `begin`, `finish` or `abandon` on a paused sandbox returns class `conflict` with the resume remedy and leaves the workspace and record untouched. `sandbox-status` still answers with the divergence and the open resolution. After `resume`, the same action proceeds. |
+| Complexity | 🟢 Low |
+| Effort | 2-3h |
+| Depends On | T-020 |
+| References | paused-refusal,paused-class-parity,paused-returns-immediately,paused-reconcile,paused-host-side-operations,repair-while-paused |
+
+### T-022: [ ] Replace --force with per-condition delete guards
+
+Change `Sandboxes::delete(name, force)` to take `DeleteGuards { running, invalid, unmerged }` and wire `--ignore-running`, `--ignore-invalid` and `--ignore-unmerged` through `cli.rs`; remove `--force`. Each guard is checked and reported independently, and a refusal names every flag the record needs plus the record, both branches and any staging workspace. `paused` and `missing` set no running guard. The unmerged guard holds when the sandbox tip is not an ancestor of the shared tip, the shared ref is absent while the sandbox ref exists, a resolution is open, or a staging workspace exists. Extend `Deletion` with the refs, the staging workspace and the guards whose flags were unused, and print them. Update the `delete` help to describe each guard, and update Docker's `ReuseExisting` unsupported remedy to name the delete flags instead of `--force`. This supersedes the `--force` policy from T-010 and T-011.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | An active sandbox needs `--ignore-running`; a corrupt or undetermined record needs `--ignore-invalid`; a diverged sandbox, an open resolution or a staging workspace needs `--ignore-unmerged`. Missing and paused need no compute flag. Passing one flag does not satisfy another. The refusal names all required flags, the record, both branches and any staging workspace. With the flags, delete removes staging, compute, the shared branch, the sandbox branch, the synced ref and the record and prints them; a passed flag whose condition did not hold is reported as unused. `--force` is gone and its use is a clap error. |
+| Complexity | 🔴 High |
+| Effort | 5-8h |
+| Depends On | T-020 |
+| References | delete-missing-force,delete-corrupt-record,delete-missing-needs-force,corrupt-record-removable,corrupt-delete-without-force,unreadable-payload-delete-force,paused-delete,several-delete-guards,unused-delete-flag,backward-compatibility,no-new-surface,repair-failure,backend-unavailable |
+
+### T-023: [ ] Build the source-state and delete-guard matrix tests
+
+Extend the table-driven tests with the source states `clean`, `diverged` and `resolving` against `list`, `shell` and the MCP command tools, `pause`, `resume`, `delete`, `sandbox-create`, `sandbox-status`, `sandbox-reconcile`, repair and the absent-sandbox status. Include a `Pending` repair that materialises the sandbox branch and preserves its work, a paused `sandbox-reconcile` refusal for each action, and one test per delete guard and per combination. Add the incident fixture with a live shared branch and a different live sandbox branch.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | Every new matrix cell has a named test. The `Pending` repair preserves the sandbox branch work and reports `source: sandbox`. A paused `begin`, `finish` and `abandon` each return `conflict` without touching the workspace. The absent-sandbox status returns the recorded revisions and the continuation, and repair refuses with the same text. Each delete guard refuses alone and combines with the others. The matrix test fails when a cell loses its test. |
+| Complexity | 🔴 High |
+| Effort | 8-10h |
+| Depends On | T-018,T-019,T-020,T-021,T-022,T-025 |
+| References | test-matrix,matrix-tests,workspace-tests-recovers,repair-preserves-sandbox-work,commands-while-diverged,paused-reconcile,several-delete-guards,unused-delete-flag,delete-missing-needs-force,absent-sandbox-revision |
+
+### T-024: [ ] Update lifecycle docs and regenerate both references
+
+Update `docs/docs/user/litterbox/lifecycle.mdx` with the state diagram, the compute and source state tables, a second matrix over `clean`, `diverged` and `resolving`, the repair-source rule and its fallback, the absent-sandbox status and continuation, the paused `sandbox-reconcile` refusal, and the three delete flags. Mirror the tables and prose in `src/docgen.rs`, then regenerate `reference/cli.mdx` and `reference/mcp.mdx` with the existing docgen commands. Add docgen assertions for the new rows and for the removed `held`/`--force` words.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | The lifecycle page distinguishes compute state from source state, states that repair materialises the sandbox branch and reports the shared fallback, reports an absent sandbox revision with the recorded revisions and the reflog/op-log continuation, refuses paused `sandbox-reconcile`, and documents each delete guard. Both generated pages contain the same tables and prose. A docgen test fails if a row, state or flag is removed. |
+| Complexity | 🟡 Medium |
+| Effort | 3-5h |
+| Depends On | T-018,T-019,T-020,T-021,T-022,T-025 |
+| References | lifecycle-documentation,generated-documentation,reference-regenerated |
+
+### T-025: [ ] Report an absent sandbox revision in status
+
+Add a shared continuation helper in `orchestrator/` that, for a sandbox with an open resolution, names the recorded `synced`/`ours`, the VCS store from `Vcs::state_path`, and the Git (`fsck --lost-found`, `update-ref`) or jj (`op log`, `workspace add`) recovery, identifying the resolution commit by its two parents (`ours` and the shared tip). Make `SourceStatus` carry `sandbox: Option<String>`, `ours: Option<String>` and `next: Option<String>`, and `Report` carry `sandbox: Option<Revision>` and `next: Option<String>`. In `source_status` and `report`, catch the sandbox-revision failure only when a resolution is open and return `resolving`, `sandbox: None`, the recorded revisions and the continuation; propagate every other error. Print `sandbox absent` and `next` in `handle_status`, and return the same fields from `sandbox-status`.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | With an open resolution and no sandbox revision, `litterbox status` and `sandbox-status` return `resolving`, `sandbox: null`, the recorded `synced`/`ours` and `next`; repair refuses with the same `next`. A missing sandbox revision with no open resolution is still an error. No ref is written. Git and jj tests cover the helper. |
+| Complexity | 🟡 Medium |
+| Effort | 4-6h |
+| Depends On | T-019,T-020 |
+| References | absent-sandbox-revision,resolution-without-sandbox-branch,repair-open-resolution,source-state-matrix,open-resolution |
+
+### T-026: [ ] Run final verification for the amendment
+
+Run `cargo test -p agentkit-litterbox`, `cargo clippy -p agentkit-litterbox --all-targets -- -D warnings`, `arch-lint check` and `bash hack/arch-lint-negative.sh`. Check the MCP tool list, the CLI command list, the generated pages and every spec slug against the tasks.
+
+
+| Field | Value |
+|-------|-------|
+| Success Criteria | Tests, clippy and both arch-lint gates pass. The MCP tool list is unchanged. No command is added. `--force` and `held` no longer appear on a user-facing surface. Every FR, NFR, AC and EC slug is referenced by at least one task. |
+| Complexity | 🟢 Low |
+| Effort | 1-2h |
+| Depends On | T-023,T-024,T-025 |
+| References | verification,tests-and-clippy,no-new-tool-or-verb |
+
