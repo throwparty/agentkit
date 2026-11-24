@@ -242,10 +242,11 @@ pub(crate) fn report(
     Ok(Report {
         base: synced.clone(),
         branch: branch.clone(),
-        sandbox: sandbox.clone(),
+        sandbox: Some(sandbox.clone()),
         conflicts,
         worktree,
         reflog: Some(reflog),
+        next: None,
     })
 }
 

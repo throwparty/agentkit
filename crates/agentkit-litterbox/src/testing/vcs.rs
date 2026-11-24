@@ -629,10 +629,11 @@ impl Vcs for TestVcs {
         Ok(Report {
             base: Revision::new(state.synced.clone()),
             branch: Revision::new(state.tip.clone()),
-            sandbox: Revision::new(state.sandbox_tip.clone()),
+            sandbox: (!state.sandbox_absent).then(|| Revision::new(state.sandbox_tip.clone())),
             conflicts: Vec::new(),
             worktree: None,
             reflog: None,
+            next: None,
         })
     }
 

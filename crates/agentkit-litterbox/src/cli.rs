@@ -310,7 +310,13 @@ async fn handle_status(backend: Option<String>, name: String, json: bool) -> Exi
     println!("sandbox   {name}");
     println!("base      {}", divergence.base);
     println!("branch    {}", divergence.branch);
-    println!("sandbox   {}", divergence.sandbox);
+    match &divergence.sandbox {
+        Some(sandbox) => println!("sandbox   {sandbox}"),
+        None => println!("sandbox   absent"),
+    }
+    if let Some(next) = &divergence.next {
+        println!("next      {next}");
+    }
     if divergence.conflicts.is_empty() {
         println!("conflicts none");
     } else {

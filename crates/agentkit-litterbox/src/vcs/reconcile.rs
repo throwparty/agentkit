@@ -9,14 +9,16 @@ pub struct Report {
     pub base: Revision,
     /// The branch tip.
     pub branch: Revision,
-    /// The sandbox branch tip.
-    pub sandbox: Revision,
+    /// The sandbox branch tip, when it is addressable.
+    pub sandbox: Option<Revision>,
     /// The paths that would conflict.
     pub conflicts: Vec<PathBuf>,
     /// The staging worktree, when one exists.
     pub worktree: Option<PathBuf>,
     /// The ref whose reflog holds the previous tips.
     pub reflog: Option<String>,
+    /// What the user does next, when the sandbox revision is absent.
+    pub next: Option<String>,
 }
 
 /// A staged merge in a linked worktree.

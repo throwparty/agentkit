@@ -597,10 +597,11 @@ impl Vcs for JjVcs {
         Ok(Report {
             base,
             branch,
-            sandbox,
+            sandbox: Some(sandbox),
             conflicts,
             worktree,
             reflog: None,
+            next: None,
         })
     }
 

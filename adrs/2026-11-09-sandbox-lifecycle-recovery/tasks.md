@@ -314,7 +314,7 @@ Update `docs/docs/user/litterbox/lifecycle.mdx` with the state diagram, the comp
 | Depends On | T-018,T-019,T-020,T-021,T-022,T-025 |
 | References | lifecycle-documentation,generated-documentation,reference-regenerated |
 
-### T-025: [ ] Report an absent sandbox revision in status
+### T-025: [x] Report an absent sandbox revision in status
 
 Add a shared continuation helper in `orchestrator/` that, for a sandbox with an open resolution, names the recorded `synced`/`ours`, the VCS store from `Vcs::state_path`, and the Git (`fsck --lost-found`, `update-ref`) or jj (`op log`, `workspace add`) recovery, identifying the resolution commit by its two parents (`ours` and the shared tip). Make `SourceStatus` carry `sandbox: Option<String>`, `ours: Option<String>` and `next: Option<String>`, and `Report` carry `sandbox: Option<Revision>` and `next: Option<String>`. In `source_status` and `report`, catch the sandbox-revision failure only when a resolution is open and return `resolving`, `sandbox: None`, the recorded revisions and the continuation; propagate every other error. Print `sandbox absent` and `next` in `handle_status`, and return the same fields from `sandbox-status`.
 
