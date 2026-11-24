@@ -1561,34 +1561,43 @@ impl Sandboxes {
     }
 
     /// Begin resolving a conflict inside the sandbox.
-    pub(crate) async fn begin_resolution(&self, name: &str) -> Result<Resolved, Error> {
+    pub(crate) async fn begin_resolution(&self, name: &str) -> Result<Performed<Resolved>, Error> {
+        let recovery = self.ensure_live(name, PausedPolicy::Refuse).await?;
         let stored = self.stored(name)?;
         let selected = self
             .select_for(&stored.sandbox, "resolve a conflict")
             .await?;
-        Resolver::new(&self.vcs, &stored, &selected, &self.records_dir)
+        let resolved = Resolver::new(&self.vcs, &stored, &selected, &self.records_dir)
             .begin()
-            .await
+            .await?;
+        Ok(Performed::fresh(resolved).or_recovery(recovery))
     }
 
     /// Finish a resolution, failing while the working copy still conflicts.
-    pub(crate) async fn finish_resolution(&self, name: &str) -> Result<Resolved, Error> {
+    pub(crate) async fn finish_resolution(&self, name: &str) -> Result<Performed<Resolved>, Error> {
+        let recovery = self.ensure_live(name, PausedPolicy::Refuse).await?;
         let stored = self.stored(name)?;
         let selected = self
             .select_for(&stored.sandbox, "resolve a conflict")
             .await?;
-        Resolver::new(&self.vcs, &stored, &selected, &self.records_dir).finish()
+        let resolved = Resolver::new(&self.vcs, &stored, &selected, &self.records_dir).finish()?;
+        Ok(Performed::fresh(resolved).or_recovery(recovery))
     }
 
     /// Abandon a resolution and leave the sandbox on its own branch.
-    pub(crate) async fn abandon_resolution(&self, name: &str) -> Result<Resolved, Error> {
+    pub(crate) async fn abandon_resolution(
+        &self,
+        name: &str,
+    ) -> Result<Performed<Resolved>, Error> {
+        let recovery = self.ensure_live(name, PausedPolicy::Refuse).await?;
         let stored = self.stored(name)?;
         let selected = self
             .select_for(&stored.sandbox, "resolve a conflict")
             .await?;
-        Resolver::new(&self.vcs, &stored, &selected, &self.records_dir)
+        let resolved = Resolver::new(&self.vcs, &stored, &selected, &self.records_dir)
             .abandon()
-            .await
+            .await?;
+        Ok(Performed::fresh(resolved).or_recovery(recovery))
     }
 
     /// Report the sandbox's source state and the conflicts it carries.
@@ -2020,7 +2029,12 @@ mod seam_tests {
             .begin_resolution("demo")
             .await
             .expect("the divergence conflicts");
-        assert_eq!(begun.conflicts.len(), 1, "{:?}", begun.conflicts);
+        assert_eq!(
+            begun.value.conflicts.len(),
+            1,
+            "{:?}",
+            begun.value.conflicts
+        );
 
         let status = sandboxes.source_status("demo").await.expect("status");
         assert!(status.resolution, "the status reports the open resolution");
@@ -2035,9 +2049,9 @@ mod seam_tests {
             .await
             .expect("the resolution lands");
         assert!(
-            finished.dropped_from_ours.is_empty(),
+            finished.value.dropped_from_ours.is_empty(),
             "{:?}",
-            finished.dropped_from_ours
+            finished.value.dropped_from_ours
         );
 
         let landed = vcs.tip(&workspace).expect("branch tip");
@@ -3144,6 +3158,57 @@ mod seam_tests {
             stored.resolution.is_some(),
             "the refusal does not clear the resolution"
         );
+    }
+
+    #[tokio::test]
+    async fn a_paused_sandbox_refuses_begin_resolution() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(TestVcs::new().with_conflicts_for("resolution-revision", &["file.txt"]));
+        let sandboxes = orchestrator_vcs(records.path(), backend, vcs);
+        sandboxes.create("demo").await.expect("create");
+        sandboxes.pause("demo").await.expect("pause");
+
+        let error = sandboxes
+            .begin_resolution("demo")
+            .await
+            .expect_err("a paused begin is refused");
+        assert!(
+            matches!(error, Error::Paused { ref name } if name == "demo"),
+            "{error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_paused_sandbox_refuses_finish_and_abandon_but_answers_status() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(TestVcs::new().with_conflicts_for("resolution-revision", &["file.txt"]));
+        let sandboxes = orchestrator_vcs(records.path(), backend, vcs);
+        sandboxes.create("demo").await.expect("create");
+        sandboxes
+            .begin_resolution("demo")
+            .await
+            .expect("the conflict is open");
+        sandboxes.pause("demo").await.expect("pause");
+
+        let finish = sandboxes
+            .finish_resolution("demo")
+            .await
+            .expect_err("a paused finish is refused");
+        assert!(matches!(finish, Error::Paused { .. }), "{finish:?}");
+        let abandon = sandboxes
+            .abandon_resolution("demo")
+            .await
+            .expect_err("a paused abandon is refused");
+        assert!(matches!(abandon, Error::Paused { .. }), "{abandon:?}");
+
+        let status = sandboxes
+            .source_status("demo")
+            .await
+            .expect("status answers");
+        assert_eq!(status.state, "resolving");
+        assert!(status.resolution);
     }
 
     #[tokio::test]
