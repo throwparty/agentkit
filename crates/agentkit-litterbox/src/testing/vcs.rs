@@ -37,6 +37,8 @@ struct State {
     sandboxes: Vec<String>,
     tip: String,
     sandbox_tip: String,
+    tip_absent: bool,
+    sandbox_absent: bool,
     synced: String,
     observed_tree: String,
     trees: std::collections::BTreeMap<String, String>,
@@ -115,6 +117,23 @@ impl TestVcs {
     pub fn with_sandbox_tip(mut self, revision: &str) -> Self {
         self.state_mut().sandbox_tip = revision.to_string();
         self
+    }
+
+    /// Report that the shared branch is absent.
+    pub fn without_shared_branch(mut self) -> Self {
+        self.state_mut().tip_absent = true;
+        self
+    }
+
+    /// Report that the sandbox branch is absent.
+    pub fn without_sandbox_branch(mut self) -> Self {
+        self.state_mut().sandbox_absent = true;
+        self
+    }
+
+    /// Forget the sandbox branch after a test has created it.
+    pub fn forget_sandbox_branch(&self) {
+        self.state().sandbox_absent = true;
     }
 
     /// Configure the synced revision.
@@ -443,7 +462,13 @@ impl Vcs for TestVcs {
     }
 
     fn tip(&self, _workspace: &Workspace) -> Result<Revision, Error> {
-        Ok(Revision::new(self.state().tip.clone()))
+        let state = self.state();
+        if state.tip_absent {
+            return Err(Error::NotFound {
+                name: "shared".to_string(),
+            });
+        }
+        Ok(Revision::new(state.tip.clone()))
     }
 
     fn set_tip(&self, _workspace: &Workspace, revision: &Revision) -> Result<(), Error> {
@@ -539,7 +564,13 @@ impl Vcs for TestVcs {
     }
 
     fn sandbox_tip(&self, _workspace: &Workspace) -> Result<Revision, Error> {
-        Ok(Revision::new(self.state().sandbox_tip.clone()))
+        let state = self.state();
+        if state.sandbox_absent {
+            return Err(Error::NotFound {
+                name: "sandbox".to_string(),
+            });
+        }
+        Ok(Revision::new(state.sandbox_tip.clone()))
     }
 
     fn set_sandbox_tip(&self, _workspace: &Workspace, revision: &Revision) -> Result<(), Error> {
@@ -576,7 +607,13 @@ impl Vcs for TestVcs {
     }
 
     fn ensure_refs(&self, _workspace: &Workspace) -> Result<(), Error> {
-        self.state().ensured += 1;
+        let mut state = self.state();
+        state.ensured += 1;
+        if state.sandbox_absent && !state.tip_absent {
+            let tip = state.tip.clone();
+            state.sandbox_tip = tip;
+            state.sandbox_absent = false;
+        }
         Ok(())
     }
 

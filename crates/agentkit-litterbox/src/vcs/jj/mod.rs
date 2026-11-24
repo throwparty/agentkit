@@ -469,6 +469,11 @@ impl Vcs for JjVcs {
 
     fn sandbox_tip(&self, workspace: &Workspace) -> Result<Revision, Error> {
         let target = self.workspace(sandbox_of(workspace));
+        if !target.is_dir() {
+            return Err(Error::NotFound {
+                name: sandbox_of(workspace).to_string(),
+            });
+        }
         Ok(Revision::new(ops::commit_id(&target, "@")?))
     }
 

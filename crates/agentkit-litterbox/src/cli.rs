@@ -407,17 +407,25 @@ async fn handle_list(backend: Option<String>) -> ExitCode {
              cannot be addressed by Litterbox"
         );
     }
+    let sources = listing.sources.clone();
     let inspections = match sandboxes.inspect_listing(listing).await {
         Ok(inspections) => inspections,
         Err(error) => return report(error),
     };
     for (name, report) in inspections {
+        let source = sources.get(&name).map(String::as_str).unwrap_or("clean");
+        let suffix = if source == "clean" {
+            String::new()
+        } else {
+            format!(" {source}")
+        };
         match report {
             InspectionReport::Inspected(inspection) => {
                 println!(
-                    "{} {} {}",
+                    "{} {}{} {}",
                     name,
                     status_label(&inspection.status),
+                    suffix,
                     inspection.backend
                 );
                 if listing_failed(&inspection.status) {
@@ -426,8 +434,8 @@ async fn handle_list(backend: Option<String>) -> ExitCode {
             }
             InspectionReport::Status { status, reason, .. } => {
                 match &status {
-                    SandboxStatus::Unknown => println!("{name} unknown {reason}"),
-                    _ => println!("{name} {}", status_label(&status)),
+                    SandboxStatus::Unknown => println!("{name} unknown{suffix} {reason}"),
+                    _ => println!("{name} {}{suffix}", status_label(&status)),
                 }
                 if listing_failed(&status) {
                     failed = true;
@@ -573,9 +581,12 @@ async fn handle_shell(backend: Option<String>, name: String, command: Vec<String
     };
     if let Some(recovery) = &performed.recovery {
         eprintln!(
-            "warning: sandbox '{}' was recreated from '{}' on branch '{}'",
-            recovery.sandbox, recovery.action, recovery.branch
+            "warning: sandbox '{}' was recreated from '{}' on branch '{}' (source: {})",
+            recovery.sandbox, recovery.action, recovery.branch, recovery.source
         );
+        if let Some(fallback) = &recovery.fallback {
+            eprintln!("warning: {fallback}");
+        }
     }
     let result = performed.value;
 

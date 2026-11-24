@@ -223,7 +223,7 @@ Run `cargo test -p agentkit-litterbox` and `cargo clippy -p agentkit-litterbox -
 | Depends On | T-015,T-016 |
 | References | verification,tests-and-clippy,no-new-tool-or-verb |
 
-### T-018: [ ] Materialise repair from the sandbox branch
+### T-018: [x] Materialise repair from the sandbox branch
 
 In `orchestrator/service.rs`, change `repair` to read `self.vcs.sandbox_tip(&workspace)` before `self.vcs.tip(&workspace)` and pass the chosen revision to `materialise`. Use the sandbox tip whenever it exists; fall back to the shared tip only when `sandbox_tip` returns `NotFound` and no resolution is open. A `NotFound` from `tip` alone does not block repair when the sandbox ref exists. Add `source` (`sandbox` or `shared`) and `fallback` to `Recovery`; `fallback` names `refs/litterbox/workspaces/<name>` when the shared tip was used. Serialise both in the MCP recovery block and include them in the CLI warning. Keep the existing `unavailable` remedy when both calls return `NotFound`. Extend `TestVcs` with absent `tip`/`sandbox_tip` and keep the materialise log.
 
@@ -236,7 +236,7 @@ In `orchestrator/service.rs`, change `repair` to read `self.vcs.sandbox_tip(&wor
 | Depends On | T-005 |
 | References | repair-source,repair-preserves-workspace,repair-failure,recovery-warning,workspace-missing,branch-missing,record-without-branch,sandbox-branch-absent,sandbox-branch-equals-tip,repair-preserves-sandbox-work |
 
-### T-019: [ ] Keep an open resolution through repair
+### T-019: [x] Keep an open resolution through repair
 
 Copy `stored.resolution` into the rewritten record in `repair`, as `merge` already is. Do not call `resolve_begin`, `set_sandbox_tip` or `set_tip`. When the sandbox revision cannot be read (Git `NotFound`, jj missing workspace) and a resolution is open, return `unavailable` with a reason naming the recorded `synced`/`ours`, instead of falling back to the shared tip. T-025 adds the shared VCS continuation.
 
@@ -249,7 +249,7 @@ Copy `stored.resolution` into the rewritten record in `repair`, as `merge` alrea
 | Depends On | T-018 |
 | References | repair-open-resolution,open-resolution,resolution-without-sandbox-branch,repair-keeps-resolution,repair-preserves-sandbox-work |
 
-### T-020: [ ] Rename the source state to diverged and report it
+### T-020: [x] Rename the source state to diverged and report it
 
 Change the model-facing source state from `clean`/`held` to `clean`/`diverged`/`resolving` in `orchestrator/reconcile.rs`'s `WorkspaceBlock` and in `SourceStatus`. `diverged` holds when the record has a stored merge or the shared tip reports conflicts; `resolving` holds when `stored.resolution` is `Some` and wins over `diverged`. Add a `reason` to `SourceStatus` (and the MCP response) that names an unsaved-work divergence or a conflicted shared tip. `Sandboxes::list` adds the record's source state without inspecting the workspace, and `handle_list` prints it. Update the `WorkspaceBlock.reason` text to carry the same distinction. Leave the plan steps unchanged.
 
