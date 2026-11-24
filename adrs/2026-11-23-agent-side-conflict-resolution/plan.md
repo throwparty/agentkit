@@ -123,7 +123,7 @@ Answers base, ours and theirs
 
 Owns begin, finish and abandon
 
-New `orchestrator/resolve.rs`. Begin refuses an open resolution, asks the backend for the conflicted revision, publishes it into a copied sandbox and records the `synced` revision plus the sandbox tip it replaced. The revision under resolution is read fresh from the working copy and never stored, because resolving rewrites it. Finish re-reads the conflict state, builds the per-side report from the recorded tip and the shared branch, advances the branch by compare-and-swap, records the new `synced` and clears the record. Begin refuses a tip that already carries a conflict, because that commit belongs to the user. Abandon hands the backend the recorded tip and publishes whatever it restores. It names no ref and no backend.
+New `orchestrator/resolve.rs`. Begin fails when a resolution is already open, asks the backend for the conflicted revision, publishes it into a copied sandbox and records the `synced` revision plus the sandbox tip it replaced. The revision under resolution is read fresh from the working copy and never stored, because resolving rewrites it. Finish re-reads the conflict state, builds the per-side report from the recorded tip and the shared branch, advances the branch by compare-and-swap, records the new `synced` and clears the record. Begin fails when the tip already carries a conflict, because that commit belongs to the user. Abandon hands the backend the recorded tip and publishes whatever it restores. It names no ref and no backend.
 
 
 ### workspace materialisation

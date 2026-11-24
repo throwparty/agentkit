@@ -199,7 +199,7 @@ Remove the workspace and the record when a sandbox with an open resolution is de
 
 ### T-016: [x] The acceptance suite
 
-End-to-end tests for a Git divergence and a jj divergence, a check that a broken shared-branch tip is refused, and the main workspace build check.
+End-to-end tests for a Git divergence and a jj divergence, a check that a broken shared-branch tip is reported and left alone, and the main workspace build check.
 
 
 | Field | Value |
@@ -208,7 +208,7 @@ End-to-end tests for a Git divergence and a jj divergence, a check that a broken
 | Complexity | 🔴 High |
 | Effort | 8-12h |
 | Depends On | T-009,T-010,T-011,T-012,T-013,T-014 |
-| References | git-divergence-resolved,jj-divergence-resolved,tip-refused,main-workspace-buildable,lost-side-reported |
+| References | git-divergence-resolved,jj-divergence-resolved,tip-reported,main-workspace-buildable,lost-side-reported |
 
 ### T-017: [x] Boundaries and gates
 

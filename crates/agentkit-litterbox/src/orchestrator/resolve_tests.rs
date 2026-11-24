@@ -80,14 +80,14 @@ async fn begin_records_the_resolution_and_a_second_begin_is_refused() {
         "the record outlives the call"
     );
 
-    let refused = Resolver::new(&vcs, &reloaded, &selected, dir.path())
+    let second = Resolver::new(&vcs, &reloaded, &selected, dir.path())
         .begin()
         .await;
-    assert!(refused.is_err(), "a second begin must be refused");
+    assert!(second.is_err(), "a second begin must fail");
 }
 
 #[tokio::test]
-async fn begin_refuses_a_shared_branch_tip_that_already_conflicts() {
+async fn begin_fails_on_a_shared_branch_tip_that_already_conflicts() {
     let dir = TempDir::new().expect("tempdir");
     let selected = selected();
     let mut stored = stored();
@@ -109,12 +109,12 @@ async fn begin_refuses_a_shared_branch_tip_that_already_conflicts() {
         metadata_store::load_sandbox_at(dir.path(), "demo")
             .expect("load")
             .is_none(),
-        "a refused begin writes no record"
+        "a failed begin writes no record"
     );
 }
 
 #[tokio::test]
-async fn the_refusal_names_a_git_fix_for_a_git_sandbox() {
+async fn the_error_names_a_git_fix_for_a_git_sandbox() {
     let dir = TempDir::new().expect("tempdir");
     let selected = selected();
     let mut stored = stored();
@@ -156,12 +156,12 @@ async fn begin_without_a_conflict_reports_the_state() {
         metadata_store::load_sandbox_at(dir.path(), "demo")
             .expect("load")
             .is_none(),
-        "a refused begin writes no record"
+        "a failed begin writes no record"
     );
 }
 
 #[tokio::test]
-async fn finish_refuses_while_conflicts_remain_and_clears_when_they_are_gone() {
+async fn finish_fails_while_conflicts_remain_and_clears_when_they_are_gone() {
     let dir = TempDir::new().expect("tempdir");
     let selected = selected();
     let dirty = vcs_with("branch-tip", &[], "sandbox-tip", &["file.txt"]);
@@ -170,7 +170,7 @@ async fn finish_refuses_while_conflicts_remain_and_clears_when_they_are_gone() {
     resolver.begin().await.expect("begin");
     assert!(
         resolver.finish().is_err(),
-        "finish refuses while the working copy conflicts"
+        "finish fails while the working copy conflicts"
     );
 
     let clean = TempDir::new().expect("tempdir");
@@ -250,6 +250,6 @@ async fn abandon_clears_the_record() {
             .abandon()
             .await
             .is_err(),
-        "abandon with nothing open is refused"
+        "abandon with nothing open fails"
     );
 }

@@ -99,7 +99,9 @@ impl<'a> Resolver<'a> {
             // The broken commit belongs to the user, and only they can replace
             // it. Litterbox reports it and holds until they do.
             let fix = match self.stored.vcs() {
-                "jj" => "for example `jj edit <revision>`, resolve, then `jj bookmark set <branch> -r @`",
+                "jj" => {
+                    "for example `jj edit <revision>`, resolve, then `jj bookmark set <branch> -r @`"
+                }
                 _ => "for example `git commit --amend` or a new commit, then push",
             };
             return Err(Error::Denied {
@@ -169,7 +171,7 @@ impl<'a> Resolver<'a> {
         Ok(())
     }
 
-    /// Close a resolution, refusing while the working copy still conflicts.
+    /// Close a resolution, failing while the working copy still conflicts.
     ///
     /// Nothing blocks the write on the report. A union legitimately drops a
     /// side, so the report names what is gone and the VCS verdict decides.

@@ -1510,7 +1510,7 @@ impl Sandboxes {
             .await
     }
 
-    /// Finish a resolution, refusing while the working copy still conflicts.
+    /// Finish a resolution, failing while the working copy still conflicts.
     pub(crate) async fn finish_resolution(&self, name: &str) -> Result<Resolved, Error> {
         let stored = self.stored(name)?;
         let selected = self

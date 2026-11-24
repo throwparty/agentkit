@@ -1,7 +1,7 @@
 # Brief for agent-side conflict resolution
 
 Input to `adrs/<date>-agent-side-conflict-resolution`. Written after T-023 and T-024 closed and the
-frontier emptied. Each line is marked. Decided means you ruled on it in this conversation. Shown
+frontier emptied. Each line is marked. Decided means you settled it in this conversation. Shown
 means a probe in this map demonstrates it. Open means the ADR must rule on it. Nothing here is a
 spec.
 
@@ -61,25 +61,25 @@ spec.
 
 ## Open
 
-The first three questions below were ruled on after this brief was written. They are kept here with
+The first three questions below were decided after this brief was written. They are kept here with
 their answers so the brief and the ADR do not disagree.
 
-1. ~~The check for resolution.~~ **Ruled: report it, do not enforce it.** `finish` refuses only when
+1. ~~The check for resolution.~~ **Decided: report it, do not enforce it.** `finish` refuses only when
    the VCS still reports conflicts. It returns a diff against base, ours and theirs for every
    conflicted path, and the agent has to justify the result. Enforcement has a trap: a deliberate
    union drops a side.
-2. ~~Which host writes are permitted.~~ **Ruled: Litterbox performs every host write.** The agent's
+2. ~~Which host writes are permitted.~~ **Decided: Litterbox performs every host write.** The agent's
    authority ends at `finish`. The commit, the ref move and any rewrite of a user-owned commit
    belong to Litterbox and use the same consent check staging already requires.
-3. ~~How the three sides reach the agent.~~ **Ruled: an optional side on `read`.** `base`, `ours`
+3. ~~How the three sides reach the agent.~~ **Decided: an optional side on `read`.** `base`, `ours`
    and `theirs` are served from the backend. No path, mount or extra tool.
-4. ~~The MCP tools.~~ **Ruled: `sandbox-reconcile` carries begin, finish and abandon; `sandbox-status`
+4. ~~The MCP tools.~~ **Decided: `sandbox-reconcile` carries begin, finish and abandon; `sandbox-status`
    is added; `read` gains a side.** `sandbox-reconcile` stopped staging a host worktree, so no MCP
    call writes one.
-5. ~~The `Vcs` contract.~~ **Ruled: `blob`, `resolve_begin` and `resolve_abandon` join the contract,
+5. ~~The `Vcs` contract.~~ **Decided: `blob`, `resolve_begin` and `resolve_abandon` join the contract,
    and `Conflict` gains counts.** `stage`, `finish` and `discard_stage` keep meaning the host
    staging path the operator uses.
-6. ~~Landing a fix to a conflicted tip.~~ **Ruled: Litterbox does not rewrite a commit the user
+6. ~~Landing a fix to a conflicted tip.~~ **Decided: Litterbox does not rewrite a commit the user
    owns.** A shared-branch tip that already carries a conflict is reported and the sandbox keeps
    holding. The owner fixes it in their checkout and pushes; the next operation adopts the clean
    tip. Litterbox resolves only the merge it creates, which is the same rule on both backends
