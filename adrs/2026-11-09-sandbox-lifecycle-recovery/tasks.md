@@ -288,7 +288,7 @@ Change `Sandboxes::delete(name, force)` to take `DeleteGuards { running, invalid
 | Depends On | T-020 |
 | References | delete-missing-force,delete-corrupt-record,delete-missing-needs-force,corrupt-record-removable,corrupt-delete-without-force,unreadable-payload-delete-force,paused-delete,several-delete-guards,unused-delete-flag,backward-compatibility,no-new-surface,repair-failure,backend-unavailable |
 
-### T-023: [ ] Build the source-state and delete-guard matrix tests
+### T-023: [x] Build the source-state and delete-guard matrix tests
 
 Extend the table-driven tests with the source states `clean`, `diverged` and `resolving` against `list`, `shell` and the MCP command tools, `pause`, `resume`, `delete`, `sandbox-create`, `sandbox-status`, `sandbox-reconcile`, repair and the absent-sandbox status. Include a `Pending` repair that materialises the sandbox branch and preserves its work, a paused `sandbox-reconcile` refusal for each action, and one test per delete guard and per combination. Add the incident fixture with a live shared branch and a different live sandbox branch.
 
