@@ -59,6 +59,7 @@ struct State {
     bound_root: Option<PathBuf>,
     conflicts: Vec<Conflict>,
     conflicts_by_revision: std::collections::BTreeMap<String, Vec<Conflict>>,
+    staging: Option<PathBuf>,
 }
 
 impl Default for TestVcs {
@@ -134,6 +135,12 @@ impl TestVcs {
     /// Forget the sandbox branch after a test has created it.
     pub fn forget_sandbox_branch(&self) {
         self.state().sandbox_absent = true;
+    }
+
+    /// Report a staging workspace.
+    pub fn with_staging(mut self, path: PathBuf) -> Self {
+        self.state_mut().staging = Some(path);
+        self
     }
 
     /// Configure the synced revision.
@@ -644,7 +651,12 @@ impl Vcs for TestVcs {
     }
 
     fn discard_stage(&self, _workspace: &Workspace) -> Result<(), Error> {
+        self.state().staging = None;
         Ok(())
+    }
+
+    fn staging(&self, _workspace: &Workspace) -> Option<PathBuf> {
+        self.state().staging.clone()
     }
 }
 

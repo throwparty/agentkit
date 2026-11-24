@@ -211,6 +211,33 @@ pub enum StagedMerge {
     },
 }
 
+/// Which delete guards the caller has overridden.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DeleteGuards {
+    /// Permit deleting a sandbox whose compute is running.
+    pub running: bool,
+    /// Permit deleting a record whose compute cannot be determined.
+    pub invalid: bool,
+    /// Permit deleting work that may not be merged into the shared branch.
+    pub unmerged: bool,
+}
+
+impl DeleteGuards {
+    /// No guard overridden.
+    pub const NONE: Self = Self {
+        running: false,
+        invalid: false,
+        unmerged: false,
+    };
+
+    /// Every guard overridden.
+    pub const ALL: Self = Self {
+        running: true,
+        invalid: true,
+        unmerged: true,
+    };
+}
+
 /// What a delete removed and what it could not stop.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Deletion {
@@ -218,10 +245,14 @@ pub struct Deletion {
     pub record_path: Option<PathBuf>,
     /// State paths the backend removed.
     pub state_paths: Vec<PathBuf>,
-    /// The branch the sandbox was paired with.
-    pub branch: String,
+    /// The refs the delete removed: shared branch, sandbox branch, synced ref.
+    pub branches: Vec<String>,
     /// Whether the backend knew it stopped the compute.
     pub compute_stopped: bool,
+    /// The staging workspace removed, when there was one.
+    pub staging: Option<PathBuf>,
+    /// Guard flags passed for conditions that did not hold.
+    pub unused: Vec<String>,
     /// Anything the caller should know, such as compute it could not identify.
     pub detail: Option<String>,
 }

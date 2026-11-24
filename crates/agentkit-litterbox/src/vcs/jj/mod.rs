@@ -724,6 +724,11 @@ impl Vcs for JjVcs {
         Ok(())
     }
 
+    fn staging(&self, workspace: &Workspace) -> Option<PathBuf> {
+        let path = clone::reconcile(&self.root, sandbox_of(workspace));
+        path.is_dir().then_some(path)
+    }
+
     fn conflict_sides(&self, revision: &Revision, _path: &Path) -> Result<ConflictSides, Error> {
         let (base, ours, theirs) = ops::conflict_sides(&self.root, revision.as_str())?;
         Ok(ConflictSides {

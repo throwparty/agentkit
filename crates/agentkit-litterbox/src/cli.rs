@@ -5,7 +5,8 @@ use crate::config::Config;
 use crate::config_loader;
 use crate::mcp;
 use crate::orchestrator::{
-    HostReport, InspectionReport, PlannedStep, Preflight, Sandboxes, StagedMerge, preflight_host,
+    DeleteGuards, HostReport, InspectionReport, PlannedStep, Preflight, Sandboxes, StagedMerge,
+    preflight_host,
 };
 use crate::sandbox::contract::{
     ContributionSupport, Error, ProvisioningClass, SandboxStatus, StoreView,
@@ -77,10 +78,18 @@ enum Commands {
         /// Name of the sandbox to delete
         name: String,
 
-        /// Delete even if the sandbox is active or missing. A missing
-        /// sandbox's branch may hold unmerged work.
-        #[arg(short, long)]
-        force: bool,
+        /// Delete even if the sandbox's compute is running.
+        #[arg(long)]
+        ignore_running: bool,
+
+        /// Delete even if the record or its compute cannot be read.
+        #[arg(long)]
+        ignore_invalid: bool,
+
+        /// Delete even if the sandbox branch, resolution or staging workspace
+        /// may hold work the shared branch does not.
+        #[arg(long)]
+        ignore_unmerged: bool,
     },
 
     /// Report the backends available on this machine, their readiness and their
@@ -176,7 +185,23 @@ pub async fn run() -> ExitCode {
         Commands::Stdio => handle_stdio(backend).await,
         Commands::Pause { name, all, machine } => handle_pause(backend, name, all, machine).await,
         Commands::Resume { name } => handle_resume(backend, name).await,
-        Commands::Delete { name, force } => handle_delete(backend, name, force).await,
+        Commands::Delete {
+            name,
+            ignore_running,
+            ignore_invalid,
+            ignore_unmerged,
+        } => {
+            handle_delete(
+                backend,
+                name,
+                DeleteGuards {
+                    running: ignore_running,
+                    invalid: ignore_invalid,
+                    unmerged: ignore_unmerged,
+                },
+            )
+            .await
+        }
         Commands::Remote { name } => handle_remote(backend, name),
         Commands::Shell { name, command } => handle_shell(backend, name, command).await,
         Commands::Status { name, json } => handle_status(backend, name, json).await,
@@ -524,7 +549,7 @@ async fn handle_resume(backend: Option<String>, name: String) -> ExitCode {
     }
 }
 
-async fn handle_delete(backend: Option<String>, name: String, force: bool) -> ExitCode {
+async fn handle_delete(backend: Option<String>, name: String, guards: DeleteGuards) -> ExitCode {
     let config = match load_config(backend) {
         Ok(config) => config,
         Err(error) => return report(error),
@@ -534,7 +559,7 @@ async fn handle_delete(backend: Option<String>, name: String, force: bool) -> Ex
         Err(error) => return report(error),
     };
 
-    match sandboxes.delete(&name, force).await {
+    match sandboxes.delete(&name, guards).await {
         Ok(deletion) => {
             print!("Deleted {name}");
             if let Some(path) = &deletion.record_path {
@@ -551,7 +576,15 @@ async fn handle_delete(backend: Option<String>, name: String, force: bool) -> Ex
                         .join(", ")
                 );
             }
-            print!("; removed branch {}", deletion.branch);
+            if !deletion.branches.is_empty() {
+                print!("; removed {}", deletion.branches.join(", "));
+            }
+            if let Some(staging) = &deletion.staging {
+                print!("; removed staging {}", staging.display());
+            }
+            if !deletion.unused.is_empty() {
+                print!("; unused flags {}", deletion.unused.join(", "));
+            }
             if !deletion.compute_stopped {
                 print!("; compute could not be stopped");
             }

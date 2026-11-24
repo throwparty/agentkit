@@ -275,7 +275,7 @@ Add the paused check to `begin_resolution`, `finish_resolution` and `abandon_res
 | Depends On | T-020 |
 | References | paused-refusal,paused-class-parity,paused-returns-immediately,paused-reconcile,paused-host-side-operations,repair-while-paused |
 
-### T-022: [ ] Replace --force with per-condition delete guards
+### T-022: [x] Replace --force with per-condition delete guards
 
 Change `Sandboxes::delete(name, force)` to take `DeleteGuards { running, invalid, unmerged }` and wire `--ignore-running`, `--ignore-invalid` and `--ignore-unmerged` through `cli.rs`; remove `--force`. Each guard is checked and reported independently, and a refusal names every flag the record needs plus the record, both branches and any staging workspace. `paused` and `missing` set no running guard. The unmerged guard holds when the sandbox tip is not an ancestor of the shared tip, the shared ref is absent while the sandbox ref exists, a resolution is open, or a staging workspace exists. Extend `Deletion` with the refs, the staging workspace and the guards whose flags were unused, and print them. Update the `delete` help to describe each guard, and update Docker's `ReuseExisting` unsupported remedy to name the delete flags instead of `--force`. This supersedes the `--force` policy from T-010 and T-011.
 
