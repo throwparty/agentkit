@@ -262,7 +262,7 @@ Change the model-facing source state from `clean`/`held` to `clean`/`diverged`/`
 | Depends On | T-018 |
 | References | source-state-matrix,source-state,commands-while-diverged,list-records-and-branches |
 
-### T-021: [ ] Refuse paused resolution actions and keep status answering
+### T-021: [x] Refuse paused resolution actions and keep status answering
 
 Add the paused check to `begin_resolution`, `finish_resolution` and `abandon_resolution` in `orchestrator/service.rs`, using the same `ensure_live(.., PausedPolicy::Refuse)` path as `exec`, before the resolver inspects or writes the workspace. Do not add the check to `source_status`.
 

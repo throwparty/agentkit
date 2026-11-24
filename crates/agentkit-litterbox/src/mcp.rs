@@ -209,7 +209,7 @@ impl SandboxServer {
     ) -> Result<CallToolResult, McpError> {
         let project = self.project()?;
         let action = args.action.clone().unwrap_or_else(|| "begin".to_string());
-        let resolved = match action.as_str() {
+        let performed = match action.as_str() {
             "begin" => project.begin_resolution(&args.sandbox).await,
             "finish" => project.finish_resolution(&args.sandbox).await,
             "abandon" => project.abandon_resolution(&args.sandbox).await,
@@ -221,6 +221,7 @@ impl SandboxServer {
             }
         }
         .map_err(map_contract)?;
+        let resolved = performed.value;
         let response = serde_json::json!({
             "sandbox": args.sandbox,
             "action": action,
@@ -237,7 +238,7 @@ impl SandboxServer {
         });
         let content = ContentBlock::json(response)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
-        Ok(CallToolResult::success(vec![content]))
+        success_with_recovery(content, performed.recovery, None)
     }
 
     #[tool(
