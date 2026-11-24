@@ -27,7 +27,7 @@ use crate::sandbox::contract::{
 };
 use crate::sandbox::selected::Selected;
 use crate::vcs::{
-    Error as VcsError, Finished, Prepared, Report, Staged, Vcs, Workspace as VcsWorkspace,
+    Error as VcsError, Finished, Prepared, Report, Revision, Staged, Vcs, Workspace as VcsWorkspace,
 };
 /// How long host preparation may take before its commands are killed and
 /// reaped. Preparation runs before a backend's create budget starts, so it
@@ -1653,8 +1653,62 @@ impl Sandboxes {
     /// The host-side view of a diverged sandbox.
     pub async fn report(&self, name: &str) -> Result<Report, Error> {
         let stored = self.stored(name)?;
+        self.ensure_tool(&stored)?;
         let workspace = VcsWorkspace::from_branch(&stored.branch_name);
-        self.vcs.report(&workspace).map_err(contract_error)
+        let resolving = stored.resolution.is_some();
+        match self.vcs.sandbox_tip(&workspace) {
+            Ok(_) => self.vcs.report(&workspace).map_err(contract_error),
+            Err(VcsError::NotFound { .. }) if resolving => {
+                let base = self.vcs.synced(&workspace).map_err(contract_error)?;
+                let branch = self.vcs.tip(&workspace).map_err(contract_error)?;
+                Ok(Report {
+                    base,
+                    branch: branch.clone(),
+                    sandbox: None,
+                    conflicts: Vec::new(),
+                    worktree: self.vcs.staging(&workspace),
+                    reflog: None,
+                    next: Some(self.absent_sandbox_next(&stored, Some(&branch))),
+                })
+            }
+            Err(error) => Err(contract_error(error)),
+        }
+    }
+
+    /// The continuation for an open resolution whose sandbox revision is gone.
+    fn absent_sandbox_next(&self, stored: &StoredSandbox, shared: Option<&Revision>) -> String {
+        let name = &stored.sandbox.name;
+        let ours = stored
+            .resolution
+            .as_ref()
+            .map(|resolution| resolution.ours.as_str())
+            .unwrap_or("the recorded ours");
+        let shared = shared.map(Revision::as_str).unwrap_or("the shared tip");
+        let store = self
+            .vcs
+            .state_path()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "the VCS store".to_string());
+        match stored.vcs() {
+            "jj" => format!(
+                "the jj workspace for '{name}' is absent. In the clone at {store}, `jj op log` \
+                 or `jj log -r 'all()'` names the resolution commit whose parents are {ours} and \
+                 {shared}; re-attach it with `jj workspace add --name {name} --revision <commit>`, \
+                 or add the workspace at {ours} and run `sandbox-reconcile begin`. Do not push the \
+                 sandbox branch. If neither is recoverable, run `litterbox delete {name} \
+                 --ignore-unmerged` (add `--ignore-invalid` when the record cannot be read) and \
+                 create it again."
+            ),
+            _ => format!(
+                "the sandbox branch refs/litterbox/workspaces/{name} is absent. In the VCS store \
+                 at {store}, `git fsck --lost-found` lists the dangling resolution merge whose \
+                 parents are {ours} and {shared}; restore it with `git update-ref \
+                 refs/litterbox/workspaces/{name} <commit>`, or restore the ref at {ours} and run \
+                 `sandbox-reconcile begin`. Do not push the sandbox branch. If neither is \
+                 recoverable, run `litterbox delete {name} --ignore-unmerged` (add \
+                 `--ignore-invalid` when the record cannot be read) and create it again."
+            ),
+        }
     }
 
     /// Stage the host merge in a linked worktree.
@@ -1728,11 +1782,33 @@ impl Sandboxes {
         let stored = self.stored(name)?;
         self.ensure_tool(&stored)?;
         let workspace = VcsWorkspace::from_branch(&stored.branch_name);
-        self.vcs.ensure_refs(&workspace).map_err(contract_error)?;
+        let resolving = stored.resolution.is_some();
+        if !resolving {
+            self.vcs.ensure_refs(&workspace).map_err(contract_error)?;
+        }
         let synced = self.vcs.synced(&workspace).map_err(contract_error)?;
         let branch = self.vcs.tip(&workspace).map_err(contract_error)?;
-        let sandbox = self.vcs.sandbox_tip(&workspace).map_err(contract_error)?;
-        let resolving = stored.resolution.is_some();
+        let ours = stored
+            .resolution
+            .as_ref()
+            .map(|resolution| resolution.ours.clone());
+        let sandbox = match self.vcs.sandbox_tip(&workspace) {
+            Ok(sandbox) => sandbox,
+            Err(VcsError::NotFound { .. }) if resolving => {
+                return Ok(SourceStatus {
+                    synced: synced.as_str().to_string(),
+                    branch: branch.as_str().to_string(),
+                    sandbox: None,
+                    ours,
+                    state: "resolving".to_string(),
+                    reason: None,
+                    next: Some(self.absent_sandbox_next(&stored, Some(&branch))),
+                    resolution: true,
+                    conflicts: Vec::new(),
+                });
+            }
+            Err(error) => return Err(contract_error(error)),
+        };
         let conflicts = if resolving {
             self.vcs.conflicts(&sandbox).map_err(contract_error)?
         } else {
@@ -1757,9 +1833,11 @@ impl Sandboxes {
         Ok(SourceStatus {
             synced: synced.as_str().to_string(),
             branch: branch.as_str().to_string(),
-            sandbox: sandbox.as_str().to_string(),
+            sandbox: Some(sandbox.as_str().to_string()),
+            ours,
             state: state.to_string(),
             reason,
+            next: None,
             resolution: resolving,
             conflicts: conflicts
                 .into_iter()
@@ -3472,6 +3550,63 @@ mod seam_tests {
             .await
             .expect("the flag permits the delete");
         assert_eq!(deletion.staging, Some(staging));
+    }
+
+    #[tokio::test]
+    async fn an_absent_sandbox_revision_is_reported_with_the_continuation() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(TestVcs::new().with_conflicts_for("resolution-revision", &["file.txt"]));
+        let sandboxes = orchestrator_vcs(records.path(), backend, vcs.clone());
+        sandboxes.create("demo").await.expect("create");
+        sandboxes
+            .begin_resolution("demo")
+            .await
+            .expect("the conflict is open");
+        vcs.forget_sandbox_branch();
+
+        let status = sandboxes.source_status("demo").await.expect("status");
+        assert_eq!(status.state, "resolving");
+        assert!(status.sandbox.is_none());
+        assert_eq!(status.ours.as_deref(), Some("0123456789abcdef"));
+        let next = status.next.expect("the continuation is reported");
+        assert!(next.contains("fsck"), "{next}");
+        assert!(next.contains("--ignore-unmerged"), "{next}");
+
+        let report = sandboxes.report("demo").await.expect("report");
+        assert!(report.sandbox.is_none());
+        assert!(
+            report
+                .next
+                .as_deref()
+                .is_some_and(|next| next.contains("fsck")),
+            "{:?}",
+            report.next
+        );
+    }
+
+    #[tokio::test]
+    async fn an_absent_jj_sandbox_is_reported_with_the_operation_log() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(TestVcs::new().with_conflicts_for("resolution-revision", &["file.txt"]));
+        let mut sandboxes = orchestrator_vcs(records.path(), backend, vcs.clone());
+        sandboxes.create("demo").await.expect("create");
+        sandboxes
+            .begin_resolution("demo")
+            .await
+            .expect("the conflict is open");
+        let mut stored = current_record(records.path(), "demo");
+        stored.vcs = Some("jj".to_string());
+        metadata_store::store_sandbox_at(records.path(), "demo", &stored).expect("store");
+        sandboxes.vcs_tool = "jj".to_string();
+        vcs.forget_sandbox_branch();
+
+        let status = sandboxes.source_status("demo").await.expect("status");
+        let next = status.next.expect("the continuation is reported");
+        assert!(next.contains("jj op log"), "{next}");
+        assert!(next.contains("workspace add"), "{next}");
+        assert!(!next.contains("fsck"), "{next}");
     }
 
     #[tokio::test]

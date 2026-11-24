@@ -45,13 +45,20 @@ pub struct SourceStatus {
     pub synced: String,
     /// The shared branch tip.
     pub branch: String,
-    /// The sandbox branch tip.
-    pub sandbox: String,
+    /// The sandbox branch tip, when it is addressable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<String>,
+    /// The recorded sandbox tip when a resolution began, when one is open.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ours: Option<String>,
     /// `clean`, `diverged` or `resolving`.
     pub state: String,
     /// Why the source state is not `clean`, when it is not.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// What the user does next, when the sandbox revision is absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next: Option<String>,
     /// Whether a resolution is open.
     pub resolution: bool,
     /// The conflicts the working copy or shared branch carries, with counts and no text.
