@@ -12,7 +12,7 @@ use crate::domain::SandboxError;
 use crate::metadata_store::{self, LoadedSandbox, StoredSandbox};
 use crate::orchestrator::lock;
 use crate::orchestrator::outcome::{
-    Deletion, InspectionReport, Performed, Recovery, SourceStatus, StagedMerge,
+    DeleteGuards, Deletion, InspectionReport, Performed, Recovery, SourceStatus, StagedMerge,
 };
 use crate::orchestrator::reconcile::Reconciler;
 use crate::orchestrator::resolve::{Resolved, Resolver};
@@ -552,21 +552,55 @@ impl Sandboxes {
         }
     }
 
+    /// Whether deleting `stored` would drop work the shared branch does not have.
+    fn unmerged(&self, stored: &StoredSandbox, workspace: &VcsWorkspace) -> Result<bool, Error> {
+        if stored.resolution.is_some() {
+            return Ok(true);
+        }
+        self.unmerged_refs(workspace)
+    }
+
+    /// Whether the sandbox ref holds work the shared ref does not.
+    fn unmerged_refs(&self, workspace: &VcsWorkspace) -> Result<bool, Error> {
+        let sandbox = self.vcs.sandbox_tip(workspace);
+        let shared = self.vcs.tip(workspace);
+        match (sandbox, shared) {
+            (Ok(sandbox), Ok(shared)) => Ok(!self
+                .vcs
+                .is_ancestor(&sandbox, &shared)
+                .map_err(contract_error)?),
+            (Ok(_), Err(VcsError::NotFound { .. })) => Ok(true),
+            (Err(VcsError::NotFound { .. }), _) => Ok(false),
+            (Ok(_), Err(error)) => Err(contract_error(error)),
+            (Err(error), _) => Err(contract_error(error)),
+        }
+    }
+
     /// Delete a sandbox: compute first, then the branch, each half idempotent.
-    pub async fn delete(&self, name: &str, force: bool) -> Result<Deletion, Error> {
+    pub async fn delete(&self, name: &str, guards: DeleteGuards) -> Result<Deletion, Error> {
         let name = self.valid_name(name)?;
 
         match metadata_store::load_sandbox_at(&self.records_dir, &name)? {
             Some(LoadedSandbox::Current(stored)) => {
                 let workspace = VcsWorkspace::from_branch(&stored.branch_name);
-                if let Err(error) = self.vcs.discard_stage(&workspace) {
-                    tracing::warn!(sandbox = %name, %error, "the staging worktree may remain");
-                }
+                let staging = self.vcs.staging(&workspace);
                 let selected = match self.select_for(&stored.sandbox, "delete the sandbox").await {
                     Ok(selected) => selected,
                     Err(error) => {
-                        if !force {
-                            return Err(error);
+                        // Without the backend, compute cannot be determined. The
+                        // invalid guard is the only one that can decide it.
+                        let unmerged = staging.is_some() || self.unmerged(&stored, &workspace)?;
+                        let (needed, unused) = guard_set(guards, false, true, unmerged);
+                        if !needed.is_empty() {
+                            return Err(Error::Denied {
+                                operation: format!("delete sandbox '{name}'"),
+                                reason: refusal(
+                                    "in a state that cannot be determined",
+                                    &stored,
+                                    staging.as_deref(),
+                                    &needed,
+                                ),
+                            });
                         }
                         // Forced deletion still has to honour ownership: another
                         // backend's record is not ours to remove.
@@ -584,8 +618,10 @@ impl Sandboxes {
                                     .join(format!("{}.toml", stored.sandbox.name)),
                             ),
                             state_paths: Vec::new(),
-                            branch: stored.branch_name,
+                            branches: deleted_refs(&stored.branch_name),
                             compute_stopped: false,
+                            staging,
+                            unused,
                             detail: Some(format!("the backend could not be asked: {error}")),
                         });
                     }
@@ -597,7 +633,12 @@ impl Sandboxes {
                         reason: error.to_string(),
                     },
                 };
-                if !matches!(status, SandboxStatus::Paused) && !force {
+                let running = matches!(status, SandboxStatus::Active);
+                let invalid =
+                    matches!(status, SandboxStatus::Unknown | SandboxStatus::Error { .. });
+                let unmerged = staging.is_some() || self.unmerged(&stored, &workspace)?;
+                let (needed, unused) = guard_set(guards, running, invalid, unmerged);
+                if !needed.is_empty() {
                     let state = match &status {
                         SandboxStatus::Active => "active",
                         SandboxStatus::Missing => "missing",
@@ -608,12 +649,14 @@ impl Sandboxes {
                     };
                     return Err(Error::Denied {
                         operation: format!("delete sandbox '{name}'"),
-                        reason: format!(
-                            "it is {state}; its branch '{}' may hold unmerged work. \
-                             Pass --force to delete the record, workspace and branch.",
-                            stored.branch_name
-                        ),
+                        reason: refusal(state, &stored, staging.as_deref(), &needed),
                     });
+                }
+
+                if staging.is_some()
+                    && let Err(error) = self.vcs.discard_stage(&workspace)
+                {
+                    tracing::warn!(sandbox = %name, %error, "the staging workspace may remain");
                 }
 
                 tracing::info!(sandbox = %name, backend = %selected.name(), "deleting the sandbox");
@@ -642,20 +685,33 @@ impl Sandboxes {
                             .join(format!("{}.toml", stored.sandbox.name)),
                     ),
                     state_paths: teardown.state_paths,
-                    branch: stored.branch_name,
+                    branches: deleted_refs(&stored.branch_name),
                     compute_stopped: teardown.compute_stopped,
+                    staging,
+                    unused,
                     detail: teardown.detail,
                 })
             }
             Some(LoadedSandbox::Corrupt { path, reason }) => {
-                if !force {
+                let workspace = VcsWorkspace::from_branch(format!("litterbox/{name}"));
+                let staging = self.vcs.staging(&workspace);
+                let unmerged = staging.is_some() || self.unmerged_refs(&workspace)?;
+                let (needed, unused) = guard_set(guards, false, true, unmerged);
+                if !needed.is_empty() {
                     return Err(Error::Denied {
                         operation: format!("delete sandbox '{name}'"),
-                        reason: "its record is unreadable, so its status and compute cannot be \
-                                 determined. Pass --force to remove the record, state directory \
-                                 and branch."
-                            .to_string(),
+                        reason: format!(
+                            "its record is unreadable, so its status and compute cannot be \
+                             determined. Pass {} to remove the record, state directory, staging \
+                             workspace and branches.",
+                            needed.join(" and ")
+                        ),
                     });
+                }
+                if staging.is_some()
+                    && let Err(error) = self.vcs.discard_stage(&workspace)
+                {
+                    tracing::warn!(sandbox = %name, %error, "the staging workspace may remain");
                 }
                 let (teardown, selection_error) =
                     match self.selected_for_operation("delete the sandbox").await {
@@ -688,8 +744,10 @@ impl Sandboxes {
                 Ok(Deletion {
                     record_path: Some(path),
                     state_paths: teardown.state_paths,
-                    branch: format!("litterbox/{name}"),
+                    branches: deleted_refs(&format!("litterbox/{name}")),
                     compute_stopped: teardown.compute_stopped,
+                    staging,
+                    unused,
                     detail: teardown.detail.or(selection_error).or(Some(reason)),
                 })
             }
@@ -697,6 +755,7 @@ impl Sandboxes {
                 // No record: the branch may still exist from a crash before the
                 // record was written. Remove it; both halves already gone means a
                 // retried delete, which succeeds.
+                let (_, unused) = guard_set(guards, false, false, false);
                 match self.vcs.delete_branch(&name) {
                     Ok(()) => {}
                     Err(VcsError::NotFound { .. }) => {}
@@ -705,8 +764,10 @@ impl Sandboxes {
                 Ok(Deletion {
                     record_path: None,
                     state_paths: Vec::new(),
-                    branch: format!("litterbox/{name}"),
+                    branches: deleted_refs(&format!("litterbox/{name}")),
                     compute_stopped: true,
+                    staging: None,
+                    unused,
                     detail: None,
                 })
             }
@@ -1080,6 +1141,68 @@ fn port(port: &crate::config::PortRequest) -> RequestedPort {
 fn sandbox_ref(branch: &str) -> String {
     let slug = branch.strip_prefix("litterbox/").unwrap_or(branch);
     format!("refs/litterbox/workspaces/{slug}")
+}
+
+/// The ref that records the revision both sides last agreed on.
+fn synced_ref(branch: &str) -> String {
+    let slug = branch.strip_prefix("litterbox/").unwrap_or(branch);
+    format!("refs/litterbox/synced/{slug}")
+}
+
+/// The refs a delete removes for `branch`.
+fn deleted_refs(branch: &str) -> Vec<String> {
+    vec![branch.to_string(), sandbox_ref(branch), synced_ref(branch)]
+}
+
+/// Which guard flags the record needs and which were passed without their
+/// condition holding.
+fn guard_set(
+    guards: DeleteGuards,
+    running: bool,
+    invalid: bool,
+    unmerged: bool,
+) -> (Vec<String>, Vec<String>) {
+    let mut needed = Vec::new();
+    let mut unused = Vec::new();
+    for (holds, passed, flag) in [
+        (running, guards.running, "--ignore-running"),
+        (invalid, guards.invalid, "--ignore-invalid"),
+        (unmerged, guards.unmerged, "--ignore-unmerged"),
+    ] {
+        if holds && !passed {
+            needed.push(flag.to_string());
+        }
+        if !holds && passed {
+            unused.push(flag.to_string());
+        }
+    }
+    (needed, unused)
+}
+
+/// The refusal that names what a delete would remove and the flags it needs.
+fn refusal(
+    state: &str,
+    stored: &StoredSandbox,
+    staging: Option<&Path>,
+    needed: &[String],
+) -> String {
+    let mut held = format!(
+        "the record '{}', branches '{}' and '{}'",
+        stored.sandbox.name,
+        stored.branch_name,
+        sandbox_ref(&stored.branch_name)
+    );
+    if let Some(staging) = staging {
+        held.push_str(&format!(
+            ", and the staging workspace '{}'",
+            staging.display()
+        ));
+    }
+    format!(
+        "it is {state}; {held} may hold work the shared branch does not. Pass {} to delete \
+         the record, state and branches.",
+        needed.join(" and ")
+    )
 }
 
 /// The recorded source state, without inspecting the workspace.
@@ -1836,6 +1959,7 @@ mod seam_tests {
     use super::Sandboxes;
     use crate::config::Config;
     use crate::metadata_store::{self, StoredSandbox};
+    use crate::orchestrator::outcome::DeleteGuards;
     use crate::sandbox::contract::{
         BindingSupport, Error, ProvisionStep, ProvisioningClass, ResolvedStep, SandboxRecord,
         WorkspaceBinding,
@@ -2091,7 +2215,10 @@ mod seam_tests {
             "the record holds the resolution before the delete"
         );
 
-        sandboxes.delete("demo", true).await.expect("delete");
+        sandboxes
+            .delete("demo", DeleteGuards::ALL)
+            .await
+            .expect("delete");
 
         assert!(
             metadata_store::load_sandbox_at(records.path(), "demo")
@@ -2304,7 +2431,7 @@ mod seam_tests {
             orchestrator(dir.path(), records.path().to_path_buf(), backend, None);
 
         sandboxes
-            .delete("orphan", false)
+            .delete("orphan", DeleteGuards::NONE)
             .await
             .expect("delete cleans up");
 
@@ -2324,11 +2451,11 @@ mod seam_tests {
             orchestrator(dir.path(), records.path().to_path_buf(), backend, None);
 
         sandboxes
-            .delete("nothing-here", false)
+            .delete("nothing-here", DeleteGuards::NONE)
             .await
             .expect("nothing left is not a failure");
         sandboxes
-            .delete("nothing-here", false)
+            .delete("nothing-here", DeleteGuards::NONE)
             .await
             .expect("a retried delete succeeds");
     }
@@ -2445,7 +2572,10 @@ mod seam_tests {
             "the mask hid the file; it did not remove it"
         );
 
-        sandboxes.delete("demo", true).await.expect("delete");
+        sandboxes
+            .delete("demo", DeleteGuards::ALL)
+            .await
+            .expect("delete");
     }
 
     /// Create a sandbox, or skip the test when this host cannot run one.
@@ -2611,7 +2741,10 @@ mod seam_tests {
             "the mask hid the file; it did not remove it"
         );
 
-        sandboxes.delete("demo", true).await.expect("delete");
+        sandboxes
+            .delete("demo", DeleteGuards::ALL)
+            .await
+            .expect("delete");
     }
 
     #[tokio::test]
@@ -2690,7 +2823,10 @@ mod seam_tests {
         sandboxes.create("demo").await.expect("create");
         assert_eq!(vcs.prunes(), 0, "create does not prune");
 
-        sandboxes.delete("demo", true).await.expect("delete");
+        sandboxes
+            .delete("demo", DeleteGuards::ALL)
+            .await
+            .expect("delete");
         assert_eq!(
             vcs.prunes(),
             1,
@@ -2895,7 +3031,10 @@ mod seam_tests {
 
         let sandboxes = sandboxes.with_binding(None);
         assert_eq!(sandboxes.list().expect("list").sandboxes.len(), 1);
-        sandboxes.delete("demo", true).await.expect("delete");
+        sandboxes
+            .delete("demo", DeleteGuards::ALL)
+            .await
+            .expect("delete");
     }
 
     #[tokio::test]
@@ -2920,7 +3059,10 @@ mod seam_tests {
         assert!(!stored.remote);
         assert_eq!(vcs.prepared(), vec!["demo"]);
 
-        sandboxes.delete("demo", true).await.expect("delete");
+        sandboxes
+            .delete("demo", DeleteGuards::ALL)
+            .await
+            .expect("delete");
         assert!(
             metadata_store::load_sandbox_at(records.path(), "demo")
                 .expect("readable")
@@ -2934,7 +3076,7 @@ mod seam_tests {
         );
 
         sandboxes
-            .delete("demo", true)
+            .delete("demo", DeleteGuards::ALL)
             .await
             .expect("a second delete");
     }
@@ -3158,6 +3300,178 @@ mod seam_tests {
             stored.resolution.is_some(),
             "the refusal does not clear the resolution"
         );
+    }
+
+    #[tokio::test]
+    async fn delete_refuses_a_running_sandbox_without_ignore_running() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(TestVcs::new());
+        let sandboxes = orchestrator_vcs(records.path(), backend, vcs);
+        sandboxes.create("demo").await.expect("create");
+
+        let error = sandboxes
+            .delete("demo", DeleteGuards::NONE)
+            .await
+            .expect_err("a running sandbox is guarded");
+        assert!(error.to_string().contains("--ignore-running"), "{error}");
+
+        let deletion = sandboxes
+            .delete(
+                "demo",
+                DeleteGuards {
+                    running: true,
+                    ..DeleteGuards::NONE
+                },
+            )
+            .await
+            .expect("the flag permits the delete");
+        assert!(
+            deletion
+                .branches
+                .iter()
+                .any(|name| name == "litterbox/demo")
+        );
+        assert!(
+            deletion
+                .branches
+                .iter()
+                .any(|name| name == "refs/litterbox/workspaces/demo")
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_refuses_unmerged_work_and_names_both_guards_when_running() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(TestVcs::new().with_ancestor(false));
+        let sandboxes = orchestrator_vcs(records.path(), backend, vcs);
+        sandboxes.create("demo").await.expect("create");
+
+        let error = sandboxes
+            .delete("demo", DeleteGuards::NONE)
+            .await
+            .expect_err("running and unmerged are both guarded");
+        let message = error.to_string();
+        assert!(message.contains("--ignore-running"), "{message}");
+        assert!(message.contains("--ignore-unmerged"), "{message}");
+
+        let error = sandboxes
+            .delete(
+                "demo",
+                DeleteGuards {
+                    running: true,
+                    ..DeleteGuards::NONE
+                },
+            )
+            .await
+            .expect_err("the unmerged guard remains");
+        assert!(error.to_string().contains("--ignore-unmerged"), "{error}");
+
+        sandboxes
+            .delete(
+                "demo",
+                DeleteGuards {
+                    running: true,
+                    unmerged: true,
+                    ..DeleteGuards::NONE
+                },
+            )
+            .await
+            .expect("both flags permit the delete");
+    }
+
+    #[tokio::test]
+    async fn delete_refuses_a_corrupt_record_without_ignore_invalid() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(TestVcs::new());
+        let sandboxes = orchestrator_vcs(records.path(), backend, vcs);
+        std::fs::write(records.path().join("demo.toml"), "not = [valid").expect("write");
+
+        let error = sandboxes
+            .delete("demo", DeleteGuards::NONE)
+            .await
+            .expect_err("a corrupt record needs its own flag");
+        assert!(error.to_string().contains("--ignore-invalid"), "{error}");
+
+        let deletion = sandboxes
+            .delete(
+                "demo",
+                DeleteGuards {
+                    invalid: true,
+                    ..DeleteGuards::NONE
+                },
+            )
+            .await
+            .expect("the invalid flag permits the delete");
+        assert!(deletion.record_path.is_some());
+    }
+
+    #[tokio::test]
+    async fn delete_reports_unused_guard_flags() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(TestVcs::new());
+        let sandboxes = orchestrator_vcs(records.path(), backend, vcs);
+        sandboxes.create("demo").await.expect("create");
+
+        let deletion = sandboxes
+            .delete("demo", DeleteGuards::ALL)
+            .await
+            .expect("all flags permit the delete");
+        assert!(
+            deletion
+                .unused
+                .iter()
+                .any(|flag| flag == "--ignore-invalid"),
+            "{:?}",
+            deletion.unused
+        );
+        assert!(
+            deletion
+                .unused
+                .iter()
+                .any(|flag| flag == "--ignore-unmerged"),
+            "{:?}",
+            deletion.unused
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_refuses_a_staging_workspace_as_unmerged() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let staging = PathBuf::from("/tmp/litterbox-staging");
+        let vcs = Arc::new(TestVcs::new().with_staging(staging.clone()));
+        let sandboxes = orchestrator_vcs(records.path(), backend, vcs);
+        sandboxes.create("demo").await.expect("create");
+
+        let error = sandboxes
+            .delete(
+                "demo",
+                DeleteGuards {
+                    running: true,
+                    ..DeleteGuards::NONE
+                },
+            )
+            .await
+            .expect_err("the staging workspace is unmerged work");
+        assert!(error.to_string().contains("--ignore-unmerged"), "{error}");
+        assert!(error.to_string().contains("staging"), "{error}");
+
+        let deletion = sandboxes
+            .delete(
+                "demo",
+                DeleteGuards {
+                    running: true,
+                    unmerged: true,
+                    ..DeleteGuards::NONE
+                },
+            )
+            .await
+            .expect("the flag permits the delete");
+        assert_eq!(deletion.staging, Some(staging));
     }
 
     #[tokio::test]

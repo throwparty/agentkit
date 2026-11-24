@@ -207,7 +207,10 @@ mod tests {
         );
         assert_eq!(sandboxes.list().expect("list").sandboxes.len(), 1);
 
-        sandboxes.delete("demo", true).await.expect("delete");
+        sandboxes
+            .delete("demo", crate::orchestrator::DeleteGuards::ALL)
+            .await
+            .expect("delete");
         assert!(
             !branch_exists(dir.path(), "litterbox/demo"),
             "the branch is removed"

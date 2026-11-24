@@ -235,6 +235,11 @@ pub trait Vcs: Send + Sync {
     fn discard_stage(&self, _workspace: &Workspace) -> Result<(), Error> {
         Err(not_implemented("discard the staging worktree"))
     }
+
+    /// The staging workspace, when one exists.
+    fn staging(&self, _workspace: &Workspace) -> Option<PathBuf> {
+        None
+    }
 }
 
 fn not_implemented(operation: &str) -> Error {

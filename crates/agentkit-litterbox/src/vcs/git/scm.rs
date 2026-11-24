@@ -869,6 +869,14 @@ impl Vcs for GitVcs {
         reconcile::discard(&repo, &path, &temp)
     }
 
+    fn staging(&self, workspace: &Workspace) -> Option<PathBuf> {
+        let branch_name = workspace.branch().to_string();
+        let slug = sandbox_slug(&branch_name);
+        let path =
+            reconcile::worktree_path(&self.reconcile_root(), &self.project_slug().ok()?, slug);
+        path.is_dir().then_some(path)
+    }
+
     fn ensure_refs(&self, workspace: &Workspace) -> Result<(), VcsError> {
         let branch = workspace.branch().to_string();
         self.repo_for_branch(&branch, |repo| {
