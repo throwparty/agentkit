@@ -12,7 +12,7 @@ The probes behind this spec established the following. Git round-trips a tree of
 
 Two runs of an agent against an identical conflicted fixture produced trees that passed every check Litterbox can run (the conflict query, a marker scan, bookmark consistency, ancestry) while one had deleted a whole side and the other had conflict-header text as file content. Only a diff against each side caught either. Character-level editing of markers failed twice. A three-way merge of the three versions resolved correctly.
 
-Three rulings shape the design. Litterbox performs every host write on the resolution path and the agent writes no ref. `read` serves the three sides of a conflicted path. The check for resolution reports a per-side diff and refuses only what the VCS refuses.
+Three decisions shape the design. Litterbox performs every host write on the resolution path and the agent writes no ref. `read` serves the three sides of a conflicted path. The check for resolution reports a per-side diff and refuses only what the VCS refuses.
 
 
 ```mermaid
@@ -86,7 +86,7 @@ Beginning resolution materialises the conflicted revision into `/src` in place o
 
 ### FR-002: Beginning is a tool
 
-`sandbox-reconcile` gains an action. `begin` refuses when the shared branch tip already carries a conflict, because that commit belongs to the user and Litterbox resolves only the merge it creates. Otherwise it snapshots the workspace, materialises the merge, and reports the revision it started from. It fails when a resolution is already open for the sandbox and names the revision of the open one.
+`sandbox-reconcile` gains an action. `begin` fails when the shared branch tip already carries a conflict, because that commit belongs to the user and Litterbox resolves only the merge it creates. Otherwise it snapshots the workspace, materialises the merge, and reports the revision it started from. It fails when a resolution is already open for the sandbox and names the revision of the open one.
 
 **Slug:** `begin-resolution`
 
@@ -212,7 +212,7 @@ The same sequence on a jj sandbox. The resolution revision is the working copy, 
 
 Point the shared bookmark at a commit that already carries a conflict. `begin` fails, the message says Litterbox resolves only the merge it creates and names the fix to make in the checkout, no resolution record is written, and the sandbox keeps holding at `synced`. Fix the tip in the checkout and push it; the next operation adopts the clean tip.
 
-**Slug:** `tip-refused`
+**Slug:** `tip-reported`
 
 ### AC-004: A lost side is reported
 
