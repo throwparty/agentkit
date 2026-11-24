@@ -327,7 +327,7 @@ Add a shared continuation helper in `orchestrator/` that, for a sandbox with an 
 | Depends On | T-019,T-020 |
 | References | absent-sandbox-revision,resolution-without-sandbox-branch,repair-open-resolution,source-state-matrix,open-resolution |
 
-### T-026: [ ] Run final verification for the amendment
+### T-026: [x] Run final verification for the amendment
 
 Run `cargo test -p agentkit-litterbox`, `cargo clippy -p agentkit-litterbox --all-targets -- -D warnings`, `arch-lint check` and `bash hack/arch-lint-negative.sh`. Check the MCP tool list, the CLI command list, the generated pages and every spec slug against the tasks.
 
