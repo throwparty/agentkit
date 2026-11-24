@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -51,6 +51,9 @@ pub struct Sandboxes {
 pub struct Listing {
     /// Records written by this version.
     pub sandboxes: Vec<SandboxRecord>,
+    /// The source state of each current record, from the stored merge and
+    /// resolution: `clean`, `diverged` or `resolving`.
+    pub sources: BTreeMap<String, String>,
     /// Records that cannot be read, with the reason.
     pub corrupt: Vec<String>,
     /// Branches with no record: compute the orchestrator cannot address.
@@ -383,6 +386,8 @@ impl Sandboxes {
                     from: SandboxStatus::Missing,
                     action: "already repaired".to_string(),
                     branch: stored.branch_name.clone(),
+                    source: "sandbox".to_string(),
+                    fallback: None,
                 });
             }
             SandboxStatus::Paused => {
@@ -400,14 +405,47 @@ impl Sandboxes {
 
         let binding = stored.binding();
         let workspace = VcsWorkspace::from_branch(&stored.branch_name);
-        let tip = match self.vcs.tip(&workspace) {
-            Ok(tip) => tip,
+        let sandbox_ref = sandbox_ref(&stored.branch_name);
+        let (materialised, source, fallback) = match self.vcs.sandbox_tip(&workspace) {
+            Ok(revision) => (revision, "sandbox".to_string(), None),
             Err(VcsError::NotFound { .. }) => {
-                return Err(Error::Unavailable {
-                    backend: selected.name().to_string(),
-                    reason: format!("sandbox '{name}' has no branch; its durable half is gone"),
-                    remedy: format!("run `litterbox delete --force {name}` and create it again"),
-                });
+                if let Some(open) = &stored.resolution {
+                    return Err(Error::Unavailable {
+                        backend: selected.name().to_string(),
+                        reason: format!(
+                            "sandbox '{name}' has an open resolution but its sandbox branch is absent; \
+                             the revision under resolution is not addressable"
+                        ),
+                        remedy: format!(
+                            "restore {sandbox_ref} at {} from the reflog or operation log, or run \
+                             `litterbox delete {name}` with the flags its refusal names and create it again",
+                            open.ours
+                        ),
+                    });
+                }
+                match self.vcs.tip(&workspace) {
+                    Ok(revision) => (
+                        revision,
+                        "shared".to_string(),
+                        Some(format!(
+                            "{sandbox_ref} is absent; materialised from the shared branch {}",
+                            stored.branch_name
+                        )),
+                    ),
+                    Err(VcsError::NotFound { .. }) => {
+                        return Err(Error::Unavailable {
+                            backend: selected.name().to_string(),
+                            reason: format!(
+                                "sandbox '{name}' has neither a shared nor a sandbox branch; \
+                                 its durable half is gone"
+                            ),
+                            remedy: format!(
+                                "run `litterbox delete {name}` with the flags its refusal names and create it again"
+                            ),
+                        });
+                    }
+                    Err(error) => return Err(contract_error(error)),
+                }
             }
             Err(error) => return Err(contract_error(error)),
         };
@@ -419,7 +457,7 @@ impl Sandboxes {
             WorkspaceBinding::Copied => {
                 let staged = TempDir::new().map_err(SandboxError::Io)?;
                 self.vcs
-                    .materialise(&workspace, &tip, staged.path())
+                    .materialise(&workspace, &materialised, staged.path())
                     .map_err(contract_error)?;
                 Some(staged)
             }
@@ -479,6 +517,8 @@ impl Sandboxes {
             from: SandboxStatus::Missing,
             action: "created".to_string(),
             branch: stored.branch_name.clone(),
+            source,
+            fallback,
         })
     }
 
@@ -751,6 +791,10 @@ impl Sandboxes {
             match entry.loaded {
                 Ok(LoadedSandbox::Current(stored)) => {
                     if stored.vcs() == self.vcs_tool {
+                        listing.sources.insert(
+                            stored.sandbox.name.clone(),
+                            source_state(&stored).to_string(),
+                        );
                         listing.sandboxes.push(stored.sandbox);
                     } else {
                         listing.corrupt.push(format!(
@@ -1029,6 +1073,23 @@ fn port(port: &crate::config::PortRequest) -> RequestedPort {
     RequestedPort {
         name: port.name.clone(),
         target: port.target,
+    }
+}
+
+/// The ref that holds a sandbox's own work.
+fn sandbox_ref(branch: &str) -> String {
+    let slug = branch.strip_prefix("litterbox/").unwrap_or(branch);
+    format!("refs/litterbox/workspaces/{slug}")
+}
+
+/// The recorded source state, without inspecting the workspace.
+fn source_state(stored: &StoredSandbox) -> &'static str {
+    if stored.resolution.is_some() {
+        "resolving"
+    } else if stored.merge.is_some() {
+        "diverged"
+    } else {
+        "clean"
     }
 }
 
@@ -1539,17 +1600,35 @@ impl Sandboxes {
         let synced = self.vcs.synced(&workspace).map_err(contract_error)?;
         let branch = self.vcs.tip(&workspace).map_err(contract_error)?;
         let sandbox = self.vcs.sandbox_tip(&workspace).map_err(contract_error)?;
-        let conflicts = self.vcs.conflicts(&branch).map_err(contract_error)?;
+        let resolving = stored.resolution.is_some();
+        let conflicts = if resolving {
+            self.vcs.conflicts(&sandbox).map_err(contract_error)?
+        } else {
+            self.vcs.conflicts(&branch).map_err(contract_error)?
+        };
+        let state = if resolving {
+            "resolving"
+        } else if stored.merge.is_some() || !conflicts.is_empty() {
+            "diverged"
+        } else {
+            "clean"
+        };
+        let reason = if resolving {
+            None
+        } else if !conflicts.is_empty() {
+            Some("shared branch is conflicted".to_string())
+        } else if stored.merge.is_some() {
+            Some("the sandbox has unsaved work and the branch moved".to_string())
+        } else {
+            None
+        };
         Ok(SourceStatus {
             synced: synced.as_str().to_string(),
             branch: branch.as_str().to_string(),
             sandbox: sandbox.as_str().to_string(),
-            state: if conflicts.is_empty() {
-                "clean".to_string()
-            } else {
-                "conflicted".to_string()
-            },
-            resolution: stored.resolution.is_some(),
+            state: state.to_string(),
+            reason,
+            resolution: resolving,
             conflicts: conflicts
                 .into_iter()
                 .map(|conflict| crate::orchestrator::outcome::ConflictView {
@@ -1846,6 +1925,16 @@ mod seam_tests {
             vcs: None,
             merge: None,
             resolution: None,
+        }
+    }
+
+    fn current_record(records: &Path, name: &str) -> StoredSandbox {
+        match metadata_store::load_sandbox_at(records, name)
+            .expect("load")
+            .expect("present")
+        {
+            metadata_store::LoadedSandbox::Current(stored) => *stored,
+            metadata_store::LoadedSandbox::Corrupt { .. } => panic!("corrupt record"),
         }
     }
 
@@ -2899,6 +2988,236 @@ mod seam_tests {
         let recovery = performed.recovery.expect("the repair is reported");
         assert_eq!(recovery.sandbox, "demo");
         assert_eq!(recovery.branch, "litterbox/demo");
+    }
+
+    #[tokio::test]
+    async fn a_pending_repair_materialises_the_sandbox_branch() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(
+            TestVcs::new()
+                .with_tip("shared-tip")
+                .with_sandbox_tip("sandbox-tip"),
+        );
+        let sandboxes = orchestrator_vcs(records.path(), backend.clone(), vcs.clone());
+        sandboxes.create("demo").await.expect("create");
+        backend.mark_missing("demo");
+
+        let performed = sandboxes
+            .exec("demo", &["true".to_string()])
+            .await
+            .expect("the command repairs the sandbox");
+        let recovery = performed.recovery.expect("the repair is reported");
+        assert_eq!(recovery.source, "sandbox");
+        assert_eq!(recovery.fallback, None);
+        assert_eq!(
+            vcs.materialised()
+                .last()
+                .map(|(_, revision)| revision.as_str()),
+            Some("sandbox-tip"),
+            "the sandbox branch is the materialise source"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_repair_without_a_sandbox_branch_uses_and_reports_the_shared_branch() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(
+            TestVcs::new()
+                .with_tip("shared-tip")
+                .without_sandbox_branch(),
+        );
+        let sandboxes = orchestrator_vcs(records.path(), backend.clone(), vcs.clone());
+        sandboxes.create("demo").await.expect("create");
+        backend.mark_missing("demo");
+
+        let performed = sandboxes
+            .exec("demo", &["true".to_string()])
+            .await
+            .expect("the command repairs the sandbox");
+        let recovery = performed.recovery.expect("the repair is reported");
+        assert_eq!(recovery.source, "shared");
+        let fallback = recovery.fallback.expect("the fallback is reported");
+        assert!(
+            fallback.contains("refs/litterbox/workspaces/demo"),
+            "{fallback}"
+        );
+        assert_eq!(
+            vcs.materialised()
+                .last()
+                .map(|(_, revision)| revision.as_str()),
+            Some("shared-tip"),
+            "the shared branch is the fallback source"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_repair_without_either_branch_is_unavailable() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(
+            TestVcs::new()
+                .without_shared_branch()
+                .without_sandbox_branch(),
+        );
+        let sandboxes = orchestrator_vcs(records.path(), backend.clone(), vcs);
+        sandboxes.create("demo").await.expect("create");
+        backend.mark_missing("demo");
+
+        let error = sandboxes
+            .exec("demo", &["true".to_string()])
+            .await
+            .expect_err("no durable ref remains");
+        assert!(matches!(error, Error::Unavailable { .. }), "{error:?}");
+    }
+
+    #[tokio::test]
+    async fn an_open_resolution_survives_repair() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(TestVcs::new().with_conflicts_for("resolution-revision", &["file.txt"]));
+        let sandboxes = orchestrator_vcs(records.path(), backend.clone(), vcs.clone());
+        sandboxes.create("demo").await.expect("create");
+        sandboxes
+            .begin_resolution("demo")
+            .await
+            .expect("the conflict is open");
+        backend.mark_missing("demo");
+
+        let performed = sandboxes
+            .exec("demo", &["true".to_string()])
+            .await
+            .expect("repair keeps the resolution");
+        assert_eq!(
+            performed.recovery.expect("the repair is reported").source,
+            "sandbox"
+        );
+        assert_eq!(
+            vcs.materialised()
+                .last()
+                .map(|(_, revision)| revision.as_str()),
+            Some("resolution-revision"),
+            "the revision under resolution is materialised"
+        );
+
+        let stored = metadata_store::load_sandbox_at(records.path(), "demo")
+            .expect("load")
+            .expect("present");
+        let metadata_store::LoadedSandbox::Current(stored) = stored else {
+            panic!("a record written now is current");
+        };
+        assert!(
+            stored.resolution.is_some(),
+            "the resolution record survives the repair"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_repair_cannot_preserve_a_resolution_without_the_sandbox_branch() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(TestVcs::new().with_conflicts_for("resolution-revision", &["file.txt"]));
+        let sandboxes = orchestrator_vcs(records.path(), backend.clone(), vcs.clone());
+        sandboxes.create("demo").await.expect("create");
+        sandboxes
+            .begin_resolution("demo")
+            .await
+            .expect("the conflict is open");
+        vcs.forget_sandbox_branch();
+        backend.mark_missing("demo");
+
+        let error = sandboxes
+            .exec("demo", &["true".to_string()])
+            .await
+            .expect_err("the resolution cannot be reconstructed");
+        assert!(matches!(error, Error::Unavailable { .. }), "{error:?}");
+        assert!(error.to_string().contains("open resolution"), "{error}");
+
+        let stored = metadata_store::load_sandbox_at(records.path(), "demo")
+            .expect("load")
+            .expect("present");
+        let metadata_store::LoadedSandbox::Current(stored) = stored else {
+            panic!("a record written now is current");
+        };
+        assert!(
+            stored.resolution.is_some(),
+            "the refusal does not clear the resolution"
+        );
+    }
+
+    #[tokio::test]
+    async fn source_status_reports_diverged_when_a_merge_is_held() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(TestVcs::new());
+        let sandboxes = orchestrator_vcs(records.path(), backend, vcs);
+        sandboxes.create("demo").await.expect("create");
+        let mut stored = current_record(records.path(), "demo");
+        stored.merge = Some(metadata_store::StoredMerge {
+            base: "base".to_string(),
+            ours: "ours".to_string(),
+            theirs: "theirs".to_string(),
+        });
+        metadata_store::store_sandbox_at(records.path(), "demo", &stored).expect("store");
+
+        let status = sandboxes.source_status("demo").await.expect("status");
+        assert_eq!(status.state, "diverged");
+        assert!(
+            status
+                .reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("unsaved work")),
+            "{:?}",
+            status.reason
+        );
+    }
+
+    #[tokio::test]
+    async fn source_status_reports_resolving_and_the_workspace_block_does_too() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(TestVcs::new().with_conflicts_for("resolution-revision", &["file.txt"]));
+        let sandboxes = orchestrator_vcs(records.path(), backend, vcs);
+        sandboxes.create("demo").await.expect("create");
+        sandboxes
+            .begin_resolution("demo")
+            .await
+            .expect("the conflict is open");
+
+        let status = sandboxes.source_status("demo").await.expect("status");
+        assert_eq!(status.state, "resolving");
+        assert!(status.resolution);
+        assert_eq!(status.conflicts.len(), 1, "{:?}", status.conflicts);
+        assert_eq!(status.conflicts[0].path, "file.txt");
+
+        let performed = sandboxes
+            .exec("demo", &["true".to_string()])
+            .await
+            .expect("the tool runs during resolution");
+        let block = performed.block().expect("the block is reported");
+        assert_eq!(block.state, "resolving");
+    }
+
+    #[tokio::test]
+    async fn list_carries_the_source_state_from_the_record() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(TestVcs::new());
+        let sandboxes = orchestrator_vcs(records.path(), backend, vcs);
+        sandboxes.create("demo").await.expect("create");
+        let mut stored = current_record(records.path(), "demo");
+        stored.resolution = Some(metadata_store::StoredResolution {
+            synced: "base".to_string(),
+            ours: "ours".to_string(),
+        });
+        metadata_store::store_sandbox_at(records.path(), "demo", &stored).expect("store");
+
+        let listing = sandboxes.list().expect("list");
+        assert_eq!(
+            listing.sources.get("demo").map(String::as_str),
+            Some("resolving")
+        );
     }
 
     #[tokio::test]

@@ -18,6 +18,11 @@ pub struct Recovery {
     pub action: String,
     /// The branch the sandbox is paired with.
     pub branch: String,
+    /// Where the workspace was materialised from: `sandbox` or `shared`.
+    pub source: String,
+    /// Why the shared branch was used, when the sandbox branch was absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback: Option<String>,
 }
 
 /// One conflicted path, as the model sees it.
@@ -42,11 +47,14 @@ pub struct SourceStatus {
     pub branch: String,
     /// The sandbox branch tip.
     pub sandbox: String,
-    /// `clean` or `conflicted`.
+    /// `clean`, `diverged` or `resolving`.
     pub state: String,
+    /// Why the source state is not `clean`, when it is not.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
     /// Whether a resolution is open.
     pub resolution: bool,
-    /// The conflicts the shared branch carries, with counts and no text.
+    /// The conflicts the working copy or shared branch carries, with counts and no text.
     pub conflicts: Vec<ConflictView>,
 }
 
@@ -64,7 +72,7 @@ pub struct ResolutionView {
 /// The model-facing workspace block appended to a single-sandbox tool result.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct WorkspaceBlock {
-    /// `clean` or `held`.
+    /// `clean`, `diverged` or `resolving`.
     pub state: String,
     /// Why the branch is held, when it is.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -241,15 +249,15 @@ mod tests {
     }
 
     #[test]
-    fn a_held_block_carries_its_reason_and_conflicts() {
+    fn a_diverged_block_carries_its_reason_and_conflicts() {
         let text = toml::to_string(&block(
-            "held",
+            "diverged",
             Some("shared branch is conflicted"),
             &["src/lib.rs"],
             Some("resolve"),
         ))
         .expect("toml");
-        assert!(text.contains("state = \"held\""), "{text}");
+        assert!(text.contains("state = \"diverged\""), "{text}");
         assert!(text.contains("shared branch is conflicted"), "{text}");
         assert!(text.contains("src/lib.rs"), "{text}");
     }

@@ -186,10 +186,30 @@ impl<'a> Reconciler<'a> {
             merge,
         );
 
+        let resolving = self.stored.resolution.is_some();
+        let resolution_conflicts: Vec<String> = if resolving {
+            self.vcs
+                .conflicts(&sandbox)
+                .map_err(contract_error)?
+                .into_iter()
+                .map(|conflict| conflict.path.display().to_string())
+                .collect()
+        } else {
+            Vec::new()
+        };
         let held = !conflicted.is_empty() || merge == Merge::Pending;
         let block = WorkspaceBlock {
-            state: if held { "held" } else { "clean" }.to_string(),
-            reason: if !conflicted.is_empty() {
+            state: if resolving {
+                "resolving"
+            } else if held {
+                "diverged"
+            } else {
+                "clean"
+            }
+            .to_string(),
+            reason: if resolving {
+                None
+            } else if !conflicted.is_empty() {
                 Some("shared branch is conflicted".to_string())
             } else if merge == Merge::Pending {
                 Some("the sandbox has unsaved work and the branch moved".to_string())
@@ -203,7 +223,9 @@ impl<'a> Reconciler<'a> {
                 .iter()
                 .map(|path| path.display().to_string())
                 .collect(),
-            next: if !conflicted.is_empty() {
+            next: if resolving {
+                Some("resolve the conflicts in the workspace, then finish or abandon".to_string())
+            } else if !conflicted.is_empty() {
                 Some(
                     "resolve the shared branch and push; the sandbox is on the last good revision"
                         .to_string(),
@@ -215,10 +237,7 @@ impl<'a> Reconciler<'a> {
             },
             resolution: self.stored.resolution.as_ref().map(|open| ResolutionView {
                 synced: open.synced.clone(),
-                conflicts: conflicted
-                    .iter()
-                    .map(|path| path.display().to_string())
-                    .collect(),
+                conflicts: resolution_conflicts,
                 next: "resolve the conflicts in the workspace, then finish or abandon".to_string(),
             }),
         };
