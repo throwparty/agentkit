@@ -301,7 +301,7 @@ Extend the table-driven tests with the source states `clean`, `diverged` and `re
 | Depends On | T-018,T-019,T-020,T-021,T-022,T-025 |
 | References | test-matrix,matrix-tests,workspace-tests-recovers,repair-preserves-sandbox-work,commands-while-diverged,paused-reconcile,several-delete-guards,unused-delete-flag,delete-missing-needs-force,absent-sandbox-revision |
 
-### T-024: [ ] Update lifecycle docs and regenerate both references
+### T-024: [x] Update lifecycle docs and regenerate both references
 
 Update `docs/docs/user/litterbox/lifecycle.mdx` with the state diagram, the compute and source state tables, a second matrix over `clean`, `diverged` and `resolving`, the repair-source rule and its fallback, the absent-sandbox status and continuation, the paused `sandbox-reconcile` refusal, and the three delete flags. Mirror the tables and prose in `src/docgen.rs`, then regenerate `reference/cli.mdx` and `reference/mcp.mdx` with the existing docgen commands. Add docgen assertions for the new rows and for the removed `held`/`--force` words.
 

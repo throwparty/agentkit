@@ -62,6 +62,7 @@ Parameters:
 - `path` (string, required) Path inside the sandbox.
 - `offset` (integer, optional) Line offset (0-based).
 - `limit` (integer, optional) Maximum number of lines to read.
+- `side` (string, optional) Read one side of a conflicted path: base, ours or theirs.
 
 ## `sandbox-create`
 
@@ -74,6 +75,23 @@ Parameters:
 ## `sandbox-ports`
 
 Get forwarded ports for a sandbox.
+
+Parameters:
+
+- `sandbox` (string, required) Sandbox name.
+
+## `sandbox-reconcile`
+
+Begin, finish or abandon a conflict resolution in the sandbox.
+
+Parameters:
+
+- `sandbox` (string, required) Sandbox name.
+- `action` (string, optional) One of begin, finish or abandon. Defaults to begin.
+
+## `sandbox-status`
+
+Report a sandbox's source state and the conflicts it carries.
 
 Parameters:
 
@@ -92,25 +110,41 @@ Parameters:
 
 ## Sandbox lifecycle
 
-A sandbox is `active`, `paused` or `missing`. `active` and `paused` are derived from the
-sandbox's compute; `missing` means the record and the branch exist but the compute has
-exited. Every command that takes a sandbox expects `active`.
+A sandbox has a compute state and a source state. The compute state is `active`,
+`paused` or `missing`; it describes the process. The source state is `clean`,
+`diverged` or `resolving`; it describes the branches. `diverged` means the shared
+branch advance is held because the branch moved under unsaved work or the shared tip
+carries a conflict. `resolving` means a `sandbox-reconcile` resolution is open.
+Neither source state refuses a tool: only the branch advance waits.
 
-### Tools
+### Tools by compute state
 
 | Tool | `active` | `paused` | `missing` |
 | --- | --- | --- | --- |
 | `bash`, `read`, `write`, `patch`, `ls`, `glob`, `grep` | runs | invalid params, `conflict`, naming the resume command | repairs the sandbox, appends a recovery block, then runs |
 | `sandbox-ports` | the recorded ports | the recorded ports | the recorded ports |
 | `sandbox-create` | conflict | conflict | repairs the sandbox and reports the recovery |
+| `sandbox-status` | reports the source state | reports the source state | reports the source state |
+| `sandbox-reconcile` | begins, finishes or abandons a resolution | invalid params, `conflict`, naming the resume command | repairs, then begins, finishes or abandons |
 
-`sandbox-create` on an active or paused name is a conflict. On a missing name it
-repairs the compute and reports the recovery. `sandbox-ports` answers from the
-record, so the same ports come back whether or not the compute is alive; a backend
-that does not forward ports reports the operation as unsupported.
+### Tools by source state
 
-A paused command is refused before any join, so the tool returns immediately. A
-repaired command's result carries the normal content plus a structured recovery
-block naming the sandbox, the state it came from and the branch.
+| Tool | `clean` | `diverged` | `resolving` |
+| --- | --- | --- | --- |
+| command tools | runs; a snapshot advances the shared branch | runs; a snapshot stays on the sandbox branch | runs; edits are the resolution |
+| `sandbox-status` | clean | diverged, with the reason | resolving, with the conflicts |
+| `sandbox-reconcile` | begin fails; there is nothing to resolve | begin opens a resolution | begin fails; finish and abandon close it |
+| `sandbox-create` on a missing name | repair lands clean | repair keeps the divergence | repair keeps the resolution |
+
+`sandbox-create` on an active, paused, diverged or resolving name is a conflict. On a
+missing name it repairs the compute and reports the recovery. `sandbox-ports` answers
+from the record, so the same ports come back whether or not the compute is alive.
+
+A paused command or `sandbox-reconcile` action is refused before any join, so the
+tool returns immediately. `sandbox-status` does not join and still answers.
+
+When only the sandbox revision is absent and a resolution is open, `sandbox-status`
+returns `resolving`, `sandbox: null`, the recorded `synced`/`ours` and a `next` that
+names the Git reflog/fsck or jj op-log recovery and the delete fallback.
 
 See [Sandbox lifecycle](../lifecycle) for the state diagram, the failure classes and how to recover a missing sandbox.

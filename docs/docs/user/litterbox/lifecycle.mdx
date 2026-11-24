@@ -4,26 +4,40 @@ sidebar_position: 6
 
 # ♻️ Sandbox lifecycle
 
-A sandbox is a name, a Git branch and a unit of compute. The name is the
-identity, and the branch is the durable half: it holds the work. The compute is
-the throwaway half, and it can disappear without the sandbox disappearing with
-it.
+A sandbox is a name, a pair of Git refs and a unit of compute. The name is the
+identity. The shared branch `litterbox/<name>` is the user's branch, and the
+sandbox branch `refs/litterbox/workspaces/<name>` holds the sandbox's own work.
+The compute is the throwaway half, and it can disappear without the sandbox
+disappearing with it.
 
 ## States
 
-| State     | Meaning                                                                   |
-| --------- | ------------------------------------------------------------------------- |
-| `active`  | The compute is running and accepts commands.                              |
-| `paused`  | The compute exists but is frozen. It accepts no work until it is resumed. |
-| `missing` | The record and the branch exist; the compute has exited.                  |
-| `unknown` | The backend could not be asked. `list` prints this with the reason.       |
-| `error`   | The backend was asked and reported a failure, with the reason.            |
+A sandbox has a compute state and a source state. They are independent.
+
+| Compute state | Meaning                                                                   |
+| ------------- | ------------------------------------------------------------------------- |
+| `active`      | The compute is running and accepts commands.                              |
+| `paused`      | The compute exists but is frozen. It accepts no work until it is resumed. |
+| `missing`     | The record and the branches exist; the compute has exited.                |
+| `unknown`     | The backend could not be asked. `list` prints this with the reason.       |
+| `error`       | The backend was asked and reported a failure, with the reason.            |
+
+| Source state | Meaning                                                                                       |
+| ------------ | --------------------------------------------------------------------------------------------- |
+| `clean`      | The shared branch is where the sandbox last agreed, and the workspace matches its own branch.  |
+| `diverged`   | The shared branch advance is held: it moved under unsaved work, or its tip carries a conflict. |
+| `resolving`  | A `sandbox-reconcile` resolution is open in the sandbox.                                      |
 
 `active`, `paused` and `missing` are derived every time Litterbox looks: the
 record's process ids are checked against the running processes. Nothing is
 stored as "missing". `unknown` and `error` are reporting states rather than
 lifecycle states — they describe an answer about the backend, not a phase the
 sandbox moves through.
+
+`clean`, `diverged` and `resolving` come from the record and the refs. A
+`diverged` sandbox runs normally; only the advance of the shared branch waits.
+A `resolving` sandbox is also `diverged` in the sense that the advance waits, but
+`resolving` is reported because a resolution is the active workflow.
 
 ## The lifecycle
 
@@ -40,29 +54,47 @@ stateDiagram-v2
     deleted --> [*]
 
     note right of missing
-        The record and the branch remain.
+        The record and both branches remain.
         Only delete removes them.
     end note
 ```
 
-A sandbox is created `active`. Pausing and resuming move it between `active` and
-`paused`, and both are safe to repeat: pausing an already-paused sandbox and
-resuming an already-active one do nothing. The compute can exit at any time — a
-reboot, a killed process, a full disk — and the sandbox becomes `missing`
-without Litterbox being told. The next operation that needs live compute repairs
-it from the branch and workspace, and reports the repair.
+A sandbox is created `active` and `clean`. Pausing and resuming move it between
+`active` and `paused`, and both are safe to repeat: pausing an already-paused
+sandbox and resuming an already-active one do nothing. The compute can exit at
+any time — a reboot, a killed process, a full disk — and the sandbox becomes
+`missing` without Litterbox being told. The next operation that needs live
+compute repairs it from the sandbox branch and workspace, and reports the
+repair.
 
-## Operations by state
+The source state is orthogonal:
+
+```mermaid
+stateDiagram-v2
+    [*] --> clean: create or repair
+    clean --> clean: a tool snapshots the sandbox branch
+    clean --> diverged: the shared branch moves under unsaved work
+    clean --> diverged: the shared tip carries a conflict
+    diverged --> clean: the sandbox adopts a clean rewrite
+    clean --> resolving: sandbox-reconcile begin
+    diverged --> resolving: sandbox-reconcile begin
+    resolving --> clean: sandbox-reconcile finish
+    resolving --> diverged: sandbox-reconcile abandon
+```
+
+## Operations by compute state
 
 ### Command line
 
-| Command  | `active`                   | `paused`                            | `missing`                                  |
-| -------- | -------------------------- | ----------------------------------- | ------------------------------------------ |
-| `list`   | reported as `active`       | reported as `paused`                | reported as `missing`; the listing exits 0 |
-| `shell`  | runs the command           | exits 4, `conflict`, naming the resume command | repairs the sandbox, warns, then runs |
-| `pause`  | freezes the sandbox        | succeeds, changing nothing          | exits 3, not found                         |
-| `resume` | succeeds, changing nothing | thaws the sandbox                   | exits 3, not found                         |
-| `delete` | refused without `--force`  | removes the record and the branch   | refused without `--force`; with it, removes record, workspace and branch |
+| Command   | `active`                   | `paused`                            | `missing`                                  |
+| --------- | -------------------------- | ----------------------------------- | ------------------------------------------ |
+| `list`    | reported as `active`       | reported as `paused`                | reported as `missing`; the listing exits 0 |
+| `shell`   | runs the command           | exits 4, `conflict`, naming the resume command | repairs the sandbox, warns, then runs |
+| `pause`   | freezes the sandbox        | succeeds, changing nothing          | exits 3, not found                         |
+| `resume`  | succeeds, changing nothing | thaws the sandbox                   | exits 3, not found                         |
+| `status`  | reports the source state   | reports the source state            | reports the source state                   |
+| `reconcile` | stages, finishes or aborts the host merge | unchanged; it does not join | unchanged                     |
+| `delete`  | refused without `--ignore-running` | removes the record and branches; `--ignore-unmerged` when work would be lost | removes the record and branches; `--ignore-unmerged` when work would be lost |
 
 ### MCP
 
@@ -71,25 +103,57 @@ it from the branch and workspace, and reports the repair.
 | `bash`, `read`, `write`, `patch`, `ls`, `glob`, `grep` | runs               | invalid params, `conflict`, naming the resume command | repairs, appends a recovery block, then runs |
 | `sandbox-ports`                                        | the recorded ports | the recorded ports                  | the recorded ports |
 | `sandbox-create`                                       | conflict           | conflict                            | repairs and reports the recovery |
+| `sandbox-status`                                       | reports the source state | reports the source state       | reports the source state |
+| `sandbox-reconcile`                                    | begins, finishes or abandons a resolution | invalid params, `conflict`, naming the resume command | repairs, then begins, finishes or abandons |
 
 `sandbox-create` is not an operation on an existing sandbox: it takes a new
-name, and any name already in use — `active`, `paused` or `missing` — is a
-conflict. `sandbox-ports` answers from the record, so the same ports come back
-whether or not the compute is alive; a backend that does not forward ports
-reports the operation as unsupported.
+name, and any name already in use — `active`, `paused`, `missing`, `diverged` or
+`resolving` — is a conflict. `sandbox-ports` answers from the record, so the
+same ports come back whether or not the compute is alive; a backend that does
+not forward ports reports the operation as unsupported.
+
+## Operations by source state
+
+### Command line
+
+| Command   | `clean`                    | `diverged`                  | `resolving`                 |
+| --------- | -------------------------- | --------------------------- | --------------------------- |
+| `list`    | `clean`                    | `diverged`                  | `resolving`                 |
+| `shell`   | runs; a snapshot advances the shared branch | runs; a snapshot stays on the sandbox branch | runs; edits are the resolution |
+| `pause`   | compute only               | compute only                | compute only                |
+| `resume`  | compute only               | compute only                | compute only                |
+| `status`  | clean                      | diverged, with the reason   | resolving, with the conflicts |
+| `delete`  | no unmerged flag           | `--ignore-unmerged`         | `--ignore-unmerged`         |
+
+### MCP
+
+| Tool                | `clean`                    | `diverged`                  | `resolving`                 |
+| ------------------- | -------------------------- | --------------------------- | --------------------------- |
+| command tools       | run; a snapshot advances the shared branch | run; a snapshot stays on the sandbox branch | run; edits are the resolution |
+| `sandbox-status`    | clean                      | diverged, with the reason   | resolving, with the conflicts |
+| `sandbox-reconcile` | begin fails; nothing to resolve | begin opens a resolution | begin fails; finish and abandon close it |
+| `sandbox-create` on a missing name | repair lands clean | repair keeps the divergence | repair keeps the resolution |
+
+Neither `diverged` nor `resolving` refuses a command tool. The sandbox keeps
+working; only the shared branch does not advance.
 
 :::warning Paused sandboxes are refused early
 
 A command sent to a paused sandbox is refused before any namespace is opened or
 joined. The command returns immediately with `conflict` and names the resume
-command. A `timeout` is irrelevant because nothing runs. Resume the sandbox
-first.
+command. The same applies to the three `sandbox-reconcile` actions, which join
+the workspace. A `timeout` is irrelevant because nothing runs. Resume the
+sandbox first.
 
 :::
 
+`status` does not join, so it answers while the sandbox is paused. It reports
+`resolving` with the conflicts in the working copy, or `diverged` with the
+reason, without starting compute.
+
 The MCP surface still has no tool to list, inspect, pause, resume or delete a
 sandbox. Those are command-line operations. An agent that finds a missing
-sandbox now recovers it on the next command tool call, and sees the repair in a
+sandbox recovers it on the next command tool call, and sees the repair in a
 structured recovery block.
 
 ## When a client asks for the wrong thing
@@ -104,6 +168,7 @@ come from that one classification.
 | The record exists but the compute has exited | `not-found`   | exit 3 (or a repair) | `invalid_params`, `class: not-found`    |
 | Creating a name that is already in use       | `conflict`    | exit 4       | `invalid_params`, `class: conflict`     |
 | A command addressed to a paused sandbox      | `conflict`    | exit 4       | `invalid_params`, `class: conflict`     |
+| A delete guard has not been overridden       | `denied`      | exit 6       | `invalid_request`, `class: denied`      |
 | The backend does not provide the operation   | `unsupported` | exit 5       | `invalid_request`, `class: unsupported` |
 | Permission was refused                       | `denied`      | exit 6       | `invalid_request`, `class: denied`      |
 | The backend cannot run on this host          | `unavailable` | exit 7       | `invalid_request`, `class: unavailable` |
@@ -114,23 +179,57 @@ Two cases are deliberately not errors:
 - **Inspecting a missing sandbox succeeds.** It reports `missing`, because that
   is the honest answer and it is what `list` shows.
 - **A missing sandbox is repaired on the next operation.** The CLI warns on
-  stderr; MCP appends a structured recovery block. The branch is never deleted
-  by a repair.
-- **Deleting a missing sandbox requires `--force`.** The branch may hold
-  unmerged work. With `--force`, the record, workspace and branch are removed
-  and the command states exactly what it removed.
+  stderr; MCP appends a structured recovery block. Neither branch is deleted by
+  a repair.
 
 ## Recovering a missing sandbox
 
 A missing sandbox repairs itself on the next command, upload, download or
-snapshot. The repair reuses the workspace, keeps the branch, and starts new
-compute against the same name. If the workspace is gone, it is materialised
-from the branch and the sandbox's provisioning steps run again.
+snapshot. The repair reuses the workspace. If the workspace is gone, it
+materialises the **sandbox branch**, `refs/litterbox/workspaces/<name>`, because
+that is where the agent's own work lives. The recovery block reports
+`source: sandbox`.
 
-If the branch is gone, repair refuses and names the next command:
-`litterbox delete --force <name>`, then create it again. A corrupt record is not
-guessed at; `litterbox delete --force <name>` removes it and reports any compute
-it could not stop.
+When the sandbox branch is absent, repair falls back to the shared branch and
+reports `source: shared` with a `fallback` naming the missing ref. This is the
+case for a record written before the branch split. If both refs are gone, repair
+refuses and names the delete command.
 
-The branch remains the durable copy. It is a normal branch: inspect it, merge or
-cherry-pick from it, and only then delete the sandbox.
+An open resolution is different. Its revision and its recorded `ours` parent
+are only addressable through the sandbox ref. If that ref is gone, repair
+refuses rather than clearing the resolution, and both `status` and
+`sandbox-status` answer with `resolving`, `sandbox: null`, the recorded
+`synced`/`ours` and a `next`:
+
+- **Git:** in the VCS store, `git fsck --lost-found` lists the dangling
+  resolution merge whose parents are `ours` and the shared tip. Restore it with
+  `git update-ref refs/litterbox/workspaces/<name> <commit>`. If the merge is
+  gone, restore the ref at `ours` and run `sandbox-reconcile begin`.
+- **jj:** in the clone, `jj op log` or `jj log -r 'all()'` names the commit.
+  Re-attach it with `jj workspace add --name <name> --revision <commit>`. If it
+  is gone, add the workspace at `ours` and run `sandbox-reconcile begin`.
+- Do not push the sandbox branch to the shared branch: that publishes a
+  conflicted tree and is not a recovery.
+- If neither commit is recoverable, inspect the shared branch and run
+  `litterbox delete <name> --ignore-unmerged`, adding `--ignore-invalid` when
+  the record cannot be read, then create it again.
+
+## Deleting a sandbox
+
+`delete` has three independent guards. Each has its own flag, and a refusal
+names every flag the record needs. Passing one flag does not satisfy another.
+
+| Guard       | Holds when                                                                 | Flag                 |
+| ----------- | -------------------------------------------------------------------------- | -------------------- |
+| `running`   | The compute is `active`.                                                   | `--ignore-running`   |
+| `invalid`   | The compute is unknown, the backend cannot be asked, or the record is unreadable. | `--ignore-invalid`   |
+| `unmerged`  | The sandbox branch has work the shared branch does not, a resolution is open, or a staging workspace exists. | `--ignore-unmerged`  |
+
+A `paused` or `missing` sandbox needs no compute flag. With every required flag,
+delete stops compute when it can, removes the staging workspace, the shared
+branch, the sandbox branch and the synced ref, and removes the record. It prints
+each path and ref it removed, and says when compute could not be stopped. A flag
+whose condition did not hold is accepted and reported as unused.
+
+The branch remains the durable copy until it is deleted. It is a normal branch:
+inspect it, merge or cherry-pick from it, and only then delete the sandbox.
