@@ -3610,6 +3610,128 @@ mod seam_tests {
     }
 
     #[tokio::test]
+    async fn the_source_state_matrix_covers_list_commands_pause_resume_status_create_and_delete() {
+        for (index, state) in ["clean", "diverged", "resolving"].iter().enumerate() {
+            let records = TempDir::new().expect("records");
+            let backend = Arc::new(TestBackend::new());
+            let mut vcs = TestVcs::new().with_conflicts_for("resolution-revision", &["file.txt"]);
+            if *state == "diverged" {
+                vcs = vcs.with_ancestor(false);
+            }
+            let sandboxes = orchestrator_vcs(records.path(), backend.clone(), Arc::new(vcs));
+            let name = format!("demo{index}");
+            sandboxes.create(&name).await.expect("create");
+
+            if *state == "diverged" {
+                let mut stored = current_record(records.path(), &name);
+                stored.merge = Some(metadata_store::StoredMerge {
+                    base: "base".to_string(),
+                    ours: "ours".to_string(),
+                    theirs: "theirs".to_string(),
+                });
+                metadata_store::store_sandbox_at(records.path(), &name, &stored).expect("store");
+            }
+            if *state == "resolving" {
+                sandboxes
+                    .begin_resolution(&name)
+                    .await
+                    .expect("the conflict is open");
+            }
+
+            let status = sandboxes.source_status(&name).await.expect("status");
+            assert_eq!(status.state, *state, "status for {state}");
+            let listing = sandboxes.list().expect("list");
+            assert_eq!(
+                listing.sources.get(&name).map(String::as_str),
+                Some(*state),
+                "list for {state}"
+            );
+
+            let performed = sandboxes
+                .exec(&name, &["true".to_string()])
+                .await
+                .expect("the command runs");
+            let block = performed.block().expect("the block is reported");
+            assert_eq!(block.state, *state, "block for {state}");
+
+            sandboxes.pause(&name).await.expect("pause");
+            sandboxes.resume(&name).await.expect("resume");
+            assert_eq!(
+                sandboxes.source_status(&name).await.expect("status").state,
+                *state,
+                "pause and resume leave the source state"
+            );
+
+            let conflict = sandboxes
+                .create(&name)
+                .await
+                .expect_err("create on an existing sandbox is a conflict");
+            assert!(matches!(conflict, Error::Conflict { .. }), "{conflict:?}");
+
+            if *state != "clean" {
+                let guarded = sandboxes
+                    .delete(
+                        &name,
+                        DeleteGuards {
+                            running: true,
+                            ..DeleteGuards::NONE
+                        },
+                    )
+                    .await
+                    .expect_err("the unmerged guard holds");
+                assert!(
+                    guarded.to_string().contains("--ignore-unmerged"),
+                    "{guarded}"
+                );
+            }
+
+            let deletion = sandboxes
+                .delete(&name, DeleteGuards::ALL)
+                .await
+                .expect("all flags delete the sandbox");
+            assert!(deletion.record_path.is_some());
+        }
+    }
+
+    #[tokio::test]
+    async fn sandbox_reconcile_actions_follow_the_source_state() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(TestVcs::new());
+        let sandboxes = orchestrator_vcs(records.path(), backend, vcs);
+        sandboxes.create("clean").await.expect("create");
+        let clean = sandboxes
+            .begin_resolution("clean")
+            .await
+            .expect_err("there is nothing to resolve");
+        assert!(clean.to_string().contains("nothing to resolve"), "{clean}");
+
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(TestVcs::new().with_conflicts_for("resolution-revision", &["file.txt"]));
+        let sandboxes = orchestrator_vcs(records.path(), backend, vcs);
+        sandboxes.create("open").await.expect("create");
+        sandboxes
+            .begin_resolution("open")
+            .await
+            .expect("the conflict opens");
+        let second = sandboxes
+            .begin_resolution("open")
+            .await
+            .expect_err("a second begin is refused");
+        assert!(second.to_string().contains("already open"), "{second}");
+        sandboxes
+            .abandon_resolution("open")
+            .await
+            .expect("abandon closes it");
+        let again = sandboxes
+            .abandon_resolution("open")
+            .await
+            .expect_err("abandon with no resolution is refused");
+        assert!(again.to_string().contains("no resolution"), "{again}");
+    }
+
+    #[tokio::test]
     async fn a_paused_sandbox_refuses_begin_resolution() {
         let records = TempDir::new().expect("records");
         let backend = Arc::new(TestBackend::new());
