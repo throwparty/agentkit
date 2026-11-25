@@ -39,6 +39,69 @@ fn the_backend_reports_its_conflict_model_and_binding() {
 }
 
 #[test]
+fn restore_adds_one_forward_commit() {
+    let dir = repo_with_commit();
+    let repo = Repository::open(dir.path()).expect("open");
+    let base = repo.head().expect("head").peel_to_commit().expect("commit");
+    let signature = Signature::now("test", "test@example.com").expect("signature");
+    let commit_with = |body: &str, message: &str| -> git2::Oid {
+        fs::write(dir.path().join("greeting.txt"), body).expect("write");
+        let mut index = repo.index().expect("index");
+        index
+            .add_all(["*"].iter(), IndexAddOption::DEFAULT, None)
+            .expect("add");
+        index.write().expect("write index");
+        let tree_id = index.write_tree().expect("tree");
+        let tree = repo.find_tree(tree_id).expect("find tree");
+        repo.commit(None, &signature, &signature, message, &tree, &[&base])
+            .expect("commit")
+    };
+    let one = commit_with("one\n", "one");
+    let two = commit_with("two\n", "two");
+
+    let vcs = GitVcs::open(dir.path()).expect("vcs");
+    let prepared = vcs.prepare("example").expect("prepare");
+    let workspace = prepared.workspace;
+    vcs.set_tip(&workspace, &Revision::new(two.to_string()))
+        .expect("tip");
+    vcs.set_sandbox_tip(&workspace, &Revision::new(two.to_string()))
+        .expect("sandbox tip");
+    vcs.set_synced(&workspace, &Revision::new(two.to_string()))
+        .expect("synced");
+
+    let restored = vcs
+        .restore(&workspace, &Revision::new(one.to_string()))
+        .expect("restore");
+    assert!(restored.created);
+
+    let commit = repo
+        .find_commit(restored.revision.as_str().parse().expect("oid"))
+        .expect("commit");
+    assert_eq!(commit.parent_id(0).expect("parent"), two);
+    assert_eq!(
+        commit.tree_id(),
+        repo.find_commit(one).expect("one").tree_id()
+    );
+    assert_eq!(vcs.tip(&workspace).expect("tip"), restored.revision);
+    assert_eq!(
+        vcs.sandbox_tip(&workspace).expect("sandbox tip"),
+        restored.revision
+    );
+    assert_eq!(vcs.synced(&workspace).expect("synced"), restored.revision);
+    assert!(
+        repo.find_reference("refs/litterbox/history/example")
+            .is_err(),
+        "no history ref is minted"
+    );
+
+    let again = vcs
+        .restore(&workspace, &Revision::new(one.to_string()))
+        .expect("second restore");
+    assert!(!again.created, "the tree already matches");
+    assert_eq!(again.revision, restored.revision);
+}
+
+#[test]
 fn history_lists_the_branch_reflog_newest_first() {
     let dir = repo_with_commit();
     let repo = Repository::open(dir.path()).expect("open");

@@ -41,7 +41,7 @@ Add `src/vcs/git/history.rs`. Read `refs/heads/litterbox/<name>` with `Repositor
 | Depends On | T-002 |
 | References | git-log,history-lists,empty-log,missing-target |
 
-### T-004: [ ] Git restore
+### T-004: [x] Git restore
 
 Add `src/vcs/git/restore.rs`. Peel the target tree. If the tip tree equals the target tree, align the sandbox ref and `synced` to the tip and create no commit. Otherwise create one commit with the target tree and the tip as parent, move the branch with `reference_matching`, then write the sandbox ref and `synced`. Refuse a target tree with conflict markers.
 

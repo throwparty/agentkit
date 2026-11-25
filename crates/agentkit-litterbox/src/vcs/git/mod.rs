@@ -13,6 +13,7 @@ mod reconcile;
 mod reconcile_tests;
 mod refs;
 pub mod remote;
+mod restore;
 mod scm;
 mod store;
 #[cfg(test)]
