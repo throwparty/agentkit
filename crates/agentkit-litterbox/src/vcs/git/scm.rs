@@ -1000,8 +1000,12 @@ impl Vcs for GitVcs {
             .map_err(vcs_error)
     }
 
-    fn restore(&self, _workspace: &Workspace, _revision: &Revision) -> Result<Restored, VcsError> {
-        Err(unsupported("restore"))
+    fn restore(&self, workspace: &Workspace, revision: &Revision) -> Result<Restored, VcsError> {
+        let branch = workspace.branch().to_string();
+        self.repo_for_branch(&branch, |repo| {
+            super::restore::restore(repo, &branch, revision)
+        })
+        .map_err(vcs_error)
     }
 
     fn export(&self) -> Result<(), VcsError> {
