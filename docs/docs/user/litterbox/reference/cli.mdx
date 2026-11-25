@@ -34,6 +34,18 @@ Options:
 
 - `--json` Emit structured JSON instead of a table
 
+## `history`
+
+List the commits a sandbox's shared branch pointed at
+
+Arguments:
+
+- `NAME` Name of the sandbox to list
+
+Options:
+
+- `--json` Emit structured JSON instead of a table
+
 ## `list`
 
 List all sandboxes in the current repository
@@ -72,6 +84,21 @@ Add the Git remote that holds this project's sandbox branches
 Arguments:
 
 - `[NAME]` Name for the remote
+
+## `restore`
+
+Restore a sandbox to a listed step by adding a forward commit
+
+Arguments:
+
+- `NAME` Name of the sandbox to restore
+- `STEP` Step number from `history`, or a commit ID it lists
+
+Options:
+
+- `--discard-work` Discard a held merge, unsaved work or a staging workspace
+- `--discard-resolution` Discard an open resolution
+- `--json` Emit structured JSON instead of a table
 
 ## `resume`
 
