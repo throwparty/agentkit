@@ -42,19 +42,3 @@ pub enum Merge {
         conflicts: Vec<Conflict>,
     },
 }
-
-/// How much history to retain. User configuration, with no default.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct HistoryPolicy {
-    /// How many steps to keep, when the user configured a limit.
-    pub keep: Option<usize>,
-}
-
-/// What a restore replaces.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RestoreMode {
-    /// Replace the workspace content.
-    WorkingCopy,
-    /// Move the branch.
-    Branch,
-}

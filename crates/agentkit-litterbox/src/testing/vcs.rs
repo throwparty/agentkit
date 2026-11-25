@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use crate::sandbox::contract::{BindingSupport, SnapshotSelector};
 use crate::vcs::{
     Begun, Capabilities, Conflict, ConflictModel, ConflictSides, Error, ExportSupport, Finished,
-    HistoryPolicy, Merge, Prepared, Report, RestoreMode, Revision, Staged, TreeId, Vcs, Workspace,
+    HistoryStep, Merge, Prepared, Report, Restored, Revision, Staged, TreeId, Vcs, Workspace,
     git_common,
 };
 
@@ -539,21 +539,15 @@ impl Vcs for TestVcs {
         Err(unsupported("abort"))
     }
 
-    fn history(
-        &self,
-        _workspace: &Workspace,
-        _keep: &HistoryPolicy,
-    ) -> Result<Vec<Revision>, Error> {
-        Err(unsupported("history"))
+    fn history(&self, _workspace: &Workspace) -> Result<Vec<HistoryStep>, Error> {
+        Ok(Vec::new())
     }
 
-    fn restore(
-        &self,
-        _workspace: &Workspace,
-        _revision: &Revision,
-        _mode: RestoreMode,
-    ) -> Result<(), Error> {
-        Err(unsupported("restore"))
+    fn restore(&self, _workspace: &Workspace, revision: &Revision) -> Result<Restored, Error> {
+        Ok(Restored {
+            revision: revision.clone(),
+            created: true,
+        })
     }
 
     fn export(&self) -> Result<(), Error> {

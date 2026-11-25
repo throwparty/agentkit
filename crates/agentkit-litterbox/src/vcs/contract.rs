@@ -1,0 +1,483 @@
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use crate::sandbox::contract::SnapshotSelector;
+
+use super::capabilities::Capabilities;
+use super::conflict::{Conflict, ConflictSides, Merge};
+use super::error::Error;
+use super::history::{HistoryStep, Restored};
+use super::reconcile::{Begun, Finished, Report, Staged};
+use super::types::{Prepared, Revision, TreeId, Workspace};
+
+/// One VCS implementation behind the orchestrator's handle.
+///
+/// Object-safe and synchronous. The orchestrator stores `Arc<dyn Vcs>` and
+/// calls these methods from async code, exactly as it called the Git-specific
+/// `Scm` trait before.
+pub trait Vcs: Send + Sync {
+    /// What this backend and its configuration can do.
+    fn capabilities(&self) -> Capabilities;
+
+    /// Create or attach the branch for `sandbox` and report the revision it
+    /// starts from. Used by create.
+    fn prepare(&self, sandbox: &str) -> Result<Prepared, Error>;
+
+    /// Paths the sandbox must not see inside a bound workspace.
+    ///
+    /// They are relative to the workspace root, because a backend decides
+    /// where the sandbox sees its workspace: `/src` under bubblewrap, the
+    /// image's working directory under Docker. A copy excludes them; a bind
+    /// masks them.
+    fn masked_paths(&self, workspace: &Workspace) -> Vec<PathBuf>;
+
+    /// The host directory a bound workspace lives in.
+    ///
+    /// Only meaningful when the binding is `Bound`. The directory holds the
+    /// checkout the backend binds into the sandbox, and the orchestrator
+    /// creates it on create and removes it on delete. A backend that cannot
+    /// bind returns the neutral unsupported error.
+    fn bound_root(&self, workspace: &Workspace) -> Result<PathBuf, Error>;
+
+    /// The tree identity of the workspace's branch tip.
+    fn identity(&self, workspace: &Workspace) -> Result<TreeId, Error>;
+
+    /// Unpack `revision` into `into` as the workspace source.
+    fn materialise(
+        &self,
+        workspace: &Workspace,
+        revision: &Revision,
+        into: &Path,
+    ) -> Result<(), Error>;
+
+    /// The transfer predicate for a snapshot, read from `rules_root`.
+    fn snapshot_filter(&self, rules_root: &Path) -> Result<Arc<dyn SnapshotSelector>, Error>;
+
+    /// The selector that carries a snapshot's ignore files.
+    fn ignore_files(&self) -> Arc<dyn SnapshotSelector>;
+
+    /// Commit the staged tree into the workspace's branch.
+    fn snapshot(
+        &self,
+        workspace: &Workspace,
+        staging: &Path,
+        message: &str,
+    ) -> Result<Revision, Error>;
+
+    /// The sandbox names this backend exposes in its configured locality.
+    fn sandboxes(&self) -> Result<Vec<String>, Error>;
+
+    /// Delete the branch paired with `sandbox`, and release any host directory
+    /// the backend owned for it.
+    fn delete_branch(&self, sandbox: &str) -> Result<(), Error>;
+
+    /// Where this backend keeps durable project state, if it has a path.
+    fn state_path(&self) -> Option<PathBuf>;
+
+    /// Attach the state at [`Self::state_path`] to the user's checkout as a
+    /// remote called `name`. Returns whether it was added.
+    fn expose(&self, name: &str) -> Result<bool, Error>;
+
+    /// Release project storage that is no longer needed.
+    ///
+    /// A backend that keeps a bare clone destroys it once no sandbox branch
+    /// remains. A backend that owns a host directory per bound sandbox removes
+    /// the directories whose branches are gone, because the branch is the
+    /// authoritative record of which sandboxes exist.
+    fn prune(&self) -> Result<(), Error>;
+
+    /// The revision at the workspace branch tip.
+    fn tip(&self, workspace: &Workspace) -> Result<Revision, Error>;
+
+    /// Move the workspace branch tip.
+    fn set_tip(&self, workspace: &Workspace, revision: &Revision) -> Result<(), Error>;
+
+    /// The revision the branch was last synchronised at.
+    fn synced(&self, workspace: &Workspace) -> Result<Revision, Error>;
+
+    /// Record the revision the branch was synchronised at.
+    fn set_synced(&self, workspace: &Workspace, revision: &Revision) -> Result<(), Error>;
+
+    /// Merge three revisions according to this backend's conflict model.
+    fn merge(&self, base: &Revision, ours: &Revision, theirs: &Revision) -> Result<Merge, Error>;
+
+    /// Create the conflict between the shared branch and the sandbox branch
+    /// and report the revision that now holds it.
+    ///
+    /// The first parent is the sandbox side, so [`Self::conflict_sides`] reads
+    /// `ours` from the sandbox and `theirs` from the shared branch. A backend
+    /// whose conflicts live in commits moves the sandbox branch; a backend
+    /// whose conflicts live in an index creates the commit it will be written
+    /// from.
+    fn resolve_begin(&self, _workspace: &Workspace) -> Result<Begun, Error> {
+        Err(not_implemented("open a resolution"))
+    }
+
+    /// Put the workspace back on `ours`, the revision it held before the
+    /// resolution began, and report the revision it now holds.
+    fn resolve_abandon(&self, _workspace: &Workspace, _ours: &Revision) -> Result<Revision, Error> {
+        Err(not_implemented("abandon a resolution"))
+    }
+
+    /// The conflicts a revision carries.
+    fn conflicts(&self, revision: &Revision) -> Result<Vec<Conflict>, Error>;
+
+    /// The three sides of one conflicted path.
+    fn conflict_sides(&self, revision: &Revision, path: &Path) -> Result<ConflictSides, Error>;
+
+    /// Mark the given paths resolved in `revision`.
+    fn resolve(&self, revision: &Revision, paths: &[PathBuf]) -> Result<Revision, Error>;
+
+    /// Abandon a merge.
+    fn abort(&self, revision: &Revision) -> Result<(), Error>;
+
+    /// The commits the shared branch pointed at, newest first.
+    fn history(&self, workspace: &Workspace) -> Result<Vec<HistoryStep>, Error>;
+
+    /// Restore the shared branch to the tree of `revision` by adding a commit.
+    fn restore(&self, workspace: &Workspace, revision: &Revision) -> Result<Restored, Error>;
+
+    /// Publish the backend's state to its external form, if it has one.
+    fn export(&self) -> Result<(), Error>;
+
+    /// The root tree of `revision`.
+    fn tree(&self, _revision: &Revision) -> Result<TreeId, Error> {
+        Err(not_implemented("resolve a tree"))
+    }
+
+    /// The content of `path` inside `tree`, when the tree holds it.
+    ///
+    /// This is how a surface serves one side of a conflicted file without a
+    /// second checkout.
+    fn blob(&self, _tree: &TreeId, _path: &Path) -> Result<Option<Vec<u8>>, Error> {
+        Err(not_implemented("read a blob"))
+    }
+
+    /// The revision at the sandbox branch tip.
+    fn sandbox_tip(&self, _workspace: &Workspace) -> Result<Revision, Error> {
+        Err(not_implemented("read the sandbox branch"))
+    }
+
+    /// Move the sandbox branch tip.
+    fn set_sandbox_tip(&self, _workspace: &Workspace, _revision: &Revision) -> Result<(), Error> {
+        Err(not_implemented("write the sandbox branch"))
+    }
+
+    /// Move the shared branch tip without moving the sandbox branch.
+    ///
+    /// Fails with [`Error::Raced`] when the branch no longer points at
+    /// `expected`.
+    fn advance(
+        &self,
+        _workspace: &Workspace,
+        _revision: &Revision,
+        _expected: &Revision,
+    ) -> Result<(), Error> {
+        Err(not_implemented("advance the branch"))
+    }
+
+    /// The paths present in `from` and absent from `to`.
+    fn deleted_paths(&self, _from: &TreeId, _to: &TreeId) -> Result<Vec<PathBuf>, Error> {
+        Err(not_implemented("compare trees"))
+    }
+
+    /// The tree a snapshot of `staging` would commit, without committing it.
+    fn observe(&self, _workspace: &Workspace, _staging: &Path) -> Result<TreeId, Error> {
+        Err(not_implemented("observe the workspace"))
+    }
+
+    /// Whether `ancestor` is an ancestor of `descendant`.
+    fn is_ancestor(&self, _ancestor: &Revision, _descendant: &Revision) -> Result<bool, Error> {
+        Err(not_implemented("compare revisions"))
+    }
+
+    /// Create the bookkeeping refs from the branch tip when they are absent.
+    fn ensure_refs(&self, _workspace: &Workspace) -> Result<(), Error> {
+        Err(not_implemented("initialise the bookkeeping refs"))
+    }
+
+    /// The host-side view of a diverged sandbox.
+    fn report(&self, _workspace: &Workspace) -> Result<Report, Error> {
+        Err(not_implemented("report the divergence"))
+    }
+
+    /// Stage the host merge in a linked worktree.
+    fn stage(&self, _workspace: &Workspace) -> Result<Staged, Error> {
+        Err(not_implemented("stage the merge"))
+    }
+
+    /// Finish a staged merge.
+    fn finish(&self, _workspace: &Workspace) -> Result<Finished, Error> {
+        Err(not_implemented("finish the merge"))
+    }
+
+    /// Remove a staging worktree and its temporary branch.
+    fn discard_stage(&self, _workspace: &Workspace) -> Result<(), Error> {
+        Err(not_implemented("discard the staging worktree"))
+    }
+
+    /// The staging workspace, when one exists.
+    fn staging(&self, _workspace: &Workspace) -> Option<PathBuf> {
+        None
+    }
+}
+
+fn not_implemented(operation: &str) -> Error {
+    Error::Unsupported {
+        operation: operation.to_string(),
+        backend: "this backend".to_string(),
+        primitive: "the operation".to_string(),
+        reason: "it is not implemented in this change".to_string(),
+        remedy: "use a backend that implements it".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::capabilities::{ConflictModel, ExportSupport};
+    use super::super::types::BranchName;
+    use crate::sandbox::contract::BindingSupport;
+
+    struct Stub;
+
+    struct SelectAll;
+
+    impl SnapshotSelector for SelectAll {
+        fn selects(
+            &self,
+            _relative: &Path,
+            _is_dir: bool,
+        ) -> Result<bool, crate::sandbox::contract::Error> {
+            Ok(true)
+        }
+    }
+
+    impl Vcs for Stub {
+        fn capabilities(&self) -> Capabilities {
+            Capabilities {
+                conflict_model: ConflictModel::Blocking,
+                op_log: false,
+                bindings: BindingSupport::Copied,
+                export: ExportSupport::None,
+            }
+        }
+
+        fn prepare(&self, _sandbox: &str) -> Result<Prepared, Error> {
+            unsupported("prepare")
+        }
+
+        fn masked_paths(&self, _workspace: &Workspace) -> Vec<PathBuf> {
+            Vec::new()
+        }
+
+        fn bound_root(&self, _workspace: &Workspace) -> Result<PathBuf, Error> {
+            unsupported("bound_root")
+        }
+
+        fn identity(&self, _workspace: &Workspace) -> Result<TreeId, Error> {
+            unsupported("identity")
+        }
+
+        fn materialise(
+            &self,
+            _workspace: &Workspace,
+            _revision: &Revision,
+            _into: &Path,
+        ) -> Result<(), Error> {
+            unsupported("materialise")
+        }
+
+        fn snapshot_filter(&self, _rules_root: &Path) -> Result<Arc<dyn SnapshotSelector>, Error> {
+            unsupported("snapshot_filter")
+        }
+
+        fn ignore_files(&self) -> Arc<dyn SnapshotSelector> {
+            Arc::new(SelectAll)
+        }
+
+        fn snapshot(
+            &self,
+            _workspace: &Workspace,
+            _staging: &Path,
+            _message: &str,
+        ) -> Result<Revision, Error> {
+            unsupported("snapshot")
+        }
+
+        fn sandboxes(&self) -> Result<Vec<String>, Error> {
+            Ok(Vec::new())
+        }
+
+        fn delete_branch(&self, _sandbox: &str) -> Result<(), Error> {
+            unsupported("delete_branch")
+        }
+
+        fn state_path(&self) -> Option<PathBuf> {
+            None
+        }
+
+        fn expose(&self, _name: &str) -> Result<bool, Error> {
+            unsupported("expose")
+        }
+
+        fn prune(&self) -> Result<(), Error> {
+            Ok(())
+        }
+
+        fn tip(&self, _workspace: &Workspace) -> Result<Revision, Error> {
+            unsupported("tip")
+        }
+
+        fn set_tip(&self, _workspace: &Workspace, _revision: &Revision) -> Result<(), Error> {
+            unsupported("set_tip")
+        }
+
+        fn synced(&self, _workspace: &Workspace) -> Result<Revision, Error> {
+            unsupported("synced")
+        }
+
+        fn set_synced(&self, _workspace: &Workspace, _revision: &Revision) -> Result<(), Error> {
+            unsupported("set_synced")
+        }
+
+        fn merge(
+            &self,
+            _base: &Revision,
+            _ours: &Revision,
+            _theirs: &Revision,
+        ) -> Result<Merge, Error> {
+            unsupported("merge")
+        }
+
+        fn conflicts(&self, _revision: &Revision) -> Result<Vec<Conflict>, Error> {
+            unsupported("conflicts")
+        }
+
+        fn conflict_sides(
+            &self,
+            _revision: &Revision,
+            _path: &Path,
+        ) -> Result<ConflictSides, Error> {
+            unsupported("conflict_sides")
+        }
+
+        fn resolve(&self, _revision: &Revision, _paths: &[PathBuf]) -> Result<Revision, Error> {
+            unsupported("resolve")
+        }
+
+        fn abort(&self, _revision: &Revision) -> Result<(), Error> {
+            unsupported("abort")
+        }
+
+        fn history(&self, _workspace: &Workspace) -> Result<Vec<HistoryStep>, Error> {
+            unsupported("history")
+        }
+
+        fn restore(&self, _workspace: &Workspace, _revision: &Revision) -> Result<Restored, Error> {
+            unsupported("restore")
+        }
+
+        fn export(&self) -> Result<(), Error> {
+            Ok(())
+        }
+
+        fn tree(&self, _revision: &Revision) -> Result<TreeId, Error> {
+            unsupported("tree")
+        }
+
+        fn sandbox_tip(&self, _workspace: &Workspace) -> Result<Revision, Error> {
+            unsupported("sandbox_tip")
+        }
+
+        fn set_sandbox_tip(
+            &self,
+            _workspace: &Workspace,
+            _revision: &Revision,
+        ) -> Result<(), Error> {
+            unsupported("set_sandbox_tip")
+        }
+
+        fn advance(
+            &self,
+            _workspace: &Workspace,
+            _revision: &Revision,
+            _expected: &Revision,
+        ) -> Result<(), Error> {
+            unsupported("advance")
+        }
+
+        fn deleted_paths(&self, _from: &TreeId, _to: &TreeId) -> Result<Vec<PathBuf>, Error> {
+            unsupported("deleted_paths")
+        }
+
+        fn observe(&self, _workspace: &Workspace, _staging: &Path) -> Result<TreeId, Error> {
+            unsupported("observe")
+        }
+
+        fn is_ancestor(&self, _ancestor: &Revision, _descendant: &Revision) -> Result<bool, Error> {
+            unsupported("is_ancestor")
+        }
+
+        fn ensure_refs(&self, _workspace: &Workspace) -> Result<(), Error> {
+            unsupported("ensure_refs")
+        }
+
+        fn report(&self, _workspace: &Workspace) -> Result<Report, Error> {
+            unsupported("report")
+        }
+
+        fn stage(&self, _workspace: &Workspace) -> Result<Staged, Error> {
+            unsupported("stage")
+        }
+
+        fn finish(&self, _workspace: &Workspace) -> Result<Finished, Error> {
+            unsupported("finish")
+        }
+
+        fn discard_stage(&self, _workspace: &Workspace) -> Result<(), Error> {
+            unsupported("discard_stage")
+        }
+    }
+
+    fn unsupported<T>(operation: &str) -> Result<T, Error> {
+        Err(Error::Unsupported {
+            operation: operation.to_string(),
+            backend: "stub".to_string(),
+            primitive: "nothing".to_string(),
+            reason: "stub".to_string(),
+            remedy: "use a real backend".to_string(),
+        })
+    }
+
+    #[test]
+    fn the_trait_is_object_safe_and_shared() {
+        let vcs: Arc<dyn Vcs> = Arc::new(Stub);
+        let handle = Arc::clone(&vcs);
+        let thread = std::thread::spawn(move || handle.capabilities().conflict_model);
+
+        assert_eq!(vcs.capabilities().bindings, BindingSupport::Copied);
+        assert_eq!(thread.join().expect("joined"), ConflictModel::Blocking);
+    }
+
+    #[test]
+    fn workspace_addresses_a_branch_without_a_backend() {
+        let workspace = Workspace::from_branch("litterbox/example");
+
+        assert_eq!(workspace.branch().as_str(), "litterbox/example");
+        assert_eq!(BranchName::new("main").as_str(), "main");
+    }
+
+    #[test]
+    fn a_backend_error_keeps_its_message() {
+        let error = Error::Backend {
+            operation: "open".to_string(),
+            message: "Git repository open failed: no repository".to_string(),
+        };
+
+        assert_eq!(
+            error.to_string(),
+            "Git repository open failed: no repository"
+        );
+    }
+}

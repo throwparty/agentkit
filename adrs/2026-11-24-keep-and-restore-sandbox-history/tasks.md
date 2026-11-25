@@ -15,7 +15,7 @@ Add `config: Option<String>` to `GitVcsConfig` and `JjVcsConfig`. Git writes the
 | Depends On |  |
 | References | per-vcs-configuration,config-under-direct,config-ownership,empty-config,invalid-config |
 
-### T-002: [ ] Neutral history and restore contract
+### T-002: [x] Neutral history and restore contract
 
 Add `src/vcs/history.rs` with `HistoryStep` and `Restored`. Replace `Vcs::history` and `Vcs::restore` signatures. Delete `HistoryPolicy` and `RestoreMode` from `vcs/conflict.rs` and their exports. Implement the new methods in the `vcs/mod.rs` stub and `testing/vcs.rs`.
 
