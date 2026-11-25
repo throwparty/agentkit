@@ -1,6 +1,6 @@
 # Keep and restore sandbox history
 
-**Status:** draft  **Created:** 2026-11-24  **Author:** Luke Carrier
+**Status:** implemented  **Created:** 2026-11-24  **Author:** Luke Carrier
 
 A sandbox is paired with three refs in the clone that holds its branch. `refs/heads/litterbox/<name>` is the shared branch, `refs/litterbox/workspaces/<name>` is the sandbox branch, and `refs/litterbox/synced/<name>` is the last commit both sides agreed on (`crates/agentkit-litterbox/src/vcs/git/refs.rs:12-25`; `adrs/2026-11-22-adopt-rewritten-branches` FR-011). Under `snapshot-mode = 'remote'` that clone is Litterbox's bare clone under its data directory, and the user's clone has it as the `litterbox` remote. Under `snapshot-mode = 'direct'` it is the user's clone. Under jj it is Litterbox's co-located clone, the shared branch is the bookmark `litterbox/<name>`, and the sandbox branch is the working copy commit of the sandbox's jj workspace. The sandbox workspace holds files only and no VCS metadata the agent can read.
 

@@ -106,7 +106,7 @@ Add `history <name>` and `restore <name> <step>` to `src/cli.rs` with `--json`, 
 | Depends On | T-007 |
 | References | operator-surface,documentation |
 
-### T-009: [ ] Verification
+### T-009: [x] Verification
 
 Run the gates and the smoke on a scratch repository. Update the spec status to implemented when the tasks land.
 
