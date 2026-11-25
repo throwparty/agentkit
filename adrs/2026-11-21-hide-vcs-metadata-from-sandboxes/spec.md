@@ -1,6 +1,6 @@
 # Hide VCS Metadata From Sandboxes
 
-**Status:** draft  **Created:** 2026-11-21  **Author:** Luke Carrier
+**Status:** implemented  **Created:** 2026-11-21  **Author:** Luke Carrier
 
 Litterbox pairs a sandbox with a Git branch and a unit of compute. Today the workspace is always a private copy: `create` calls `vcs.prepare`, materialises the base revision into a `TempDir`, and hands that directory to the backend as `CreateRequest.workspace.source` (`orchestrator/service.rs:140-162`), so the sandbox never sees `.git`. Repair does the same (`service.rs:313-341`).
 
