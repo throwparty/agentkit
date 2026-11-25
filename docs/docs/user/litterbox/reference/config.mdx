@@ -212,7 +212,36 @@ snapshot-mode = "remote"
 #   "bound"  binds a host directory the VCS owns, and masks the VCS metadata
 #            inside it. Git cannot bind, so it refuses "bound".
 binding = "copied"
+
+# Applied to Litterbox's clone, not your checkout. Optional. Git config syntax.
+# This is where retention is configured; there is no [history] section.
+config = """
+[gc]
+    reflogExpire = "90 days"
+    reflogExpireUnreachable = "30 days"
+"""
 ```
+
+`[vcs.jj]` accepts `binding` and `config`. The `config` string is TOML and is
+applied to Litterbox's jj clone.
+
+```toml
+[vcs.jj]
+binding = "bound"
+# Optional. TOML, applied to Litterbox's jj clone.
+config = """
+[ui]
+color = "never"
+"""
+```
+
+The `config` string is replaced on every open, so removing a key removes its
+effect. The backend validates it with the tool before the clone is used. Under
+Git `snapshot-mode = 'direct'` the key is refused, because Litterbox has no
+clone to apply it to; configure the user's own repository for that mode. jj
+always uses a clone, so its key always applies. The string is configuration,
+not a command. Use it for the tool's own retention settings; `litterbox
+history` lists whatever the log still holds.
 
 A missing `binding` is a configuration error naming the key, the two values and
 this file. A binding the selected VCS cannot honour is refused when the

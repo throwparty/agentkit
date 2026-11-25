@@ -93,7 +93,7 @@ Add `src/orchestrator/history.rs`. Resolve a step number or commit ID. Force an 
 | Depends On | T-003,T-004,T-005,T-006 |
 | References | restore-workspace,restore-guards,history-states,divergence-guarded,resolution-guarded |
 
-### T-008: [ ] CLI and docs
+### T-008: [x] CLI and docs
 
 Add `history <name>` and `restore <name> <step>` to `src/cli.rs` with `--json`, `--discard-work` and `--discard-resolution`. Print step number, commit ID, time and description. Regenerate the command line reference. Update `reference/config.mdx` for the `config` key and add a history page.
 

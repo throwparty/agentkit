@@ -1,0 +1,71 @@
+---
+sidebar_position: 7
+---
+
+# Sandbox history
+
+Every snapshot moves the shared branch. Git and jj keep a log of the commits
+that branch pointed at, and `litterbox history` lists them. `litterbox restore`
+puts one state back by adding a commit. It never moves the shared branch
+backwards.
+
+## List the steps
+
+```sh
+litterbox history <name>
+```
+
+Step 1 is the commit the shared branch points at now. Older steps follow, each
+with its step number, commit ID, time and the log's description. `--json` prints
+the same facts for scripts.
+
+The step number is positional. A new snapshot shifts every number down, so pass
+the commit ID when the target must not move. A commit ID is the stable form.
+
+History is the shared branch's log. A commit on the sandbox branch that never
+reached the shared branch is not a step. While the sandbox is `diverged`, the
+command reports the sandbox branch commit and the flags a restore needs.
+
+## Restore a step
+
+```sh
+litterbox restore <name> <step>
+```
+
+`<step>` is a step number from `history` or a commit ID it lists. Restore creates
+one new commit on the shared branch. Its tree is the selected step's tree, and
+its parent is the current shared branch commit. The old tip stays in the log,
+so the work between the two is recoverable.
+
+Git moves the sandbox branch ref and `synced` to the new commit. jj moves the
+bookmark and `synced`, and creates a new working-copy child with the same tree,
+because a jj working-copy commit cannot be the shared commit.
+
+The user's checkout is not written. Under a direct Git clone, a branch that is
+checked out is refused, and the command names the worktree path.
+
+## Diverged and resolving
+
+A restore that would lose work is refused. Pass the flag that names what is
+being discarded:
+
+- `--discard-work` discards a held shared branch, unsaved workspace changes or a
+  staging workspace. It names the sandbox branch commit and the staging path.
+- `--discard-resolution` discards an open resolution. It names the revision
+  under resolution, its `synced` and its `ours`.
+
+Both flags are needed when both conditions hold. One flag never covers the
+other.
+
+On Git, a shared tip whose tree contains conflict marker text is allowed with
+`--discard-work`; the new tree is clean. On jj, a conflicted shared commit is
+refused even with the flag, because a child of a conflicted jj commit is still
+conflicted. Resolve the shared commit first.
+
+## Retention
+
+There is no `[history]` section, no count and no age. The log belongs to the VCS.
+Prune it with the VCS's own settings in `[vcs.git]` or `[vcs.jj]` `config`, or
+leave it at the tool's defaults. `history` lists what remains.
+
+The agent has no history or restore tool. Both commands run on the host.

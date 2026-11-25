@@ -5,8 +5,8 @@ use crate::config::Config;
 use crate::config_loader;
 use crate::mcp;
 use crate::orchestrator::{
-    DeleteGuards, HostReport, InspectionReport, PlannedStep, Preflight, Sandboxes, StagedMerge,
-    preflight_host,
+    DeleteGuards, HostReport, InspectionReport, PlannedStep, Preflight, RestoreFlags, Sandboxes,
+    StagedMerge, preflight_host,
 };
 use crate::sandbox::contract::{
     ContributionSupport, Error, ProvisioningClass, SandboxStatus, StoreView,
@@ -134,6 +134,37 @@ enum Commands {
         json: bool,
     },
 
+    /// List the commits a sandbox's shared branch pointed at
+    History {
+        /// Name of the sandbox to list
+        name: String,
+
+        /// Emit structured JSON instead of a table.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Restore a sandbox to a listed step by adding a forward commit
+    Restore {
+        /// Name of the sandbox to restore
+        name: String,
+
+        /// Step number from `history`, or a commit ID it lists
+        step: String,
+
+        /// Discard a held merge, unsaved work or a staging workspace
+        #[arg(long)]
+        discard_work: bool,
+
+        /// Discard an open resolution
+        #[arg(long)]
+        discard_resolution: bool,
+
+        /// Emit structured JSON instead of a table.
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Stage or finish a merge with a rewritten sandbox branch
     Reconcile {
         /// Name of the sandbox to reconcile
@@ -205,6 +236,14 @@ pub async fn run() -> ExitCode {
         Commands::Remote { name } => handle_remote(backend, name),
         Commands::Shell { name, command } => handle_shell(backend, name, command).await,
         Commands::Status { name, json } => handle_status(backend, name, json).await,
+        Commands::History { name, json } => handle_history(backend, name, json).await,
+        Commands::Restore {
+            name,
+            step,
+            discard_work,
+            discard_resolution,
+            json,
+        } => handle_restore(backend, name, step, discard_work, discard_resolution, json).await,
         Commands::Reconcile {
             name,
             finish,
@@ -335,6 +374,165 @@ async fn handle_status(backend: Option<String>, name: String, json: bool) -> Exi
         println!("previous  git reflog show {reflog}");
     }
     ExitCode::from(0)
+}
+
+async fn handle_history(backend: Option<String>, name: String, json: bool) -> ExitCode {
+    let config = match load_config(backend) {
+        Ok(config) => config,
+        Err(error) => return report(error),
+    };
+    let sandboxes = match project(config) {
+        Ok(sandboxes) => sandboxes,
+        Err(error) => return report(error),
+    };
+    let history = match sandboxes.history(&name).await {
+        Ok(history) => history,
+        Err(error) => return report(error),
+    };
+
+    if json {
+        let steps: Vec<serde_json::Value> = history
+            .steps
+            .iter()
+            .enumerate()
+            .map(|(index, step)| {
+                serde_json::json!({
+                    "step": index + 1,
+                    "revision": step.revision.as_str(),
+                    "time": step.time,
+                    "time_utc": utc_time(step.time),
+                    "description": step.description,
+                    "synced": step.synced,
+                })
+            })
+            .collect();
+        let value = serde_json::json!({
+            "sandbox": history.sandbox,
+            "state": history.state,
+            "sandbox_tip": history.sandbox_tip,
+            "next": history.next,
+            "steps": steps,
+        });
+        match serde_json::to_string_pretty(&value) {
+            Ok(text) => println!("{text}"),
+            Err(error) => return report(Error::failed(error.to_string())),
+        }
+        return ExitCode::from(0);
+    }
+
+    println!("sandbox  {}", history.sandbox);
+    println!("state    {}", history.state);
+    if let Some(tip) = &history.sandbox_tip {
+        println!("sandbox  {tip}");
+    }
+    if history.steps.is_empty() {
+        println!("history  none recorded");
+    } else {
+        println!();
+        println!("{:<5}{:<14}{:<21}DESCRIPTION", "STEP", "COMMIT", "TIME");
+        for (index, step) in history.steps.iter().enumerate() {
+            let short: String = step.revision.as_str().chars().take(12).collect();
+            let description = if step.synced {
+                format!("{} (synced)", step.description)
+            } else {
+                step.description.clone()
+            };
+            println!(
+                "{:<5}{:<14}{:<21}{}",
+                index + 1,
+                short,
+                utc_time(step.time),
+                description
+            );
+        }
+    }
+    if let Some(next) = &history.next {
+        println!("\n{next}");
+    }
+    ExitCode::from(0)
+}
+
+async fn handle_restore(
+    backend: Option<String>,
+    name: String,
+    step: String,
+    discard_work: bool,
+    discard_resolution: bool,
+    json: bool,
+) -> ExitCode {
+    let config = match load_config(backend) {
+        Ok(config) => config,
+        Err(error) => return report(error),
+    };
+    let sandboxes = match project(config) {
+        Ok(sandboxes) => sandboxes,
+        Err(error) => return report(error),
+    };
+    let result = match sandboxes
+        .restore(
+            &name,
+            &step,
+            RestoreFlags {
+                discard_work,
+                discard_resolution,
+            },
+        )
+        .await
+    {
+        Ok(result) => result,
+        Err(error) => return report(error),
+    };
+
+    if json {
+        let value = serde_json::json!({
+            "sandbox": result.sandbox,
+            "target": result.target,
+            "revision": result.revision,
+            "created": result.created,
+        });
+        match serde_json::to_string_pretty(&value) {
+            Ok(text) => println!("{text}"),
+            Err(error) => return report(Error::failed(error.to_string())),
+        }
+        return ExitCode::from(0);
+    }
+
+    println!("sandbox  {}", result.sandbox);
+    println!("target   {}", result.target);
+    if result.created {
+        println!("commit   {}", result.revision);
+    } else {
+        println!("commit   none (the tree already matched)");
+        println!("head     {}", result.revision);
+    }
+    ExitCode::from(0)
+}
+
+/// Format Unix seconds as UTC, without adding a date library.
+fn utc_time(seconds: i64) -> String {
+    let days = seconds.div_euclid(86_400);
+    let seconds = seconds.rem_euclid(86_400);
+    let (year, month, day) = civil_from_days(days);
+    format!(
+        "{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02}Z",
+        seconds / 3_600,
+        (seconds % 3_600) / 60,
+        seconds % 60
+    )
+}
+
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if month <= 2 { year + 1 } else { year };
+    (year, month as u32, day as u32)
 }
 
 async fn handle_reconcile(
@@ -1245,6 +1443,7 @@ mod tests {
     use super::{
         DoctorError, DoctorReport, DoctorState, DoctorStep, build_doctor_report, doctor_exit_code,
         doctor_failure_report, listing_failed, render_backends, render_doctor, shell_exit_code,
+        utc_time,
     };
     use crate::backends;
     use crate::config::{Config, ProjectConfig};
@@ -1253,6 +1452,13 @@ mod tests {
         SandboxStatus, StoreView,
     };
     use crate::sandbox::report::{Capability, Check, Fallback, Readiness, State};
+
+    #[test]
+    fn unix_seconds_format_as_utc() {
+        assert_eq!(utc_time(0), "1970-01-01 00:00:00Z");
+        assert_eq!(utc_time(1_700_000_000), "2023-11-14 22:13:20Z");
+        assert_eq!(utc_time(-1), "1969-12-31 23:59:59Z");
+    }
 
     fn support(state: State) -> Vec<ContributionSupport> {
         vec![ContributionSupport {
