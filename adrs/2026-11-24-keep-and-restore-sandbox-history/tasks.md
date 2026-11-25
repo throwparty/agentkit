@@ -54,7 +54,7 @@ Add `src/vcs/git/restore.rs`. Peel the target tree. If the tip tree equals the t
 | Depends On | T-002 |
 | References | restore-forward,no-new-store,restore-races |
 
-### T-005: [ ] jj history
+### T-005: [x] jj history
 
 Add `src/vcs/jj/history.rs`. List operations with `jj op log -T`. Resolve the bookmark at each operation with `--at-op` and `--ignore-working-copy`. Skip operations where the bookmark did not exist or did not move. Return newest first with the commit, time and description. Cap the scan and report the cap.
 
