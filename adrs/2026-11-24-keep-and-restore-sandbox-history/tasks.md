@@ -67,7 +67,7 @@ Add `src/vcs/jj/history.rs`. List operations with `jj op log -T`. Resolve the bo
 | Depends On | T-002 |
 | References | jj-log,jj-scoped,pruned-jj-log |
 
-### T-006: [ ] jj restore
+### T-006: [x] jj restore
 
 Add `src/vcs/jj/restore.rs`. Refuse a missing sandbox workspace with the repair remedy. Refuse a conflicted shared commit. If the sandbox working copy already has the target tree and descends from the tip, create no commit. Otherwise run `jj new <tip> -m`, `jj restore --from <target>`, move the bookmark and write `synced`.
 
