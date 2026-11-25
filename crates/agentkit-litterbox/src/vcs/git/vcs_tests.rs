@@ -39,6 +39,86 @@ fn the_backend_reports_its_conflict_model_and_binding() {
 }
 
 #[test]
+fn history_lists_the_branch_reflog_newest_first() {
+    let dir = repo_with_commit();
+    let repo = Repository::open(dir.path()).expect("open");
+    repo.config()
+        .expect("config")
+        .set_str("core.logAllRefUpdates", "always")
+        .expect("log all refs");
+    let base = repo.head().expect("head").peel_to_commit().expect("commit");
+    let signature = Signature::now("test", "test@example.com").expect("signature");
+    let tree = base.tree().expect("tree");
+    let one = repo
+        .commit(None, &signature, &signature, "one", &tree, &[&base])
+        .expect("one");
+    let two = repo
+        .commit(None, &signature, &signature, "two", &tree, &[&base])
+        .expect("two");
+
+    let vcs = GitVcs::open(dir.path()).expect("vcs");
+    let prepared = vcs.prepare("example").expect("prepare");
+    let workspace = prepared.workspace;
+    vcs.set_tip(&workspace, &Revision::new(one.to_string()))
+        .expect("one");
+    vcs.set_tip(&workspace, &Revision::new(two.to_string()))
+        .expect("two");
+    vcs.set_synced(&workspace, &Revision::new(one.to_string()))
+        .expect("synced");
+
+    let steps = vcs.history(&workspace).expect("history");
+    assert_eq!(steps[0].revision.as_str(), two.to_string(), "{steps:?}");
+    let first = steps
+        .iter()
+        .find(|step| step.revision.as_str() == one.to_string())
+        .expect("the previous tip is listed");
+    assert!(first.synced, "the synced ref labels the step: {steps:?}");
+    assert!(
+        steps.iter().all(|step| !step.description.is_empty()),
+        "{steps:?}"
+    );
+}
+
+#[test]
+fn a_missing_commit_in_the_reflog_is_skipped() {
+    let dir = repo_with_commit();
+    let repo = Repository::open(dir.path()).expect("open");
+    let base = repo.head().expect("head").peel_to_commit().expect("commit");
+    let signature = Signature::now("test", "test@example.com").expect("signature");
+    let tree = base.tree().expect("tree");
+    let one = repo
+        .commit(None, &signature, &signature, "one", &tree, &[&base])
+        .expect("one");
+    let two = repo
+        .commit(None, &signature, &signature, "two", &tree, &[&base])
+        .expect("two");
+
+    let vcs = GitVcs::open(dir.path()).expect("vcs");
+    let prepared = vcs.prepare("example").expect("prepare");
+    let workspace = prepared.workspace;
+    vcs.set_tip(&workspace, &Revision::new(one.to_string()))
+        .expect("one");
+    vcs.set_tip(&workspace, &Revision::new(two.to_string()))
+        .expect("two");
+
+    let missing = git2::Oid::from_str("0000000000000000000000000000000000000001").expect("oid");
+    let mut reflog = repo.reflog("refs/heads/litterbox/example").expect("reflog");
+    reflog
+        .append(missing, &signature, Some("missing object"))
+        .expect("append");
+    reflog.write().expect("write");
+
+    let steps = vcs.history(&workspace).expect("history");
+    assert!(
+        steps
+            .iter()
+            .all(|step| step.revision.as_str() != missing.to_string()),
+        "{steps:?}"
+    );
+    assert_eq!(steps[0].revision.as_str(), two.to_string(), "{steps:?}");
+}
+
+#[test]
 fn resolve_begin_writes_a_conflicted_merge() {
     let dir = repo_with_commit();
     let repo = Repository::open(dir.path()).expect("open");
