@@ -5,8 +5,10 @@
 //! error rather than something silently ignored.
 
 use serde::Deserialize;
+use std::path::Path;
+use std::process::Command;
 
-use crate::domain::ScmMode;
+use crate::domain::{SandboxError, ScmMode};
 use crate::sandbox::contract::WorkspaceBinding;
 
 /// Git's keys.
@@ -19,6 +21,9 @@ pub struct GitVcsConfig {
     /// How a sandbox receives its workspace.
     #[serde(default)]
     pub binding: Option<WorkspaceBinding>,
+    /// Configuration applied to Litterbox's clone. Git config syntax.
+    #[serde(default)]
+    pub config: Option<String>,
 }
 
 impl GitVcsConfig {
@@ -34,14 +39,119 @@ impl GitVcsConfig {
     }
 }
 
+/// Apply a Git config string to Litterbox's clone.
+///
+/// The string is written to an overlay file the clone includes. The overlay is
+/// replaced on every call, so an empty or absent string clears the previous
+/// settings. Git validates the string before it is installed.
+pub fn apply_config(store: &Path, config: Option<&str>) -> Result<(), SandboxError> {
+    let overlay = store.join("litterbox.config");
+    let temporary = store.join("litterbox.config.tmp");
+    std::fs::write(&temporary, config.unwrap_or("")).map_err(SandboxError::Io)?;
+
+    let checked = Command::new("git")
+        .arg("config")
+        .arg("--file")
+        .arg(&temporary)
+        .arg("--list")
+        .output()
+        .map_err(SandboxError::Io)?;
+    if !checked.status.success() {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(SandboxError::Config(format!(
+            "vcs.git config is not valid: {}",
+            String::from_utf8_lossy(&checked.stderr).trim()
+        )));
+    }
+
+    std::fs::rename(&temporary, &overlay).map_err(SandboxError::Io)?;
+    let overlay = overlay.canonicalize().map_err(SandboxError::Io)?;
+    let installed = Command::new("git")
+        .arg("--git-dir")
+        .arg(store)
+        .args(["config", "--replace-all", "include.path"])
+        .arg(&overlay)
+        .output()
+        .map_err(SandboxError::Io)?;
+    if !installed.status.success() {
+        return Err(SandboxError::Config(format!(
+            "vcs.git config could not be installed: {}",
+            String::from_utf8_lossy(&installed.stderr).trim()
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+    use std::process::Command;
+
+    use tempfile::TempDir;
+
     use super::GitVcsConfig;
     use crate::domain::ScmMode;
     use crate::sandbox::contract::WorkspaceBinding;
 
     fn section(text: &str) -> toml::Value {
         toml::from_str(text).expect("section")
+    }
+
+    fn bare() -> TempDir {
+        let dir = TempDir::new().expect("tempdir");
+        git2::Repository::init_bare(dir.path()).expect("bare");
+        dir
+    }
+
+    fn read(dir: &Path, key: &str) -> Option<String> {
+        let output = Command::new("git")
+            .arg("--git-dir")
+            .arg(dir)
+            .args(["config", "--get", key])
+            .output()
+            .expect("git runs");
+        if output.status.success() {
+            Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        } else {
+            None
+        }
+    }
+
+    #[test]
+    fn the_config_string_parses() {
+        let config = GitVcsConfig::from_section(&section("config = 'x'")).expect("config");
+        assert_eq!(config.config.as_deref(), Some("x"));
+    }
+
+    #[test]
+    fn a_config_string_is_applied_and_replaced() {
+        let dir = bare();
+        super::apply_config(dir.path(), Some("[gc]\n\treflogExpire = 30.days\n")).expect("apply");
+        assert_eq!(
+            read(dir.path(), "gc.reflogExpire").as_deref(),
+            Some("30.days")
+        );
+
+        super::apply_config(
+            dir.path(),
+            Some("[gc]\n\treflogExpireUnreachable = 7.days\n"),
+        )
+        .expect("replace");
+        assert_eq!(read(dir.path(), "gc.reflogExpire"), None);
+        assert_eq!(
+            read(dir.path(), "gc.reflogExpireUnreachable").as_deref(),
+            Some("7.days")
+        );
+
+        super::apply_config(dir.path(), None).expect("clear");
+        assert_eq!(read(dir.path(), "gc.reflogExpireUnreachable"), None);
+    }
+
+    #[test]
+    fn an_invalid_config_is_refused() {
+        let dir = bare();
+        let error = super::apply_config(dir.path(), Some("not a config")).expect_err("invalid");
+        assert!(error.to_string().contains("vcs.git config"), "{error}");
     }
 
     #[test]

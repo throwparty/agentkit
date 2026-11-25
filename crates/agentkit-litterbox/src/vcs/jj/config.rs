@@ -15,6 +15,9 @@ pub struct JjVcsConfig {
     /// How a sandbox receives its workspace.
     #[serde(default)]
     pub binding: Option<WorkspaceBinding>,
+    /// Configuration applied to Litterbox's clone. TOML.
+    #[serde(default)]
+    pub config: Option<String>,
 }
 
 impl JjVcsConfig {
@@ -47,6 +50,12 @@ mod tests {
         let config =
             JjVcsConfig::from_section(&toml::Value::Table(Default::default())).expect("config");
         assert_eq!(config.binding, None, "an absent binding is not a default");
+    }
+
+    #[test]
+    fn the_config_string_parses() {
+        let config = JjVcsConfig::from_section(&section("config = 'x'")).expect("config");
+        assert_eq!(config.config.as_deref(), Some("x"));
     }
 
     #[test]

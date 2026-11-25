@@ -17,7 +17,7 @@ mod store;
 #[cfg(test)]
 mod vcs_tests;
 
-pub use config::GitVcsConfig;
+pub use config::{GitVcsConfig, apply_config};
 pub use scm::{GitScm, GitVcs, Scm, ThreadSafeScm};
 pub use store::VcsStore;
 

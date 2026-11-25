@@ -28,19 +28,58 @@ pub struct JjVcs {
     slug: String,
     host: PathBuf,
     lock: Mutex<()>,
+    config: Option<String>,
 }
 
 impl JjVcs {
     /// Build the backend for one project.
-    pub fn open(project_slug: &str) -> Result<Self, SandboxError> {
+    pub fn open(project_slug: &str, config: Option<String>) -> Result<Self, SandboxError> {
         let host = std::env::current_dir().map_err(SandboxError::Io)?;
         ops::probe(&host).map_err(|error| SandboxError::Config(error.to_string()))?;
-        Ok(Self {
+        let vcs = Self {
             root: clone::root(project_slug),
             slug: project_slug.to_string(),
             host,
             lock: Mutex::new(()),
-        })
+            config,
+        };
+        vcs.apply_config()
+            .map_err(|error| SandboxError::Config(error.to_string()))?;
+        Ok(vcs)
+    }
+
+    /// Apply the per-repo config string the clone includes.
+    ///
+    /// jj keeps a repository's config under the user's config directory, keyed
+    /// by the repository id, so `jj config path --repo` is the only stable way
+    /// to find it. The file is replaced rather than appended, so a changed or
+    /// removed string clears the previous settings.
+    fn apply_config(&self) -> Result<(), Error> {
+        if !self.root.join(".jj").is_dir() {
+            return Ok(());
+        }
+        let path = PathBuf::from(ops::jj(&self.root, &["config", "path", "--repo"])?);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(Error::Io)?;
+        }
+        let temporary = path.with_file_name("config.toml.next");
+        std::fs::write(&temporary, self.config.as_deref().unwrap_or("")).map_err(Error::Io)?;
+        let text = temporary.to_str().ok_or_else(|| Error::Backend {
+            operation: "apply vcs.jj config".to_string(),
+            message: "the config path is not UTF-8".to_string(),
+        })?;
+        ops::jj(
+            &self.root,
+            &[
+                "--ignore-working-copy",
+                "--config-file",
+                text,
+                "config",
+                "list",
+            ],
+        )?;
+        std::fs::rename(&temporary, &path).map_err(Error::Io)?;
+        Ok(())
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, ()> {
@@ -244,6 +283,7 @@ impl Vcs for JjVcs {
     fn prepare(&self, sandbox: &str) -> Result<Prepared, Error> {
         let _guard = self.lock();
         clone::ensure(&self.root, &self.host)?;
+        self.apply_config()?;
         let workspace = self.workspace(sandbox);
         if workspace.exists() {
             return Err(Error::Exists {
@@ -779,7 +819,14 @@ impl JjVcs {
             slug: "test".to_string(),
             host,
             lock: Mutex::new(()),
+            config: None,
         })
+    }
+
+    /// Attach a config string for tests that do not go through `open`.
+    pub(crate) fn with_config(mut self, config: Option<String>) -> Self {
+        self.config = config;
+        self
     }
 }
 
@@ -812,6 +859,41 @@ mod tests {
         git(dir.path(), &["add", "."]);
         git(dir.path(), &["commit", "-qm", "init"]);
         dir
+    }
+
+    #[test]
+    fn the_config_string_is_applied_to_the_clone() {
+        unsafe {
+            std::env::set_var("JJ_USER", "Test");
+            std::env::set_var("JJ_EMAIL", "test@example.com");
+        }
+
+        let host = repository();
+        let data = TempDir::new().expect("data");
+        let root = data.path().join("clone");
+        let vcs = JjVcs::open_at(root.clone(), host.path().to_path_buf())
+            .expect("backend")
+            .with_config(Some("[ui]\ncolor = \"never\"\n".to_string()));
+        vcs.prepare("demo").expect("prepare");
+
+        let value = super::ops::jj(&root, &["config", "get", "ui.color"]).expect("config");
+        assert!(value.contains("never"), "{value}");
+    }
+
+    #[test]
+    fn an_invalid_config_is_refused_when_the_clone_is_prepared() {
+        unsafe {
+            std::env::set_var("JJ_USER", "Test");
+            std::env::set_var("JJ_EMAIL", "test@example.com");
+        }
+
+        let host = repository();
+        let data = TempDir::new().expect("data");
+        let vcs = JjVcs::open_at(data.path().join("clone"), host.path().to_path_buf())
+            .expect("backend")
+            .with_config(Some("not toml".to_string()));
+        let error = vcs.prepare("demo").expect_err("invalid config");
+        assert!(error.to_string().contains("config"), "{error}");
     }
 
     fn numbered(label: &str) -> String {

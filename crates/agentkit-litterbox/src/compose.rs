@@ -36,7 +36,7 @@ fn open_git_project(config: Config, project_slug: &str) -> Result<Sandboxes, San
     let git = git_settings(&config)?;
     let mode = git.snapshot_mode.unwrap_or_default();
     let remote = mode == ScmMode::Remote;
-    let vcs = open_git(&config, project_slug, mode)?;
+    let vcs = open_git(&config, project_slug, mode, git.config.as_deref())?;
 
     Sandboxes::with_vcs(config, Arc::new(vcs), remote, git.binding)
 }
@@ -49,7 +49,7 @@ fn open_jj(config: Config, project_slug: &str) -> Result<Sandboxes, SandboxError
         .cloned()
         .unwrap_or(toml::Value::Table(Default::default()));
     let jj = JjVcsConfig::from_section(&section).map_err(SandboxError::Config)?;
-    let vcs = JjVcs::open(project_slug)?;
+    let vcs = JjVcs::open(project_slug, jj.config)?;
     Sandboxes::with_vcs(config, Arc::new(vcs), true, jj.binding)
 }
 
@@ -63,15 +63,28 @@ fn git_settings(config: &Config) -> Result<GitVcsConfig, SandboxError> {
     GitVcsConfig::from_section(&section).map_err(SandboxError::Config)
 }
 
-fn open_git(config: &Config, project_slug: &str, mode: ScmMode) -> Result<GitVcs, SandboxError> {
+fn open_git(
+    config: &Config,
+    project_slug: &str,
+    mode: ScmMode,
+    vcs_config: Option<&str>,
+) -> Result<GitVcs, SandboxError> {
     let host = Path::new(".");
 
     let vcs = match mode {
         ScmMode::Direct => {
+            if vcs_config.is_some() {
+                return Err(SandboxError::Config(
+                    "vcs.git config applies only when Litterbox owns its clone; remove it or \
+                     use snapshot-mode = 'remote'"
+                        .to_string(),
+                ));
+            }
             GitVcs::open_with_mode_and_prefix(host, mode, config.project.slug.clone(), None)?
         }
         ScmMode::Remote => {
             let bare: std::path::PathBuf = VcsStore::clone_bare(host, project_slug)?;
+            crate::vcs::git::apply_config(&bare, vcs_config)?;
             VcsStore::install_remote(host, &bare)?;
             let host_abs = host.canonicalize().unwrap_or_else(|_| host.to_path_buf());
             GitVcs::open_with_mode_and_prefix(
@@ -108,12 +121,44 @@ mod tests {
         let mut config = Config::default();
         config.vcs_settings.insert(
             "git".to_string(),
-            toml::from_str("binding = 'bound'\nsnapshot-mode = 'direct'").expect("section"),
+            toml::from_str(
+                "binding = 'bound'\nsnapshot-mode = 'direct'\nconfig = '[gc]\\n\\treflogExpire = 30.days\\n'",
+            )
+            .expect("section"),
         );
 
         let git = super::git_settings(&config).expect("settings");
         assert_eq!(git.binding, Some(WorkspaceBinding::Bound));
         assert_eq!(git.snapshot_mode, Some(ScmMode::Direct));
+        assert!(
+            git.config
+                .as_deref()
+                .is_some_and(|value| value.contains("reflogExpire")),
+            "{:?}",
+            git.config
+        );
+    }
+
+    #[test]
+    fn git_config_is_refused_under_direct() {
+        let config = Config {
+            project: ProjectConfig {
+                slug: Some("project".to_string()),
+                backends: None,
+            },
+            ..Config::default()
+        };
+        let result = super::open_git(
+            &config,
+            "project",
+            ScmMode::Direct,
+            Some("[gc]\n\treflogExpire = 1.day\n"),
+        );
+        let error = match result {
+            Ok(_) => panic!("a direct clone has no place for the config"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("vcs.git config"), "{error}");
     }
 
     #[test]
