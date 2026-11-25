@@ -18,7 +18,7 @@ use crate::sandbox::contract::{BindingSupport, SnapshotSelector};
 use crate::vcs::git_common::IgnoreFiles;
 use crate::vcs::{
     Begun, Capabilities, Conflict, ConflictModel, ConflictSides, Error, ExportSupport, Finished,
-    HistoryPolicy, Merge, Prepared, Report, RestoreMode, Revision, Staged, TreeId, Vcs, Workspace,
+    HistoryStep, Merge, Prepared, Report, Restored, Revision, Staged, TreeId, Vcs, Workspace,
 };
 
 /// A jj-backed VCS.
@@ -787,20 +787,11 @@ impl Vcs for JjVcs {
         Err(unsupported("abort"))
     }
 
-    fn history(
-        &self,
-        _workspace: &Workspace,
-        _keep: &HistoryPolicy,
-    ) -> Result<Vec<Revision>, Error> {
+    fn history(&self, _workspace: &Workspace) -> Result<Vec<HistoryStep>, Error> {
         Err(unsupported("history"))
     }
 
-    fn restore(
-        &self,
-        _workspace: &Workspace,
-        _revision: &Revision,
-        _mode: RestoreMode,
-    ) -> Result<(), Error> {
+    fn restore(&self, _workspace: &Workspace, _revision: &Revision) -> Result<Restored, Error> {
         Err(unsupported("restore"))
     }
 

@@ -12,7 +12,7 @@ use crate::vcs::git_common::archive;
 pub use crate::vcs::git_common::{SnapshotFilter, branch_name_for};
 use crate::vcs::{
     Begun, Capabilities, Conflict, ConflictModel, ConflictSides, Error as VcsError, ExportSupport,
-    Finished, HistoryPolicy, Merge, Prepared, Report, RestoreMode, Revision, Staged, TreeId, Vcs,
+    Finished, HistoryStep, Merge, Prepared, Report, Restored, Revision, Staged, TreeId, Vcs,
     Workspace,
 };
 
@@ -994,20 +994,11 @@ impl Vcs for GitVcs {
         Err(unsupported("abort"))
     }
 
-    fn history(
-        &self,
-        _workspace: &Workspace,
-        _keep: &HistoryPolicy,
-    ) -> Result<Vec<Revision>, VcsError> {
+    fn history(&self, _workspace: &Workspace) -> Result<Vec<HistoryStep>, VcsError> {
         Err(unsupported("history"))
     }
 
-    fn restore(
-        &self,
-        _workspace: &Workspace,
-        _revision: &Revision,
-        _mode: RestoreMode,
-    ) -> Result<(), VcsError> {
+    fn restore(&self, _workspace: &Workspace, _revision: &Revision) -> Result<Restored, VcsError> {
         Err(unsupported("restore"))
     }
 
