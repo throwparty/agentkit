@@ -6,6 +6,7 @@
 //! imports `vcs::jj`.
 
 mod config;
+mod history;
 pub mod path;
 mod reconcile;
 #[cfg(test)]

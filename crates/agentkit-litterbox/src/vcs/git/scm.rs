@@ -994,8 +994,10 @@ impl Vcs for GitVcs {
         Err(unsupported("abort"))
     }
 
-    fn history(&self, _workspace: &Workspace) -> Result<Vec<HistoryStep>, VcsError> {
-        Err(unsupported("history"))
+    fn history(&self, workspace: &Workspace) -> Result<Vec<HistoryStep>, VcsError> {
+        let branch = workspace.branch().to_string();
+        self.repo_for_branch(&branch, |repo| super::history::read(repo, &branch))
+            .map_err(vcs_error)
     }
 
     fn restore(&self, _workspace: &Workspace, _revision: &Revision) -> Result<Restored, VcsError> {

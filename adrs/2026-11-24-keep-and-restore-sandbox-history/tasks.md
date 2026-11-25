@@ -28,7 +28,7 @@ Add `src/vcs/history.rs` with `HistoryStep` and `Restored`. Replace `Vcs::histor
 | Depends On |  |
 | References | history-command,restore-forward |
 
-### T-003: [ ] Git history
+### T-003: [x] Git history
 
 Add `src/vcs/git/history.rs`. Read `refs/heads/litterbox/<name>` with `Repository::reflog`, newest first. Skip deleted entries and missing commits. Collapse consecutive repeats. Mark a step named by the synced reflog. Return `HistoryStep` with the commit, time and reflog message.
 
