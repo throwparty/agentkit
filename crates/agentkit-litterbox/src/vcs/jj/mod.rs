@@ -6,6 +6,7 @@
 
 mod clone;
 mod config;
+mod history;
 mod ops;
 
 pub use config::JjVcsConfig;
@@ -787,8 +788,9 @@ impl Vcs for JjVcs {
         Err(unsupported("abort"))
     }
 
-    fn history(&self, _workspace: &Workspace) -> Result<Vec<HistoryStep>, Error> {
-        Err(unsupported("history"))
+    fn history(&self, workspace: &Workspace) -> Result<Vec<HistoryStep>, Error> {
+        let _guard = self.lock();
+        history::read(&self.root, workspace.branch().as_str())
     }
 
     fn restore(&self, _workspace: &Workspace, _revision: &Revision) -> Result<Restored, Error> {
@@ -850,6 +852,77 @@ mod tests {
         git(dir.path(), &["add", "."]);
         git(dir.path(), &["commit", "-qm", "init"]);
         dir
+    }
+
+    #[test]
+    fn history_is_scoped_to_the_sandbox_bookmark() {
+        unsafe {
+            std::env::set_var("JJ_USER", "Test");
+            std::env::set_var("JJ_EMAIL", "test@example.com");
+        }
+
+        let host = repository();
+        let data = TempDir::new().expect("data");
+        let root = data.path().join("clone");
+        let vcs = JjVcs::open_at(root.clone(), host.path().to_path_buf()).expect("backend");
+        let demo = vcs.prepare("demo").expect("demo").workspace;
+        let other = vcs.prepare("other").expect("other").workspace;
+        let base = vcs.tip(&demo).expect("base").as_str().to_string();
+
+        jj(&root, &["new", &base, "-m", "one"]);
+        let one = super::ops::commit_id(&root, "@").expect("one");
+        jj(&root, &["new", &one, "-m", "two"]);
+        let two = super::ops::commit_id(&root, "@").expect("two");
+        vcs.set_tip(&demo, &Revision::new(one.clone()))
+            .expect("one");
+        vcs.set_tip(&demo, &Revision::new(two.clone()))
+            .expect("two");
+
+        jj(&root, &["new", &base, "-m", "other"]);
+        let other_commit = super::ops::commit_id(&root, "@").expect("other");
+        vcs.set_tip(&other, &Revision::new(other_commit.clone()))
+            .expect("other");
+
+        let before = super::ops::jj(
+            &root,
+            &[
+                "--ignore-working-copy",
+                "op",
+                "log",
+                "--limit",
+                "1",
+                "-T",
+                "self.id()",
+            ],
+        )
+        .expect("op log");
+        let steps = vcs.history(&demo).expect("history");
+        let after = super::ops::jj(
+            &root,
+            &[
+                "--ignore-working-copy",
+                "op",
+                "log",
+                "--limit",
+                "1",
+                "-T",
+                "self.id()",
+            ],
+        )
+        .expect("op log");
+
+        assert_eq!(before, after, "history writes no operation");
+        assert_eq!(steps[0].revision.as_str(), two, "{steps:?}");
+        assert!(
+            steps.iter().any(|step| step.revision.as_str() == one),
+            "{steps:?}"
+        );
+        assert!(
+            steps
+                .iter()
+                .all(|step| step.revision.as_str() != other_commit),
+            "another bookmark's commit is not a demo step: {steps:?}"
+        );
     }
 
     #[test]
