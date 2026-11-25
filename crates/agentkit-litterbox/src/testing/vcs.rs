@@ -60,6 +60,8 @@ struct State {
     conflicts: Vec<Conflict>,
     conflicts_by_revision: std::collections::BTreeMap<String, Vec<Conflict>>,
     staging: Option<PathBuf>,
+    history: Vec<HistoryStep>,
+    restored: Vec<(String, String)>,
 }
 
 impl Default for TestVcs {
@@ -205,6 +207,17 @@ impl TestVcs {
             .insert(revision.to_string(), conflicts);
         self.state_mut().conflicts.clear();
         self
+    }
+
+    /// Configure the history the backend reports, newest first.
+    pub fn with_history(mut self, steps: Vec<HistoryStep>) -> Self {
+        self.state_mut().history = steps;
+        self
+    }
+
+    /// The restores the orchestrator requested, as `(old tip, target)`.
+    pub fn restored(&self) -> Vec<(String, String)> {
+        self.state().restored.clone()
     }
 
     /// Configure the tree a revision reports.
@@ -540,10 +553,18 @@ impl Vcs for TestVcs {
     }
 
     fn history(&self, _workspace: &Workspace) -> Result<Vec<HistoryStep>, Error> {
-        Ok(Vec::new())
+        Ok(self.state().history.clone())
     }
 
     fn restore(&self, _workspace: &Workspace, revision: &Revision) -> Result<Restored, Error> {
+        let mut state = self.state();
+        let previous = state.tip.clone();
+        state
+            .restored
+            .push((previous, revision.as_str().to_string()));
+        state.tip = revision.as_str().to_string();
+        state.sandbox_tip = revision.as_str().to_string();
+        state.synced = revision.as_str().to_string();
         Ok(Restored {
             revision: revision.clone(),
             created: true,
