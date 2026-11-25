@@ -2,7 +2,7 @@
 
 ## Tasks
 
-### T-001: [ ] Per-VCS config string
+### T-001: [x] Per-VCS config string
 
 Add `config: Option<String>` to `GitVcsConfig` and `JjVcsConfig`. Git writes the string to an overlay beside Litterbox's bare clone and points `include.path` at it with `--replace-all`. jj writes the file named by `jj config path --repo`. Both validate with the tool before use and replace the overlay on every open. Refuse the Git key when `snapshot-mode = 'direct'`.
 
