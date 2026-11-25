@@ -10,13 +10,14 @@ use crate::backends;
 use crate::config::Config;
 use crate::domain::SandboxError;
 use crate::metadata_store::{self, LoadedSandbox, StoredSandbox};
+use crate::orchestrator::history::{HistoryReport, HistoryRestore, RestoreFlags};
 use crate::orchestrator::lock;
 use crate::orchestrator::outcome::{
     DeleteGuards, Deletion, InspectionReport, Performed, Recovery, SourceStatus, StagedMerge,
 };
 use crate::orchestrator::reconcile::Reconciler;
 use crate::orchestrator::resolve::{Resolved, Resolver};
-use crate::orchestrator::source::Action;
+use crate::orchestrator::source::{Action, Merge, Workspace as WorkspaceAxis};
 use crate::provision::StepOutcome;
 use crate::provision::kind::KindDescription;
 use crate::provision::prepare::{self, PrepareContext, PrepareError, SystemRunner};
@@ -27,7 +28,8 @@ use crate::sandbox::contract::{
 };
 use crate::sandbox::selected::Selected;
 use crate::vcs::{
-    Error as VcsError, Finished, Prepared, Report, Revision, Staged, Vcs, Workspace as VcsWorkspace,
+    Error as VcsError, Finished, HistoryStep, Prepared, Report, Revision, Staged, Vcs,
+    Workspace as VcsWorkspace,
 };
 /// How long host preparation may take before its commands are killed and
 /// reaped. Preparation runs before a backend's create budget starts, so it
@@ -1647,6 +1649,136 @@ impl SandboxIo for Sandboxes {
 }
 
 impl Sandboxes {
+    /// List the commits the shared branch pointed at.
+    pub async fn history(&self, name: &str) -> Result<HistoryReport, Error> {
+        let stored = self.stored(name)?;
+        let workspace = VcsWorkspace::from_branch(&stored.branch_name);
+        let steps = self.vcs.history(&workspace).map_err(contract_error)?;
+
+        let resolving = stored.resolution.is_some();
+        let conflicted = self
+            .vcs
+            .tip(&workspace)
+            .ok()
+            .and_then(|tip| self.vcs.conflicts(&tip).ok())
+            .is_some_and(|conflicts| !conflicts.is_empty());
+        let diverged = stored.merge.is_some() || conflicted;
+        let state = if resolving {
+            "resolving"
+        } else if diverged {
+            "diverged"
+        } else {
+            "clean"
+        };
+        let sandbox_tip = self
+            .vcs
+            .sandbox_tip(&workspace)
+            .ok()
+            .map(|revision| revision.as_str().to_string());
+        let next = if resolving {
+            Some(format!(
+                "resolve the open conflict, or run `litterbox restore {name} <step> \
+                 --discard-resolution`"
+            ))
+        } else if diverged {
+            Some(format!(
+                "run `litterbox restore {name} <step> --discard-work` to replace the held \
+                 sandbox branch commit"
+            ))
+        } else {
+            None
+        };
+
+        Ok(HistoryReport {
+            sandbox: stored.sandbox.name,
+            steps,
+            state: state.to_string(),
+            sandbox_tip,
+            next,
+        })
+    }
+
+    /// Restore the shared branch to a listed step by adding a forward commit.
+    pub async fn restore(
+        &self,
+        name: &str,
+        step: &str,
+        flags: RestoreFlags,
+    ) -> Result<HistoryRestore, Error> {
+        let _lock = lock::acquire(&self.records_dir, name).await?;
+        let stored = self.stored(name)?;
+        let selected = self.select_for(&stored.sandbox, "restore").await?;
+        let workspace = VcsWorkspace::from_branch(&stored.branch_name);
+
+        let steps = self.vcs.history(&workspace).map_err(contract_error)?;
+        let index = resolve_step(&steps, step)?;
+        let target = steps[index].revision.clone();
+
+        if !self
+            .vcs
+            .conflicts(&target)
+            .map_err(contract_error)?
+            .is_empty()
+        {
+            return Err(Error::Denied {
+                operation: "restore".to_string(),
+                reason: format!(
+                    "step {} is a conflicted commit; a restore would add another conflicted \
+                     commit",
+                    index + 1
+                ),
+            });
+        }
+
+        let reconciler = Reconciler::new(&self.vcs, &stored, &selected, &self.records_dir);
+        let state = reconciler.state().await?;
+        let staging = self.vcs.staging(&workspace);
+        let loses_work = state.merge != Merge::None
+            || state.workspace == WorkspaceAxis::Dirty
+            || staging.is_some();
+
+        let mut hints = Vec::new();
+        if loses_work && !flags.discard_work {
+            hints.push("--discard-work");
+        }
+        if stored.resolution.is_some() && !flags.discard_resolution {
+            hints.push("--discard-resolution");
+        }
+        if !hints.is_empty() {
+            return Err(Error::Denied {
+                operation: "restore".to_string(),
+                reason: format!(
+                    "the restore would discard sandbox work or an open resolution; pass {}",
+                    hints.join(" and ")
+                ),
+            });
+        }
+
+        if flags.discard_work && staging.is_some() {
+            self.vcs.discard_stage(&workspace).map_err(contract_error)?;
+        }
+
+        reconciler.replace_workspace(&target).await?;
+        let restored = self
+            .vcs
+            .restore(&workspace, &target)
+            .map_err(contract_error)?;
+
+        if stored.merge.is_some() || stored.resolution.is_some() {
+            let mut updated = stored.clone();
+            updated.merge = None;
+            updated.resolution = None;
+            metadata_store::store_sandbox_at(&self.records_dir, &updated.sandbox.name, &updated)?;
+        }
+
+        Ok(HistoryRestore {
+            sandbox: stored.sandbox.name,
+            target: target.as_str().to_string(),
+            revision: restored.revision.as_str().to_string(),
+            created: restored.created,
+        })
+    }
+
     /// The host-side view of a diverged sandbox.
     pub async fn report(&self, name: &str) -> Result<Report, Error> {
         let stored = self.stored(name)?;
@@ -2028,6 +2160,44 @@ impl From<VcsError> for SandboxError {
     }
 }
 
+/// Resolve a step number or a commit ID against the listed history.
+fn resolve_step(steps: &[HistoryStep], step: &str) -> Result<usize, Error> {
+    if let Ok(number) = step.parse::<usize>() {
+        if number == 0 || number > steps.len() {
+            return Err(Error::Denied {
+                operation: "restore".to_string(),
+                reason: format!(
+                    "step {number} is outside the {} steps the log has; run `litterbox history \
+                     <name>` and pass a step it lists",
+                    steps.len()
+                ),
+            });
+        }
+        return Ok(number - 1);
+    }
+
+    let matches: Vec<usize> = steps
+        .iter()
+        .enumerate()
+        .filter(|(_, candidate)| candidate.revision.as_str().starts_with(step))
+        .map(|(index, _)| index)
+        .collect();
+    match matches.as_slice() {
+        [index] => Ok(*index),
+        [] => Err(Error::Denied {
+            operation: "restore".to_string(),
+            reason: format!(
+                "commit '{step}' is not in the log; run `litterbox history <name>` and pass a \
+                 commit it lists"
+            ),
+        }),
+        _ => Err(Error::Denied {
+            operation: "restore".to_string(),
+            reason: format!("commit prefix '{step}' is ambiguous; use more characters"),
+        }),
+    }
+}
+
 pub(crate) fn contract_error(error: VcsError) -> Error {
     match error {
         VcsError::Exists { name } => Error::Conflict { name },
@@ -2061,6 +2231,7 @@ mod seam_tests {
     use super::Sandboxes;
     use crate::config::Config;
     use crate::metadata_store::{self, StoredSandbox};
+    use crate::orchestrator::history::RestoreFlags;
     use crate::orchestrator::outcome::DeleteGuards;
     use crate::sandbox::contract::{
         BindingSupport, Error, ProvisionStep, ProvisioningClass, ResolvedStep, SandboxRecord,
@@ -2069,6 +2240,7 @@ mod seam_tests {
     use crate::sandbox::report::State;
     use crate::sandbox::selected::Selected;
     use crate::testing::{TestBackend, TestVcs};
+    use crate::vcs::{HistoryStep, Revision};
 
     fn scratch() -> TempDir {
         TempDir::new().expect("tempdir")
@@ -2144,6 +2316,78 @@ mod seam_tests {
             selected(backend),
         );
         (sandboxes, vcs)
+    }
+
+    #[tokio::test]
+    async fn restore_refuses_a_diverged_sandbox_and_restores_with_the_flag() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(
+            TestVcs::new()
+                .with_tip("branch")
+                .with_synced("branch")
+                .with_sandbox_tip("branch")
+                .with_conflicts_for("branch", &["file.txt"])
+                .with_history(vec![
+                    HistoryStep {
+                        revision: Revision::new("branch"),
+                        time: 2,
+                        description: "current".to_string(),
+                        synced: false,
+                    },
+                    HistoryStep {
+                        revision: Revision::new("target"),
+                        time: 1,
+                        description: "older".to_string(),
+                        synced: false,
+                    },
+                ]),
+        );
+        let config = Config {
+            project: crate::config::ProjectConfig {
+                slug: Some("project".to_string()),
+                backends: Some(vec!["test".to_string()]),
+            },
+            ..Config::default()
+        };
+        let sandboxes = Sandboxes::for_test(
+            config,
+            vcs.clone(),
+            false,
+            "project".to_string(),
+            records.path().to_path_buf(),
+            selected(backend),
+        );
+        sandboxes.create("demo").await.expect("create");
+
+        let report = sandboxes.history("demo").await.expect("history");
+        assert_eq!(report.state, "diverged");
+        assert_eq!(report.steps.len(), 2);
+
+        let error = sandboxes
+            .restore("demo", "2", RestoreFlags::default())
+            .await
+            .expect_err("refused");
+        assert!(error.to_string().contains("--discard-work"), "{error}");
+        assert!(vcs.restored().is_empty(), "a refusal changes nothing");
+
+        let restored = sandboxes
+            .restore(
+                "demo",
+                "2",
+                RestoreFlags {
+                    discard_work: true,
+                    discard_resolution: false,
+                },
+            )
+            .await
+            .expect("restore");
+        assert_eq!(restored.target, "target");
+        assert_eq!(restored.revision, "target");
+        assert_eq!(
+            vcs.restored(),
+            vec![("branch".to_string(), "target".to_string())]
+        );
     }
 
     fn record(name: &str, backend: &str) -> StoredSandbox {

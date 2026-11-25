@@ -107,7 +107,7 @@ impl<'a> Reconciler<'a> {
         action: Action,
         message: &str,
     ) -> Result<Result<Reconciled, Raced>, Error> {
-        let (state, observed) = self.classify(action).await?;
+        let (state, observed) = self.classify_with(action, false, true).await?;
         let steps = source::plan(state, action, self.vcs.capabilities().conflict_model);
 
         let block = observed.block.clone();
@@ -121,8 +121,24 @@ impl<'a> Reconciler<'a> {
         }
     }
 
+    /// Read the state without changing anything.
+    ///
+    /// The workspace is always observed so a restore can tell whether it would
+    /// lose unsaved work. A held merge is not cleared: a refused restore must
+    /// write nothing.
+    pub(crate) async fn state(&self) -> Result<SourceState, Error> {
+        self.classify_with(Action::Tool, true, false)
+            .await
+            .map(|(state, _)| state)
+    }
+
     /// Read the state, and the workspace tree when the plan can use it.
-    async fn classify(&self, action: Action) -> Result<(SourceState, Observation), Error> {
+    async fn classify_with(
+        &self,
+        action: Action,
+        force_observation: bool,
+        clear_merge: bool,
+    ) -> Result<(SourceState, Observation), Error> {
         let workspace = self.workspace_handle();
         self.vcs.ensure_refs(&workspace).map_err(contract_error)?;
 
@@ -151,7 +167,8 @@ impl<'a> Reconciler<'a> {
                 .map_err(|_| Error::failed("the merge state lock is poisoned".to_string()))?
                 .as_ref(),
         );
-        if merge == Merge::Pending
+        if clear_merge
+            && merge == Merge::Pending
             && self
                 .vcs
                 .is_ancestor(&sandbox, &branch)
@@ -167,7 +184,8 @@ impl<'a> Reconciler<'a> {
 
         // The pre-plan reads the workspace only when the result can change the
         // steps: a moved branch, a held merge, or a snapshot.
-        let needs_observation = needs_observation(merge, &branch, &synced, action);
+        let needs_observation =
+            force_observation || needs_observation(merge, &branch, &synced, action);
         let (workspace_tree, observed_source) = if needs_observation {
             let (source, tree) = self.observe().await?;
             (tree, Some(source))
@@ -385,14 +403,33 @@ impl<'a> Reconciler<'a> {
 
     /// Replace the recorded workspace content with the branch tree.
     async fn adopt(&self, branch: &Revision, sandbox: &Revision) -> Result<(), Error> {
+        self.replace_workspace_with(branch, sandbox).await?;
         let workspace = self.workspace_handle();
-        let old_tree = self.vcs.tree(sandbox).map_err(contract_error)?;
-        let new_tree = self.vcs.tree(branch).map_err(contract_error)?;
+        self.vcs
+            .set_sandbox_tip(&workspace, branch)
+            .map_err(contract_error)?;
+        self.vcs
+            .set_synced(&workspace, branch)
+            .map_err(contract_error)?;
+        Ok(())
+    }
+
+    /// Replace the workspace with the target tree, without moving a ref.
+    pub(crate) async fn replace_workspace(&self, target: &Revision) -> Result<(), Error> {
+        let workspace = self.workspace_handle();
+        let sandbox = self.vcs.sandbox_tip(&workspace).map_err(contract_error)?;
+        self.replace_workspace_with(target, &sandbox).await
+    }
+
+    async fn replace_workspace_with(&self, target: &Revision, old: &Revision) -> Result<(), Error> {
+        let workspace = self.workspace_handle();
+        let old_tree = self.vcs.tree(old).map_err(contract_error)?;
+        let new_tree = self.vcs.tree(target).map_err(contract_error)?;
 
         let staging = tempfile::tempdir()
             .map_err(|error| Error::failed(format!("could not create a staging dir: {error}")))?;
         self.vcs
-            .materialise(&workspace, branch, staging.path())
+            .materialise(&workspace, target, staging.path())
             .map_err(contract_error)?;
 
         let path = self.workspace_path().await?;

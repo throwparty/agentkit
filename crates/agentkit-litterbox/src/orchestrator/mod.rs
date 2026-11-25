@@ -5,6 +5,7 @@
 //! branch exists.
 
 pub mod bulk;
+pub mod history;
 pub mod lock;
 pub mod machine;
 pub mod outcome;
@@ -14,6 +15,7 @@ pub mod service;
 pub mod source;
 
 pub use bulk::PauseSummary;
+pub use history::{HistoryReport, HistoryRestore, RestoreFlags};
 pub use outcome::{DeleteGuards, Deletion, InspectionReport, Performed, Recovery, StagedMerge};
 pub use service::{
     HostReport, HostRequirement, Listing, PausedPolicy, PlannedStep, Preflight, SandboxIo,

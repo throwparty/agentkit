@@ -80,7 +80,7 @@ Add `src/vcs/jj/restore.rs`. Refuse a missing sandbox workspace with the repair 
 | Depends On | T-002 |
 | References | jj-log,jj-conflicted-tip,missing-workspace,jj-scoped |
 
-### T-007: [ ] Orchestrator history and restore
+### T-007: [x] Orchestrator history and restore
 
 Add `src/orchestrator/history.rs`. Resolve a step number or commit ID. Force an observation of the workspace. Refuse `diverged`, unsaved work or a staging workspace without `--discard-work`, and an open resolution without `--discard-resolution`. Materialise the target tree, upload it and delete the paths the old tree had. Call `Vcs::restore`. Clear the merge or resolution record. Return a `HistoryRestore` outcome. Refuse a missing jj workspace.
 
