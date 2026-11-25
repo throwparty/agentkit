@@ -1357,6 +1357,30 @@ mod tests {
             .expect("exec");
         assert_eq!(read_visible.exit_code, 0, "{}", read_visible.stderr);
         assert_eq!(read_visible.stdout, "hello");
+        println!(
+            "read visible.txt: exit={} stdout={:?} stderr={:?}",
+            read_visible.exit_code, read_visible.stdout, read_visible.stderr
+        );
+
+        // The entry stays in the listing because metadata on the workspace
+        // itself is allowed; only the subtree is denied.
+        let listing = backend
+            .exec(
+                &record,
+                &["/bin/ls".to_string(), "-a".to_string()],
+            )
+            .await
+            .expect("exec");
+        assert_eq!(listing.exit_code, 0, "{}", listing.stderr);
+        assert!(
+            listing.stdout.lines().any(|entry| entry == ".jj"),
+            "the masked entry is visible: {:?}",
+            listing.stdout
+        );
+        println!(
+            "listing: exit={} stdout={:?} stderr={:?}",
+            listing.exit_code, listing.stdout, listing.stderr
+        );
 
         let read_secret = backend
             .exec(
@@ -1366,6 +1390,64 @@ mod tests {
             .await
             .expect("exec");
         assert_ne!(read_secret.exit_code, 0, "the masked path is unreadable");
+        assert!(
+            read_secret.stderr.contains("Operation not permitted"),
+            "the read returns EPERM: {:?}",
+            read_secret.stderr
+        );
+        assert!(!read_secret.stdout.contains("top secret"), "the read leaked");
+        println!(
+            "read .jj/secret.txt: exit={} stdout={:?} stderr={:?}",
+            read_secret.exit_code, read_secret.stdout, read_secret.stderr
+        );
+
+        let list_secret = backend
+            .exec(&record, &["/bin/ls".to_string(), ".jj".to_string()])
+            .await
+            .expect("exec");
+        assert_ne!(list_secret.exit_code, 0, "the masked path is unlistable");
+        assert!(
+            list_secret.stderr.contains("Operation not permitted"),
+            "the listing returns EPERM: {:?}",
+            list_secret.stderr
+        );
+        println!(
+            "list .jj: exit={} stdout={:?} stderr={:?}",
+            list_secret.exit_code, list_secret.stdout, list_secret.stderr
+        );
+
+        let stat_secret = backend
+            .exec(&record, &["/usr/bin/stat".to_string(), ".jj".to_string()])
+            .await
+            .expect("exec");
+        assert_ne!(stat_secret.exit_code, 0, "the masked path is not stattable");
+        assert!(
+            stat_secret.stderr.contains("Operation not permitted"),
+            "the stat returns EPERM: {:?}",
+            stat_secret.stderr
+        );
+        println!(
+            "stat .jj: exit={} stdout={:?} stderr={:?}",
+            stat_secret.exit_code, stat_secret.stdout, stat_secret.stderr
+        );
+
+        let stat_child = backend
+            .exec(
+                &record,
+                &["/usr/bin/stat".to_string(), ".jj/secret.txt".to_string()],
+            )
+            .await
+            .expect("exec");
+        assert_ne!(stat_child.exit_code, 0, "the child is not stattable");
+        assert!(
+            stat_child.stderr.contains("Operation not permitted"),
+            "the child stat returns EPERM: {:?}",
+            stat_child.stderr
+        );
+        println!(
+            "stat .jj/secret.txt: exit={} stdout={:?} stderr={:?}",
+            stat_child.exit_code, stat_child.stdout, stat_child.stderr
+        );
 
         let write_secret = backend
             .exec(
@@ -1380,8 +1462,41 @@ mod tests {
             .expect("exec");
         assert_ne!(write_secret.exit_code, 0, "the masked path is unwritable");
         assert!(
+            write_secret.stderr.contains("Operation not permitted"),
+            "the write returns EPERM: {:?}",
+            write_secret.stderr
+        );
+        assert!(
             !source.path().join(".jj").join("evil.txt").exists(),
             "the write did not reach the host"
+        );
+        println!(
+            "write .jj/evil.txt: exit={} stdout={:?} stderr={:?}",
+            write_secret.exit_code, write_secret.stdout, write_secret.stderr
+        );
+
+        // A descendant shell inherits the confinement and the deny layer.
+        let descendant = backend
+            .exec(
+                &record,
+                &[
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    "/bin/sh -c 'cat .jj/secret.txt'".to_string(),
+                ],
+            )
+            .await
+            .expect("exec");
+        assert_ne!(descendant.exit_code, 0, "the descendant is denied too");
+        assert!(
+            descendant.stderr.contains("Operation not permitted"),
+            "the descendant returns EPERM: {:?}",
+            descendant.stderr
+        );
+        assert!(!descendant.stdout.contains("top secret"), "the descendant leaked");
+        println!(
+            "descendant read .jj/secret.txt: exit={} stdout={:?} stderr={:?}",
+            descendant.exit_code, descendant.stdout, descendant.stderr
         );
 
         backend.delete(&record).await.expect("delete");

@@ -598,6 +598,16 @@ mod tests {
     }
 
     #[test]
+    fn a_copied_workspace_renders_no_deny_layer() {
+        let workspace = workspace();
+        std::fs::create_dir_all(workspace.path().join(".git")).expect("git dir");
+        std::fs::write(workspace.path().join(".git").join("HEAD"), b"ref: main").expect("head");
+        let rendered = render(&input(workspace.path())).expect("renders");
+        assert!(!rendered.text.contains("(deny file-read*"));
+        assert!(!rendered.text.contains("(deny file-write*"));
+    }
+
+    #[test]
     fn the_tag_service_and_endpoint_are_validated() {
         let workspace = workspace();
         let mut bad_tag = input(workspace.path());

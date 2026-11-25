@@ -1,0 +1,53 @@
+host: macOS 27.2.1 (arm64)
+repo: /Users/lukecarrier/Code/throwparty/agentkit
+
+== build the Seatbelt helper ==
+   Compiling agentkit-litterbox v0.1.0 (/Users/lukecarrier/Code/throwparty/agentkit/crates/agentkit-litterbox)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.87s
+
+== Bound workspace: visible entry, EPERM on read/write/stat, descendant inheritance ==
+   Compiling agentkit-litterbox v0.1.0 (/Users/lukecarrier/Code/throwparty/agentkit/crates/agentkit-litterbox)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.28s
+     Running unittests src/lib.rs (target/debug/deps/agentkit_litterbox-8113dd7e12fce071)
+
+running 1 test
+read visible.txt: exit=0 stdout="hello" stderr=""
+listing: exit=0 stdout=".\n..\n.jj\ntmp\nvisible.txt\n" stderr=""
+read .jj/secret.txt: exit=1 stdout="" stderr="cat: .jj/secret.txt: Operation not permitted\n"
+list .jj: exit=1 stdout="" stderr="ls: .jj: Operation not permitted\n"
+stat .jj: exit=1 stdout="" stderr="stat: .jj: stat: Operation not permitted\n"
+stat .jj/secret.txt: exit=1 stdout="" stderr="stat: .jj/secret.txt: stat: Operation not permitted\n"
+write .jj/evil.txt: exit=1 stdout="" stderr="/bin/sh: .jj/evil.txt: Operation not permitted\n"
+descendant read .jj/secret.txt: exit=1 stdout="" stderr="cat: .jj/secret.txt: Operation not permitted\n"
+test backends::seatbelt::backend::tests::a_bound_workspace_masks_the_metadata_path ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 646 filtered out; finished in 0.35s
+
+== Renderer: the deny rules follow the allow rules ==
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.14s
+     Running unittests src/lib.rs (target/debug/deps/agentkit_litterbox-8113dd7e12fce071)
+
+running 1 test
+test backends::seatbelt::policy::tests::a_masked_path_is_denied_after_the_allows ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 646 filtered out; finished in 0.00s
+
+== Copied: the renderer emits no deny layer ==
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.15s
+     Running unittests src/lib.rs (target/debug/deps/agentkit_litterbox-8113dd7e12fce071)
+
+running 1 test
+test backends::seatbelt::policy::tests::a_copied_workspace_renders_no_deny_layer ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 646 filtered out; finished in 0.00s
+
+== Copied: create, exec and cleanup are unchanged ==
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.15s
+     Running unittests src/lib.rs (target/debug/deps/agentkit_litterbox-8113dd7e12fce071)
+
+running 1 test
+test backends::seatbelt::backend::tests::create_exec_and_cleanup ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 646 filtered out; finished in 0.05s
+
+RESULT: every check passed
