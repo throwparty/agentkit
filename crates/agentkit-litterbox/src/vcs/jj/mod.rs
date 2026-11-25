@@ -8,6 +8,7 @@ mod clone;
 mod config;
 mod history;
 mod ops;
+mod restore;
 
 pub use config::JjVcsConfig;
 
@@ -793,8 +794,9 @@ impl Vcs for JjVcs {
         history::read(&self.root, workspace.branch().as_str())
     }
 
-    fn restore(&self, _workspace: &Workspace, _revision: &Revision) -> Result<Restored, Error> {
-        Err(unsupported("restore"))
+    fn restore(&self, workspace: &Workspace, revision: &Revision) -> Result<Restored, Error> {
+        let _guard = self.lock();
+        restore::restore(self, workspace, sandbox_of(workspace), revision)
     }
 
     fn export(&self) -> Result<(), Error> {
@@ -852,6 +854,53 @@ mod tests {
         git(dir.path(), &["add", "."]);
         git(dir.path(), &["commit", "-qm", "init"]);
         dir
+    }
+
+    #[test]
+    fn restore_adds_one_forward_commit() {
+        unsafe {
+            std::env::set_var("JJ_USER", "Test");
+            std::env::set_var("JJ_EMAIL", "test@example.com");
+        }
+
+        let host = repository();
+        let data = TempDir::new().expect("data");
+        let root = data.path().join("clone");
+        let vcs = JjVcs::open_at(root.clone(), host.path().to_path_buf()).expect("backend");
+        let workspace = vcs.prepare("demo").expect("prepare").workspace;
+        let base = vcs.tip(&workspace).expect("base").as_str().to_string();
+
+        jj(&root, &["new", &base, "-m", "one"]);
+        std::fs::write(root.join("file.txt"), "one\n").expect("write");
+        let one = super::ops::commit_id(&root, "@").expect("one");
+        vcs.set_tip(&workspace, &Revision::new(one.clone()))
+            .expect("tip");
+
+        let restored = vcs
+            .restore(&workspace, &Revision::new(one.clone()))
+            .expect("restore");
+        assert!(restored.created);
+        assert_eq!(vcs.tip(&workspace).expect("tip"), restored.revision);
+        assert_eq!(
+            vcs.sandbox_tip(&workspace).expect("sandbox tip"),
+            restored.revision
+        );
+        assert_eq!(vcs.synced(&workspace).expect("synced"), restored.revision);
+        let written =
+            std::fs::read_to_string(vcs.workspace("demo").join("file.txt")).expect("read");
+        assert_eq!(written, "one\n");
+        assert!(
+            vcs.conflicts(&restored.revision)
+                .expect("conflicts")
+                .is_empty(),
+            "the restore commit is clean"
+        );
+
+        let again = vcs
+            .restore(&workspace, &Revision::new(one))
+            .expect("second restore");
+        assert!(!again.created, "the tree already matches");
+        assert_eq!(again.revision, restored.revision);
     }
 
     #[test]
@@ -1038,6 +1087,12 @@ mod tests {
             restored,
             "the working copy is back on the sandbox side"
         );
+
+        vcs.set_tip(&workspace, &revision).expect("conflicted tip");
+        let error = vcs
+            .restore(&workspace, &restored)
+            .expect_err("a conflicted shared commit is refused");
+        assert!(error.to_string().contains("conflicted"), "{error}");
     }
 
     #[test]
