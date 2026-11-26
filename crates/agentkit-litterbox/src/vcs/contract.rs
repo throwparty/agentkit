@@ -50,8 +50,13 @@ pub trait Vcs: Send + Sync {
         into: &Path,
     ) -> Result<(), Error>;
 
-    /// The transfer predicate for a snapshot, read from `rules_root`.
-    fn snapshot_filter(&self, rules_root: &Path) -> Result<Arc<dyn SnapshotSelector>, Error>;
+    /// The transfer predicate for a snapshot of `workspace`, read from
+    /// `rules_root`.
+    fn snapshot_filter(
+        &self,
+        workspace: &Workspace,
+        rules_root: &Path,
+    ) -> Result<Arc<dyn SnapshotSelector>, Error>;
 
     /// The selector that carries a snapshot's ignore files.
     fn ignore_files(&self) -> Arc<dyn SnapshotSelector>;
@@ -234,9 +239,9 @@ fn not_implemented(operation: &str) -> Error {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::capabilities::{ConflictModel, ExportSupport};
     use super::super::types::BranchName;
+    use super::*;
     use crate::sandbox::contract::BindingSupport;
 
     struct Stub;
@@ -288,7 +293,11 @@ mod tests {
             unsupported("materialise")
         }
 
-        fn snapshot_filter(&self, _rules_root: &Path) -> Result<Arc<dyn SnapshotSelector>, Error> {
+        fn snapshot_filter(
+            &self,
+            _workspace: &Workspace,
+            _rules_root: &Path,
+        ) -> Result<Arc<dyn SnapshotSelector>, Error> {
             unsupported("snapshot_filter")
         }
 

@@ -305,7 +305,7 @@ fn handle_remote(backend: Option<String>, name: String) -> ExitCode {
         Ok(config) => config,
         Err(error) => return report(error),
     };
-    let sandboxes = match project(config) {
+    let sandboxes = match crate::compose::open_existing(config).map_err(Error::from) {
         Ok(sandboxes) => sandboxes,
         Err(error) => return report(error),
     };

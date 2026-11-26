@@ -31,6 +31,86 @@ pub fn open(config: Config) -> Result<Sandboxes, SandboxError> {
     }
 }
 
+/// Build the orchestrator over an existing project store.
+///
+/// Unlike [`open`], this never creates storage and never installs the default
+/// `litterbox` remote. It is for commands that operate on an existing project,
+/// such as `remote`, so they report a missing store instead of creating one and
+/// do not collide with an unrelated `litterbox` remote.
+pub fn open_existing(config: Config) -> Result<Sandboxes, SandboxError> {
+    let project_slug = resolve_project_slug(&config)?;
+    let tool = config.vcs_tool.clone().ok_or_else(|| {
+        SandboxError::Config(
+            "no VCS is selected; set `tool = 'git'` or `tool = 'jj'` under [vcs] in \
+             .agentkit/litterbox/config.local.toml"
+                .to_string(),
+        )
+    })?;
+
+    if tool == "jj" {
+        open_jj_existing(config, &project_slug)
+    } else {
+        open_git_project_existing(config, &project_slug)
+    }
+}
+
+/// Build the orchestrator over the Git backend's existing store.
+fn open_git_project_existing(
+    config: Config,
+    project_slug: &str,
+) -> Result<Sandboxes, SandboxError> {
+    let git = git_settings(&config)?;
+    let mode = git.snapshot_mode.unwrap_or_default();
+    let remote = mode == ScmMode::Remote;
+    let vcs = match mode {
+        ScmMode::Direct => open_git(&config, project_slug, mode, None)?,
+        ScmMode::Remote => open_git_bare_existing(&config, project_slug)?,
+    };
+
+    Sandboxes::with_vcs(config, Arc::new(vcs), remote, git.binding)
+}
+
+/// Open the bare store as it is, without cloning or attaching it to the host.
+fn open_git_bare_existing(config: &Config, project_slug: &str) -> Result<GitVcs, SandboxError> {
+    let bare = VcsStore::resolve_path(project_slug);
+    if !bare.is_dir() {
+        return Err(SandboxError::Config(format!(
+            "this project has no sandbox store at '{}' yet; create a sandbox first",
+            bare.display()
+        )));
+    }
+    open_git_bare_at(config, project_slug, &bare)
+}
+
+fn open_git_bare_at(
+    config: &Config,
+    project_slug: &str,
+    bare: &Path,
+) -> Result<GitVcs, SandboxError> {
+    let host_abs = Path::new(".")
+        .canonicalize()
+        .unwrap_or_else(|_| Path::new(".").to_path_buf());
+    GitVcs::open_with_mode_and_prefix(
+        bare,
+        ScmMode::Remote,
+        config.project.slug.clone(),
+        Some(host_abs),
+    )
+    .map(|vcs| vcs.set_store_slug(project_slug.to_string()))
+}
+
+/// Build the orchestrator over the jj backend without creating its clone.
+fn open_jj_existing(config: Config, project_slug: &str) -> Result<Sandboxes, SandboxError> {
+    let section = config
+        .vcs_settings
+        .get("jj")
+        .cloned()
+        .unwrap_or(toml::Value::Table(Default::default()));
+    let jj = JjVcsConfig::from_section(&section).map_err(SandboxError::Config)?;
+    let vcs = JjVcs::open(project_slug, jj.config)?;
+    Sandboxes::with_vcs(config, Arc::new(vcs), true, jj.binding)
+}
+
 /// Build the orchestrator over the Git backend.
 fn open_git_project(config: Config, project_slug: &str) -> Result<Sandboxes, SandboxError> {
     let git = git_settings(&config)?;
@@ -108,13 +188,15 @@ mod tests {
 
     use tempfile::TempDir;
 
+    use git2::Repository;
+
     use crate::config::{Config, ProjectConfig};
     use crate::domain::ScmMode;
     use crate::orchestrator::Sandboxes;
     use crate::sandbox::contract::WorkspaceBinding;
     use crate::sandbox::selected::Selected;
     use crate::testing::TestBackend;
-    use crate::vcs::git::GitVcs;
+    use crate::vcs::git::{GitVcs, VcsStore};
 
     #[test]
     fn git_settings_read_the_binding_from_the_section() {
@@ -259,6 +341,64 @@ mod tests {
         assert!(
             !branch_exists(dir.path(), "litterbox/demo"),
             "the branch is removed"
+        );
+    }
+
+    fn remote_config(slug: &str) -> Config {
+        let mut config = Config {
+            vcs_tool: Some("git".to_string()),
+            project: ProjectConfig {
+                slug: Some(slug.to_string()),
+                backends: None,
+            },
+            ..Config::default()
+        };
+        config.vcs_settings.insert(
+            "git".to_string(),
+            toml::from_str("snapshot-mode = 'remote'").expect("section"),
+        );
+        config
+    }
+
+    #[test]
+    fn open_existing_refuses_a_missing_store_without_creating_it() {
+        let config = remote_config("compose-existing-missing");
+        let slug = crate::orchestrator::resolve_project_slug(&config).expect("slug");
+        let store = VcsStore::resolve_path(&slug);
+        assert!(!store.exists(), "the test needs an absent store");
+
+        let error = match super::open_existing(config) {
+            Ok(_) => panic!("a missing store must be refused"),
+            Err(error) => error,
+        };
+        assert!(
+            error.to_string().contains("create a sandbox first"),
+            "{error}"
+        );
+        assert!(!store.exists(), "opening must not create the store");
+    }
+
+    #[test]
+    fn open_existing_does_not_install_the_default_remote() {
+        let host = repository();
+        let bare_dir = TempDir::new().expect("bare");
+        Repository::init_bare(bare_dir.path()).expect("bare repo");
+        let config = Config {
+            project: ProjectConfig {
+                slug: Some("compose-existing".to_string()),
+                backends: None,
+            },
+            ..Config::default()
+        };
+
+        let vcs = super::open_git_bare_at(&config, "compose-existing", bare_dir.path())
+            .expect("open the existing store");
+        drop(vcs);
+
+        let host = Repository::open(host.path()).expect("host");
+        assert!(
+            host.find_remote("litterbox").is_err(),
+            "the default remote must not be installed"
         );
     }
 }

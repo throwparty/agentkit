@@ -377,7 +377,7 @@ impl<'a> Reconciler<'a> {
             .await?;
         let filter = self
             .vcs
-            .snapshot_filter(staging.path())
+            .snapshot_filter(&workspace, staging.path())
             .map_err(contract_error)?;
         let filter: Arc<dyn SnapshotSelector> = Arc::new(Excluding {
             inner: filter,

@@ -119,22 +119,35 @@ impl GitScm {
             .map_err(|source| SandboxError::from(GitError::BranchCreate { source }))
     }
 
-    fn signature(&self) -> Result<git2::Signature<'_>, SandboxError> {
-        self.repo
-            .signature()
-            .or_else(|_| git2::Signature::now("Litterbox", "noreply@example.com"))
-            .map_err(|source| SandboxError::from(GitError::Signature { source }))
-    }
-
-    fn head_commit_optional(&self) -> Result<Option<git2::Commit<'_>>, SandboxError> {
-        match self.repo.head() {
-            Ok(head) => head
-                .peel_to_commit()
-                .map(Some)
-                .map_err(|source| SandboxError::from(GitError::Head { source })),
-            Err(error) if error.code() == git2::ErrorCode::UnbornBranch => Ok(None),
-            Err(source) => Err(SandboxError::from(GitError::Head { source })),
+    /// The commit a new sandbox starts from.
+    ///
+    /// In remote mode the host checkout is the source: the store is only as
+    /// fresh as its last clone, so a host commit the store does not hold is
+    /// fetched in before the branch is created from it.
+    fn creation_oid(&self) -> Result<git2::Oid, SandboxError> {
+        if matches!(self.mode, ScmMode::Direct) {
+            return Ok(self.head_commit()?.id());
         }
+
+        let host_path = self.host_repo_path.as_ref().ok_or_else(|| {
+            SandboxError::Config("remote mode has no host repository".to_string())
+        })?;
+        let host = Repository::open(host_path)
+            .map_err(|source| SandboxError::from(GitError::Open { source }))?;
+        let head = host
+            .head()
+            .map_err(|source| SandboxError::from(GitError::Head { source }))?;
+        let oid = head
+            .peel_to_commit()
+            .map_err(|source| SandboxError::from(GitError::Head { source }))?
+            .id();
+
+        if self.repo.find_commit(oid).is_ok() {
+            return Ok(oid);
+        }
+
+        let name = head.name().unwrap_or("HEAD").to_string();
+        fetch_host_head(&self.repo, host_path, &name)
     }
 
     fn snapshot_branch_ref(&self) -> String {
@@ -145,16 +158,28 @@ impl GitScm {
         }
     }
 
-    /// The commit the snapshot branch points at, when the branch exists.
-    fn snapshot_target(&self) -> Result<Option<git2::Commit<'_>>, SandboxError> {
-        match self.repo.find_reference(&self.snapshot_branch_ref()) {
-            Ok(reference) => reference
-                .peel_to_commit()
-                .map(Some)
-                .map_err(|source| SandboxError::from(GitError::Reference { source })),
-            Err(error) if error.code() == git2::ErrorCode::NotFound => Ok(None),
-            Err(source) => Err(SandboxError::from(GitError::Reference { source })),
+    fn create_branch_at(&self, slug: &str, oid: git2::Oid) -> Result<String, SandboxError> {
+        let branch_name = Self::branch_name(slug);
+
+        if self
+            .repo
+            .find_branch(&branch_name, BranchType::Local)
+            .is_ok()
+        {
+            return Err(SandboxError::SandboxExists {
+                name: slug.to_string(),
+            });
         }
+
+        let commit = self
+            .repo
+            .find_commit(oid)
+            .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
+        self.repo
+            .branch(&branch_name, &commit, false)
+            .map_err(|source| SandboxError::from(GitError::BranchCreate { source }))?;
+
+        Ok(branch_name)
     }
 }
 
@@ -273,14 +298,7 @@ impl GitVcs {
         Ok(())
     }
 
-    /// The paths this sandbox's snapshot carries.
-    ///
-    /// `rules_root` is the tree the ignore rules are read from: the sandbox's
-    /// own copy of the workspace.
-    pub fn snapshot_filter(&self, rules_root: &Path) -> Result<SnapshotFilter, SandboxError> {
-        self.lock()?.snapshot_filter(rules_root)
-    }
-
+    /// Commit a staging tree into the snapshot ref this handle currently names.
     pub fn commit_snapshot_from_staging(
         &self,
         staging_path: &Path,
@@ -337,24 +355,8 @@ impl Scm for GitScm {
     }
 
     fn create_branch(&self, slug: &str) -> Result<String, SandboxError> {
-        let branch_name = Self::branch_name(slug);
         let head = self.head_commit()?;
-
-        if self
-            .repo
-            .find_branch(&branch_name, BranchType::Local)
-            .is_ok()
-        {
-            return Err(SandboxError::SandboxExists {
-                name: slug.to_string(),
-            });
-        }
-
-        self.repo
-            .branch(&branch_name, &head, false)
-            .map_err(|source| SandboxError::from(GitError::BranchCreate { source }))?;
-
-        Ok(branch_name)
+        self.create_branch_at(slug, head.id())
     }
 
     fn delete_branch(&self, slug: &str) -> Result<(), SandboxError> {
@@ -452,31 +454,29 @@ impl Vcs for GitVcs {
     }
 
     fn prepare(&self, sandbox: &str) -> Result<Prepared, VcsError> {
-        let branch = self.create_branch(sandbox).map_err(vcs_error)?;
-        let oid = self
-            .repo_for_branch(&branch, |repo| {
-                let oid = repo
-                    .refname_to_id(&refs::branch(&branch))
-                    .map_err(|source| SandboxError::from(GitError::Reference { source }))?;
-                refs::write(
-                    repo,
-                    &refs::sandbox(&branch),
-                    oid,
-                    "litterbox: create the sandbox branch",
-                )?;
-                refs::write(
-                    repo,
-                    &refs::synced(&branch),
-                    oid,
-                    "litterbox: record the synced revision",
-                )?;
-                Ok(oid)
-            })
-            .map_err(vcs_error)?;
+        let guard = self.lock().map_err(vcs_error)?;
+        let prepared = (|| {
+            let oid = guard.creation_oid()?;
+            let branch = guard.create_branch_at(sandbox, oid)?;
+            refs::write(
+                &guard.repo,
+                &refs::sandbox(&branch),
+                oid,
+                "litterbox: create the sandbox branch",
+            )?;
+            refs::write(
+                &guard.repo,
+                &refs::synced(&branch),
+                oid,
+                "litterbox: record the synced revision",
+            )?;
+            Ok((branch, oid))
+        })()
+        .map_err(vcs_error)?;
 
         Ok(Prepared {
-            workspace: Workspace::from_branch(branch),
-            base: Revision::new(oid.to_string()),
+            workspace: Workspace::from_branch(prepared.0),
+            base: Revision::new(prepared.1.to_string()),
         })
     }
 
@@ -529,11 +529,17 @@ impl Vcs for GitVcs {
         crate::vcs::git_common::archive::unpack(&bytes, into).map_err(vcs_error)
     }
 
-    fn snapshot_filter(&self, rules_root: &Path) -> Result<Arc<dyn SnapshotSelector>, VcsError> {
+    fn snapshot_filter(
+        &self,
+        workspace: &Workspace,
+        rules_root: &Path,
+    ) -> Result<Arc<dyn SnapshotSelector>, VcsError> {
+        let branch = workspace.branch().to_string();
+        let reference = refs::sandbox(&branch);
         let filter = self
-            .lock()
-            .map_err(vcs_error)?
-            .snapshot_filter(rules_root)
+            .repo_for_branch(&branch, |repo| {
+                snapshot_filter_in(repo, &reference, rules_root)
+            })
             .map_err(vcs_error)?;
         Ok(Arc::new(filter))
     }
@@ -549,15 +555,19 @@ impl Vcs for GitVcs {
         message: &str,
     ) -> Result<Revision, VcsError> {
         let branch = workspace.branch().to_string();
-        self.set_snapshot_ref(refs::sandbox(&branch))
-            .map_err(vcs_error)?;
-        match self
-            .commit_snapshot_from_staging(staging, message)
-            .map_err(vcs_error)?
-        {
-            Some(oid) => Ok(Revision::new(oid.to_string())),
-            None => self.sandbox_tip(workspace),
-        }
+        let reference = refs::sandbox(&branch);
+        let guard = self.lock().map_err(vcs_error)?;
+        self.with_repo_for_branch(&guard, &branch, |repo| {
+            match commit_snapshot_in(repo, &reference, staging, message)? {
+                Some(oid) => Ok(Revision::new(oid.to_string())),
+                None => refs::read(repo, &reference)?
+                    .map(|oid| Revision::new(oid.to_string()))
+                    .ok_or_else(|| SandboxError::SandboxNotFound {
+                        name: branch.clone(),
+                    }),
+            }
+        })
+        .map_err(vcs_error)
     }
 
     fn sandboxes(&self) -> Result<Vec<String>, VcsError> {
@@ -724,14 +734,12 @@ impl Vcs for GitVcs {
 
     fn observe(&self, workspace: &Workspace, staging: &Path) -> Result<TreeId, VcsError> {
         let branch = workspace.branch().to_string();
-        self.set_snapshot_ref(refs::sandbox(&branch))
-            .map_err(vcs_error)?;
-        let oid = self
-            .lock()
-            .map_err(vcs_error)?
-            .staged_tree(staging)
-            .map_err(vcs_error)?;
-        Ok(TreeId::new(oid.to_string()))
+        let reference = refs::sandbox(&branch);
+        let guard = self.lock().map_err(vcs_error)?;
+        self.with_repo_for_branch(&guard, &branch, |repo| {
+            staged_tree_in(repo, &reference, staging).map(|oid| TreeId::new(oid.to_string()))
+        })
+        .map_err(vcs_error)
     }
 
     fn sandbox_tip(&self, workspace: &Workspace) -> Result<Revision, VcsError> {
@@ -1061,7 +1069,17 @@ impl GitVcs {
         operation: impl FnOnce(&Repository) -> Result<T, SandboxError>,
     ) -> Result<T, SandboxError> {
         let guard = self.lock()?;
+        self.with_repo_for_branch(&guard, branch, operation)
+    }
 
+    /// The unlocked form of [`Self::repo_for_branch`], for callers that already
+    /// hold the guard.
+    fn with_repo_for_branch<T>(
+        &self,
+        guard: &GitScm,
+        branch: &str,
+        operation: impl FnOnce(&Repository) -> Result<T, SandboxError>,
+    ) -> Result<T, SandboxError> {
         if guard.repo.find_branch(branch, BranchType::Local).is_ok() {
             return operation(&guard.repo);
         }
@@ -1121,250 +1139,333 @@ fn unsupported(operation: &str) -> VcsError {
 }
 
 impl GitScm {
-    /// The paths the snapshot's parent records, which stay tracked however the
-    /// sandbox's ignore rules read.
-    fn snapshot_tracked(&self) -> Result<(HashSet<PathBuf>, HashSet<PathBuf>), SandboxError> {
-        let mut tracked = HashSet::new();
-        let mut tracked_dirs = HashSet::new();
-
-        let Some(parent) = self.snapshot_target()? else {
-            return Ok((tracked, tracked_dirs));
-        };
-        let tree = parent
-            .tree()
-            .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
-
-        tree.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
-            let path = Path::new(root).join(entry.name().unwrap_or_default());
-            for ancestor in path.ancestors().skip(1) {
-                if ancestor.as_os_str().is_empty() {
-                    break;
-                }
-                tracked_dirs.insert(ancestor.to_path_buf());
-            }
-            if entry.kind() == Some(ObjectType::Blob) {
-                tracked.insert(path);
-            }
-            0
-        })
-        .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
-
-        Ok((tracked, tracked_dirs))
-    }
-
-    /// The paths this sandbox's snapshot carries.
-    ///
-    /// The rules are read from `rules_root`, the sandbox's own tree: a
-    /// `.gitignore` edited inside the sandbox decides what the snapshot
-    /// records, not the host checkout the branch happens to be stored beside.
-    pub fn snapshot_filter(&self, rules_root: &Path) -> Result<SnapshotFilter, SandboxError> {
-        let (tracked, tracked_dirs) = self.snapshot_tracked()?;
-        SnapshotFilter::open(rules_root, tracked, tracked_dirs)
-    }
-
-    /// The tree a snapshot of `staging_path` would commit.
-    fn staged_tree(&self, staging_path: &Path) -> Result<git2::Oid, SandboxError> {
-        let mut builder = self
-            .repo
-            .treebuilder(None)
-            .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
-
-        // The staged tree is the sandbox's, so its rules are the ones that
-        // decide what the snapshot records; the transfer applied the same ones.
-        let filter = self.snapshot_filter(staging_path)?;
-        self.add_directory_to_tree(&mut builder, staging_path, Path::new(""), &filter)?;
-
-        builder
-            .write()
-            .map_err(|source| SandboxError::from(GitError::Commit { source }))
-    }
-
     fn commit_snapshot_from_staging(
         &self,
         staging_path: &Path,
         message: &str,
     ) -> Result<Option<git2::Oid>, SandboxError> {
-        let signature = self.signature()?;
-        let tree_oid = self.staged_tree(staging_path)?;
+        commit_snapshot_in(
+            &self.repo,
+            &self.snapshot_branch_ref(),
+            staging_path,
+            message,
+        )
+    }
+}
 
-        let tree = self
-            .repo
-            .find_tree(tree_oid)
-            .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
+/// The commit `reference` points at, when it exists.
+fn snapshot_target_in<'a>(
+    repo: &'a Repository,
+    reference: &str,
+) -> Result<Option<git2::Commit<'a>>, SandboxError> {
+    match repo.find_reference(reference) {
+        Ok(reference) => reference
+            .peel_to_commit()
+            .map(Some)
+            .map_err(|source| SandboxError::from(GitError::Reference { source })),
+        Err(error) if error.code() == git2::ErrorCode::NotFound => Ok(None),
+        Err(source) => Err(SandboxError::from(GitError::Reference { source })),
+    }
+}
 
-        // Another tool call can snapshot the same sandbox while this tree is
-        // being built, so the branch may move. Build each commit against the
-        // branch as it is now and move the ref only if it still points there,
-        // or one of the two snapshots is silently dropped.
-        let mut attempts = 0;
-        loop {
-            // The branch may not exist yet; its absence and HEAD pointing at a
-            // commit are different facts, and the compare-and-swap needs to
-            // know which it is.
-            let (parent, ref_exists) = match self.snapshot_target()? {
-                Some(commit) => (Some(commit), true),
-                None => (self.head_commit_optional()?, false),
-            };
-            if let Some(ref parent_commit) = parent {
-                if parent_commit.tree_id() == tree_oid {
-                    return Ok(None);
-                }
-            } else if tree_oid == git2::Oid::ZERO_SHA1 {
+/// The paths the snapshot's parent records, which stay tracked however the
+/// sandbox's ignore rules read.
+fn snapshot_tracked_in(
+    repo: &Repository,
+    reference: &str,
+) -> Result<(HashSet<PathBuf>, HashSet<PathBuf>), SandboxError> {
+    let mut tracked = HashSet::new();
+    let mut tracked_dirs = HashSet::new();
+
+    let Some(parent) = snapshot_target_in(repo, reference)? else {
+        return Ok((tracked, tracked_dirs));
+    };
+    let tree = parent
+        .tree()
+        .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
+
+    tree.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
+        let path = Path::new(root).join(entry.name().unwrap_or_default());
+        for ancestor in path.ancestors().skip(1) {
+            if ancestor.as_os_str().is_empty() {
+                break;
+            }
+            tracked_dirs.insert(ancestor.to_path_buf());
+        }
+        if entry.kind() == Some(ObjectType::Blob) {
+            tracked.insert(path);
+        }
+        0
+    })
+    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
+
+    Ok((tracked, tracked_dirs))
+}
+
+/// The paths this sandbox's snapshot carries.
+///
+/// The rules are read from `rules_root`, the sandbox's own tree: a
+/// `.gitignore` edited inside the sandbox decides what the snapshot records,
+/// not the host checkout the branch happens to be stored beside.
+fn snapshot_filter_in(
+    repo: &Repository,
+    reference: &str,
+    rules_root: &Path,
+) -> Result<SnapshotFilter, SandboxError> {
+    let (tracked, tracked_dirs) = snapshot_tracked_in(repo, reference)?;
+    SnapshotFilter::open(rules_root, tracked, tracked_dirs)
+}
+
+/// The tree a snapshot of `staging_path` would commit in `repo`.
+fn staged_tree_in(
+    repo: &Repository,
+    reference: &str,
+    staging_path: &Path,
+) -> Result<git2::Oid, SandboxError> {
+    let mut builder = repo
+        .treebuilder(None)
+        .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
+
+    // The staged tree is the sandbox's, so its rules are the ones that decide
+    // what the snapshot records; the transfer applied the same ones.
+    let filter = snapshot_filter_in(repo, reference, staging_path)?;
+    add_directory_to_tree(repo, &mut builder, staging_path, Path::new(""), &filter)?;
+
+    builder
+        .write()
+        .map_err(|source| SandboxError::from(GitError::Commit { source }))
+}
+
+/// Commit `staging_path` into `reference` in `repo`.
+fn commit_snapshot_in(
+    repo: &Repository,
+    reference: &str,
+    staging_path: &Path,
+    message: &str,
+) -> Result<Option<git2::Oid>, SandboxError> {
+    let signature = signature_in(repo)?;
+    let tree_oid = staged_tree_in(repo, reference, staging_path)?;
+
+    let tree = repo
+        .find_tree(tree_oid)
+        .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
+
+    // Another tool call can snapshot the same sandbox while this tree is being
+    // built, so the branch may move. Build each commit against the branch as it
+    // is now and move the ref only if it still points there, or one of the two
+    // snapshots is silently dropped.
+    let mut attempts = 0;
+    loop {
+        // The branch may not exist yet; its absence and HEAD pointing at a
+        // commit are different facts, and the compare-and-swap needs to know
+        // which it is.
+        let (parent, ref_exists) = match snapshot_target_in(repo, reference)? {
+            Some(commit) => (Some(commit), true),
+            None => (head_commit_optional_in(repo)?, false),
+        };
+        if let Some(ref parent_commit) = parent {
+            if parent_commit.tree_id() == tree_oid {
                 return Ok(None);
             }
+        } else if tree_oid == git2::Oid::ZERO_SHA1 {
+            return Ok(None);
+        }
 
-            let parents: Vec<&git2::Commit> = parent.iter().collect();
-            // Create the commit without updating the ref: the compare-and-swap
-            // below decides whether it becomes the branch tip.
-            let oid = self
-                .repo
-                .commit(None, &signature, &signature, message, &tree, &parents)
-                .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
+        let parents: Vec<&git2::Commit> = parent.iter().collect();
+        // Create the commit without updating the ref: the compare-and-swap
+        // below decides whether it becomes the branch tip.
+        let oid = repo
+            .commit(None, &signature, &signature, message, &tree, &parents)
+            .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
 
-            let updated = if ref_exists {
-                let expected = parent
-                    .as_ref()
-                    .map(git2::Commit::id)
-                    .expect("a reference peels to a commit");
-                self.repo
-                    .reference_matching(&self.snapshot_branch_ref(), oid, true, expected, message)
-                    .map(|_| ())
-            } else {
-                self.repo
-                    .reference(&self.snapshot_branch_ref(), oid, false, message)
-                    .map(|_| ())
-            };
+        let updated = if ref_exists {
+            let expected = parent
+                .as_ref()
+                .map(git2::Commit::id)
+                .expect("a reference peels to a commit");
+            repo.reference_matching(reference, oid, true, expected, message)
+                .map(|_| ())
+        } else {
+            repo.reference(reference, oid, false, message).map(|_| ())
+        };
 
-            match updated {
-                Ok(()) => return Ok(Some(oid)),
-                Err(error)
-                    if matches!(
-                        error.code(),
-                        git2::ErrorCode::Modified
-                            | git2::ErrorCode::Exists
-                            | git2::ErrorCode::NotFound
-                    ) && attempts < MAX_SNAPSHOT_ATTEMPTS =>
-                {
-                    attempts += 1;
-                    continue;
-                }
-                Err(error)
-                    if error.code() == git2::ErrorCode::Locked
-                        && attempts < MAX_SNAPSHOT_ATTEMPTS =>
-                {
-                    attempts += 1;
-                    std::thread::sleep(std::time::Duration::from_millis(10 * attempts as u64));
-                    continue;
-                }
-                Err(error) => {
-                    // The ref has not moved: it is only written by a
-                    // compare-and-swap that has not succeeded, so there is
-                    // nothing to roll back. Restoring the tip seen at the start
-                    // would undo whatever another writer has published since.
-                    return Err(SandboxError::from(GitError::Commit { source: error }));
-                }
+        match updated {
+            Ok(()) => return Ok(Some(oid)),
+            Err(error)
+                if matches!(
+                    error.code(),
+                    git2::ErrorCode::Modified | git2::ErrorCode::Exists | git2::ErrorCode::NotFound
+                ) && attempts < MAX_SNAPSHOT_ATTEMPTS =>
+            {
+                attempts += 1;
+                continue;
+            }
+            Err(error)
+                if error.code() == git2::ErrorCode::Locked && attempts < MAX_SNAPSHOT_ATTEMPTS =>
+            {
+                attempts += 1;
+                std::thread::sleep(std::time::Duration::from_millis(10 * attempts as u64));
+                continue;
+            }
+            Err(error) => {
+                // The ref has not moved: it is only written by a
+                // compare-and-swap that has not succeeded, so there is nothing
+                // to roll back. Restoring the tip seen at the start would undo
+                // whatever another writer has published since.
+                return Err(SandboxError::from(GitError::Commit { source: error }));
             }
         }
     }
+}
 
-    fn add_directory_to_tree(
-        &self,
-        builder: &mut git2::TreeBuilder,
-        current_path: &Path,
-        relative: &Path,
-        filter: &SnapshotFilter,
-    ) -> Result<(), SandboxError> {
-        let entries = fs::read_dir(current_path).map_err(SandboxError::Io)?;
+fn signature_in(repo: &Repository) -> Result<git2::Signature<'_>, SandboxError> {
+    repo.signature()
+        .or_else(|_| git2::Signature::now("Litterbox", "noreply@example.com"))
+        .map_err(|source| SandboxError::from(GitError::Signature { source }))
+}
 
-        for entry in entries {
-            let entry = entry.map_err(SandboxError::Io)?;
-            let path = entry.path();
-            let file_name = entry.file_name();
-            let name_str = file_name.to_string_lossy();
+fn head_commit_optional_in(repo: &Repository) -> Result<Option<git2::Commit<'_>>, SandboxError> {
+    match repo.head() {
+        Ok(head) => head
+            .peel_to_commit()
+            .map(Some)
+            .map_err(|source| SandboxError::from(GitError::Head { source })),
+        Err(error) if error.code() == git2::ErrorCode::UnbornBranch => Ok(None),
+        Err(source) => Err(SandboxError::from(GitError::Head { source })),
+    }
+}
 
-            // Skip .git directory
-            if name_str == ".git" {
+/// Fetch `name` from the host checkout into `repo` and return its commit.
+///
+/// The fetch lands on a temporary ref, which is removed once the commit is
+/// resolved, so the store gains the objects without a lasting ref.
+fn fetch_host_head(
+    repo: &Repository,
+    host_path: &Path,
+    name: &str,
+) -> Result<git2::Oid, SandboxError> {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    let temporary = format!("refs/litterbox/create/{}-{stamp}", std::process::id());
+    let spec = format!("+{name}:{temporary}");
+    let url = host_path
+        .to_str()
+        .ok_or_else(|| SandboxError::Config("the host path is not UTF-8".to_string()))?;
+
+    let mut remote = repo
+        .remote_anonymous(url)
+        .map_err(|source| SandboxError::from(GitError::Fetch { source }))?;
+    // Fetch the ref in full: the local transport refuses a depth-limited fetch,
+    // and the ancestry is what a later merge needs.
+    remote
+        .fetch(&[spec.as_str()], None, None)
+        .map_err(|source| SandboxError::from(GitError::Fetch { source }))?;
+
+    let oid = repo
+        .refname_to_id(&temporary)
+        .map_err(|source| SandboxError::from(GitError::Reference { source }))?;
+    if let Ok(mut reference) = repo.find_reference(&temporary) {
+        let _ = reference.delete();
+    }
+    Ok(oid)
+}
+
+fn add_directory_to_tree(
+    repo: &Repository,
+    builder: &mut git2::TreeBuilder,
+    current_path: &Path,
+    relative: &Path,
+    filter: &SnapshotFilter,
+) -> Result<(), SandboxError> {
+    let entries = fs::read_dir(current_path).map_err(SandboxError::Io)?;
+
+    for entry in entries {
+        let entry = entry.map_err(SandboxError::Io)?;
+        let path = entry.path();
+        let file_name = entry.file_name();
+        let name_str = file_name.to_string_lossy();
+
+        // Skip .git directory
+        if name_str == ".git" {
+            continue;
+        }
+
+        let child = relative.join(&file_name);
+        let file_type = entry.file_type().map_err(SandboxError::Io)?;
+
+        if file_type.is_dir() {
+            if filter.skips_dir(&child)? {
                 continue;
             }
 
-            let child = relative.join(&file_name);
-            let file_type = entry.file_type().map_err(SandboxError::Io)?;
+            let mut sub_builder = repo
+                .treebuilder(None)
+                .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
 
-            if file_type.is_dir() {
-                if filter.skips_dir(&child)? {
-                    continue;
-                }
+            add_directory_to_tree(repo, &mut sub_builder, &path, &child, filter)?;
 
-                let mut sub_builder = self
-                    .repo
-                    .treebuilder(None)
-                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
+            let sub_tree_oid = sub_builder
+                .write()
+                .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
 
-                self.add_directory_to_tree(&mut sub_builder, &path, &child, filter)?;
-
-                let sub_tree_oid = sub_builder
-                    .write()
-                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
-
-                builder
-                    .insert(&*name_str, sub_tree_oid, 0o040000)
-                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
-            } else if file_type.is_symlink() {
-                if filter.skips_file(&child)? {
-                    continue;
-                }
-
-                // Git records a link as its target path, never the content the
-                // link points at.
-                let target = fs::read_link(&path).map_err(SandboxError::Io)?;
-                let blob_oid = self
-                    .repo
-                    .blob(target.as_os_str().as_encoded_bytes())
-                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
-
-                builder
-                    .insert(&*name_str, blob_oid, 0o120000)
-                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
-            } else if file_type.is_file() {
-                if filter.skips_file(&child)? {
-                    continue;
-                }
-
-                // Stream the file into the object database: build outputs are
-                // large enough that reading one whole into memory is a risk.
-                let mut source = fs::File::open(&path).map_err(SandboxError::Io)?;
-                let mut writer = self
-                    .repo
-                    .blob_writer(None)
-                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
-                std::io::copy(&mut source, &mut writer).map_err(SandboxError::Io)?;
-                let blob_oid = writer
-                    .commit()
-                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
-
-                #[cfg(unix)]
-                let filemode = {
-                    use std::os::unix::fs::PermissionsExt;
-                    let metadata = entry.metadata().map_err(SandboxError::Io)?;
-                    let mode = metadata.permissions().mode();
-                    if mode & 0o111 != 0 {
-                        0o100755
-                    } else {
-                        0o100644
-                    }
-                };
-
-                #[cfg(not(unix))]
-                let filemode = 0o100644;
-
-                builder
-                    .insert(&*name_str, blob_oid, filemode)
-                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
+            builder
+                .insert(&*name_str, sub_tree_oid, 0o040000)
+                .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
+        } else if file_type.is_symlink() {
+            if filter.skips_file(&child)? {
+                continue;
             }
-        }
 
-        Ok(())
+            // Git records a link as its target path, never the content the
+            // link points at.
+            let target = fs::read_link(&path).map_err(SandboxError::Io)?;
+            let blob_oid = repo
+                .blob(target.as_os_str().as_encoded_bytes())
+                .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
+
+            builder
+                .insert(&*name_str, blob_oid, 0o120000)
+                .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
+        } else if file_type.is_file() {
+            if filter.skips_file(&child)? {
+                continue;
+            }
+
+            // Stream the file into the object database: build outputs are
+            // large enough that reading one whole into memory is a risk.
+            let mut source = fs::File::open(&path).map_err(SandboxError::Io)?;
+            let mut writer = repo
+                .blob_writer(None)
+                .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
+            std::io::copy(&mut source, &mut writer).map_err(SandboxError::Io)?;
+            let blob_oid = writer
+                .commit()
+                .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
+
+            #[cfg(unix)]
+            let filemode = {
+                use std::os::unix::fs::PermissionsExt;
+                let metadata = entry.metadata().map_err(SandboxError::Io)?;
+                let mode = metadata.permissions().mode();
+                if mode & 0o111 != 0 {
+                    0o100755
+                } else {
+                    0o100644
+                }
+            };
+
+            #[cfg(not(unix))]
+            let filemode = 0o100644;
+
+            builder
+                .insert(&*name_str, blob_oid, filemode)
+                .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
+        }
     }
+
+    Ok(())
 }
 
 fn repo_prefix_from_path(path: &Path) -> String {
@@ -2354,5 +2455,189 @@ mod tests {
         let second_commit = scm.repo.find_commit(second_oid).expect("second commit");
         assert_eq!(second_commit.parent_count(), 1);
         assert_eq!(second_commit.parent_id(0).expect("parent"), initial_oid);
+    }
+
+    #[test]
+    fn snapshot_commits_into_the_repository_that_holds_the_branch() {
+        let (host_dir, host) = init_repo();
+        let head = host.head().expect("head").peel_to_commit().expect("commit");
+        host.branch("litterbox/demo", &head, false).expect("branch");
+
+        let (configured_dir, configured) = init_repo();
+        let vcs = GitVcs {
+            inner: Mutex::new(GitScm {
+                repo: configured,
+                mode: ScmMode::Direct,
+                snapshot_branch: None,
+                host_repo_path: Some(host_dir.path().to_path_buf()),
+            }),
+            prefix_override: None,
+            store_slug: None,
+            reconcile_root: None,
+        };
+        let workspace = Workspace::from_branch("litterbox/demo");
+        let staging = TempDir::new().expect("staging dir");
+        fs::write(staging.path().join("README.md"), "changed").expect("write");
+
+        let revision = vcs
+            .snapshot(&workspace, staging.path(), "snapshot")
+            .expect("snapshot");
+
+        let host = Repository::open(host_dir.path()).expect("reopen host");
+        assert_eq!(
+            refs::read(&host, &refs::sandbox("litterbox/demo"))
+                .expect("read host ref")
+                .map(|oid| oid.to_string()),
+            Some(revision.as_str().to_string()),
+            "the sandbox ref belongs to the repository that holds the branch"
+        );
+
+        let configured = Repository::open(configured_dir.path()).expect("reopen configured");
+        assert!(
+            refs::read(&configured, &refs::sandbox("litterbox/demo"))
+                .expect("read configured ref")
+                .is_none(),
+            "the configured repository must not gain the other repository's branch"
+        );
+    }
+
+    #[test]
+    fn snapshot_filter_uses_the_workspace_branch_not_the_last_snapshot_ref() {
+        let (_tempdir, repo) = init_repo();
+        {
+            let base = repo.head().expect("head").peel_to_commit().expect("commit");
+            let signature = Signature::now("Litterbox", "noreply@example.com").expect("signature");
+
+            let ignore = repo.blob(b"kept.txt\nignored.txt\n").expect("ignore blob");
+            let kept = repo.blob(b"tracked\n").expect("kept blob");
+            let mut demo_builder = repo.treebuilder(None).expect("demo builder");
+            demo_builder
+                .insert(".gitignore", ignore, 0o100644)
+                .expect("ignore");
+            demo_builder
+                .insert("kept.txt", kept, 0o100644)
+                .expect("kept");
+            let demo_tree = repo
+                .find_tree(demo_builder.write().expect("demo tree"))
+                .expect("demo tree");
+            let demo = repo
+                .commit(None, &signature, &signature, "demo", &demo_tree, &[&base])
+                .expect("demo commit");
+            refs::write(&repo, &refs::sandbox("litterbox/demo"), demo, "test: demo")
+                .expect("demo ref");
+
+            let mut other_builder = repo.treebuilder(None).expect("other builder");
+            other_builder
+                .insert(".gitignore", ignore, 0o100644)
+                .expect("ignore");
+            let other_tree = repo
+                .find_tree(other_builder.write().expect("other tree"))
+                .expect("other tree");
+            let other = repo
+                .commit(None, &signature, &signature, "other", &other_tree, &[&base])
+                .expect("other commit");
+            refs::write(
+                &repo,
+                &refs::sandbox("litterbox/other"),
+                other,
+                "test: other",
+            )
+            .expect("other ref");
+        }
+
+        let vcs = GitVcs {
+            inner: Mutex::new(GitScm {
+                repo,
+                mode: ScmMode::Direct,
+                snapshot_branch: Some("refs/litterbox/workspaces/other".to_string()),
+                host_repo_path: None,
+            }),
+            prefix_override: None,
+            store_slug: None,
+            reconcile_root: None,
+        };
+        let staging = TempDir::new().expect("staging dir");
+        fs::write(staging.path().join(".gitignore"), "kept.txt\nignored.txt\n")
+            .expect("write ignore");
+        fs::write(staging.path().join("kept.txt"), "tracked\n").expect("write kept");
+
+        let filter = vcs
+            .snapshot_filter(&Workspace::from_branch("litterbox/demo"), staging.path())
+            .expect("filter");
+
+        assert!(
+            filter
+                .selects(Path::new("kept.txt"), false)
+                .expect("select kept"),
+            "a file tracked by the workspace branch stays selected"
+        );
+        assert!(
+            !filter
+                .selects(Path::new("ignored.txt"), false)
+                .expect("select ignored"),
+            "an untracked ignored file stays excluded"
+        );
+    }
+
+    #[test]
+    fn prepare_uses_the_host_head_when_the_store_is_behind() {
+        let (host_dir, host) = init_repo();
+        let store_dir = TempDir::new().expect("store dir");
+        let store_path = store_dir.path().join("store");
+        git2::build::RepoBuilder::new()
+            .bare(true)
+            .clone(host_dir.path().to_str().expect("host path"), &store_path)
+            .expect("clone");
+
+        fs::write(host_dir.path().join("advanced.txt"), "new").expect("write");
+        let mut index = host.index().expect("index");
+        index.add_path(Path::new("advanced.txt")).expect("add");
+        index.write().expect("write index");
+        let tree_id = index.write_tree().expect("tree");
+        let signature = Signature::now("Test", "test@example.com").expect("signature");
+        let parent = host.head().expect("head").peel_to_commit().expect("parent");
+        let advanced = {
+            let tree = host.find_tree(tree_id).expect("tree");
+            host.commit(
+                Some("HEAD"),
+                &signature,
+                &signature,
+                "advance",
+                &tree,
+                &[&parent],
+            )
+            .expect("commit")
+        };
+
+        let store = Repository::open_bare(&store_path).expect("store");
+        let vcs = GitVcs {
+            inner: Mutex::new(GitScm {
+                repo: store,
+                mode: ScmMode::Remote,
+                snapshot_branch: None,
+                host_repo_path: Some(host_dir.path().to_path_buf()),
+            }),
+            prefix_override: None,
+            store_slug: None,
+            reconcile_root: None,
+        };
+
+        let prepared = vcs.prepare("demo").expect("prepare");
+        assert_eq!(prepared.base.as_str(), advanced.to_string());
+
+        let destination = TempDir::new().expect("destination");
+        vcs.materialise(&prepared.workspace, &prepared.base, destination.path())
+            .expect("materialise");
+        assert!(
+            destination.path().join("advanced.txt").exists(),
+            "the sandbox starts from the host's current checkout"
+        );
+
+        let store = Repository::open_bare(&store_path).expect("reopen store");
+        assert_eq!(
+            refs::read(&store, &refs::branch("litterbox/demo")).expect("read branch"),
+            Some(advanced),
+            "the branch starts at the host commit"
+        );
     }
 }

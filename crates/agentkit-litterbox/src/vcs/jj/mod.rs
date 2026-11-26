@@ -360,7 +360,11 @@ impl Vcs for JjVcs {
         })
     }
 
-    fn snapshot_filter(&self, _rules_root: &Path) -> Result<Arc<dyn SnapshotSelector>, Error> {
+    fn snapshot_filter(
+        &self,
+        _workspace: &Workspace,
+        _rules_root: &Path,
+    ) -> Result<Arc<dyn SnapshotSelector>, Error> {
         Ok(Arc::new(IgnoreFiles))
     }
 
