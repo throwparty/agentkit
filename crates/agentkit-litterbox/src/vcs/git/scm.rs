@@ -167,9 +167,6 @@ pub struct GitVcs {
     reconcile_root: Option<PathBuf>,
 }
 
-/// The old name, kept while the orchestrator still imports it.
-pub type ThreadSafeScm = GitVcs;
-
 impl GitVcs {
     /// Record the project slug used for the bare store.
     pub fn set_store_slug(mut self, slug: String) -> Self {

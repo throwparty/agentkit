@@ -20,7 +20,7 @@ mod store;
 mod vcs_tests;
 
 pub use config::{GitVcsConfig, apply_config};
-pub use scm::{GitScm, GitVcs, Scm, ThreadSafeScm};
+pub use scm::{GitScm, GitVcs, Scm};
 pub use store::VcsStore;
 
 use std::path::Path;
