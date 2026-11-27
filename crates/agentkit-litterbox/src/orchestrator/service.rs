@@ -388,6 +388,15 @@ impl Sandboxes {
     /// Repair a missing sandbox through the backend's reuse mode.
     async fn repair(&self, name: &str, selected: &Selected) -> Result<Recovery, Error> {
         let _lock = lock::acquire(&self.records_dir, name).await?;
+        self.repair_locked(name, selected).await
+    }
+
+    /// The repair body, for callers that already hold the sandbox lock.
+    async fn repair_locked(
+        &self,
+        name: &str,
+        selected: &Selected,
+    ) -> Result<Recovery, Error> {
         let stored = self.stored(name)?;
         let name = stored.sandbox.name.clone();
 
@@ -538,6 +547,16 @@ impl Sandboxes {
         name: &str,
         policy: PausedPolicy,
     ) -> Result<Option<Recovery>, Error> {
+        let _lock = lock::acquire(&self.records_dir, name).await?;
+        self.ensure_live_locked(name, policy).await
+    }
+
+    /// The liveness check, for callers that already hold the sandbox lock.
+    async fn ensure_live_locked(
+        &self,
+        name: &str,
+        policy: PausedPolicy,
+    ) -> Result<Option<Recovery>, Error> {
         let stored = self.stored(name)?;
         let selected = self.select_for(&stored.sandbox, "use the sandbox").await?;
         let inspection = selected.core().inspect(&stored.sandbox).await?;
@@ -551,7 +570,7 @@ impl Sandboxes {
             },
             SandboxStatus::Missing => {
                 let canonical = stored.sandbox.name.clone();
-                Ok(Some(self.repair(&canonical, &selected).await?))
+                Ok(Some(self.repair_locked(&canonical, &selected).await?))
             }
             SandboxStatus::Unknown => Err(Error::Unavailable {
                 backend: selected.name().to_string(),
@@ -790,11 +809,14 @@ impl Sandboxes {
         name: &str,
         command: &[String],
     ) -> Result<Performed<Execution>, Error> {
-        let recovery = self.ensure_live(name, PausedPolicy::Refuse).await?;
+        let _lock = lock::acquire(&self.records_dir, name).await?;
+        let recovery = self
+            .ensure_live_locked(name, PausedPolicy::Refuse)
+            .await?;
         let stored = self.stored(name)?;
         let selected = self.select_for(&stored.sandbox, "run a command").await?;
         let reconciler = Reconciler::new(&self.vcs, &stored, &selected, &self.records_dir);
-        reconciler.before(Action::Tool).await?;
+        let before = reconciler.before(Action::Tool).await?;
 
         let result = selected.core().exec(&stored.sandbox, command).await;
         match &result {
@@ -806,9 +828,12 @@ impl Sandboxes {
             }
         }
         let value = result?;
-        let reconciled = reconciler
+        let mut reconciled = reconciler
             .after("litterbox: snapshot after a command")
             .await?;
+        if reconciled.dropped.is_none() {
+            reconciled.dropped = before.dropped;
+        }
         Ok(Performed::fresh(value)
             .or_recovery(recovery)
             .with_reconciliation(reconciled))
@@ -1924,7 +1949,10 @@ impl Sandboxes {
 
     /// Begin resolving a conflict inside the sandbox.
     pub(crate) async fn begin_resolution(&self, name: &str) -> Result<Performed<Resolved>, Error> {
-        let recovery = self.ensure_live(name, PausedPolicy::Refuse).await?;
+        let _lock = lock::acquire(&self.records_dir, name).await?;
+        let recovery = self
+            .ensure_live_locked(name, PausedPolicy::Refuse)
+            .await?;
         let stored = self.stored(name)?;
         let selected = self
             .select_for(&stored.sandbox, "resolve a conflict")
@@ -1937,7 +1965,10 @@ impl Sandboxes {
 
     /// Finish a resolution, failing while the working copy still conflicts.
     pub(crate) async fn finish_resolution(&self, name: &str) -> Result<Performed<Resolved>, Error> {
-        let recovery = self.ensure_live(name, PausedPolicy::Refuse).await?;
+        let _lock = lock::acquire(&self.records_dir, name).await?;
+        let recovery = self
+            .ensure_live_locked(name, PausedPolicy::Refuse)
+            .await?;
         let stored = self.stored(name)?;
         let selected = self
             .select_for(&stored.sandbox, "resolve a conflict")
@@ -1951,7 +1982,10 @@ impl Sandboxes {
         &self,
         name: &str,
     ) -> Result<Performed<Resolved>, Error> {
-        let recovery = self.ensure_live(name, PausedPolicy::Refuse).await?;
+        let _lock = lock::acquire(&self.records_dir, name).await?;
+        let recovery = self
+            .ensure_live_locked(name, PausedPolicy::Refuse)
+            .await?;
         let stored = self.stored(name)?;
         let selected = self
             .select_for(&stored.sandbox, "resolve a conflict")
@@ -2087,20 +2121,26 @@ impl Sandboxes {
         source: &std::path::Path,
         destination: &str,
     ) -> Result<Performed<()>, Error> {
-        let recovery = self.ensure_live(name, PausedPolicy::Allow).await?;
+        let _lock = lock::acquire(&self.records_dir, name).await?;
+        let recovery = self
+            .ensure_live_locked(name, PausedPolicy::Allow)
+            .await?;
         let stored = self.stored(name)?;
         let selected = self
             .select_for(&stored.sandbox, "upload into the sandbox")
             .await?;
         let reconciler = Reconciler::new(&self.vcs, &stored, &selected, &self.records_dir);
-        reconciler.before(Action::Tool).await?;
+        let before = reconciler.before(Action::Tool).await?;
         selected
             .core()
             .upload(&stored.sandbox, source, destination)
             .await?;
-        let reconciled = reconciler
+        let mut reconciled = reconciler
             .after("litterbox: snapshot after an upload")
             .await?;
+        if reconciled.dropped.is_none() {
+            reconciled.dropped = before.dropped;
+        }
         Ok(Performed::fresh(())
             .or_recovery(recovery)
             .with_reconciliation(reconciled))
@@ -2113,7 +2153,10 @@ impl Sandboxes {
         source: &str,
         destination: &std::path::Path,
     ) -> Result<Performed<()>, Error> {
-        let recovery = self.ensure_live(name, PausedPolicy::Allow).await?;
+        let _lock = lock::acquire(&self.records_dir, name).await?;
+        let recovery = self
+            .ensure_live_locked(name, PausedPolicy::Allow)
+            .await?;
         let stored = self.stored(name)?;
         let selected = self
             .select_for(&stored.sandbox, "download from the sandbox")
@@ -2131,7 +2174,10 @@ impl Sandboxes {
 
     /// Download the workspace and commit it to the sandbox's snapshot branch.
     pub async fn snapshot(&self, name: &str, message: &str) -> Result<Performed<()>, Error> {
-        let recovery = self.ensure_live(name, PausedPolicy::Allow).await?;
+        let _lock = lock::acquire(&self.records_dir, name).await?;
+        let recovery = self
+            .ensure_live_locked(name, PausedPolicy::Allow)
+            .await?;
         let stored = self.stored(name)?;
         let selected = self
             .select_for(&stored.sandbox, "snapshot the workspace")
@@ -2726,7 +2772,8 @@ mod seam_tests {
         assert_eq!(vcs.snapshots().len(), 1, "one snapshot after the command");
         assert_eq!(
             performed.state().map(|state| state.workspace),
-            Some(crate::orchestrator::source::Workspace::Dirty)
+            Some(crate::orchestrator::source::Workspace::Clean),
+            "the returned state is the post-plan state"
         );
     }
 

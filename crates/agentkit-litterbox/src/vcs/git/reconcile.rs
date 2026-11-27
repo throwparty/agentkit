@@ -305,23 +305,56 @@ fn stage_in(
     branch: &Revision,
     sandbox: &Revision,
 ) -> Result<Staged, VcsError> {
+    let merge_base = format!("--merge-base={}", synced.as_str());
     let merged = git(
         path,
         &[
-            "read-tree",
-            "-m",
-            synced.as_str(),
+            "merge-tree",
+            "--write-tree",
+            &merge_base,
             branch.as_str(),
             sandbox.as_str(),
         ],
     )?;
-    if !merged.status.success() {
-        return Err(failed("merge the sandbox branch", &merged));
-    }
+    match merged.status.code() {
+        // A clean content merge: write its tree into the worktree. `read-tree
+        // -m` below only knows tree/index merges and would leave stages for
+        // edits that merge cleanly.
+        Some(0) => {
+            let tree = String::from_utf8_lossy(&merged.stdout)
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            let written = git(path, &["read-tree", "-u", "--reset", &tree])?;
+            if !written.status.success() {
+                return Err(failed("write the merged tree", &written));
+            }
+        }
+        // Genuine conflicts: populate index stages and the conflicted working
+        // tree so the user can resolve them.
+        Some(1) => {
+            let merged = git(
+                path,
+                &[
+                    "read-tree",
+                    "-m",
+                    synced.as_str(),
+                    branch.as_str(),
+                    sandbox.as_str(),
+                ],
+            )?;
+            if !merged.status.success() {
+                return Err(failed("merge the sandbox branch", &merged));
+            }
 
-    let checked_out = git(path, &["checkout", "--conflict=merge", "--", "."])?;
-    if !checked_out.status.success() {
-        return Err(failed("write the conflicted working tree", &checked_out));
+            let checked_out = git(path, &["checkout", "--conflict=merge", "--", "."])?;
+            if !checked_out.status.success() {
+                return Err(failed("write the conflicted working tree", &checked_out));
+            }
+        }
+        _ => return Err(failed("merge the sandbox branch", &merged)),
     }
 
     let git_dir = git(path, &["rev-parse", "--git-dir"])?;
@@ -412,6 +445,34 @@ pub(crate) fn finish(
         return Err(failed("read the merge commit", &head));
     }
     let head = text(&head);
+
+    // `status --porcelain` can be empty while MERGE_HEAD is still present, for
+    // example when the chosen tree equals the branch's original tree. Reject
+    // that, and require a real merge commit whose first parent is the branch
+    // and whose second is the sandbox revision captured at staging.
+    let merge_head = git(path, &["rev-parse", "-q", "--verify", "MERGE_HEAD"])?;
+    if merge_head.status.success() {
+        return Err(VcsError::Backend {
+            operation: "finish the merge".to_string(),
+            message: "the staging worktree still has an unfinished merge".to_string(),
+        });
+    }
+    let first_parent = git(path, &["rev-parse", "HEAD^1"])?;
+    if !first_parent.status.success() || text(&first_parent) != branch_tip.as_str() {
+        return Err(VcsError::Backend {
+            operation: "finish the merge".to_string(),
+            message: format!(
+                "the staged commit's first parent is not the shared branch tip {branch_tip}"
+            ),
+        });
+    }
+    let second_parent = git(path, &["rev-parse", "HEAD^2"])?;
+    if !second_parent.status.success() {
+        return Err(VcsError::Backend {
+            operation: "finish the merge".to_string(),
+            message: "the staged commit does not contain the sandbox revision".to_string(),
+        });
+    }
 
     if head != branch_tip.as_str() {
         let contains = git(

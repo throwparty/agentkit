@@ -693,16 +693,20 @@ impl Vcs for GitVcs {
     fn tree(&self, revision: &Revision) -> Result<TreeId, VcsError> {
         let oid = revision_oid(revision).map_err(vcs_error)?;
         let guard = self.lock().map_err(vcs_error)?;
-        let commit = guard
-            .repo
-            .find_commit(oid)
-            .map_err(|source| SandboxError::from(GitError::Commit { source }))
-            .map_err(vcs_error)?;
-        let tree = commit
-            .tree()
-            .map_err(|source| SandboxError::from(GitError::Commit { source }))
-            .map_err(vcs_error)?;
-        Ok(TreeId::new(tree.id().to_string()))
+        self.with_repo_containing(
+            &guard,
+            |repo| repo.find_commit(oid).is_ok(),
+            |repo| {
+                let commit = repo
+                    .find_commit(oid)
+                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
+                let tree = commit
+                    .tree()
+                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
+                Ok(TreeId::new(tree.id().to_string()))
+            },
+        )
+        .map_err(vcs_error)
     }
 
     fn blob(&self, tree: &TreeId, path: &Path) -> Result<Option<Vec<u8>>, VcsError> {
@@ -712,24 +716,30 @@ impl Vcs for GitVcs {
             .map_err(|source| SandboxError::from(GitError::Commit { source }))
             .map_err(vcs_error)?;
         let guard = self.lock().map_err(vcs_error)?;
-        let tree = guard
-            .repo
-            .find_tree(oid)
-            .map_err(|source| SandboxError::from(GitError::Commit { source }))
-            .map_err(vcs_error)?;
-        let entry = match tree.get_path(path) {
-            Ok(entry) => entry,
-            Err(error) if error.code() == git2::ErrorCode::NotFound => return Ok(None),
-            Err(source) => return Err(vcs_error(SandboxError::from(GitError::Commit { source }))),
-        };
-        let object = entry
-            .to_object(&guard.repo)
-            .map_err(|source| SandboxError::from(GitError::Commit { source }))
-            .map_err(vcs_error)?;
-        match object.as_blob() {
-            Some(blob) => Ok(Some(blob.content().to_vec())),
-            None => Ok(None),
-        }
+        self.with_repo_containing(
+            &guard,
+            |repo| repo.find_tree(oid).is_ok(),
+            |repo| {
+                let tree = repo
+                    .find_tree(oid)
+                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
+                let entry = match tree.get_path(path) {
+                    Ok(entry) => entry,
+                    Err(error) if error.code() == git2::ErrorCode::NotFound => return Ok(None),
+                    Err(source) => {
+                        return Err(SandboxError::from(GitError::Commit { source }));
+                    }
+                };
+                let object = entry
+                    .to_object(repo)
+                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
+                match object.as_blob() {
+                    Some(blob) => Ok(Some(blob.content().to_vec())),
+                    None => Ok(None),
+                }
+            },
+        )
+        .map_err(vcs_error)
     }
 
     fn observe(&self, workspace: &Workspace, staging: &Path) -> Result<TreeId, VcsError> {
@@ -776,11 +786,17 @@ impl Vcs for GitVcs {
             return Ok(true);
         }
         let guard = self.lock().map_err(vcs_error)?;
-        guard
-            .repo
-            .graph_descendant_of(descendant, ancestor)
-            .map_err(|source| SandboxError::from(GitError::Commit { source }))
-            .map_err(vcs_error)
+        self.with_repo_containing(
+            &guard,
+            |repo| {
+                repo.find_commit(ancestor).is_ok() && repo.find_commit(descendant).is_ok()
+            },
+            |repo| {
+                repo.graph_descendant_of(descendant, ancestor)
+                    .map_err(|source| SandboxError::from(GitError::Commit { source }))
+            },
+        )
+        .map_err(vcs_error)
     }
 
     fn deleted_paths(&self, from: &TreeId, to: &TreeId) -> Result<Vec<PathBuf>, VcsError> {
@@ -794,31 +810,32 @@ impl Vcs for GitVcs {
         let to = parse(to).map_err(vcs_error)?;
 
         let guard = self.lock().map_err(vcs_error)?;
-        let from = guard
-            .repo
-            .find_tree(from)
-            .map_err(|source| SandboxError::from(GitError::Commit { source }))
-            .map_err(vcs_error)?;
-        let to = guard
-            .repo
-            .find_tree(to)
-            .map_err(|source| SandboxError::from(GitError::Commit { source }))
-            .map_err(vcs_error)?;
-        let diff = guard
-            .repo
-            .diff_tree_to_tree(Some(&from), Some(&to), None)
-            .map_err(|source| SandboxError::from(GitError::Commit { source }))
-            .map_err(vcs_error)?;
+        self.with_repo_containing(
+            &guard,
+            |repo| repo.find_tree(from).is_ok() && repo.find_tree(to).is_ok(),
+            |repo| {
+                let from = repo
+                    .find_tree(from)
+                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
+                let to = repo
+                    .find_tree(to)
+                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
+                let diff = repo
+                    .diff_tree_to_tree(Some(&from), Some(&to), None)
+                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
 
-        let mut paths = Vec::new();
-        for delta in diff.deltas() {
-            if delta.status() == git2::Delta::Deleted
-                && let Some(path) = delta.old_file().path()
-            {
-                paths.push(path.to_path_buf());
-            }
-        }
-        Ok(paths)
+                let mut paths = Vec::new();
+                for delta in diff.deltas() {
+                    if delta.status() == git2::Delta::Deleted
+                        && let Some(path) = delta.old_file().path()
+                    {
+                        paths.push(path.to_path_buf());
+                    }
+                }
+                Ok(paths)
+            },
+        )
+        .map_err(vcs_error)
     }
 
     fn report(&self, workspace: &Workspace) -> Result<Report, VcsError> {
@@ -1095,6 +1112,38 @@ impl GitVcs {
             let path = crate::vcs::git::VcsStore::resolve_path(slug);
             if let Ok(bare) = Repository::open_bare(&path)
                 && bare.find_branch(branch, BranchType::Local).is_ok()
+            {
+                return operation(&bare);
+            }
+        }
+
+        operation(&guard.repo)
+    }
+
+    /// Run `operation` against a repository that contains the object the
+    /// caller needs, checking the configured repository, the host, then the
+    /// bare store.
+    fn with_repo_containing<T>(
+        &self,
+        guard: &GitScm,
+        contains: impl Fn(&Repository) -> bool,
+        operation: impl FnOnce(&Repository) -> Result<T, SandboxError>,
+    ) -> Result<T, SandboxError> {
+        if contains(&guard.repo) {
+            return operation(&guard.repo);
+        }
+
+        if let Some(path) = &guard.host_repo_path
+            && let Ok(host) = Repository::open(path)
+            && contains(&host)
+        {
+            return operation(&host);
+        }
+
+        if let Some(slug) = &self.store_slug {
+            let path = crate::vcs::git::VcsStore::resolve_path(slug);
+            if let Ok(bare) = Repository::open_bare(&path)
+                && contains(&bare)
             {
                 return operation(&bare);
             }

@@ -98,6 +98,9 @@ pub struct WorkspaceBlock {
     /// The resolution the operation observed, when one is open.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resolution: Option<ResolutionView>,
+    /// The sandbox tip adoption dropped, when it dropped one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dropped: Option<String>,
 }
 
 /// One operation's result, plus the repair it performed on the way.
@@ -142,10 +145,20 @@ impl<T> Performed<T> {
         }
     }
 
-    /// Attach the reconciliation the operation performed.
+    /// Keep the result and attach the reconciliation the operation performed.
     pub(crate) fn with_reconciliation(mut self, reconciled: Reconciled) -> Self {
         self.reconciliation = Some(reconciled);
         self
+    }
+
+    /// Map the operation's value while preserving the recovery and the
+    /// reconciliation the operation reported.
+    pub(crate) fn map<U>(self, map: impl FnOnce(T) -> U) -> Performed<U> {
+        Performed {
+            value: map(self.value),
+            recovery: self.recovery,
+            reconciliation: self.reconciliation,
+        }
     }
 
     /// The source state after the reconciliation, when one ran.
@@ -283,6 +296,7 @@ mod tests {
             conflicts: conflicts.iter().map(|path| path.to_string()).collect(),
             next: next.map(str::to_string),
             resolution: None,
+            dropped: None,
         }
     }
 
@@ -305,5 +319,13 @@ mod tests {
         let text = toml::to_string(&block("clean", None, &[], None)).expect("toml");
         assert!(!text.contains("reason"), "{text}");
         assert!(!text.contains("next"), "{text}");
+    }
+
+    #[test]
+    fn a_dropped_tip_is_carried_in_the_block() {
+        let mut block = block("clean", None, &[], None);
+        block.dropped = Some("abcd".to_string());
+        let text = toml::to_string(&block).expect("toml");
+        assert!(text.contains("dropped = \"abcd\""), "{text}");
     }
 }

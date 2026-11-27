@@ -650,15 +650,10 @@ async fn ls_in_sandbox<P: SandboxIo + ?Sized>(
     let performed = exec_in_sandbox(io, name, &command)
         .await
         .map_err(|error| ToolError::sandbox(Tool::Ls, error))?;
-    let recovery = performed.recovery;
-    let result = performed.value;
-    if result.exit_code != 0 {
-        return Err(ToolError::classify(Tool::Ls, &sandbox_path, &result));
+    if performed.value.exit_code != 0 {
+        return Err(ToolError::classify(Tool::Ls, &sandbox_path, &performed.value));
     }
-    Ok(
-        Performed::fresh(parse_ls_output(&result.stdout, &sandbox_path, recursive))
-            .or_recovery(recovery),
-    )
+    Ok(performed.map(|result| parse_ls_output(&result.stdout, &sandbox_path, recursive)))
 }
 
 fn parse_ls_output(output: &str, base: &str, recursive: bool) -> Vec<String> {
@@ -761,12 +756,10 @@ async fn read_in_sandbox<P: SandboxIo + ?Sized>(
     let performed = exec_in_sandbox(io, name, &command)
         .await
         .map_err(|error| ToolError::sandbox(Tool::Read, error))?;
-    let recovery = performed.recovery;
-    let result = performed.value;
-    if result.exit_code != 0 {
-        return Err(ToolError::classify(Tool::Read, &sandbox_path, &result));
+    if performed.value.exit_code != 0 {
+        return Err(ToolError::classify(Tool::Read, &sandbox_path, &performed.value));
     }
-    Ok(Performed::fresh(slice_content(&result.stdout, offset, limit)).or_recovery(recovery))
+    Ok(performed.map(|result| slice_content(&result.stdout, offset, limit)))
 }
 
 #[allow(clippy::result_large_err)]
@@ -795,12 +788,14 @@ async fn write_in_sandbox<P: SandboxIo + ?Sized>(
     let performed = exec_in_sandbox(io, name, &command)
         .await
         .map_err(|error| ToolError::sandbox(Tool::Write, error))?;
-    let recovery = performed.recovery;
-    let result = performed.value;
-    if result.exit_code != 0 {
-        return Err(ToolError::classify(Tool::Write, &sandbox_path, &result));
+    if performed.value.exit_code != 0 {
+        return Err(ToolError::classify(
+            Tool::Write,
+            &sandbox_path,
+            &performed.value,
+        ));
     }
-    Ok(Performed::fresh(()).or_recovery(recovery))
+    Ok(performed.map(|_| ()))
 }
 
 #[allow(clippy::result_large_err)]
@@ -814,7 +809,7 @@ async fn patch_in_sandbox<P: SandboxIo + ?Sized>(
     let read = read_in_sandbox(io, name, path, None, None)
         .await
         .map_err(|error| ToolError::patch_read(path, error))?;
-    let mut recovery = read.recovery;
+    let recovery = read.recovery;
     let original_content = read.value;
 
     // Parse and apply patch using diffy
@@ -828,11 +823,8 @@ async fn patch_in_sandbox<P: SandboxIo + ?Sized>(
     let written = write_in_sandbox(io, name, path, &patched_content)
         .await
         .map_err(|error| ToolError::patch_write(path, error))?;
-    if recovery.is_none() {
-        recovery = written.recovery;
-    }
 
-    Ok(Performed::fresh(()).or_recovery(recovery))
+    Ok(written.map(|_| ()).or_recovery(recovery))
 }
 
 #[allow(clippy::result_large_err)]
@@ -1062,10 +1054,8 @@ async fn glob_in_sandbox<P: SandboxIo + ?Sized>(
     let performed = exec_in_sandbox(io, name, &command)
         .await
         .map_err(|error| ToolError::sandbox(Tool::Glob, error))?;
-    let recovery = performed.recovery;
-    let result = performed.value;
-    if result.exit_code != 0 {
-        return Err(ToolError::classify(Tool::Glob, &base, &result));
+    if performed.value.exit_code != 0 {
+        return Err(ToolError::classify(Tool::Glob, &base, &performed.value));
     }
 
     let pattern_is_absolute = Path::new(pattern).is_absolute();
@@ -1078,7 +1068,7 @@ async fn glob_in_sandbox<P: SandboxIo + ?Sized>(
     };
 
     let mut entries = Vec::new();
-    for entry in parse_find_output(&result.stdout) {
+    for entry in parse_find_output(&performed.value.stdout) {
         let relative = strip_base_prefix(&entry, &base);
         let candidate = if pattern_is_absolute {
             entry.as_str()
@@ -1092,7 +1082,7 @@ async fn glob_in_sandbox<P: SandboxIo + ?Sized>(
     }
 
     entries.sort();
-    Ok(Performed::fresh(entries).or_recovery(recovery))
+    Ok(performed.map(|_| entries))
 }
 
 fn parse_find_output(output: &str) -> Vec<String> {
@@ -1135,15 +1125,17 @@ async fn grep_in_sandbox<P: SandboxIo + ?Sized>(
     let performed = exec_in_sandbox(io, name, &command)
         .await
         .map_err(|error| ToolError::sandbox(Tool::Grep, error))?;
-    let recovery = performed.recovery;
-    let result = performed.value;
-    if result.exit_code == 0 {
-        return Ok(Performed::fresh(parse_grep_output(&result.stdout)).or_recovery(recovery));
+    if performed.value.exit_code == 0 {
+        return Ok(performed.map(|result| parse_grep_output(&result.stdout)));
     }
-    if result.exit_code == 1 && result.stderr.trim().is_empty() {
-        return Ok(Performed::fresh(Vec::new()).or_recovery(recovery));
+    if performed.value.exit_code == 1 && performed.value.stderr.trim().is_empty() {
+        return Ok(performed.map(|_| Vec::new()));
     }
-    Err(classify_grep_failure(&sandbox_path, pattern, &result))
+    Err(classify_grep_failure(
+        &sandbox_path,
+        pattern,
+        &performed.value,
+    ))
 }
 
 fn build_grep_command(pattern: &str, path: &str, include: Option<&str>) -> String {
