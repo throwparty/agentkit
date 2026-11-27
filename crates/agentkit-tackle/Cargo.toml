@@ -26,7 +26,7 @@ clap = {version = "4", features = ["derive"]}
 futures = "0.3"
 git2 = "0.21"
 http = "1"
-jiff = {version = "0.2", features = ["serde"]}
+jiff = {version = "1.0", features = ["serde"]}
 rig-core = {version = "0.46.0", features = ["reqwest"]}
 regex = "1"
 reqwest = {version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"]}
