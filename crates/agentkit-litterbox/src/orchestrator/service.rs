@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -46,6 +46,8 @@ pub struct Sandboxes {
     project_slug: String,
     records_dir: std::path::PathBuf,
     fixed: Option<Selected>,
+    /// Where materialised workspaces are staged, when a test overrides it.
+    staging_root: Option<PathBuf>,
 }
 
 /// What a project's sandboxes currently look like.
@@ -94,6 +96,7 @@ impl Sandboxes {
             project_slug,
             records_dir,
             fixed: None,
+            staging_root: None,
         })
     }
 
@@ -128,6 +131,7 @@ impl Sandboxes {
             project_slug,
             records_dir,
             fixed: Some(fixed),
+            staging_root: None,
         }
     }
 
@@ -135,6 +139,13 @@ impl Sandboxes {
     #[cfg(test)]
     pub fn with_binding(mut self, binding: Option<WorkspaceBinding>) -> Self {
         self.binding = binding;
+        self
+    }
+
+    /// Put staged workspaces under `root` instead of the data directory.
+    #[cfg(test)]
+    pub fn with_staging_root(mut self, root: PathBuf) -> Self {
+        self.staging_root = Some(root);
         self
     }
 
@@ -454,7 +465,7 @@ impl Sandboxes {
         let masked_paths = self.vcs.masked_paths(&workspace);
         let staged = match binding {
             WorkspaceBinding::Copied => {
-                let staged = TempDir::new().map_err(SandboxError::Io)?;
+                let staged = self.staging_dir("repair-")?;
                 self.vcs
                     .materialise(&workspace, &materialised, staged.path())
                     .map_err(contract_error)?;
@@ -1087,8 +1098,26 @@ impl Sandboxes {
         backends::select_as(&self.config, operation).await
     }
 
+    /// A directory for a workspace being materialised.
+    ///
+    /// It lives under Litterbox's data directory, never the system temporary
+    /// directory: a cleaner that expunges temporary files must not be able to
+    /// take a create or repair out from under a running backend.
+    fn staging_dir(&self, prefix: &str) -> Result<TempDir, SandboxError> {
+        let root = self.staging_root.clone().unwrap_or_else(|| {
+            agentkit_common::data_dir("litterbox")
+                .join("staging")
+                .join(&self.project_slug)
+        });
+        std::fs::create_dir_all(&root).map_err(SandboxError::Io)?;
+        tempfile::Builder::new()
+            .prefix(prefix)
+            .tempdir_in(&root)
+            .map_err(SandboxError::Io)
+    }
+
     fn materialise(&self, prepared: &Prepared) -> Result<TempDir, SandboxError> {
-        let staged = TempDir::new().map_err(SandboxError::Io)?;
+        let staged = self.staging_dir("create-")?;
         self.vcs
             .materialise(&prepared.workspace, &prepared.base, staged.path())?;
         Ok(staged)
@@ -2240,10 +2269,41 @@ mod seam_tests {
     use crate::sandbox::report::State;
     use crate::sandbox::selected::Selected;
     use crate::testing::{TestBackend, TestVcs};
-    use crate::vcs::{HistoryStep, Revision};
+    use crate::vcs::{HistoryStep, Prepared, Revision};
 
     fn scratch() -> TempDir {
         TempDir::new().expect("tempdir")
+    }
+
+    #[test]
+    fn materialised_workspaces_are_staged_under_the_data_directory() {
+        let parent = scratch();
+        let root = parent.path().join("staging");
+        let records = scratch();
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(TestVcs::new());
+        let sandboxes = Sandboxes::for_test(
+            Config::default(),
+            vcs,
+            false,
+            "project".to_string(),
+            records.path().to_path_buf(),
+            selected(backend),
+        )
+        .with_staging_root(root.clone());
+
+        let prepared = Prepared {
+            workspace: crate::vcs::Workspace::from_branch("litterbox/demo"),
+            base: Revision::new("base"),
+        };
+        let staged = sandboxes.materialise(&prepared).expect("materialise");
+
+        assert!(
+            staged.path().starts_with(&root),
+            "staged at {} instead of {}",
+            staged.path().display(),
+            root.display()
+        );
     }
 
     fn selected(backend: Arc<TestBackend>) -> Selected {
