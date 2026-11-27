@@ -227,15 +227,13 @@ pub(crate) fn render(input: &ProfileInput) -> Result<RenderedProfile, RenderErro
 
     // A masked path is denied after every allow rule: SBPL resolves
     // last-match-wins, so the deny overrides the workspace allow for that
-    // subtree. A masked path that does not exist is skipped — there is nothing
-    // to hide.
+    // subtree. The deny is emitted even when the path is currently absent:
+    // metadata created there later must stay hidden for the holder's lifetime.
     if !input.masked_paths.is_empty() {
         let mut denied = Vec::new();
         for relative in &input.masked_paths {
-            let absolute = workspace.join(relative);
-            if let Ok(resolved) = resolve(&absolute) {
-                push_path(&mut denied, resolved);
-            }
+            let path = resolve_masked(workspace, relative)?;
+            push_path(&mut denied, path);
         }
         if !denied.is_empty() {
             let mut filters = Vec::with_capacity(denied.len());
@@ -341,6 +339,38 @@ fn resolve(path: &Path) -> Result<PathBuf, RenderError> {
     std::fs::canonicalize(path).map_err(|_| RenderError::BadPath {
         value: path.display().to_string(),
     })
+}
+
+/// Resolve a workspace-relative masked path, including one that does not
+/// exist yet.
+///
+/// A missing leaf is resolved through its existing parent, so a symlinked
+/// workspace path is honoured without requiring the masked entry to exist.
+/// Any other failure is returned rather than silently leaving the path
+/// readable and writable.
+fn resolve_masked(workspace: &Path, relative: &Path) -> Result<PathBuf, RenderError> {
+    let absolute = workspace.join(relative);
+    match std::fs::canonicalize(&absolute) {
+        Ok(resolved) => Ok(resolved),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let parent = absolute.parent().unwrap_or(workspace);
+            match std::fs::canonicalize(parent) {
+                Ok(parent) => Ok(parent.join(
+                    absolute
+                        .file_name()
+                        .map(Path::new)
+                        .unwrap_or_else(|| Path::new("")),
+                )),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(absolute),
+                Err(_) => Err(RenderError::BadPath {
+                    value: absolute.display().to_string(),
+                }),
+            }
+        }
+        Err(_) => Err(RenderError::BadPath {
+            value: absolute.display().to_string(),
+        }),
+    }
 }
 
 fn push_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
@@ -588,13 +618,35 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_masked_path_is_skipped() {
+    fn a_missing_masked_path_is_still_denied() {
         let workspace = workspace();
         let mut masked = input(workspace.path());
         masked.masked_paths = vec![PathBuf::from(".does-not-exist")];
         let rendered = render(&masked).expect("renders");
-        assert!(!rendered.text.contains("(deny file-read*"));
-        assert!(!rendered.text.contains("(deny file-write*"));
+        assert!(rendered.text.contains("(deny file-read*)"));
+        assert!(rendered.text.contains("(deny file-write*)"));
+
+        let canonical = workspace.path().canonicalize().expect("canonical");
+        let target = canonical.join(".does-not-exist");
+        assert!(
+            rendered
+                .parameters
+                .iter()
+                .any(|parameter| parameter.value.to_bytes() == target.as_os_str().as_bytes()),
+            "the missing masked path is still a deny parameter"
+        );
+    }
+
+    #[test]
+    fn a_masked_path_that_cannot_be_resolved_fails_closed() {
+        let workspace = workspace();
+        std::os::unix::fs::symlink("loop", workspace.path().join("loop")).expect("loop");
+        let mut masked = input(workspace.path());
+        masked.masked_paths = vec![PathBuf::from("loop")];
+        assert!(matches!(
+            render(&masked),
+            Err(RenderError::BadPath { .. })
+        ));
     }
 
     #[test]

@@ -290,6 +290,7 @@ impl SeatbeltBackend {
             provenance: environment.provenance,
             posture: self.posture_name().to_string(),
             tag: request.name.clone(),
+            masked_paths: request.workspace.masked_paths.clone(),
         };
 
         if let Err(error) = write_payload(&state, &payload) {
@@ -880,8 +881,9 @@ impl Backend for SeatbeltBackend {
         let destination = destination.to_string();
         Box::pin(async move {
             let root = payload.workspace_host;
+            let masks = payload.masked_paths;
             shared::transfer(UPLOAD_TIMEOUT, move || {
-                workspace::transfer_in(&source, &root, &destination)
+                workspace::transfer_in(&source, &root, &destination, &masks)
             })
             .await
         })
@@ -902,8 +904,9 @@ impl Backend for SeatbeltBackend {
         let destination = destination.to_path_buf();
         Box::pin(async move {
             let root = payload.workspace_host;
+            let masks = payload.masked_paths;
             shared::transfer(DOWNLOAD_TIMEOUT, move || {
-                workspace::transfer_out(&root, &source, &destination, selector.as_deref())
+                workspace::transfer_out(&root, &source, &destination, selector.as_deref(), &masks)
             })
             .await
         })
