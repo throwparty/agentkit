@@ -950,7 +950,12 @@ impl Vcs for JjVcs {
         path.is_dir().then_some(path)
     }
 
-    fn conflict_sides(&self, revision: &Revision, _path: &Path) -> Result<ConflictSides, Error> {
+    fn conflict_sides(
+        &self,
+        revision: &Revision,
+        _path: &Path,
+        _base: Option<&Revision>,
+    ) -> Result<ConflictSides, Error> {
         let (base, ours, theirs) = ops::conflict_sides(&self.root, revision.as_str())?;
         Ok(ConflictSides {
             base: base.map(TreeId::new),
@@ -1345,7 +1350,7 @@ mod tests {
         assert!(conflicts[0].base, "the merge has a common ancestor");
 
         let sides = vcs
-            .conflict_sides(&Revision::new(merge), Path::new("file.txt"))
+            .conflict_sides(&Revision::new(merge), Path::new("file.txt"), None)
             .expect("sides");
         let side = |tree: &crate::vcs::TreeId| {
             String::from_utf8(

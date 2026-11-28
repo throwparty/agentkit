@@ -142,7 +142,16 @@ pub trait Vcs: Send + Sync {
     }
 
     /// The three sides of one conflicted path.
-    fn conflict_sides(&self, revision: &Revision, path: &Path) -> Result<ConflictSides, Error>;
+    ///
+    /// `base` is the common ancestor the conflict was materialised against.
+    /// A backend that can address it reads that revision; the other may infer
+    /// it from the revision's parents.
+    fn conflict_sides(
+        &self,
+        revision: &Revision,
+        path: &Path,
+        base: Option<&Revision>,
+    ) -> Result<ConflictSides, Error>;
 
     /// Mark the given paths resolved in `revision`.
     fn resolve(&self, revision: &Revision, paths: &[PathBuf]) -> Result<Revision, Error>;
@@ -404,6 +413,7 @@ mod tests {
             &self,
             _revision: &Revision,
             _path: &Path,
+            _base: Option<&Revision>,
         ) -> Result<ConflictSides, Error> {
             unsupported("conflict_sides")
         }

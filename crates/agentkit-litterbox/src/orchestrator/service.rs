@@ -2140,10 +2140,15 @@ impl Sandboxes {
                 .working_copy_tip(&workspace)
                 .map_err(contract_error)?,
         };
+        let base = stored
+            .resolution
+            .as_ref()
+            .filter(|open| !open.synced.is_empty())
+            .map(|open| Revision::new(open.synced.clone()));
         let relative = std::path::Path::new(path);
         let sides = self
             .vcs
-            .conflict_sides(&revision, relative)
+            .conflict_sides(&revision, relative, base.as_ref())
             .map_err(contract_error)?;
         let tree = match side {
             "base" => sides

@@ -1027,7 +1027,12 @@ impl Vcs for GitVcs {
         reconcile::marker_conflicts(&repo, revision.as_str(), base.map(Revision::as_str))
     }
 
-    fn conflict_sides(&self, revision: &Revision, _path: &Path) -> Result<ConflictSides, VcsError> {
+    fn conflict_sides(
+        &self,
+        revision: &Revision,
+        path: &Path,
+        base: Option<&Revision>,
+    ) -> Result<ConflictSides, VcsError> {
         let oid = revision_oid(revision).map_err(vcs_error)?;
         let guard = self.lock().map_err(vcs_error)?;
         let commit = guard
@@ -1052,12 +1057,46 @@ impl Vcs for GitVcs {
         };
         let ours = parent(0)?;
         let theirs = parent(1)?;
-        let base = guard
-            .repo
-            .merge_base(ours.id(), theirs.id())
-            .ok()
-            .and_then(|oid| guard.repo.find_commit(oid).ok())
-            .map(|commit| TreeId::new(commit.tree_id().to_string()));
+        let base_tree_id = match base {
+            Some(base) => {
+                let oid = revision_oid(base).map_err(vcs_error)?;
+                Some(
+                    guard
+                        .repo
+                        .find_commit(oid)
+                        .map_err(|source| SandboxError::from(GitError::Commit { source }))
+                        .map_err(vcs_error)?
+                        .tree_id(),
+                )
+            }
+            None => {
+                let oid = guard
+                    .repo
+                    .merge_base(ours.id(), theirs.id())
+                    .map_err(|source| SandboxError::from(GitError::Commit { source }))
+                    .map_err(vcs_error)?;
+                Some(
+                    guard
+                        .repo
+                        .find_commit(oid)
+                        .map_err(|source| SandboxError::from(GitError::Commit { source }))
+                        .map_err(vcs_error)?
+                        .tree_id(),
+                )
+            }
+        };
+        // A path the base tree does not hold has no base side.
+        let base = match base_tree_id {
+            Some(id) => guard
+                .repo
+                .find_tree(id)
+                .map_err(|source| SandboxError::from(GitError::Commit { source }))
+                .map_err(vcs_error)?
+                .get_path(path)
+                .ok()
+                .map(|_| TreeId::new(id.to_string())),
+            None => None,
+        };
         Ok(ConflictSides {
             base,
             ours: TreeId::new(ours.tree_id().to_string()),

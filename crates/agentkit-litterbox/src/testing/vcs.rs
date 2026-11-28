@@ -578,7 +578,12 @@ impl Vcs for TestVcs {
         Ok(state.conflicts.clone())
     }
 
-    fn conflict_sides(&self, _revision: &Revision, _path: &Path) -> Result<ConflictSides, Error> {
+    fn conflict_sides(
+        &self,
+        _revision: &Revision,
+        _path: &Path,
+        _base: Option<&Revision>,
+    ) -> Result<ConflictSides, Error> {
         Ok(self.sides())
     }
 
