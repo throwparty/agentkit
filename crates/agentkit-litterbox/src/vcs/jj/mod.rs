@@ -349,19 +349,37 @@ impl Vcs for JjVcs {
         }
         let base = host_head;
         let branch = branch_name(sandbox);
-        ops::jj_ok(&self.root, &["bookmark", "set", &branch, "-r", &base])?;
-        if let Some(parent) = workspace.parent() {
-            std::fs::create_dir_all(parent).map_err(Error::Io)?;
+        let mut bookmarked = false;
+        let mut workspace_added = false;
+        let result = (|| -> Result<(), Error> {
+            ops::jj_ok(&self.root, &["bookmark", "set", &branch, "-r", &base])?;
+            bookmarked = true;
+            if let Some(parent) = workspace.parent() {
+                std::fs::create_dir_all(parent).map_err(Error::Io)?;
+            }
+            let path = workspace.to_str().ok_or_else(|| Error::Backend {
+                operation: "prepare".to_string(),
+                message: "the workspace path is not UTF-8".to_string(),
+            })?;
+            ops::jj_ok(
+                &self.root,
+                &["workspace", "add", "--name", sandbox, "-r", &base, path],
+            )?;
+            workspace_added = true;
+            self.write_synced(sandbox, &base)?;
+            Ok(())
+        })();
+        if let Err(error) = result {
+            if workspace_added {
+                let _ = ops::jj_ok(&self.root, &["workspace", "forget", sandbox]);
+                let _ = std::fs::remove_dir_all(&workspace);
+            }
+            if bookmarked {
+                let _ = ops::jj_ok(&self.root, &["bookmark", "delete", &branch]);
+            }
+            let _ = ops::git(&self.root, &["update-ref", "-d", &synced_ref(sandbox)]);
+            return Err(error);
         }
-        let path = workspace.to_str().ok_or_else(|| Error::Backend {
-            operation: "prepare".to_string(),
-            message: "the workspace path is not UTF-8".to_string(),
-        })?;
-        ops::jj_ok(
-            &self.root,
-            &["workspace", "add", "--name", sandbox, "-r", &base, path],
-        )?;
-        self.write_synced(sandbox, &base)?;
         Ok(Prepared {
             workspace: Workspace::from_branch(branch),
             base: Revision::new(base),
