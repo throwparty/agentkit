@@ -751,16 +751,36 @@ impl Vcs for JjVcs {
     }
 
     fn resolve_begin(&self, workspace: &Workspace) -> Result<Begun, Error> {
+        let synced = self.synced(workspace)?;
         let ours = self.sandbox_tip(workspace)?;
         let theirs = self.tip(workspace)?;
         let path = self.workspace(sandbox_of(workspace));
         let _guard = self.lock()?;
+        // The shared side hangs off the actual tip, so the merge keeps its
+        // ancestry. The sandbox side is rebuilt on `synced`, so the merge base
+        // is the recorded agreement rather than an inferred ancestor.
         ops::jj_ok(
             &path,
             &[
                 "new",
-                ours.as_str(),
                 theirs.as_str(),
+                "-m",
+                "litterbox: resolution theirs",
+            ],
+        )?;
+        let theirs_side = ops::commit_id(&path, "@")?;
+        ops::jj_ok(
+            &path,
+            &["new", synced.as_str(), "-m", "litterbox: resolution ours"],
+        )?;
+        ops::jj_ok(&path, &["restore", "--from", ours.as_str()])?;
+        let ours_side = ops::commit_id(&path, "@")?;
+        ops::jj_ok(
+            &path,
+            &[
+                "new",
+                &ours_side,
+                &theirs_side,
                 "-m",
                 "litterbox: resolve the divergence",
             ],
