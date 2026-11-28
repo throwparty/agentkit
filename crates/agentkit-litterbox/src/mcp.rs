@@ -151,8 +151,15 @@ impl SandboxServer {
     ) -> Result<CallToolResult, McpError> {
         let project = self.project()?;
         let performed = project.create(&args.name).await.map_err(map_contract)?;
-        let block = performed.block();
+        let mut block = performed.block();
         let record = performed.value;
+        if block.is_none() {
+            let status = project
+                .source_status(&record.name)
+                .await
+                .map_err(map_contract)?;
+            block = Some(block_from_status(status));
+        }
         let inspection = project.inspect(&record.name).await.map_err(map_contract)?;
         let content = ContentBlock::json(inspection)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
@@ -731,6 +738,22 @@ fn append_block(
         );
     }
     Ok(())
+}
+
+/// Build the workspace block a create reports when the operation itself did
+/// not carry a reconciliation.
+fn block_from_status(status: crate::orchestrator::outcome::SourceStatus) -> WorkspaceBlock {
+    WorkspaceBlock {
+        state: status.state,
+        reason: status.reason,
+        synced: status.synced,
+        branch: status.branch,
+        sandbox: status.sandbox.unwrap_or_default(),
+        conflicts: status.conflicts.into_iter().map(|entry| entry.path).collect(),
+        next: status.next,
+        resolution: None,
+        dropped: None,
+    }
 }
 
 #[allow(clippy::result_large_err)]
