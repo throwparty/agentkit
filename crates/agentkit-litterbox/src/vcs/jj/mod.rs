@@ -866,6 +866,8 @@ impl Vcs for JjVcs {
         Ok(Report {
             base,
             branch,
+            state: String::new(),
+            ours: None,
             sandbox: Some(sandbox),
             conflicts,
             worktree,

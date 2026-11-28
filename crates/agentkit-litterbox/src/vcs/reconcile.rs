@@ -9,6 +9,10 @@ pub struct Report {
     pub base: Revision,
     /// The branch tip.
     pub branch: Revision,
+    /// `clean`, `diverged` or `resolving`, from the stored record.
+    pub state: String,
+    /// The recorded sandbox revision when a resolution is open.
+    pub ours: Option<Revision>,
     /// The sandbox branch tip, when it is addressable.
     pub sandbox: Option<Revision>,
     /// The paths that would conflict.

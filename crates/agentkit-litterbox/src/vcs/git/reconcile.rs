@@ -254,6 +254,8 @@ pub(crate) fn report(
     Ok(Report {
         base: synced.clone(),
         branch: branch.clone(),
+        state: String::new(),
+        ours: None,
         sandbox: Some(sandbox.clone()),
         conflicts,
         worktree,

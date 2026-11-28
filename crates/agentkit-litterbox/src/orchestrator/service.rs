@@ -1883,22 +1883,48 @@ impl Sandboxes {
         let workspace = VcsWorkspace::from_branch(&stored.branch_name);
         let resolving = stored.resolution.is_some();
         match self.vcs.sandbox_tip(&workspace) {
-            Ok(_) => self.vcs.report(&workspace).map_err(contract_error),
+            Ok(_) => Ok(self.finalize_report(
+                self.vcs.report(&workspace).map_err(contract_error)?,
+                &stored,
+            )),
             Err(VcsError::NotFound { .. }) if resolving => {
                 let base = self.vcs.synced(&workspace).map_err(contract_error)?;
                 let branch = self.vcs.tip(&workspace).map_err(contract_error)?;
-                Ok(Report {
-                    base,
-                    branch: branch.clone(),
-                    sandbox: None,
-                    conflicts: Vec::new(),
-                    worktree: self.vcs.staging(&workspace),
-                    reflog: None,
-                    next: Some(self.absent_sandbox_next(&stored, Some(&branch))),
-                })
+                Ok(self.finalize_report(
+                    Report {
+                        base,
+                        branch: branch.clone(),
+                        state: String::new(),
+                        ours: None,
+                        sandbox: None,
+                        conflicts: Vec::new(),
+                        worktree: self.vcs.staging(&workspace),
+                        reflog: None,
+                        next: Some(self.absent_sandbox_next(&stored, Some(&branch))),
+                    },
+                    &stored,
+                ))
             }
             Err(error) => Err(contract_error(error)),
         }
+    }
+
+    /// Fill the status fields that belong to the record, not the VCS.
+    fn finalize_report(&self, mut report: Report, stored: &StoredSandbox) -> Report {
+        let resolving = stored.resolution.is_some();
+        report.state = if resolving {
+            "resolving"
+        } else if stored.merge.is_some() || !report.conflicts.is_empty() {
+            "diverged"
+        } else {
+            "clean"
+        }
+        .to_string();
+        report.ours = stored
+            .resolution
+            .as_ref()
+            .map(|open| Revision::new(open.ours.clone()));
+        report
     }
 
     /// The continuation for an open resolution whose sandbox revision is gone.
@@ -4106,6 +4132,12 @@ mod seam_tests {
 
         let report = sandboxes.report("demo").await.expect("report");
         assert!(report.sandbox.is_none());
+        assert_eq!(report.state, "resolving");
+        assert_eq!(
+            report.ours.as_ref().map(|ours| ours.as_str()),
+            Some("0123456789abcdef"),
+            "the recorded parent is in the status"
+        );
         assert!(
             report
                 .next
