@@ -113,6 +113,9 @@ impl<'a> Reconciler<'a> {
         let mut block = observed.block.clone();
         match self.execute(state, &steps, &observed, message).await? {
             Ok((dropped, state)) => {
+                if self.stored.resolution.is_some() {
+                    self.refresh_resolution_block(&mut block).await?;
+                }
                 if let Some(dropped) = &dropped {
                     block.dropped = Some(dropped.as_str().to_string());
                 }
@@ -124,6 +127,44 @@ impl<'a> Reconciler<'a> {
             }
             Err(Raced) => Ok(Err(Raced)),
         }
+    }
+
+    /// Re-read the conflicts the working copy carries after a plan ran.
+    ///
+    /// A snapshot rewrites the sandbox revision, so the pre-plan block can
+    /// still list a path the command just resolved.
+    async fn refresh_resolution_block(&self, block: &mut WorkspaceBlock) -> Result<(), Error> {
+        let workspace = self.workspace_handle();
+        let working = match self.vcs.working_copy_tip(&workspace) {
+            Ok(revision) => revision,
+            Err(crate::vcs::Error::NotFound { .. }) => return Ok(()),
+            Err(error) => return Err(contract_error(error)),
+        };
+        let base = self
+            .stored
+            .resolution
+            .as_ref()
+            .map(|open| Revision::new(open.synced.clone()));
+        let conflicts = self
+            .vcs
+            .conflicts_with_base(&working, base.as_ref())
+            .map_err(contract_error)?;
+        block.conflicts = conflicts
+            .iter()
+            .map(|conflict| conflict.path.display().to_string())
+            .collect();
+        if let Some(resolution) = block.resolution.as_mut() {
+            resolution.conflicts = conflicts
+                .iter()
+                .map(|conflict| crate::orchestrator::outcome::ConflictView {
+                    path: conflict.path.display().to_string(),
+                    hunks: conflict.hunks,
+                    sides: conflict.sides,
+                    base: conflict.base,
+                })
+                .collect();
+        }
+        Ok(())
     }
 
     /// Read the state without changing anything.

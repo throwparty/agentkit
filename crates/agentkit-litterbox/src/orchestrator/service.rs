@@ -4360,6 +4360,50 @@ mod seam_tests {
     }
 
     #[tokio::test]
+    async fn a_command_clears_resolved_paths_from_the_workspace_block() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(
+            TestVcs::new()
+                .with_tip("branch-tip")
+                .with_sandbox_tip("resolution-revision")
+                .with_synced("synced")
+                .with_observed_tree("edited")
+                .with_conflicts_for("resolution-revision", &["file.txt"])
+                .with_conflicts_for("snapshot", &[]),
+        );
+        let sandboxes = orchestrator_vcs(records.path(), backend, vcs);
+        sandboxes.create("demo").await.expect("create");
+        let mut stored = current_record(records.path(), "demo");
+        stored.resolution = Some(metadata_store::StoredResolution {
+            synced: "synced".to_string(),
+            ours: "ours".to_string(),
+            conflict: "resolution-revision".to_string(),
+            theirs: "branch-tip".to_string(),
+        });
+        metadata_store::store_sandbox_at(records.path(), "demo", &stored).expect("store");
+
+        let performed = sandboxes
+            .exec("demo", &["true".to_string()])
+            .await
+            .expect("exec");
+
+        let block = performed.block().expect("block");
+        assert!(
+            block.conflicts.is_empty(),
+            "the resolved path is gone: {block:?}"
+        );
+        assert!(
+            block
+                .resolution
+                .expect("resolution")
+                .conflicts
+                .is_empty(),
+            "the resolution view reads the post-snapshot revision"
+        );
+    }
+
+    #[tokio::test]
     async fn a_status_during_resolution_reports_the_sandbox_conflicts() {
         let records = TempDir::new().expect("records");
         let backend = Arc::new(TestBackend::new());
