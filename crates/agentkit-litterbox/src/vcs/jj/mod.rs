@@ -610,10 +610,11 @@ impl Vcs for JjVcs {
         expected: &Revision,
     ) -> Result<(), Error> {
         let _guard = self.lock()?;
-        if &self.tip(workspace)? != expected {
-            return Err(Error::Raced);
-        }
-        self.set_tip(workspace, revision)
+        let branch = workspace.branch().as_str();
+        let reference = format!("refs/heads/{branch}");
+        ops::git_update_ref(&self.root, &reference, revision.as_str(), expected.as_str())?;
+        ops::jj_ok(&self.root, &["git", "import"])?;
+        Ok(())
     }
 
     fn observe(&self, workspace: &Workspace, staging: &Path) -> Result<TreeId, Error> {
@@ -815,16 +816,9 @@ impl Vcs for JjVcs {
                 ),
             });
         }
-        ops::jj_ok(
-            &self.root,
-            &[
-                "bookmark",
-                "set",
-                workspace.branch().as_str(),
-                "-r",
-                &merged,
-            ],
-        )?;
+        let reference = format!("refs/heads/{}", workspace.branch().as_str());
+        ops::git_update_ref(&self.root, &reference, &merged, tip.as_str())?;
+        ops::jj_ok(&self.root, &["git", "import"])?;
         let name = format!("{sandbox}-staging");
         let _ = ops::jj_ok(&self.root, &["workspace", "forget", &name]);
         let _ = std::fs::remove_dir_all(&path);
