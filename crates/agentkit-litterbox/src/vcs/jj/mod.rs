@@ -52,17 +52,25 @@ impl JjVcs {
             lock: Mutex::new(()),
             config,
         };
+        // The config path and its candidate file are shared between processes.
+        // `prepare` already runs under this lock; take it here too so two CLI
+        // opens cannot overwrite or rename each other's candidate.
+        let guard = vcs
+            .lock()
+            .map_err(|error| SandboxError::Config(error.to_string()))?;
         vcs.apply_config()
             .map_err(|error| SandboxError::Config(error.to_string()))?;
+        drop(guard);
         Ok(vcs)
     }
 
     /// Apply the per-repo config string the clone includes.
     ///
-    /// jj keeps a repository's config under the user's config directory, keyed
-    /// by the repository id, so `jj config path --repo` is the only stable way
-    /// to find it. The file is replaced rather than appended, so a changed or
-    /// removed string clears the previous settings.
+    /// The caller holds the clone lock. jj keeps a repository's config under
+    /// the user's config directory, keyed by the repository id, so `jj config
+    /// path --repo` is the only stable way to find it. The file is replaced
+    /// rather than appended, so a changed or removed string clears the
+    /// previous settings.
     fn apply_config(&self) -> Result<(), Error> {
         if !self.root.join(".jj").is_dir() {
             return Ok(());
