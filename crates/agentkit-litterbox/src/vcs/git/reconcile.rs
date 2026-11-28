@@ -30,6 +30,56 @@ fn git(repo: &Path, args: &[&str]) -> Result<Output, VcsError> {
         })
 }
 
+/// The identity a synthetic commit is authored with.
+///
+/// The repository's configured identity is preferred, as it is for the
+/// snapshots and restores libgit2 writes. A host with no identity configured,
+/// such as a CI runner, falls back to Litterbox rather than failing the
+/// resolution.
+fn identity(repo: &Path) -> (String, String) {
+    let litterbox = || ("Litterbox".to_string(), "noreply@example.com".to_string());
+    let Ok(repository) = git2::Repository::open(repo) else {
+        return litterbox();
+    };
+    match repository.signature() {
+        Ok(signature) => {
+            let name = signature.name().unwrap_or("").trim();
+            let email = signature.email().unwrap_or("").trim();
+            if name.is_empty() || email.is_empty() {
+                litterbox()
+            } else {
+                (name.to_string(), email.to_string())
+            }
+        }
+        Err(_) => litterbox(),
+    }
+}
+
+/// Run `git` with an explicit author and committer identity.
+fn git_as(
+    repo: &Path,
+    name: &str,
+    email: &str,
+    args: &[&str],
+) -> Result<Output, VcsError> {
+    let hooks = tempfile::tempdir().map_err(VcsError::Io)?;
+    Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .arg("-c")
+        .arg(format!("core.hooksPath={}", hooks.path().display()))
+        .arg("-c")
+        .arg(format!("user.name={name}"))
+        .arg("-c")
+        .arg(format!("user.email={email}"))
+        .args(args)
+        .output()
+        .map_err(|error| VcsError::Backend {
+            operation: "run git".to_string(),
+            message: format!("could not run git: {error}"),
+        })
+}
+
 fn failed(operation: &str, output: &Output) -> VcsError {
     VcsError::Backend {
         operation: operation.to_string(),
@@ -67,8 +117,11 @@ pub(crate) fn begin(
     if tree.is_empty() {
         return Err(failed("create the conflict tree", &merged));
     }
-    let commit = git(
+    let (name, email) = identity(repo);
+    let commit = git_as(
         repo,
+        &name,
+        &email,
         &[
             "commit-tree",
             &tree,
