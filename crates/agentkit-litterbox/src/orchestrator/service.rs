@@ -1828,7 +1828,7 @@ impl Sandboxes {
         }
 
         let reconciler = Reconciler::new(&self.vcs, &stored, &selected, &self.records_dir);
-        let state = reconciler.state().await?;
+        let (state, workspace_tree) = reconciler.state_with_workspace().await?;
         let staging = self.vcs.staging(&workspace);
         let loses_work = state.merge != Merge::None
             || state.workspace == WorkspaceAxis::Dirty
@@ -1855,7 +1855,9 @@ impl Sandboxes {
             self.vcs.discard_stage(&workspace).map_err(contract_error)?;
         }
 
-        reconciler.replace_workspace(&target).await?;
+        reconciler
+            .replace_workspace_from_tree(&target, &workspace_tree)
+            .await?;
         let restored = self
             .vcs
             .restore(&workspace, &target)
@@ -2549,6 +2551,7 @@ mod seam_tests {
                 .with_tip("branch")
                 .with_synced("branch")
                 .with_sandbox_tip("branch")
+                .with_observed_tree("workspace")
                 .with_conflicts_for("branch", &["file.txt"])
                 .with_history(vec![
                     HistoryStep {
@@ -2609,6 +2612,11 @@ mod seam_tests {
         assert_eq!(
             vcs.restored(),
             vec![("branch".to_string(), "target".to_string())]
+        );
+        assert!(
+            vcs.deleted_calls()
+                .contains(&("workspace".to_string(), "tree".to_string())),
+            "cleanup uses the observed workspace tree, not the sandbox commit"
         );
     }
 

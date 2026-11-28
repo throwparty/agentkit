@@ -41,6 +41,7 @@ struct Observation {
     synced: Revision,
     branch: Revision,
     sandbox: Revision,
+    workspace_tree: TreeId,
     source: Option<WorkspaceSource>,
     block: WorkspaceBlock,
 }
@@ -172,10 +173,15 @@ impl<'a> Reconciler<'a> {
     /// The workspace is always observed so a restore can tell whether it would
     /// lose unsaved work. A held merge is not cleared: a refused restore must
     /// write nothing.
-    pub(crate) async fn state(&self) -> Result<SourceState, Error> {
+    /// Read the state and the observed workspace tree together.
+    ///
+    /// A restore uses the tree to delete the workspace entries the target
+    /// does not hold, including files the sandbox added after its last
+    /// snapshot.
+    pub(crate) async fn state_with_workspace(&self) -> Result<(SourceState, TreeId), Error> {
         self.classify_with(Action::Tool, true, false)
             .await
-            .map(|(state, _)| state)
+            .map(|(state, observed)| (state, observed.workspace_tree))
     }
 
     /// Read the state, and the workspace tree when the plan can use it.
@@ -342,6 +348,7 @@ impl<'a> Reconciler<'a> {
                 synced,
                 branch,
                 sandbox,
+                workspace_tree: workspace_tree.clone(),
                 source: observed_source,
                 block,
             },
@@ -524,20 +531,23 @@ impl<'a> Reconciler<'a> {
         Ok(())
     }
 
-    /// Replace the workspace with the target tree, without moving a ref.
-    pub(crate) async fn replace_workspace(&self, target: &Revision) -> Result<(), Error> {
-        let workspace = self.workspace_handle();
-        let sandbox = self.vcs.sandbox_tip(&workspace).map_err(contract_error)?;
-        self.replace_workspace_with(target, &sandbox).await
-    }
-
     pub(crate) async fn replace_workspace_with(
         &self,
         target: &Revision,
         old: &Revision,
     ) -> Result<(), Error> {
-        let workspace = self.workspace_handle();
         let old_tree = self.vcs.tree(old).map_err(contract_error)?;
+        self.replace_workspace_from_tree(target, &old_tree).await
+    }
+
+    /// Replace the workspace with `target`, deleting entries absent from it
+    /// relative to `old_tree`.
+    pub(crate) async fn replace_workspace_from_tree(
+        &self,
+        target: &Revision,
+        old_tree: &TreeId,
+    ) -> Result<(), Error> {
+        let workspace = self.workspace_handle();
         let new_tree = self.vcs.tree(target).map_err(contract_error)?;
 
         let staging = tempfile::tempdir()
@@ -560,7 +570,7 @@ impl<'a> Reconciler<'a> {
         // holding ignored files is left alone because rmdir fails.
         let deleted = self
             .vcs
-            .deleted_paths(&old_tree, &new_tree)
+            .deleted_paths(old_tree, &new_tree)
             .map_err(contract_error)?;
         if !deleted.is_empty() {
             let mut command = vec!["rm".to_string(), "-rf".to_string(), "--".to_string()];

@@ -32,6 +32,7 @@ struct State {
     snapshots: Vec<(String, String)>,
     deleted_paths: std::collections::BTreeMap<(String, String), Vec<PathBuf>>,
     changed_paths: std::collections::BTreeMap<(String, String), Vec<PathBuf>>,
+    deleted_calls: Vec<(String, String)>,
     deleted: Vec<String>,
     exposed: Vec<String>,
     prunes: usize,
@@ -360,6 +361,11 @@ impl TestVcs {
         self.state().sandbox_set.clone()
     }
 
+    /// The `(from, to)` tree pairs passed to `deleted_paths`.
+    pub fn deleted_calls(&self) -> Vec<(String, String)> {
+        self.state().deleted_calls.clone()
+    }
+
     /// Move the shared branch after the double has been built.
     pub fn move_tip(&self, revision: &str) {
         self.state().tip = revision.to_string();
@@ -664,12 +670,10 @@ impl Vcs for TestVcs {
     }
 
     fn deleted_paths(&self, from: &TreeId, to: &TreeId) -> Result<Vec<PathBuf>, Error> {
-        let state = self.state();
-        Ok(state
-            .deleted_paths
-            .get(&(from.as_str().to_string(), to.as_str().to_string()))
-            .cloned()
-            .unwrap_or_default())
+        let mut state = self.state();
+        let key = (from.as_str().to_string(), to.as_str().to_string());
+        state.deleted_calls.push(key.clone());
+        Ok(state.deleted_paths.get(&key).cloned().unwrap_or_default())
     }
 
     fn changed_paths(&self, from: &TreeId, to: &TreeId) -> Result<Vec<PathBuf>, Error> {
