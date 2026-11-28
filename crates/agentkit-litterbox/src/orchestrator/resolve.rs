@@ -178,7 +178,10 @@ impl<'a> Resolver<'a> {
     pub(crate) fn finish(&self) -> Result<Resolved, Error> {
         let open = self.open()?;
         let workspace = self.workspace();
-        let revision = self.vcs.sandbox_tip(&workspace).map_err(contract_error)?;
+        let revision = self
+            .vcs
+            .working_copy_tip(&workspace)
+            .map_err(contract_error)?;
         let conflicts = self.vcs.conflicts(&revision).map_err(contract_error)?;
         if !conflicts.is_empty() {
             return Err(Error::failed(format!(
@@ -203,6 +206,11 @@ impl<'a> Resolver<'a> {
 
         self.vcs
             .advance(&workspace, &revision, &branch)
+            .map_err(contract_error)?;
+        // The working copy is now published. Record it as the saved baseline
+        // and leave a fresh working copy, so later edits cannot rewrite it.
+        self.vcs
+            .set_sandbox_tip(&workspace, &revision)
             .map_err(contract_error)?;
         let landed = self.vcs.tip(&workspace).map_err(contract_error)?;
         self.vcs

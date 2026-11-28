@@ -2051,7 +2051,11 @@ impl Sandboxes {
             Err(error) => return Err(contract_error(error)),
         };
         let conflicts = if resolving {
-            self.vcs.conflicts(&sandbox).map_err(contract_error)?
+            let working = self
+                .vcs
+                .working_copy_tip(&workspace)
+                .map_err(contract_error)?;
+            self.vcs.conflicts(&working).map_err(contract_error)?
         } else {
             self.vcs.conflicts(&branch).map_err(contract_error)?
         };
@@ -2102,7 +2106,10 @@ impl Sandboxes {
         let stored = self.stored(name)?;
         self.ensure_tool(&stored)?;
         let workspace = VcsWorkspace::from_branch(&stored.branch_name);
-        let revision = self.vcs.sandbox_tip(&workspace).map_err(contract_error)?;
+        let revision = self
+            .vcs
+            .working_copy_tip(&workspace)
+            .map_err(contract_error)?;
         let relative = std::path::Path::new(path);
         let sides = self
             .vcs

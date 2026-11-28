@@ -211,8 +211,12 @@ impl<'a> Reconciler<'a> {
 
         let resolving = self.stored.resolution.is_some();
         let resolution_conflicts: Vec<String> = if resolving {
+            let working = self
+                .vcs
+                .working_copy_tip(&workspace)
+                .map_err(contract_error)?;
             self.vcs
-                .conflicts(&sandbox)
+                .conflicts(&working)
                 .map_err(contract_error)?
                 .into_iter()
                 .map(|conflict| conflict.path.display().to_string())

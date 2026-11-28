@@ -111,6 +111,14 @@ impl JjVcs {
         ops::git(&self.root, &["update-ref", &synced_ref(sandbox), revision])?;
         Ok(())
     }
+
+    fn write_sandbox(&self, sandbox: &str, revision: &str) -> Result<(), Error> {
+        ops::git(
+            &self.root,
+            &["update-ref", &sandbox_ref(sandbox), revision],
+        )?;
+        Ok(())
+    }
 }
 
 fn branch_name(sandbox: &str) -> String {
@@ -119,6 +127,11 @@ fn branch_name(sandbox: &str) -> String {
 
 fn synced_ref(sandbox: &str) -> String {
     format!("refs/litterbox/synced/{sandbox}")
+}
+
+/// The saved sandbox revision, kept apart from the workspace's mutable `@`.
+fn sandbox_ref(sandbox: &str) -> String {
+    format!("refs/litterbox/sandbox/{sandbox}")
 }
 
 fn sandbox_of(workspace: &Workspace) -> &str {
@@ -367,6 +380,7 @@ impl Vcs for JjVcs {
             )?;
             workspace_added = true;
             self.write_synced(sandbox, &base)?;
+            self.write_sandbox(sandbox, &base)?;
             Ok(())
         })();
         if let Err(error) = result {
@@ -378,6 +392,7 @@ impl Vcs for JjVcs {
                 let _ = ops::jj_ok(&self.root, &["bookmark", "delete", &branch]);
             }
             let _ = ops::git(&self.root, &["update-ref", "-d", &synced_ref(sandbox)]);
+            let _ = ops::git(&self.root, &["update-ref", "-d", &sandbox_ref(sandbox)]);
             return Err(error);
         }
         Ok(Prepared {
@@ -450,7 +465,7 @@ impl Vcs for JjVcs {
         &self,
         workspace: &Workspace,
         staging: &Path,
-        _message: &str,
+        message: &str,
     ) -> Result<Revision, Error> {
         let _guard = self.lock()?;
         let sandbox = sandbox_of(workspace);
@@ -458,8 +473,14 @@ impl Vcs for JjVcs {
         if staging != target {
             copy_tree(staging, &target)?;
         }
-        // Any jj command snapshots the working copy into `@`.
-        Ok(Revision::new(ops::commit_id(&target, "@")?))
+        // Snapshot the working copy into a commit and publish it. `@` is
+        // mutable: any later command may rewrite it, so move to a fresh child
+        // and record the published commit as the saved baseline.
+        ops::jj_ok(&target, &["describe", "-m", message])?;
+        let published = ops::commit_id(&target, "@")?;
+        ops::jj_ok(&target, &["new"])?;
+        self.write_sandbox(sandbox, &published)?;
+        Ok(Revision::new(published))
     }
 
     fn sandboxes(&self) -> Result<Vec<String>, Error> {
@@ -506,6 +527,7 @@ impl Vcs for JjVcs {
         }
         let _ = ops::jj_ok(&self.root, &["bookmark", "delete", &branch]);
         let _ = ops::git(&self.root, &["update-ref", "-d", &synced_ref(sandbox)]);
+        let _ = ops::git(&self.root, &["update-ref", "-d", &sandbox_ref(sandbox)]);
         Ok(())
     }
 
@@ -606,19 +628,38 @@ impl Vcs for JjVcs {
     }
 
     fn sandbox_tip(&self, workspace: &Workspace) -> Result<Revision, Error> {
-        let target = self.workspace(sandbox_of(workspace));
-        if !target.is_dir() {
-            return Err(Error::NotFound {
-                name: sandbox_of(workspace).to_string(),
-            });
+        let sandbox = sandbox_of(workspace);
+        // A read of the saved ref never touches the workspace: running jj
+        // there would snapshot `@` and change the very revision this answers.
+        match ops::git(&self.root, &["rev-parse", &sandbox_ref(sandbox)]) {
+            Ok(revision) => Ok(Revision::new(revision)),
+            Err(_) => Err(Error::NotFound {
+                name: sandbox.to_string(),
+            }),
         }
-        Ok(Revision::new(ops::commit_id(&target, "@")?))
     }
 
     fn set_sandbox_tip(&self, workspace: &Workspace, revision: &Revision) -> Result<(), Error> {
-        let target = self.workspace(sandbox_of(workspace));
-        ops::jj_ok(&target, &["new", revision.as_str()])?;
+        let sandbox = sandbox_of(workspace);
+        self.write_sandbox(sandbox, revision.as_str())?;
+        let target = self.workspace(sandbox);
+        if target.is_dir() {
+            // Keep `@` a throwaway child, so editing the workspace cannot
+            // rewrite the revision that was just recorded.
+            ops::jj_ok(&target, &["new", revision.as_str()])?;
+        }
         Ok(())
+    }
+
+    fn working_copy_tip(&self, workspace: &Workspace) -> Result<Revision, Error> {
+        let sandbox = sandbox_of(workspace);
+        let target = self.workspace(sandbox);
+        if !target.is_dir() {
+            return Err(Error::NotFound {
+                name: sandbox.to_string(),
+            });
+        }
+        Ok(Revision::new(ops::commit_id(&target, "@")?))
     }
 
     fn advance(
@@ -672,6 +713,13 @@ impl Vcs for JjVcs {
             let tip = self.tip(workspace)?;
             self.write_synced(sandbox, tip.as_str())?;
         }
+        if ops::git(&self.root, &["rev-parse", "--verify", &sandbox_ref(sandbox)]).is_err() {
+            // A clone that predates the saved ref stored the sandbox baseline
+            // in the workspace's `@`; migrate that revision rather than the
+            // shared tip, or the next snapshot would drop the sandbox's work.
+            let saved = self.working_copy_tip(workspace)?;
+            self.write_sandbox(sandbox, saved.as_str())?;
+        }
         Ok(())
     }
 
@@ -706,7 +754,10 @@ impl Vcs for JjVcs {
 
     fn resolve_abandon(&self, workspace: &Workspace, ours: &Revision) -> Result<Revision, Error> {
         let _guard = self.lock()?;
-        let path = self.workspace(sandbox_of(workspace));
+        let sandbox = sandbox_of(workspace);
+        let path = self.workspace(sandbox);
+        // The resolution lived only in `@`; the saved baseline never moved.
+        self.write_sandbox(sandbox, ours.as_str())?;
         ops::jj_ok(&path, &["new", ours.as_str()])?;
         Ok(Revision::new(ops::commit_id(&path, "@")?))
     }
@@ -1159,22 +1210,32 @@ mod tests {
         assert_eq!(conflicts[0].path, Path::new("file.txt"));
         assert_eq!(conflicts[0].sides, 2);
         assert_eq!(
-            vcs.sandbox_tip(&workspace).expect("sandbox tip"),
+            vcs.working_copy_tip(&workspace).expect("working copy tip"),
             revision,
             "the working copy holds the conflict"
         );
+        assert_eq!(
+            vcs.sandbox_tip(&workspace).expect("sandbox tip"),
+            Revision::new(ours.clone()),
+            "the saved baseline is not rewritten by the resolution"
+        );
 
         let restored = vcs
-            .resolve_abandon(&workspace, &Revision::new(ours))
+            .resolve_abandon(&workspace, &Revision::new(ours.clone()))
             .expect("abandon");
         assert!(
             vcs.conflicts(&restored).expect("conflicts").is_empty(),
             "the restored revision carries no conflict"
         );
         assert_eq!(
-            vcs.sandbox_tip(&workspace).expect("sandbox tip"),
+            vcs.working_copy_tip(&workspace).expect("working copy tip"),
             restored,
             "the working copy is back on the sandbox side"
+        );
+        assert_eq!(
+            vcs.sandbox_tip(&workspace).expect("sandbox tip"),
+            Revision::new(ours),
+            "abandon restores the saved baseline"
         );
 
         vcs.set_tip(&workspace, &revision).expect("conflicted tip");
@@ -1306,6 +1367,58 @@ mod tests {
         vcs.set_synced(&workspace, &snapshot)
             .expect("record synced");
         assert_eq!(vcs.synced(&workspace).expect("synced"), snapshot);
+    }
+
+    #[test]
+    fn a_snapshot_never_rewrites_the_published_revision() {
+        unsafe {
+            std::env::set_var("JJ_USER", "Test");
+            std::env::set_var("JJ_EMAIL", "test@example.com");
+        }
+
+        let host = repository();
+        let data = TempDir::new().expect("data");
+        let vcs =
+            JjVcs::open_at(data.path().join("clone"), host.path().to_path_buf()).expect("backend");
+        let prepared = vcs.prepare("demo").expect("prepare");
+        let workspace = prepared.workspace.clone();
+
+        let staging = TempDir::new().expect("staging");
+        std::fs::write(staging.path().join("README.md"), "one").expect("write");
+        let first = vcs
+            .snapshot(&workspace, staging.path(), "one")
+            .expect("snapshot");
+        vcs.advance(&workspace, &first, &prepared.base)
+            .expect("advance");
+        vcs.set_synced(&workspace, &first).expect("synced");
+
+        // An edit in the workspace is not the saved baseline, and reading the
+        // baseline must not snapshot that edit into it.
+        std::fs::write(vcs.workspace("demo").join("README.md"), "two").expect("write");
+        assert_eq!(
+            vcs.sandbox_tip(&workspace).expect("saved"),
+            first,
+            "reading the baseline does not snapshot the working copy"
+        );
+        let working = vcs.working_copy_tip(&workspace).expect("working");
+        assert_ne!(working, first, "the edit is in the working copy");
+        assert_ne!(
+            vcs.tree(&working).expect("working tree"),
+            vcs.tree(&first).expect("saved tree")
+        );
+
+        // The next snapshot publishes a descendant rather than rewriting the
+        // revision the shared branch already points at.
+        std::fs::write(staging.path().join("README.md"), "two").expect("write");
+        let second = vcs
+            .snapshot(&workspace, staging.path(), "two")
+            .expect("second snapshot");
+        assert_ne!(second, first);
+        assert!(
+            vcs.is_ancestor(&first, &second).expect("ancestry"),
+            "the published revision survives the later snapshot"
+        );
+        assert_eq!(vcs.sandbox_tip(&workspace).expect("saved"), second);
     }
 
     #[test]

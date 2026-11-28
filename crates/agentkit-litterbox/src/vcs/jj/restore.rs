@@ -63,6 +63,10 @@ pub(super) fn restore(
             &commit,
         ],
     )?;
+    // The restore commit is now both the shared and the sandbox tip. Start a
+    // fresh child so editing the workspace cannot rewrite either.
+    vcs.write_sandbox(sandbox, &commit)?;
+    ops::jj_ok(&path, &["new", commit.as_str()])?;
     vcs.write_synced(sandbox, &commit)?;
 
     Ok(Restored {

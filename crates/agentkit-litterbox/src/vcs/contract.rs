@@ -159,6 +159,10 @@ pub trait Vcs: Send + Sync {
     }
 
     /// The revision at the sandbox branch tip.
+    ///
+    /// This is the saved baseline: it must not move because the working copy
+    /// was read. A backend whose sandbox branch is the working copy answers
+    /// the same revision as [`Self::working_copy_tip`].
     fn sandbox_tip(&self, _workspace: &Workspace) -> Result<Revision, Error> {
         Err(not_implemented("read the sandbox branch"))
     }
@@ -166,6 +170,15 @@ pub trait Vcs: Send + Sync {
     /// Move the sandbox branch tip.
     fn set_sandbox_tip(&self, _workspace: &Workspace, _revision: &Revision) -> Result<(), Error> {
         Err(not_implemented("write the sandbox branch"))
+    }
+
+    /// The revision the workspace's mutable working copy currently holds.
+    ///
+    /// Resolution and conflict observation read this, not the saved baseline:
+    /// their work lives in the working copy until it is published. A backend
+    /// whose sandbox branch is the working copy has no separate revision.
+    fn working_copy_tip(&self, workspace: &Workspace) -> Result<Revision, Error> {
+        self.sandbox_tip(workspace)
     }
 
     /// Move the shared branch tip without moving the sandbox branch.
