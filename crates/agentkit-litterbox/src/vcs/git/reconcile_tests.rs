@@ -6,7 +6,7 @@ use std::process::Command;
 
 use tempfile::TempDir;
 
-use crate::vcs::Vcs;
+use crate::vcs::{Revision, Vcs};
 
 use super::GitVcs;
 
@@ -78,6 +78,37 @@ fn diverged() -> (TempDir, TempDir, GitVcs, crate::vcs::Workspace) {
     );
 
     (dir, root, vcs, prepared.workspace)
+}
+
+#[test]
+fn a_branch_checked_out_in_a_worktree_refuses_restore() {
+    let dir = repository();
+    git(dir.path(), &["branch", "litterbox/example"]);
+    let linked = TempDir::new().expect("linked");
+    let worktree = linked.path().join("worktree");
+    git(
+        dir.path(),
+        &[
+            "worktree",
+            "add",
+            worktree.to_str().expect("utf8"),
+            "litterbox/example",
+        ],
+    );
+
+    let vcs = GitVcs::open(dir.path()).expect("vcs");
+    let workspace = crate::vcs::Workspace::from_branch("litterbox/example");
+    let target = Revision::new(git_output(dir.path(), &["rev-parse", "HEAD"]));
+    let error = vcs
+        .restore_preflight(&workspace, &target)
+        .expect_err("the branch is checked out");
+
+    let message = error.to_string();
+    assert!(message.contains("checked out"), "{message}");
+    assert!(
+        message.contains(worktree.to_str().expect("utf8")),
+        "the refusal names the worktree: {message}"
+    );
 }
 
 #[test]

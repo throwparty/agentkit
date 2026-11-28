@@ -1121,9 +1121,20 @@ impl Vcs for GitVcs {
     fn restore(&self, workspace: &Workspace, revision: &Revision) -> Result<Restored, VcsError> {
         let branch = workspace.branch().to_string();
         self.repo_for_branch(&branch, |repo| {
+            super::restore::preflight(repo, &branch)?;
             super::restore::restore(repo, &branch, revision)
         })
         .map_err(vcs_error)
+    }
+
+    fn restore_preflight(
+        &self,
+        workspace: &Workspace,
+        _revision: &Revision,
+    ) -> Result<(), VcsError> {
+        let branch = workspace.branch().to_string();
+        self.repo_for_branch(&branch, |repo| super::restore::preflight(repo, &branch))
+            .map_err(vcs_error)
     }
 
     fn export(&self) -> Result<(), VcsError> {

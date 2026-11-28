@@ -6,6 +6,56 @@ use crate::vcs::{Restored, Revision};
 
 use super::refs;
 
+/// Refuse to move a shared branch while any worktree has it checked out.
+///
+/// The checkout's index and files would otherwise disagree with its HEAD.
+pub(super) fn preflight(repo: &Repository, branch: &str) -> Result<(), SandboxError> {
+    let reference = refs::branch(branch);
+    let mut checked_out: Vec<std::path::PathBuf> = Vec::new();
+
+    if !repo.is_bare()
+        && repo
+            .head()
+            .ok()
+            .and_then(|head| head.shorthand().ok().map(|name| name == branch))
+            .unwrap_or(false)
+        && let Some(workdir) = repo.workdir()
+    {
+        checked_out.push(workdir.to_path_buf());
+    }
+
+    if let Ok(names) = repo.worktrees() {
+        for name in names.iter() {
+            let Ok(Some(name)) = name else {
+                continue;
+            };
+            let admin = repo.path().join("worktrees").join(name);
+            let Ok(head) = std::fs::read_to_string(admin.join("HEAD")) else {
+                continue;
+            };
+            if head.trim() == format!("ref: {reference}") {
+                let path = std::fs::read_to_string(admin.join("gitdir"))
+                    .ok()
+                    .map(|gitdir| std::path::PathBuf::from(gitdir.trim()))
+                    .and_then(|gitdir| gitdir.parent().map(std::path::Path::to_path_buf))
+                    .unwrap_or_else(|| admin.clone());
+                checked_out.push(path);
+            }
+        }
+    }
+
+    if let Some(path) = checked_out.first() {
+        return Err(SandboxError::Vcs {
+            message: format!(
+                "the shared branch {branch} is checked out in {}; switch that worktree away \
+                 before restoring",
+                path.display()
+            ),
+        });
+    }
+    Ok(())
+}
+
 /// Add one commit on the shared branch whose tree is `target`, then move the
 /// sandbox branch and `synced` to it.
 pub(super) fn restore(
