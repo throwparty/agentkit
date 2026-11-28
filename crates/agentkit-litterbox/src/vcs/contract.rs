@@ -39,6 +39,17 @@ pub trait Vcs: Send + Sync {
     /// bind returns the neutral unsupported error.
     fn bound_root(&self, workspace: &Workspace) -> Result<PathBuf, Error>;
 
+    /// Ensure the host directory a bound workspace lives in exists at
+    /// `revision`.
+    ///
+    /// A repair can be asked to reuse a workspace whose directory was removed.
+    /// A backend that owns such a directory recreates it here rather than
+    /// handing a missing path to compute. Backends that bind nothing do
+    /// nothing.
+    fn restore_workspace(&self, _workspace: &Workspace, _revision: &Revision) -> Result<(), Error> {
+        Ok(())
+    }
+
     /// The tree identity of the workspace's branch tip.
     fn identity(&self, workspace: &Workspace) -> Result<TreeId, Error>;
 

@@ -492,6 +492,13 @@ impl Sandboxes {
 
         // The record decides how the workspace is presented, so a
         // configuration change affects only new sandboxes.
+        //
+        // A bound backend's host directory can be gone while the branch and
+        // record survive; recreate it at the chosen revision before compute is
+        // asked to bind it.
+        self.vcs
+            .restore_workspace(&workspace, &materialised)
+            .map_err(contract_error)?;
         let masked_paths = self.vcs.masked_paths(&workspace);
         let staged = match binding {
             WorkspaceBinding::Copied => {

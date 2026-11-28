@@ -419,6 +419,29 @@ impl Vcs for JjVcs {
         Ok(self.workspace(sandbox_of(workspace)))
     }
 
+    fn restore_workspace(&self, workspace: &Workspace, revision: &Revision) -> Result<(), Error> {
+        let sandbox = sandbox_of(workspace);
+        let target = self.workspace(sandbox);
+        if target.is_dir() {
+            return Ok(());
+        }
+        let _guard = self.lock()?;
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(Error::Io)?;
+        }
+        let path = target.to_str().ok_or_else(|| Error::Backend {
+            operation: "restore the workspace".to_string(),
+            message: "the workspace path is not UTF-8".to_string(),
+        })?;
+        // The directory can be gone while the workspace is still registered.
+        let _ = ops::jj_ok(&self.root, &["workspace", "forget", sandbox]);
+        ops::jj_ok(
+            &self.root,
+            &["workspace", "add", "--name", sandbox, "-r", revision.as_str(), path],
+        )?;
+        Ok(())
+    }
+
     fn identity(&self, workspace: &Workspace) -> Result<TreeId, Error> {
         let tip = self.tip(workspace)?;
         self.tree(&tip)
@@ -1390,6 +1413,36 @@ mod tests {
 
         let clean = vcs.conflicts(&Revision::new(ours)).expect("clean");
         assert!(clean.is_empty(), "an unconflicted revision reports nothing");
+    }
+
+    #[test]
+    fn a_missing_workspace_is_restored_at_the_saved_revision() {
+        unsafe {
+            std::env::set_var("JJ_USER", "Test");
+            std::env::set_var("JJ_EMAIL", "test@example.com");
+        }
+
+        let host = repository();
+        let data = TempDir::new().expect("data");
+        let vcs =
+            JjVcs::open_at(data.path().join("clone"), host.path().to_path_buf()).expect("backend");
+        let prepared = vcs.prepare("demo").expect("prepare");
+        let workspace = prepared.workspace.clone();
+        let base = vcs.tip(&workspace).expect("base");
+
+        std::fs::remove_dir_all(vcs.workspace("demo")).expect("remove");
+        assert!(!vcs.workspace("demo").is_dir());
+
+        vcs.restore_workspace(&workspace, &base)
+            .expect("restore the workspace");
+
+        assert!(vcs.workspace("demo").is_dir(), "the directory is back");
+        assert_eq!(vcs.sandbox_tip(&workspace).expect("saved"), base);
+        let working = vcs.working_copy_tip(&workspace).expect("working copy");
+        assert_eq!(
+            vcs.tree(&working).expect("working tree"),
+            vcs.tree(&base).expect("base tree")
+        );
     }
 
     #[test]
