@@ -207,7 +207,10 @@ fn copy_tree(from: &Path, to: &Path) -> Result<(), Error> {
             }
             let path = entry.path();
             let child = rel.join(&name);
-            if path.is_dir() {
+            let metadata = std::fs::symlink_metadata(&path).map_err(Error::Io)?;
+            if metadata.file_type().is_symlink() {
+                out.push((path, child));
+            } else if metadata.is_dir() {
                 walk(&path, &child, out)?;
             } else {
                 out.push((path, child));
@@ -228,7 +231,8 @@ fn copy_tree(from: &Path, to: &Path) -> Result<(), Error> {
             }
             let path = entry.path();
             let child = rel.join(&name);
-            if path.is_dir() {
+            let metadata = std::fs::symlink_metadata(&path).map_err(Error::Io)?;
+            if metadata.is_dir() {
                 prune(&path, &child, keep)?;
                 if std::fs::read_dir(&path)
                     .map(|mut entries| entries.next().is_none())
@@ -252,7 +256,18 @@ fn copy_tree(from: &Path, to: &Path) -> Result<(), Error> {
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent).map_err(Error::Io)?;
         }
-        std::fs::copy(source, &target).map_err(Error::Io)?;
+        let metadata = std::fs::symlink_metadata(source).map_err(Error::Io)?;
+        if metadata.file_type().is_symlink() {
+            // A sandbox-controlled link is copied as a link. Never follow it:
+            // its target may point anywhere on the host.
+            if std::fs::symlink_metadata(&target).is_ok() {
+                std::fs::remove_file(&target).map_err(Error::Io)?;
+            }
+            let link = std::fs::read_link(source).map_err(Error::Io)?;
+            std::os::unix::fs::symlink(link, &target).map_err(Error::Io)?;
+        } else {
+            std::fs::copy(source, &target).map_err(Error::Io)?;
+        }
     }
     prune(to, Path::new(""), &keep)
 }
