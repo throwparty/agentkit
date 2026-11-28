@@ -143,6 +143,9 @@ fn unsupported(operation: &str) -> Error {
 /// database, without committing.
 fn tree_from_dir(root: &Path, dir: &Path) -> Result<TreeId, Error> {
     let index = tempfile::NamedTempFile::new().map_err(Error::Io)?;
+    // `git add` rejects a pre-created empty index. It must create the index
+    // itself; keep the temporary path so it is removed on drop.
+    std::fs::remove_file(index.path()).map_err(Error::Io)?;
     let git_dir = root.join(".git");
     let staged = std::process::Command::new("git")
         .current_dir(dir)
