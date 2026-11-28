@@ -81,6 +81,18 @@ fn diverged() -> (TempDir, TempDir, GitVcs, crate::vcs::Workspace) {
 }
 
 #[test]
+fn a_marker_file_with_a_colon_in_its_name_is_reported() {
+    let dir = repository();
+    fs::write(dir.path().join("a:b.txt"), "<<<<<<< x\nours\n").expect("write");
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-qm", "conflict"]);
+
+    let conflicts = super::reconcile::marker_conflicts(dir.path(), "HEAD").expect("scan");
+    assert_eq!(conflicts.len(), 1, "{conflicts:?}");
+    assert_eq!(conflicts[0].path, Path::new("a:b.txt"));
+}
+
+#[test]
 fn the_report_finds_the_conflict_with_the_recorded_base() {
     let (dir, _root, vcs, workspace) = diverged();
 
