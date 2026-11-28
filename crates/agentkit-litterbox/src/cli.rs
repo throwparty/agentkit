@@ -493,6 +493,7 @@ async fn handle_restore(
             "target": result.target,
             "revision": result.revision,
             "created": result.created,
+            "workspace": result.workspace,
         });
         match serde_json::to_string_pretty(&value) {
             Ok(text) => println!("{text}"),
@@ -509,6 +510,7 @@ async fn handle_restore(
         println!("commit   none (the tree already matched)");
         println!("head     {}", result.revision);
     }
+    println!("workspace {}", result.workspace);
     ExitCode::from(0)
 }
 

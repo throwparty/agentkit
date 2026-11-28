@@ -26,6 +26,9 @@ pub struct HistoryRestore {
     pub revision: String,
     /// Whether a new commit was created.
     pub created: bool,
+    /// What happened to the sandbox workspace: `replaced`, `updated by the
+    /// VCS`, or `deferred; repair will materialise the restored revision`.
+    pub workspace: String,
 }
 
 /// What a restore may discard.

@@ -1835,11 +1835,35 @@ impl Sandboxes {
             .map_err(contract_error)?;
 
         let reconciler = Reconciler::new(&self.vcs, &stored, &selected, &self.records_dir);
-        let (state, workspace_tree) = reconciler.state_with_workspace().await?;
+        let inspection = selected.core().inspect(&stored.sandbox).await?;
+        let live = matches!(inspection.status, SandboxStatus::Active);
+        let binding = stored.binding();
         let staging = self.vcs.staging(&workspace);
-        let loses_work = state.merge != Merge::None
-            || state.workspace == WorkspaceAxis::Dirty
-            || staging.is_some();
+        // A copied workspace is only readable through running compute. When
+        // compute is absent or paused, skip the observation and the workspace
+        // write: repair materialises the restored revision from the refs.
+        let observed = if binding == WorkspaceBinding::Copied && !live {
+            None
+        } else {
+            Some(reconciler.state_with_workspace().await?)
+        };
+        let (state, workspace_tree) = match &observed {
+            Some((state, tree)) => (Some(*state), Some(tree.clone())),
+            None => (None, None),
+        };
+        let loses_work = match state {
+            Some(state) => {
+                state.merge != Merge::None
+                    || state.workspace == WorkspaceAxis::Dirty
+                    || staging.is_some()
+            }
+            None => {
+                stored.merge.is_some()
+                    || stored.resolution.is_some()
+                    || staging.is_some()
+                    || !matches!(inspection.status, SandboxStatus::Missing)
+            }
+        };
 
         let mut hints = Vec::new();
         if loses_work && !flags.discard_work {
@@ -1862,9 +1886,17 @@ impl Sandboxes {
             self.vcs.discard_stage(&workspace).map_err(contract_error)?;
         }
 
-        reconciler
-            .replace_workspace_from_tree(&target, &workspace_tree)
-            .await?;
+        let workspace_state = if binding == WorkspaceBinding::Copied && live {
+            let tree = workspace_tree.expect("observed while compute is live");
+            reconciler
+                .replace_workspace_from_tree(&target, &tree)
+                .await?;
+            "replaced".to_string()
+        } else if binding == WorkspaceBinding::Bound {
+            "updated by the VCS".to_string()
+        } else {
+            "deferred; repair will materialise the restored revision".to_string()
+        };
         let restored = self
             .vcs
             .restore(&workspace, &target)
@@ -1882,6 +1914,7 @@ impl Sandboxes {
             target: target.as_str().to_string(),
             revision: restored.revision.as_str().to_string(),
             created: restored.created,
+            workspace: workspace_state,
         })
     }
 
@@ -2693,6 +2726,66 @@ mod seam_tests {
         assert!(
             vcs.deleted_calls().is_empty(),
             "the workspace was not replaced before the refusal"
+        );
+    }
+
+    #[tokio::test]
+    async fn restore_without_live_compute_restores_the_refs_and_defers_the_workspace() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(
+            TestVcs::new()
+                .with_tip("branch")
+                .with_synced("branch")
+                .with_sandbox_tip("branch")
+                .with_history(vec![
+                    HistoryStep {
+                        revision: Revision::new("branch"),
+                        time: 2,
+                        description: "current".to_string(),
+                        synced: false,
+                    },
+                    HistoryStep {
+                        revision: Revision::new("target"),
+                        time: 1,
+                        description: "older".to_string(),
+                        synced: false,
+                    },
+                ]),
+        );
+        let config = Config {
+            project: crate::config::ProjectConfig {
+                slug: Some("project".to_string()),
+                backends: Some(vec!["test".to_string()]),
+            },
+            ..Config::default()
+        };
+        let sandboxes = Sandboxes::for_test(
+            config,
+            vcs.clone(),
+            false,
+            "project".to_string(),
+            records.path().to_path_buf(),
+            selected(backend.clone()),
+        );
+        sandboxes.create("demo").await.expect("create");
+        backend.mark_missing("demo");
+
+        let restored = sandboxes
+            .restore("demo", "2", RestoreFlags::default())
+            .await
+            .expect("the refs restore without compute");
+
+        assert_eq!(restored.target, "target");
+        assert_eq!(restored.revision, "target");
+        assert!(
+            restored.workspace.contains("repair"),
+            "the result names the deferred workspace: {}",
+            restored.workspace
+        );
+        assert_eq!(
+            vcs.restored(),
+            vec![("branch".to_string(), "target".to_string())]
         );
     }
 
