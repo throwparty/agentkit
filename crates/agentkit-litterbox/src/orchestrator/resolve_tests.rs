@@ -230,6 +230,35 @@ async fn finish_fails_while_conflicts_remain_and_clears_when_they_are_gone() {
 }
 
 #[tokio::test]
+async fn finish_refuses_when_the_shared_tip_moved_after_begin() {
+    let dir = TempDir::new().expect("tempdir");
+    let selected = selected();
+    let test = Arc::new(
+        TestVcs::new()
+            .with_tip("branch-tip")
+            .with_sandbox_tip("sandbox-tip")
+            .with_synced("synced-revision")
+            .with_conflicts_for("resolution-revision", &["file.txt"]),
+    );
+    let vcs: Arc<dyn Vcs> = test.clone();
+    let stored = stored();
+    let resolver = Resolver::new(&vcs, &stored, &selected, dir.path());
+    resolver.begin().await.expect("begin");
+    test.move_tip("moved");
+    test.clear_conflicts("resolution-revision");
+
+    let error = resolver.finish().expect_err("the tip moved");
+    assert!(
+        error.to_string().contains("shared branch moved"),
+        "{error}"
+    );
+    assert!(
+        test.advanced().is_empty(),
+        "nothing is written over the newer tip"
+    );
+}
+
+#[tokio::test]
 async fn finish_reports_a_path_the_resolution_dropped() {
     let dir = TempDir::new().expect("tempdir");
     let selected = selected();

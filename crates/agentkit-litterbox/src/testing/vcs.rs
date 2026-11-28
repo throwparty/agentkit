@@ -349,6 +349,11 @@ impl TestVcs {
         self.state().sandbox_set.clone()
     }
 
+    /// Move the shared branch after the double has been built.
+    pub fn move_tip(&self, revision: &str) {
+        self.state().tip = revision.to_string();
+    }
+
     fn state(&self) -> std::sync::MutexGuard<'_, State> {
         self.state.lock().expect("TestVcs mutex")
     }
@@ -632,9 +637,13 @@ impl Vcs for TestVcs {
         &self,
         _workspace: &Workspace,
         revision: &Revision,
-        _expected: &Revision,
+        expected: &Revision,
     ) -> Result<(), Error> {
-        self.state().advanced.push(revision.as_str().to_string());
+        let mut state = self.state();
+        if expected.as_str() != state.tip {
+            return Err(Error::Raced);
+        }
+        state.advanced.push(revision.as_str().to_string());
         Ok(())
     }
 

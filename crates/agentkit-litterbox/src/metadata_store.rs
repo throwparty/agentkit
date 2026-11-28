@@ -43,6 +43,12 @@ pub struct StoredResolution {
     /// predate it, so an empty value falls back to the live sandbox tip.
     #[serde(default)]
     pub conflict: String,
+    /// The shared branch tip the resolution was built against.
+    ///
+    /// `finish` advances the branch only while it still points here, so a push
+    /// after `begin` cannot be replaced by a resolution that never saw it.
+    #[serde(default)]
+    pub theirs: String,
 }
 
 /// A sandbox as persisted: the contract's record plus the branch it was paired

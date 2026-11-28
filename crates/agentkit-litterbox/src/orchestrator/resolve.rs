@@ -159,6 +159,7 @@ impl<'a> Resolver<'a> {
             synced: synced.as_str().to_string(),
             ours: ours.as_str().to_string(),
             conflict: begun.revision.as_str().to_string(),
+            theirs: branch.as_str().to_string(),
         }))?;
         Ok(Resolved {
             synced,
@@ -193,23 +194,35 @@ impl<'a> Resolver<'a> {
             )));
         }
 
-        let branch = self.vcs.tip(&workspace).map_err(contract_error)?;
+        let theirs = if open.theirs.is_empty() {
+            self.vcs.tip(&workspace).map_err(contract_error)?
+        } else {
+            Revision::new(open.theirs.clone())
+        };
         let resolved = self.vcs.tree(&revision).map_err(contract_error)?;
         let ours_revision = Revision::new(open.ours.clone());
         let ours = self.vcs.tree(&ours_revision).map_err(contract_error)?;
-        let theirs = self.vcs.tree(&branch).map_err(contract_error)?;
+        let theirs_tree = self.vcs.tree(&theirs).map_err(contract_error)?;
         let dropped_from_ours = self
             .vcs
             .deleted_paths(&ours, &resolved)
             .map_err(contract_error)?;
         let dropped_from_theirs = self
             .vcs
-            .deleted_paths(&theirs, &resolved)
+            .deleted_paths(&theirs_tree, &resolved)
             .map_err(contract_error)?;
 
-        self.vcs
-            .advance(&workspace, &revision, &branch)
-            .map_err(contract_error)?;
+        match self.vcs.advance(&workspace, &revision, &theirs) {
+            Ok(()) => {}
+            Err(crate::vcs::Error::Raced) => {
+                return Err(Error::failed(
+                    "the shared branch moved while the resolution was open; the resolution was \
+                     not written. Re-run begin against the new tip."
+                        .to_string(),
+                ));
+            }
+            Err(error) => return Err(contract_error(error)),
+        }
         // The working copy is now published. Record it as the saved baseline
         // and leave a fresh working copy, so later edits cannot rewrite it.
         self.vcs

@@ -4345,6 +4345,7 @@ mod seam_tests {
             synced: "base".to_string(),
             ours: "ours".to_string(),
             conflict: "conflict".to_string(),
+            theirs: "theirs".to_string(),
         });
         metadata_store::store_sandbox_at(records.path(), "demo", &stored).expect("store");
 
