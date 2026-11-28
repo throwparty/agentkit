@@ -111,6 +111,7 @@ pub struct Performed<T> {
     /// The repair, when the operation had to recreate compute.
     pub recovery: Option<Recovery>,
     reconciliation: Option<Reconciled>,
+    recording_error: Option<String>,
 }
 
 impl<T> Performed<T> {
@@ -120,6 +121,7 @@ impl<T> Performed<T> {
             value,
             recovery: None,
             reconciliation: None,
+            recording_error: None,
         }
     }
 
@@ -129,6 +131,7 @@ impl<T> Performed<T> {
             value,
             recovery: Some(recovery),
             reconciliation: None,
+            recording_error: None,
         }
     }
 
@@ -141,6 +144,7 @@ impl<T> Performed<T> {
                 value: self.value,
                 recovery,
                 reconciliation: self.reconciliation,
+                recording_error: self.recording_error,
             }
         }
     }
@@ -151,6 +155,20 @@ impl<T> Performed<T> {
         self
     }
 
+    /// Keep the result and report separately why it could not be recorded.
+    ///
+    /// The operation itself succeeded; only the snapshot that should make it
+    /// durable failed. Callers must not treat this as a failed operation.
+    pub(crate) fn with_recording_error(mut self, error: String) -> Self {
+        self.recording_error = Some(error);
+        self
+    }
+
+    /// Why the operation's result could not be recorded, when it could not.
+    pub fn recording_error(&self) -> Option<&str> {
+        self.recording_error.as_deref()
+    }
+
     /// Map the operation's value while preserving the recovery and the
     /// reconciliation the operation reported.
     pub(crate) fn map<U>(self, map: impl FnOnce(T) -> U) -> Performed<U> {
@@ -158,6 +176,7 @@ impl<T> Performed<T> {
             value: map(self.value),
             recovery: self.recovery,
             reconciliation: self.reconciliation,
+            recording_error: self.recording_error,
         }
     }
 

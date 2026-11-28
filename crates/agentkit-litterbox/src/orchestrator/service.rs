@@ -850,15 +850,29 @@ impl Sandboxes {
             }
         }
         let value = result?;
-        let mut reconciled = reconciler
-            .after("litterbox: snapshot after a command")
-            .await?;
-        if reconciled.dropped.is_none() {
-            reconciled.dropped = before.dropped;
+        let dropped = before.dropped;
+        match reconciler.after("litterbox: snapshot after a command").await {
+            Ok(mut reconciled) => {
+                if reconciled.dropped.is_none() {
+                    reconciled.dropped = dropped;
+                }
+                Ok(Performed::fresh(value)
+                    .or_recovery(recovery)
+                    .with_reconciliation(reconciled))
+            }
+            Err(error) => {
+                // The command already ran. Failing here would discard its
+                // output and invite the caller to run it a second time.
+                tracing::warn!(
+                    sandbox = %name,
+                    %error,
+                    "the command finished but its snapshot failed"
+                );
+                Ok(Performed::fresh(value)
+                    .or_recovery(recovery)
+                    .with_recording_error(error.to_string()))
+            }
         }
-        Ok(Performed::fresh(value)
-            .or_recovery(recovery)
-            .with_reconciliation(reconciled))
     }
 
     /// Describe a sandbox.
@@ -2164,15 +2178,32 @@ impl Sandboxes {
             .core()
             .upload(&stored.sandbox, source, destination)
             .await?;
-        let mut reconciled = reconciler
+        let dropped = before.dropped;
+        match reconciler
             .after("litterbox: snapshot after an upload")
-            .await?;
-        if reconciled.dropped.is_none() {
-            reconciled.dropped = before.dropped;
+            .await
+        {
+            Ok(mut reconciled) => {
+                if reconciled.dropped.is_none() {
+                    reconciled.dropped = dropped;
+                }
+                Ok(Performed::fresh(())
+                    .or_recovery(recovery)
+                    .with_reconciliation(reconciled))
+            }
+            Err(error) => {
+                // The upload landed. Report the recording failure separately
+                // rather than asking the caller to repeat the upload.
+                tracing::warn!(
+                    sandbox = %name,
+                    %error,
+                    "the upload finished but its snapshot failed"
+                );
+                Ok(Performed::fresh(())
+                    .or_recovery(recovery)
+                    .with_recording_error(error.to_string()))
+            }
         }
-        Ok(Performed::fresh(())
-            .or_recovery(recovery)
-            .with_reconciliation(reconciled))
     }
 
     /// Copy a sandbox path out to the host.
@@ -2803,6 +2834,36 @@ mod seam_tests {
             performed.state().map(|state| state.workspace),
             Some(crate::orchestrator::source::Workspace::Clean),
             "the returned state is the post-plan state"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_command_reports_its_result_when_the_snapshot_fails() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(
+            TestVcs::new()
+                .with_observed_tree("edited")
+                .failing_snapshot(),
+        );
+        let sandboxes = orchestrator_vcs(records.path(), backend, vcs.clone());
+        sandboxes.create("demo").await.expect("create");
+
+        let performed = sandboxes
+            .exec("demo", &["true".to_string()])
+            .await
+            .expect("the command's own success survives a failed snapshot");
+
+        assert_eq!(performed.value.exit_code, 0);
+        assert!(
+            performed
+                .recording_error()
+                .is_some_and(|error| error.contains("refused the snapshot")),
+            "the recording failure is reported separately"
+        );
+        assert!(
+            performed.block().is_none(),
+            "no reconciliation completed, so no workspace block is claimed"
         );
     }
 

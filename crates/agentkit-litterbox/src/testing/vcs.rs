@@ -50,6 +50,7 @@ struct State {
     synced_set: Vec<String>,
     sandbox_set: Vec<String>,
     failure: Failure,
+    snapshot_fails: bool,
     sides: Option<ConflictSides>,
 
     resolution: String,
@@ -107,6 +108,13 @@ impl TestVcs {
     /// Make `prepare` fail as if the branch is gone.
     pub fn failing_prepare_not_found(mut self) -> Self {
         self.state_mut().failure = Failure::NotFound;
+        self
+    }
+
+    /// Make every `snapshot` fail, so the operation's own result is the only
+    /// successful half.
+    pub fn failing_snapshot(mut self) -> Self {
+        self.state_mut().snapshot_fails = true;
         self
     }
 
@@ -456,9 +464,16 @@ impl Vcs for TestVcs {
         _staging: &Path,
         message: &str,
     ) -> Result<Revision, Error> {
-        self.state()
+        let mut state = self.state();
+        state
             .snapshots
             .push((workspace.branch().as_str().to_string(), message.to_string()));
+        if state.snapshot_fails {
+            return Err(Error::Backend {
+                operation: "snapshot".to_string(),
+                message: "the test backend refused the snapshot".to_string(),
+            });
+        }
         Ok(Revision::new("snapshot"))
     }
 

@@ -286,8 +286,9 @@ impl SandboxServer {
         let performed = write_in_sandbox(project, &args.sandbox, &args.path, &args.content)
             .await
             .map_err(ToolError::into_mcp)?;
+        let snapshot_error = performed.recording_error().map(str::to_string);
         let block = performed.block();
-        mutation_result(None, performed.recovery, block)
+        mutation_result(snapshot_error, performed.recovery, block)
     }
 
     #[tool(
@@ -302,8 +303,9 @@ impl SandboxServer {
         let performed = patch_in_sandbox(project, &args.sandbox, &args.path, &args.diff)
             .await
             .map_err(ToolError::into_mcp)?;
+        let snapshot_error = performed.recording_error().map(str::to_string);
         let block = performed.block();
-        mutation_result(None, performed.recovery, block)
+        mutation_result(snapshot_error, performed.recovery, block)
     }
 
     #[tool(
@@ -325,9 +327,11 @@ impl SandboxServer {
         .await
         .map_err(ToolError::into_mcp)?;
         let block = performed.block();
+        let recording_error = performed.recording_error().map(str::to_string);
         let recovery = performed.recovery;
         let result = performed.value;
-        let content = ContentBlock::json(result)
+        let payload = command_payload(&result, recording_error)?;
+        let content = ContentBlock::json(&payload)
             .map_err(|error| McpError::internal_error(error.to_string(), None))?;
         success_with_recovery(content, recovery, block)
     }
@@ -709,6 +713,20 @@ fn mutation_result(
     }
     append_block(&mut blocks, block)?;
     Ok(CallToolResult::success(blocks))
+}
+
+/// The command's output, plus the separate reason its snapshot could not be
+/// written. The command did run either way.
+fn command_payload(
+    result: &Execution,
+    recording_error: Option<String>,
+) -> Result<serde_json::Value, McpError> {
+    let mut payload = serde_json::to_value(result)
+        .map_err(|error| McpError::internal_error(error.to_string(), None))?;
+    if let Some(error) = recording_error {
+        payload["recording_error"] = serde_json::Value::String(error);
+    }
+    Ok(payload)
 }
 
 fn success_with_recovery(
@@ -1464,6 +1482,25 @@ mod tests {
         ) -> BoxFuture<'a, Result<Performed<()>, Error>> {
             Box::pin(async { Ok(Performed::fresh(())) })
         }
+    }
+
+    #[test]
+    fn a_command_payload_keeps_the_output_when_recording_fails() {
+        let result = Execution {
+            exit_code: 3,
+            stdout: "out\n".to_string(),
+            stderr: "err\n".to_string(),
+        };
+
+        let failed = super::command_payload(&result, Some("disk full".to_string()))
+            .expect("payload");
+        assert_eq!(failed["exit_code"], 3);
+        assert_eq!(failed["stdout"], "out\n");
+        assert_eq!(failed["stderr"], "err\n");
+        assert_eq!(failed["recording_error"], "disk full");
+
+        let clean = super::command_payload(&result, None).expect("payload");
+        assert!(clean.get("recording_error").is_none(), "{clean}");
     }
 
     #[test]
