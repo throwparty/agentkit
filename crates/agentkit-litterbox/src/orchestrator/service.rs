@@ -632,6 +632,7 @@ impl Sandboxes {
 
         match metadata_store::load_sandbox_at(&self.records_dir, &name)? {
             Some(LoadedSandbox::Current(stored)) => {
+                self.ensure_tool(&stored)?;
                 let workspace = VcsWorkspace::from_branch(&stored.branch_name);
                 let staging = self.vcs.staging(&workspace);
                 let selected = match self.select_for(&stored.sandbox, "delete the sandbox").await {
