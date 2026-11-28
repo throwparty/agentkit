@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use tempfile::TempDir;
 
 use crate::metadata_store::{self, StoredMerge, StoredSandbox};
-use crate::orchestrator::outcome::{ResolutionView, WorkspaceBlock};
+use crate::orchestrator::outcome::{ConflictView, ResolutionView, WorkspaceBlock};
 use crate::orchestrator::service::contract_error;
 use crate::orchestrator::source::{self, Action, Merge, SourceState, Step};
 use crate::sandbox::contract::{Error, SnapshotSelector, WorkspaceBinding};
@@ -218,7 +218,7 @@ impl<'a> Reconciler<'a> {
             merge,
         );
 
-        let resolution_conflicts: Vec<String> = if resolving {
+        let resolution_conflicts = if resolving {
             let working = self
                 .vcs
                 .working_copy_tip(&workspace)
@@ -226,9 +226,6 @@ impl<'a> Reconciler<'a> {
             self.vcs
                 .conflicts(&working)
                 .map_err(contract_error)?
-                .into_iter()
-                .map(|conflict| conflict.path.display().to_string())
-                .collect()
         } else {
             Vec::new()
         };
@@ -254,10 +251,17 @@ impl<'a> Reconciler<'a> {
             synced: synced.as_str().to_string(),
             branch: branch.as_str().to_string(),
             sandbox: sandbox.as_str().to_string(),
-            conflicts: conflicted
-                .iter()
-                .map(|path| path.display().to_string())
-                .collect(),
+            conflicts: if resolving {
+                resolution_conflicts
+                    .iter()
+                    .map(|conflict| conflict.path.display().to_string())
+                    .collect()
+            } else {
+                conflicted
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect()
+            },
             next: if resolving {
                 Some("resolve the conflicts in the workspace, then finish or abandon".to_string())
             } else if !conflicted.is_empty() {
@@ -272,7 +276,15 @@ impl<'a> Reconciler<'a> {
             },
             resolution: self.stored.resolution.as_ref().map(|open| ResolutionView {
                 synced: open.synced.clone(),
-                conflicts: resolution_conflicts,
+                conflicts: resolution_conflicts
+                    .iter()
+                    .map(|conflict| ConflictView {
+                        path: conflict.path.display().to_string(),
+                        hunks: conflict.hunks,
+                        sides: conflict.sides,
+                        base: conflict.base,
+                    })
+                    .collect(),
                 next: "resolve the conflicts in the workspace, then finish or abandon".to_string(),
             }),
             dropped: None,

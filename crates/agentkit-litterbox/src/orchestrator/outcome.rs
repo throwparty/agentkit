@@ -70,8 +70,8 @@ pub struct SourceStatus {
 pub struct ResolutionView {
     /// The revision both sides agreed on when resolution began.
     pub synced: String,
-    /// The conflicted paths the working copy still carries.
-    pub conflicts: Vec<String>,
+    /// The conflicted paths and their counts the working copy still carries.
+    pub conflicts: Vec<ConflictView>,
     /// What the agent does next.
     pub next: String,
 }

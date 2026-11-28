@@ -4344,6 +4344,34 @@ mod seam_tests {
     }
 
     #[tokio::test]
+    async fn a_status_during_resolution_reports_the_sandbox_conflicts() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(
+            TestVcs::new()
+                .with_sandbox_tip("conflict-revision")
+                .with_conflicts_for("conflict-revision", &["file.txt"]),
+        );
+        let sandboxes = orchestrator_vcs(records.path(), backend, vcs);
+        sandboxes.create("demo").await.expect("create");
+        let mut stored = current_record(records.path(), "demo");
+        stored.resolution = Some(metadata_store::StoredResolution {
+            synced: "base".to_string(),
+            ours: "ours".to_string(),
+            conflict: "conflict-revision".to_string(),
+            theirs: "branch".to_string(),
+        });
+        metadata_store::store_sandbox_at(records.path(), "demo", &stored).expect("store");
+
+        let status = sandboxes.source_status("demo").await.expect("status");
+
+        assert!(status.resolution);
+        assert_eq!(status.state, "resolving");
+        assert_eq!(status.conflicts.len(), 1, "{:?}", status.conflicts);
+        assert_eq!(status.conflicts[0].path, "file.txt");
+    }
+
+    #[tokio::test]
     async fn list_carries_the_source_state_from_the_record() {
         let records = TempDir::new().expect("records");
         let backend = Arc::new(TestBackend::new());
