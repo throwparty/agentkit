@@ -139,6 +139,19 @@ fn unsupported(operation: &str) -> Error {
     }
 }
 
+/// Selects every path in the full-content pass.
+struct SelectAll;
+
+impl SnapshotSelector for SelectAll {
+    fn selects(
+        &self,
+        _relative: &Path,
+        _is_dir: bool,
+    ) -> Result<bool, crate::sandbox::contract::Error> {
+        Ok(true)
+    }
+}
+
 /// The tree a directory's contents would produce, through the clone's object
 /// database, without committing.
 fn tree_from_dir(root: &Path, dir: &Path) -> Result<TreeId, Error> {
@@ -381,7 +394,10 @@ impl Vcs for JjVcs {
         _workspace: &Workspace,
         _rules_root: &Path,
     ) -> Result<Arc<dyn SnapshotSelector>, Error> {
-        Ok(Arc::new(IgnoreFiles))
+        // The second transfer is the full content pass. `IgnoreFiles` is only
+        // for the first pass that fetches the ignore inputs; selecting it here
+        // would omit every ordinary tracked file.
+        Ok(Arc::new(SelectAll))
     }
 
     fn ignore_files(&self) -> Arc<dyn SnapshotSelector> {
