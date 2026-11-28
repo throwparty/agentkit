@@ -152,6 +152,16 @@ fn unsupported(operation: &str) -> Error {
     }
 }
 
+/// Whether `tree` in the clone holds `path`.
+fn path_has(root: &Path, tree: &str, path: &Path) -> bool {
+    path.to_str().is_some_and(|path| {
+        ops::blob(root, tree, path)
+            .ok()
+            .flatten()
+            .is_some()
+    })
+}
+
 /// Selects every path in the full-content pass.
 struct SelectAll;
 
@@ -801,15 +811,23 @@ impl Vcs for JjVcs {
     }
 
     fn conflicts(&self, revision: &Revision) -> Result<Vec<Conflict>, Error> {
+        let base_tree = ops::conflict_sides(&self.root, revision.as_str())
+            .ok()
+            .and_then(|(base, _, _)| base);
         Ok(ops::conflicts(&self.root, revision.as_str())?
             .into_iter()
             .map(|(path, sides)| {
                 let hunks = ops::conflict_regions(&self.root, revision.as_str(), &path);
+                // A path the common ancestor does not hold is an add/add: it
+                // has content sides but no base side.
+                let base = base_tree
+                    .as_deref()
+                    .is_some_and(|tree| path_has(&self.root, tree, &path));
                 Conflict {
                     path,
                     hunks,
                     sides,
-                    base: true,
+                    base,
                 }
             })
             .collect())
@@ -953,12 +971,14 @@ impl Vcs for JjVcs {
     fn conflict_sides(
         &self,
         revision: &Revision,
-        _path: &Path,
+        path: &Path,
         _base: Option<&Revision>,
     ) -> Result<ConflictSides, Error> {
         let (base, ours, theirs) = ops::conflict_sides(&self.root, revision.as_str())?;
         Ok(ConflictSides {
-            base: base.map(TreeId::new),
+            base: base
+                .filter(|tree| path_has(&self.root, tree, path))
+                .map(TreeId::new),
             ours: TreeId::new(ours),
             theirs: TreeId::new(theirs),
         })
@@ -1370,6 +1390,49 @@ mod tests {
 
         let clean = vcs.conflicts(&Revision::new(ours)).expect("clean");
         assert!(clean.is_empty(), "an unconflicted revision reports nothing");
+    }
+
+    #[test]
+    fn an_add_add_conflict_reports_no_base() {
+        unsafe {
+            std::env::set_var("JJ_USER", "Test");
+            std::env::set_var("JJ_EMAIL", "test@example.com");
+        }
+
+        let host = repository();
+        let data = TempDir::new().expect("data");
+        let root = data.path().join("clone");
+        let vcs = JjVcs::open_at(root.clone(), host.path().to_path_buf()).expect("backend");
+        vcs.prepare("demo").expect("prepare");
+
+        jj(&root, &["describe", "-m", "base"]);
+        let base = super::ops::commit_id(&root, "@").expect("base id");
+
+        jj(&root, &["new", &base, "-m", "ours"]);
+        std::fs::write(root.join("added.txt"), "ours\n").expect("write");
+        let ours = super::ops::commit_id(&root, "@").expect("ours id");
+
+        jj(&root, &["new", &base, "-m", "theirs"]);
+        std::fs::write(root.join("added.txt"), "theirs\n").expect("write");
+        let theirs = super::ops::commit_id(&root, "@").expect("theirs id");
+
+        jj(&root, &["new", &ours, &theirs, "-m", "merge"]);
+        let merge = super::ops::commit_id(&root, "@").expect("merge id");
+
+        let conflicts = vcs
+            .conflicts(&Revision::new(merge.clone()))
+            .expect("conflicts");
+        assert_eq!(conflicts.len(), 1, "{conflicts:?}");
+        assert_eq!(conflicts[0].path, Path::new("added.txt"));
+        assert!(
+            !conflicts[0].base,
+            "the common ancestor holds no version of the path"
+        );
+
+        let sides = vcs
+            .conflict_sides(&Revision::new(merge), Path::new("added.txt"), None)
+            .expect("sides");
+        assert!(sides.base.is_none(), "an add/add has no base side");
     }
 
     #[test]
