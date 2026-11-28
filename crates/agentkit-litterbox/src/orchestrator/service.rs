@@ -2120,10 +2120,20 @@ impl Sandboxes {
         let stored = self.stored(name)?;
         self.ensure_tool(&stored)?;
         let workspace = VcsWorkspace::from_branch(&stored.branch_name);
-        let revision = self
-            .vcs
-            .working_copy_tip(&workspace)
-            .map_err(contract_error)?;
+        // The live tip is a single-parent child once the agent's first edit is
+        // snapshotted. The sides belong to the merge `begin` wrote, which the
+        // record keeps.
+        let revision = match stored
+            .resolution
+            .as_ref()
+            .filter(|open| !open.conflict.is_empty())
+        {
+            Some(open) => Revision::new(open.conflict.clone()),
+            None => self
+                .vcs
+                .working_copy_tip(&workspace)
+                .map_err(contract_error)?,
+        };
         let relative = std::path::Path::new(path);
         let sides = self
             .vcs
