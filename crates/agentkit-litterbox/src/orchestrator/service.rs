@@ -446,11 +446,32 @@ impl Sandboxes {
                     });
                 }
                 match self.vcs.tip(&workspace) {
-                    Ok(revision) => (
-                        revision,
-                        "shared".to_string(),
-                        Some(self.shared_fallback_note(&stored)),
-                    ),
+                    Ok(revision) => {
+                        if self
+                            .vcs
+                            .conflicts(&revision)
+                            .map_err(contract_error)?
+                            .is_empty()
+                        {
+                            (
+                                revision,
+                                "shared".to_string(),
+                                Some(self.shared_fallback_note(&stored)),
+                            )
+                        } else {
+                            let synced =
+                                self.vcs.synced(&workspace).map_err(contract_error)?;
+                            (
+                                synced,
+                                "shared".to_string(),
+                                Some(
+                                    "the shared branch is conflicted; materialised from the last \
+                                     synced revision. Resolve the shared branch before adopting it."
+                                        .to_string(),
+                                ),
+                            )
+                        }
+                    }
                     Err(VcsError::NotFound { .. }) => {
                         return Err(Error::Unavailable {
                             backend: selected.name().to_string(),
