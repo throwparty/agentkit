@@ -87,6 +87,40 @@ async fn begin_records_the_resolution_and_a_second_begin_is_refused() {
 }
 
 #[tokio::test]
+async fn begin_snapshots_the_workspace_before_reading_the_sandbox_side() {
+    let dir = TempDir::new().expect("tempdir");
+    let stored = stored();
+    let selected = selected();
+    let test = Arc::new(
+        TestVcs::new()
+            .with_observed_tree("edited")
+            .with_conflicts_for("resolution-revision", &["file.txt"]),
+    );
+    let vcs: Arc<dyn Vcs> = test.clone();
+
+    Resolver::new(&vcs, &stored, &selected, dir.path())
+        .begin()
+        .await
+        .expect("begin");
+
+    assert_eq!(
+        test.snapshots().len(),
+        1,
+        "the workspace is recorded first"
+    );
+    let reloaded = current(
+        metadata_store::load_sandbox_at(dir.path(), "demo")
+            .expect("load")
+            .expect("present"),
+    );
+    assert_eq!(
+        reloaded.resolution.expect("recorded").ours,
+        "snapshot",
+        "ours is the snapshot, not the pre-edit tip"
+    );
+}
+
+#[tokio::test]
 async fn begin_fails_on_a_shared_branch_tip_that_already_conflicts() {
     let dir = TempDir::new().expect("tempdir");
     let selected = selected();

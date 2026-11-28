@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::metadata_store::{self, StoredResolution, StoredSandbox};
+use crate::orchestrator::reconcile::Reconciler;
 use crate::orchestrator::service::contract_error;
 use crate::sandbox::contract::Error;
 use crate::sandbox::contract::WorkspaceBinding;
@@ -83,6 +84,30 @@ impl<'a> Resolver<'a> {
         Ok(())
     }
 
+    /// Refuse to resolve onto a shared tip that is already broken.
+    fn reject_conflicted_branch(&self, branch: &Revision) -> Result<(), Error> {
+        let conflicted = self.vcs.conflicts(branch).map_err(contract_error)?;
+        if conflicted.is_empty() {
+            return Ok(());
+        }
+        // The broken commit belongs to the user, and only they can replace
+        // it. Litterbox reports it and holds until they do.
+        let fix = match self.stored.vcs() {
+            "jj" => "for example `jj edit <revision>`, resolve, then `jj bookmark set <branch> -r @`",
+            _ => "for example `git commit --amend` or a new commit, then push",
+        };
+        Err(Error::Denied {
+            operation: "resolve the shared branch".to_string(),
+            reason: format!(
+                "the shared branch tip already carries a conflict in {} path(s). Litterbox \
+                 resolves only the merge it creates; fix the tip in your checkout and push \
+                 it, {}",
+                conflicted.len(),
+                fix
+            ),
+        })
+    }
+
     /// Open a resolution, write the conflict into the workspace, and report
     /// the conflicts it has to settle.
     pub(crate) async fn begin(&self) -> Result<Resolved, Error> {
@@ -94,27 +119,18 @@ impl<'a> Resolver<'a> {
         }
         let workspace = self.workspace();
         let branch = self.vcs.tip(&workspace).map_err(contract_error)?;
-        let conflicted = self.vcs.conflicts(&branch).map_err(contract_error)?;
-        if !conflicted.is_empty() {
-            // The broken commit belongs to the user, and only they can replace
-            // it. Litterbox reports it and holds until they do.
-            let fix = match self.stored.vcs() {
-                "jj" => {
-                    "for example `jj edit <revision>`, resolve, then `jj bookmark set <branch> -r @`"
-                }
-                _ => "for example `git commit --amend` or a new commit, then push",
-            };
-            return Err(Error::Denied {
-                operation: "resolve the shared branch".to_string(),
-                reason: format!(
-                    "the shared branch tip already carries a conflict in {} path(s). Litterbox \
-                     resolves only the merge it creates; fix the tip in your checkout and push \
-                     it, {}",
-                    conflicted.len(),
-                    fix
-                ),
-            });
-        }
+        self.reject_conflicted_branch(&branch)?;
+
+        // Record the workspace before reading the sandbox side. An edit that
+        // has not been snapshotted yet is part of what the agent is resolving;
+        // publishing the merge over it would drop it from `ours`.
+        let reconciler = Reconciler::new(self.vcs, self.stored, self.selected, self.records_dir);
+        reconciler
+            .snapshot("litterbox: snapshot before resolution")
+            .await?;
+
+        let branch = self.vcs.tip(&workspace).map_err(contract_error)?;
+        self.reject_conflicted_branch(&branch)?;
         let synced = self.vcs.synced(&workspace).map_err(contract_error)?;
         let ours = self.vcs.sandbox_tip(&workspace).map_err(contract_error)?;
         let begun = self.vcs.resolve_begin(&workspace).map_err(contract_error)?;

@@ -425,7 +425,15 @@ impl Vcs for TestVcs {
                 std::fs::create_dir_all(&root)?;
                 Ok(root)
             }
-            None => Err(unsupported("bound_root")),
+            None => {
+                // Resolution tests use a bound workspace. The path is opaque to
+                // the double; it only has to exist for the observation step.
+                let root = std::env::temp_dir()
+                    .join("litterbox-test-bound")
+                    .join(workspace.branch().as_str().replace('/', "-"));
+                std::fs::create_dir_all(&root)?;
+                Ok(root)
+            }
         }
     }
 
@@ -474,6 +482,7 @@ impl Vcs for TestVcs {
                 message: "the test backend refused the snapshot".to_string(),
             });
         }
+        state.sandbox_tip = "snapshot".to_string();
         Ok(Revision::new("snapshot"))
     }
 
