@@ -199,6 +199,16 @@ pub trait Vcs: Send + Sync {
         Err(not_implemented("compare trees"))
     }
 
+    /// The paths whose content differs between `from` and `to`, including
+    /// deletions.
+    ///
+    /// A resolution report uses this, not [`Self::deleted_paths`]: keeping one
+    /// side of a conflicted file loses the other side's contribution even
+    /// though no path disappeared.
+    fn changed_paths(&self, from: &TreeId, to: &TreeId) -> Result<Vec<PathBuf>, Error> {
+        self.deleted_paths(from, to)
+    }
+
     /// The tree a snapshot of `staging` would commit, without committing it.
     fn observe(&self, _workspace: &Workspace, _staging: &Path) -> Result<TreeId, Error> {
         Err(not_implemented("observe the workspace"))

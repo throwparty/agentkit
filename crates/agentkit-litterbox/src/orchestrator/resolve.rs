@@ -205,11 +205,11 @@ impl<'a> Resolver<'a> {
         let theirs_tree = self.vcs.tree(&theirs).map_err(contract_error)?;
         let dropped_from_ours = self
             .vcs
-            .deleted_paths(&ours, &resolved)
+            .changed_paths(&ours, &resolved)
             .map_err(contract_error)?;
         let dropped_from_theirs = self
             .vcs
-            .deleted_paths(&theirs_tree, &resolved)
+            .changed_paths(&theirs_tree, &resolved)
             .map_err(contract_error)?;
 
         match self.vcs.advance(&workspace, &revision, &theirs) {

@@ -31,6 +31,7 @@ struct State {
     materialised: Vec<(String, String)>,
     snapshots: Vec<(String, String)>,
     deleted_paths: std::collections::BTreeMap<(String, String), Vec<PathBuf>>,
+    changed_paths: std::collections::BTreeMap<(String, String), Vec<PathBuf>>,
     deleted: Vec<String>,
     exposed: Vec<String>,
     prunes: usize,
@@ -255,6 +256,16 @@ impl TestVcs {
     pub fn with_deleted(mut self, from: &str, to: &str, path: &str) -> Self {
         self.state_mut()
             .deleted_paths
+            .entry((from.to_string(), to.to_string()))
+            .or_default()
+            .push(PathBuf::from(path));
+        self
+    }
+
+    /// Report that `from` and `to` hold different content at `path`.
+    pub fn with_changed(mut self, from: &str, to: &str, path: &str) -> Self {
+        self.state_mut()
+            .changed_paths
             .entry((from.to_string(), to.to_string()))
             .or_default()
             .push(PathBuf::from(path));
@@ -654,6 +665,18 @@ impl Vcs for TestVcs {
             .get(&(from.as_str().to_string(), to.as_str().to_string()))
             .cloned()
             .unwrap_or_default())
+    }
+
+    fn changed_paths(&self, from: &TreeId, to: &TreeId) -> Result<Vec<PathBuf>, Error> {
+        let state = self.state();
+        let key = (from.as_str().to_string(), to.as_str().to_string());
+        let mut paths = state.deleted_paths.get(&key).cloned().unwrap_or_default();
+        if let Some(changed) = state.changed_paths.get(&key) {
+            paths.extend(changed.iter().cloned());
+        }
+        paths.sort();
+        paths.dedup();
+        Ok(paths)
     }
 
     fn observe(&self, _workspace: &Workspace, _staging: &Path) -> Result<TreeId, Error> {

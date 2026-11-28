@@ -2694,10 +2694,15 @@ mod seam_tests {
             .finish_resolution("demo")
             .await
             .expect("the resolution lands");
-        assert!(
-            finished.value.dropped_from_ours.is_empty(),
-            "{:?}",
-            finished.value.dropped_from_ours
+        assert_eq!(
+            finished.value.dropped_from_ours,
+            vec![std::path::PathBuf::from("greeting.txt")],
+            "the resolution replaced the sandbox's version"
+        );
+        assert_eq!(
+            finished.value.dropped_from_theirs,
+            vec![std::path::PathBuf::from("greeting.txt")],
+            "the resolution replaced the shared version"
         );
 
         let landed = vcs.tip(&workspace).expect("branch tip");

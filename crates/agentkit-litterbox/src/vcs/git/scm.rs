@@ -838,8 +838,53 @@ impl Vcs for GitVcs {
         .map_err(vcs_error)
     }
 
-    fn report(&self, workspace: &Workspace) -> Result<Report, VcsError> {
-        let branch_name = workspace.branch().to_string();
+    fn changed_paths(&self, from: &TreeId, to: &TreeId) -> Result<Vec<PathBuf>, VcsError> {
+        let parse = |value: &TreeId| {
+            value
+                .as_str()
+                .parse::<git2::Oid>()
+                .map_err(|source| SandboxError::from(GitError::Commit { source }))
+        };
+        let from = parse(from).map_err(vcs_error)?;
+        let to = parse(to).map_err(vcs_error)?;
+
+        let guard = self.lock().map_err(vcs_error)?;
+        self.with_repo_containing(
+            &guard,
+            |repo| repo.find_tree(from).is_ok() && repo.find_tree(to).is_ok(),
+            |repo| {
+                let from = repo
+                    .find_tree(from)
+                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
+                let to = repo
+                    .find_tree(to)
+                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
+                let diff = repo
+                    .diff_tree_to_tree(Some(&from), Some(&to), None)
+                    .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
+
+                let mut paths = Vec::new();
+                for delta in diff.deltas() {
+                    let status = delta.status();
+                    if !matches!(status, git2::Delta::Deleted | git2::Delta::Modified) {
+                        continue;
+                    }
+                    let path = if status == git2::Delta::Deleted {
+                        delta.old_file().path()
+                    } else {
+                        delta.new_file().path()
+                    };
+                    if let Some(path) = path {
+                        paths.push(path.to_path_buf());
+                    }
+                }
+                Ok(paths)
+            },
+        )
+        .map_err(vcs_error)
+    }
+
+    fn report(&self, workspace: &Workspace) -> Result<Report, VcsError> {        let branch_name = workspace.branch().to_string();
         let repo = self.repo_path_for(&branch_name)?;
         let synced = self.synced(workspace)?;
         let branch = self.tip(workspace)?;

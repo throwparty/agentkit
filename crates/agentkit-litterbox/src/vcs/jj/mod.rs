@@ -627,6 +627,24 @@ impl Vcs for JjVcs {
             .collect())
     }
 
+    fn changed_paths(&self, from: &TreeId, to: &TreeId) -> Result<Vec<PathBuf>, Error> {
+        let output = ops::git(
+            &self.root,
+            &[
+                "diff",
+                "--name-only",
+                "--diff-filter=DM",
+                from.as_str(),
+                to.as_str(),
+            ],
+        )?;
+        Ok(output
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(PathBuf::from)
+            .collect())
+    }
+
     fn sandbox_tip(&self, workspace: &Workspace) -> Result<Revision, Error> {
         let sandbox = sandbox_of(workspace);
         // A read of the saved ref never touches the workspace: running jj

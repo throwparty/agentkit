@@ -271,7 +271,8 @@ async fn finish_reports_a_path_the_resolution_dropped() {
             .with_tree("resolution-revision", "resolved-tree")
             .with_tree("branch-tip", "theirs-tree")
             .with_tree("sandbox-tip", "ours-tree")
-            .with_deleted("ours-tree", "resolved-tree", "ours-only.txt"),
+            .with_deleted("ours-tree", "resolved-tree", "ours-only.txt")
+            .with_changed("ours-tree", "resolved-tree", "ours-edited.txt"),
     );
     let vcs: Arc<dyn Vcs> = test.clone();
 
@@ -283,8 +284,11 @@ async fn finish_reports_a_path_the_resolution_dropped() {
 
     assert_eq!(
         finished.dropped_from_ours,
-        vec![std::path::PathBuf::from("ours-only.txt")],
-        "the report names what the resolution lost"
+        vec![
+            std::path::PathBuf::from("ours-edited.txt"),
+            std::path::PathBuf::from("ours-only.txt"),
+        ],
+        "the report names what the resolution changed or lost"
     );
     assert!(
         finished.dropped_from_theirs.is_empty(),
