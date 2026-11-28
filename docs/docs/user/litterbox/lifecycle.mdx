@@ -211,10 +211,12 @@ refuses rather than clearing the resolution, and both `status` and
 - **Git:** in the VCS store, `git fsck --lost-found` lists the dangling
   resolution merge whose parents are `ours` and the shared tip. Restore it with
   `git update-ref refs/litterbox/workspaces/<name> <commit>`. If the merge is
-  gone, restore the ref at `ours` and run `sandbox-reconcile begin`.
+  gone, restore the ref at `ours`, abandon the open resolution with
+  `sandbox-reconcile abandon`, then run `sandbox-reconcile begin`.
 - **jj:** in the clone, `jj op log` or `jj log -r 'all()'` names the commit.
   Re-attach it with `jj workspace add --name <name> --revision <commit>`. If it
-  is gone, add the workspace at `ours` and run `sandbox-reconcile begin`.
+  is gone, add the workspace at `ours`, abandon the open resolution with
+  `sandbox-reconcile abandon`, then run `sandbox-reconcile begin`.
 - Do not push the sandbox branch to the shared branch: that publishes a
   conflicted tree and is not a recovery.
 - If neither commit is recoverable, inspect the shared branch and run

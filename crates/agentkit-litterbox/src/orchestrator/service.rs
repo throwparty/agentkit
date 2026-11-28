@@ -1946,7 +1946,8 @@ impl Sandboxes {
                 "the jj workspace for '{name}' is absent. In the clone at {store}, `jj op log` \
                  or `jj log -r 'all()'` names the resolution commit whose parents are {ours} and \
                  {shared}; re-attach it with `jj workspace add --name {name} --revision <commit>`, \
-                 or add the workspace at {ours} and run `sandbox-reconcile begin`. Do not push the \
+                 or add the workspace at {ours}, abandon the open resolution with \
+                 `sandbox-reconcile abandon`, then run `sandbox-reconcile begin`. Do not push the \
                  sandbox branch. If neither is recoverable, run `litterbox delete {name} \
                  --ignore-unmerged` (add `--ignore-invalid` when the record cannot be read) and \
                  create it again."
@@ -1955,7 +1956,8 @@ impl Sandboxes {
                 "the sandbox branch refs/litterbox/workspaces/{name} is absent. In the VCS store \
                  at {store}, `git fsck --lost-found` lists the dangling resolution merge whose \
                  parents are {ours} and {shared}; restore it with `git update-ref \
-                 refs/litterbox/workspaces/{name} <commit>`, or restore the ref at {ours} and run \
+                 refs/litterbox/workspaces/{name} <commit>`, or restore the ref at {ours}, abandon \
+                 the open resolution with `sandbox-reconcile abandon`, then run \
                  `sandbox-reconcile begin`. Do not push the sandbox branch. If neither is \
                  recoverable, run `litterbox delete {name} --ignore-unmerged` (add \
                  `--ignore-invalid` when the record cannot be read) and create it again."
