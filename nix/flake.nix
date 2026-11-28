@@ -130,6 +130,7 @@
               cosign
               dbus
               goreleaser
+              jujutsu
               mold
               nixfmt
               openssl
@@ -191,6 +192,7 @@
                 cargo-zigbuild
                 cosign
                 goreleaser
+                jujutsu
                 mdformat
                 mingwBinutils
                 mold
