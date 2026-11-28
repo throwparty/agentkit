@@ -64,8 +64,19 @@ impl Drop for Lock {
 /// interleave across the shared repository.
 #[allow(dead_code)] // wired into the operations in T-008
 pub fn lock(root: &Path) -> Result<Lock, Error> {
-    std::fs::create_dir_all(root).map_err(Error::Io)?;
-    let path = root.join(".litterbox.lock");
+    // The lock lives beside the clone, not inside it: creating an entry in the
+    // destination would make `jj git clone` refuse a fresh clone.
+    let name = root
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "clone".to_string());
+    let path = root
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(format!("{name}.litterbox.lock"));
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(Error::Io)?;
+    }
     let file = std::fs::OpenOptions::new()
         .create(true)
         .truncate(false)

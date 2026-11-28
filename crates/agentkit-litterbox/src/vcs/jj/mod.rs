@@ -24,6 +24,13 @@ use crate::vcs::{
 };
 
 /// A jj-backed VCS.
+/// Held while a jj mutation runs: the in-process mutex plus the cross-process
+/// clone lock.
+struct Guard<'a> {
+    _local: std::sync::MutexGuard<'a, ()>,
+    _file: clone::Lock,
+}
+
 pub struct JjVcs {
     root: PathBuf,
     #[allow(dead_code)]
@@ -84,10 +91,16 @@ impl JjVcs {
         Ok(())
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, ()> {
-        self.lock
+    fn lock(&self) -> Result<Guard<'_>, Error> {
+        let local = self
+            .lock
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let file = clone::lock(&self.root)?;
+        Ok(Guard {
+            _local: local,
+            _file: file,
+        })
     }
 
     fn workspace(&self, sandbox: &str) -> PathBuf {
@@ -283,7 +296,7 @@ impl Vcs for JjVcs {
     }
 
     fn prepare(&self, sandbox: &str) -> Result<Prepared, Error> {
-        let _guard = self.lock();
+        let _guard = self.lock()?;
         clone::ensure(&self.root, &self.host)?;
         self.apply_config()?;
         let workspace = self.workspace(sandbox);
@@ -378,7 +391,7 @@ impl Vcs for JjVcs {
         staging: &Path,
         _message: &str,
     ) -> Result<Revision, Error> {
-        let _guard = self.lock();
+        let _guard = self.lock()?;
         let sandbox = sandbox_of(workspace);
         let target = self.workspace(sandbox);
         if staging != target {
@@ -412,7 +425,7 @@ impl Vcs for JjVcs {
     }
 
     fn delete_branch(&self, sandbox: &str) -> Result<(), Error> {
-        let _guard = self.lock();
+        let _guard = self.lock()?;
         let branch = branch_name(sandbox);
         let workspace = self.workspace(sandbox);
         let has_branch = ops::git(
@@ -535,7 +548,7 @@ impl Vcs for JjVcs {
         revision: &Revision,
         expected: &Revision,
     ) -> Result<(), Error> {
-        let _guard = self.lock();
+        let _guard = self.lock()?;
         if &self.tip(workspace)? != expected {
             return Err(Error::Raced);
         }
@@ -595,7 +608,7 @@ impl Vcs for JjVcs {
         let ours = self.sandbox_tip(workspace)?;
         let theirs = self.tip(workspace)?;
         let path = self.workspace(sandbox_of(workspace));
-        let _guard = self.lock();
+        let _guard = self.lock()?;
         ops::jj_ok(
             &path,
             &[
@@ -612,7 +625,7 @@ impl Vcs for JjVcs {
     }
 
     fn resolve_abandon(&self, workspace: &Workspace, ours: &Revision) -> Result<Revision, Error> {
-        let _guard = self.lock();
+        let _guard = self.lock()?;
         let path = self.workspace(sandbox_of(workspace));
         ops::jj_ok(&path, &["new", ours.as_str()])?;
         Ok(Revision::new(ops::commit_id(&path, "@")?))
@@ -652,7 +665,7 @@ impl Vcs for JjVcs {
     }
 
     fn stage(&self, workspace: &Workspace) -> Result<Staged, Error> {
-        let _guard = self.lock();
+        let _guard = self.lock()?;
         let sandbox = sandbox_of(workspace);
         let path = clone::reconcile(&self.root, sandbox);
         if path.exists() {
@@ -715,7 +728,7 @@ impl Vcs for JjVcs {
     }
 
     fn finish(&self, workspace: &Workspace) -> Result<Finished, Error> {
-        let _guard = self.lock();
+        let _guard = self.lock()?;
         let sandbox = sandbox_of(workspace);
         let path = clone::reconcile(&self.root, sandbox);
         if !path.is_dir() {
@@ -760,7 +773,7 @@ impl Vcs for JjVcs {
     }
 
     fn discard_stage(&self, workspace: &Workspace) -> Result<(), Error> {
-        let _guard = self.lock();
+        let _guard = self.lock()?;
         let sandbox = sandbox_of(workspace);
         let path = clone::reconcile(&self.root, sandbox);
         let name = format!("{sandbox}-staging");
@@ -794,12 +807,12 @@ impl Vcs for JjVcs {
     }
 
     fn history(&self, workspace: &Workspace) -> Result<Vec<HistoryStep>, Error> {
-        let _guard = self.lock();
+        let _guard = self.lock()?;
         history::read(&self.root, workspace.branch().as_str())
     }
 
     fn restore(&self, workspace: &Workspace, revision: &Revision) -> Result<Restored, Error> {
-        let _guard = self.lock();
+        let _guard = self.lock()?;
         restore::restore(self, workspace, sandbox_of(workspace), revision)
     }
 
