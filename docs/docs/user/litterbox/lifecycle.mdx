@@ -107,8 +107,9 @@ stateDiagram-v2
 | `sandbox-reconcile`                                    | begins, finishes or abandons a resolution | invalid params, `conflict`, naming the resume command | repairs, then begins, finishes or abandons |
 
 `sandbox-create` is not an operation on an existing sandbox: it takes a new
-name, and any name already in use — `active`, `paused`, `missing`, `diverged` or
-`resolving` — is a conflict. `sandbox-ports` answers from the record, so the
+name. A name whose compute is `active` or `paused` is a conflict, including when
+its source state is `diverged` or `resolving`. A name whose compute is `missing`
+is repaired and keeps its source state. `sandbox-ports` answers from the record, so the
 same ports come back whether or not the compute is alive; a backend that does
 not forward ports reports the operation as unsupported.
 
