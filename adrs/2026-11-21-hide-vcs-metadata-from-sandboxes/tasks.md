@@ -210,7 +210,7 @@ Run a Docker probe for an empty volume at a masked path, both when the bound dir
 | Depends On | T-015 |
 | References | docker-masking,docker-local,no-vcs-data |
 
-### T-017: [ ] Mask in Seatbelt by deny rule
+### T-017: [x] Mask in Seatbelt by deny rule
 
 `backends/seatbelt/policy.rs` emits a deny layer after the allow rules — `(deny file-read* (subpath <ws>/<masked>))` and `(deny file-write* (subpath <ws>/<masked>))` per masked path — and `backends/seatbelt/backend.rs` accepts `Bound`, passing the masked paths into the profile input. The masked entry stays visible but returns `EPERM` on every access, and descendants inherit it.
 
