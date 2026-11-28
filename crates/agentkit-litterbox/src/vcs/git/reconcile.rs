@@ -147,6 +147,7 @@ pub(crate) fn begin(
 pub(crate) fn marker_conflicts(
     repo: &Path,
     revision: &str,
+    base: Option<&str>,
 ) -> Result<Vec<crate::vcs::Conflict>, VcsError> {
     // List the paths with markers first, NUL-delimited so a colon in a path
     // is not a field separator, then scan each file's content through `show`.
@@ -190,9 +191,12 @@ pub(crate) fn marker_conflicts(
         if hunks == 0 {
             continue;
         }
-        let base = content
-            .lines()
-            .any(|line| line.starts_with("|||||||"));
+        // The base is available when the path exists in the tree the conflict
+        // was built against. A diff3 marker is a presentation choice.
+        let base = base.is_some_and(|base| {
+            git(repo, &["cat-file", "-e", &format!("{base}:{path}")])
+                .is_ok_and(|output| output.status.success())
+        });
         found.push(crate::vcs::Conflict {
             path: PathBuf::from(path),
             hunks,

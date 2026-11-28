@@ -1012,7 +1012,19 @@ impl Vcs for GitVcs {
             let guard = self.lock().map_err(vcs_error)?;
             guard.repo.path().to_path_buf()
         };
-        reconcile::marker_conflicts(&repo, revision.as_str())
+        reconcile::marker_conflicts(&repo, revision.as_str(), None)
+    }
+
+    fn conflicts_with_base(
+        &self,
+        revision: &Revision,
+        base: Option<&Revision>,
+    ) -> Result<Vec<Conflict>, VcsError> {
+        let repo = {
+            let guard = self.lock().map_err(vcs_error)?;
+            guard.repo.path().to_path_buf()
+        };
+        reconcile::marker_conflicts(&repo, revision.as_str(), base.map(Revision::as_str))
     }
 
     fn conflict_sides(&self, revision: &Revision, _path: &Path) -> Result<ConflictSides, VcsError> {
@@ -1639,7 +1651,7 @@ mod tests {
         .expect("commit");
 
         let conflicts =
-            crate::vcs::git::reconcile::marker_conflicts(repo.path(), "HEAD").expect("scan");
+            crate::vcs::git::reconcile::marker_conflicts(repo.path(), "HEAD", None).expect("scan");
         assert_eq!(conflicts.len(), 1, "{conflicts:?}");
         assert_eq!(conflicts[0].path, Path::new("conflicted.txt"));
         assert_eq!(conflicts[0].hunks, 2, "two regions");
@@ -1647,7 +1659,7 @@ mod tests {
         assert!(!conflicts[0].base, "no diff3 base section");
 
         let clean =
-            crate::vcs::git::reconcile::marker_conflicts(repo.path(), "HEAD^").expect("scan");
+            crate::vcs::git::reconcile::marker_conflicts(repo.path(), "HEAD^", None).expect("scan");
         assert!(clean.is_empty(), "{clean:?}");
     }
 

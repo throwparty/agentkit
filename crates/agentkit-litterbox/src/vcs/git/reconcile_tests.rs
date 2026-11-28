@@ -81,13 +81,35 @@ fn diverged() -> (TempDir, TempDir, GitVcs, crate::vcs::Workspace) {
 }
 
 #[test]
+fn a_marker_file_reports_a_base_when_the_path_is_in_the_base() {
+    let dir = repository();
+    fs::write(dir.path().join("conflicted.txt"), "base\n").expect("write");
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-qm", "base"]);
+    let base = git_output(dir.path(), &["rev-parse", "HEAD"]);
+
+    fs::write(
+        dir.path().join("conflicted.txt"),
+        "<<<<<<< x\nours\n=======\ntheirs\n>>>>>>> y\n",
+    )
+    .expect("write");
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-qm", "conflict"]);
+
+    let conflicts =
+        super::reconcile::marker_conflicts(dir.path(), "HEAD", Some(&base)).expect("scan");
+    assert_eq!(conflicts.len(), 1, "{conflicts:?}");
+    assert!(conflicts[0].base, "the path exists in the recorded base");
+}
+
+#[test]
 fn a_marker_file_with_a_colon_in_its_name_is_reported() {
     let dir = repository();
     fs::write(dir.path().join("a:b.txt"), "<<<<<<< x\nours\n").expect("write");
     git(dir.path(), &["add", "."]);
     git(dir.path(), &["commit", "-qm", "conflict"]);
 
-    let conflicts = super::reconcile::marker_conflicts(dir.path(), "HEAD").expect("scan");
+    let conflicts = super::reconcile::marker_conflicts(dir.path(), "HEAD", None).expect("scan");
     assert_eq!(conflicts.len(), 1, "{conflicts:?}");
     assert_eq!(conflicts[0].path, Path::new("a:b.txt"));
 }

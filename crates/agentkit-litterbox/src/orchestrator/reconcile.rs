@@ -223,8 +223,13 @@ impl<'a> Reconciler<'a> {
                 .vcs
                 .working_copy_tip(&workspace)
                 .map_err(contract_error)?;
+            let base = self
+                .stored
+                .resolution
+                .as_ref()
+                .map(|open| Revision::new(open.synced.clone()));
             self.vcs
-                .conflicts(&working)
+                .conflicts_with_base(&working, base.as_ref())
                 .map_err(contract_error)?
         } else {
             Vec::new()

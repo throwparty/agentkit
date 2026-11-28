@@ -2069,7 +2069,13 @@ impl Sandboxes {
                 .vcs
                 .working_copy_tip(&workspace)
                 .map_err(contract_error)?;
-            self.vcs.conflicts(&working).map_err(contract_error)?
+            let base = stored
+                .resolution
+                .as_ref()
+                .map(|open| Revision::new(open.synced.clone()));
+            self.vcs
+                .conflicts_with_base(&working, base.as_ref())
+                .map_err(contract_error)?
         } else {
             self.vcs.conflicts(&branch).map_err(contract_error)?
         };

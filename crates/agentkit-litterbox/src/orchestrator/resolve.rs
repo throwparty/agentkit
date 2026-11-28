@@ -136,7 +136,7 @@ impl<'a> Resolver<'a> {
         let begun = self.vcs.resolve_begin(&workspace).map_err(contract_error)?;
         let conflicts = self
             .vcs
-            .conflicts(&begun.revision)
+            .conflicts_with_base(&begun.revision, Some(&synced))
             .map_err(contract_error)?;
         if conflicts.is_empty() {
             // Nothing conflicted, so there is nothing to resolve: put the

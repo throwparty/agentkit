@@ -127,6 +127,20 @@ pub trait Vcs: Send + Sync {
     /// The conflicts a revision carries.
     fn conflicts(&self, revision: &Revision) -> Result<Vec<Conflict>, Error>;
 
+    /// The conflicts a revision carries, with `base` as the common ancestor
+    /// the conflict was materialised against.
+    ///
+    /// `Conflict::base` is the availability of a common-ancestor version, not
+    /// the presence of a marker section. A backend that can answer it should
+    /// override this; the default leaves the general query unchanged.
+    fn conflicts_with_base(
+        &self,
+        revision: &Revision,
+        _base: Option<&Revision>,
+    ) -> Result<Vec<Conflict>, Error> {
+        self.conflicts(revision)
+    }
+
     /// The three sides of one conflicted path.
     fn conflict_sides(&self, revision: &Revision, path: &Path) -> Result<ConflictSides, Error>;
 
