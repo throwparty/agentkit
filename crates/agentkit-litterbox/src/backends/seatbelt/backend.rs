@@ -1365,6 +1365,30 @@ mod tests {
             read_visible.exit_code, read_visible.stdout, read_visible.stderr
         );
 
+        // An ordinary write must succeed and reach the host workspace: the
+        // deny layer covers the masked subtree only.
+        let write_visible = backend
+            .exec(
+                &record,
+                &[
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    "printf updated > visible.txt".to_string(),
+                ],
+            )
+            .await
+            .expect("exec");
+        assert_eq!(write_visible.exit_code, 0, "{}", write_visible.stderr);
+        assert_eq!(
+            std::fs::read_to_string(source.path().join("visible.txt")).expect("read"),
+            "updated",
+            "the visible write reached the host workspace"
+        );
+        println!(
+            "write visible.txt: exit={} stdout={:?} stderr={:?}",
+            write_visible.exit_code, write_visible.stdout, write_visible.stderr
+        );
+
         // The entry stays in the listing because metadata on the workspace
         // itself is allowed; only the subtree is denied.
         let listing = backend

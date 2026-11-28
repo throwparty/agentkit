@@ -2,7 +2,7 @@
 
 **Question:** FR-013 says the Seatbelt renderer emits a deny layer after the allow rules, so a `Bound` workspace keeps the metadata entry visible but refuses every access under it, and descendants inherit the refusal. Does that hold on a real macOS host? Does the renderer put the deny after the allow? Is `Copied` unchanged?
 
-**Answer:** Yes on macOS 27.2.1 (arm64). A `Bound` sandbox created through `SeatbeltBackend` with `.jj` masked reads and writes the visible workspace normally. `.jj` appears in `ls -a`, but `cat`, `ls`, `stat` and a redirect into it each exit `1` with `Operation not permitted` (`EPERM`), including from a descendant shell. The host `.jj/secret.txt` is untouched and no write reaches the host. The deny blocks follow every allow block in the rendered profile, and a `Copied` create still works with no deny layer.
+**Answer:** Yes on macOS 27.2.1 (arm64). A `Bound` sandbox created through `SeatbeltBackend` with `.jj` masked reads and writes the visible workspace normally: a write to `visible.txt` through `exec` lands in the host file. `.jj` appears in `ls -a`, but `cat`, `ls`, `stat` and a redirect into it each exit `1` with `Operation not permitted` (`EPERM`), including from a descendant shell. The host `.jj/secret.txt` is untouched and no write reaches the host. The deny blocks follow every allow block in the rendered profile, and a `Copied` create still works with no deny layer.
 
 The implementation landed in `b05a0e69` (backend and policy) and `4117e487` (spec). This evidence closes the host check the task asked for.
 
@@ -25,6 +25,7 @@ From inside the `Bound` sandbox, with `.jj` as the masked path and `.jj/secret.t
 | Operation | Exit | Result |
 |-----------|------|--------|
 | `cat visible.txt` | 0 | `hello` |
+| `printf updated > visible.txt` | 0 | host `visible.txt` contains `updated` |
 | `ls -a` | 0 | `.jj` is present in the listing |
 | `cat .jj/secret.txt` | 1 | `Operation not permitted`, empty stdout |
 | `ls .jj` | 1 | `Operation not permitted` |
