@@ -46,7 +46,9 @@ pub struct SourceStatus {
     /// The shared branch tip.
     pub branch: String,
     /// The sandbox branch tip, when it is addressable.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    ///
+    /// This stays in the payload as `null` when absent: the MCP and CLI status
+    /// shapes must agree for the same recovery case.
     pub sandbox: Option<String>,
     /// The recorded sandbox tip when a resolution began, when one is open.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -298,7 +300,7 @@ pub struct Deletion {
 
 #[cfg(test)]
 mod tests {
-    use super::WorkspaceBlock;
+    use super::{SourceStatus, WorkspaceBlock};
 
     fn block(
         state: &str,
@@ -317,6 +319,29 @@ mod tests {
             resolution: None,
             dropped: None,
         }
+    }
+
+    #[test]
+    fn a_source_status_without_a_sandbox_keeps_the_null_field() {
+        let status = SourceStatus {
+            synced: "s".to_string(),
+            branch: "b".to_string(),
+            sandbox: None,
+            ours: None,
+            state: "resolving".to_string(),
+            reason: None,
+            next: None,
+            resolution: true,
+            conflicts: Vec::new(),
+        };
+
+        let value = serde_json::to_value(&status).expect("json");
+        assert_eq!(
+            value["sandbox"],
+            serde_json::Value::Null,
+            "the field is present as null, not omitted"
+        );
+        assert_eq!(value["state"], "resolving");
     }
 
     #[test]
