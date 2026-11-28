@@ -187,6 +187,15 @@ impl<'a> Reconciler<'a> {
             merge = Merge::Pending;
         }
 
+        // An open resolution is held like a pending merge: tools run and
+        // snapshot, but only `finish` advances the shared branch. Without
+        // this, a clean shared branch would let the next tool adopt content
+        // over the conflict tree.
+        let resolving = self.stored.resolution.is_some();
+        if resolving {
+            merge = Merge::Resolving;
+        }
+
         // The pre-plan reads the workspace only when the result can change the
         // steps: a moved branch, a held merge, or a snapshot.
         let needs_observation =
@@ -209,7 +218,6 @@ impl<'a> Reconciler<'a> {
             merge,
         );
 
-        let resolving = self.stored.resolution.is_some();
         let resolution_conflicts: Vec<String> = if resolving {
             let working = self
                 .vcs
@@ -349,7 +357,7 @@ impl<'a> Reconciler<'a> {
                         .vcs
                         .snapshot(&workspace, &source.path, message)
                         .map_err(contract_error)?;
-                    if state.merge != Merge::Pending {
+                    if state.merge != Merge::Pending && state.merge != Merge::Resolving {
                         match self.vcs.advance(&workspace, &revision, &observed.branch) {
                             Ok(()) => {
                                 self.vcs

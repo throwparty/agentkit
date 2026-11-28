@@ -35,6 +35,9 @@ pub enum Merge {
     Pending,
     /// A native backend holds a conflict in a commit.
     Conflicted,
+    /// An agent-side resolution is open. The workspace holds the conflict
+    /// until `finish` publishes the resolution.
+    Resolving,
 }
 
 /// The three axes at one operation boundary.
@@ -137,7 +140,7 @@ pub fn plan(state: SourceState, action: Action, model: ConflictModel) -> Vec<Ste
     use Step::{AdoptContent, AdoptHistory, Block, Materialise, Proceed, Resolve, Snapshot};
     use Workspace::{Clean, Dirty};
 
-    if state.merge == Merge::Pending {
+    if state.merge == Merge::Pending || state.merge == Merge::Resolving {
         return match action {
             Action::Tool => vec![Proceed],
             Action::Snapshot => vec![Snapshot],
@@ -325,6 +328,24 @@ mod tests {
                 Action::Repair,
                 Blocking
             ),
+            vec![Step::Materialise]
+        );
+    }
+
+    #[test]
+    fn an_open_resolution_never_adopts_the_branch() {
+        let resolving = state(Base::ContentMoved, Workspace::Dirty, Merge::Resolving);
+
+        assert_eq!(
+            plan(resolving, Action::Tool, Blocking),
+            vec![Step::Proceed]
+        );
+        assert_eq!(
+            plan(resolving, Action::Snapshot, Blocking),
+            vec![Step::Snapshot]
+        );
+        assert_eq!(
+            plan(resolving, Action::Repair, Blocking),
             vec![Step::Materialise]
         );
     }
