@@ -34,6 +34,9 @@ pub(crate) struct Payload {
     pub provenance: Provenance,
     pub posture: String,
     pub tag: String,
+    /// Workspace-relative paths hidden from the sandbox.
+    #[serde(default)]
+    pub masked_paths: Vec<PathBuf>,
 }
 
 /// The state a record describes.
@@ -181,6 +184,7 @@ mod tests {
             },
             posture: "denied".to_string(),
             tag: "demo".to_string(),
+            masked_paths: Vec::new(),
         }
     }
 

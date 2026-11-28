@@ -31,6 +31,8 @@ struct State {
     materialised: Vec<(String, String)>,
     snapshots: Vec<(String, String)>,
     deleted_paths: std::collections::BTreeMap<(String, String), Vec<PathBuf>>,
+    changed_paths: std::collections::BTreeMap<(String, String), Vec<PathBuf>>,
+    deleted_calls: Vec<(String, String)>,
     deleted: Vec<String>,
     exposed: Vec<String>,
     prunes: usize,
@@ -50,6 +52,7 @@ struct State {
     synced_set: Vec<String>,
     sandbox_set: Vec<String>,
     failure: Failure,
+    snapshot_fails: bool,
     sides: Option<ConflictSides>,
 
     resolution: String,
@@ -107,6 +110,13 @@ impl TestVcs {
     /// Make `prepare` fail as if the branch is gone.
     pub fn failing_prepare_not_found(mut self) -> Self {
         self.state_mut().failure = Failure::NotFound;
+        self
+    }
+
+    /// Make every `snapshot` fail, so the operation's own result is the only
+    /// successful half.
+    pub fn failing_snapshot(mut self) -> Self {
+        self.state_mut().snapshot_fails = true;
         self
     }
 
@@ -253,6 +263,16 @@ impl TestVcs {
         self
     }
 
+    /// Report that `from` and `to` hold different content at `path`.
+    pub fn with_changed(mut self, from: &str, to: &str, path: &str) -> Self {
+        self.state_mut()
+            .changed_paths
+            .entry((from.to_string(), to.to_string()))
+            .or_default()
+            .push(PathBuf::from(path));
+        self
+    }
+
     /// Configure the tree an observation reports.
     pub fn with_observed_tree(mut self, tree: &str) -> Self {
         self.state_mut().observed_tree = tree.to_string();
@@ -341,6 +361,16 @@ impl TestVcs {
         self.state().sandbox_set.clone()
     }
 
+    /// The `(from, to)` tree pairs passed to `deleted_paths`.
+    pub fn deleted_calls(&self) -> Vec<(String, String)> {
+        self.state().deleted_calls.clone()
+    }
+
+    /// Move the shared branch after the double has been built.
+    pub fn move_tip(&self, revision: &str) {
+        self.state().tip = revision.to_string();
+    }
+
     fn state(&self) -> std::sync::MutexGuard<'_, State> {
         self.state.lock().expect("TestVcs mutex")
     }
@@ -417,7 +447,15 @@ impl Vcs for TestVcs {
                 std::fs::create_dir_all(&root)?;
                 Ok(root)
             }
-            None => Err(unsupported("bound_root")),
+            None => {
+                // Resolution tests use a bound workspace. The path is opaque to
+                // the double; it only has to exist for the observation step.
+                let root = std::env::temp_dir()
+                    .join("litterbox-test-bound")
+                    .join(workspace.branch().as_str().replace('/', "-"));
+                std::fs::create_dir_all(&root)?;
+                Ok(root)
+            }
         }
     }
 
@@ -438,7 +476,11 @@ impl Vcs for TestVcs {
         Ok(())
     }
 
-    fn snapshot_filter(&self, _rules_root: &Path) -> Result<Arc<dyn SnapshotSelector>, Error> {
+    fn snapshot_filter(
+        &self,
+        _workspace: &Workspace,
+        _rules_root: &Path,
+    ) -> Result<Arc<dyn SnapshotSelector>, Error> {
         Ok(Arc::new(SelectAll))
     }
 
@@ -452,9 +494,17 @@ impl Vcs for TestVcs {
         _staging: &Path,
         message: &str,
     ) -> Result<Revision, Error> {
-        self.state()
+        let mut state = self.state();
+        state
             .snapshots
             .push((workspace.branch().as_str().to_string(), message.to_string()));
+        if state.snapshot_fails {
+            return Err(Error::Backend {
+                operation: "snapshot".to_string(),
+                message: "the test backend refused the snapshot".to_string(),
+            });
+        }
+        state.sandbox_tip = "snapshot".to_string();
         Ok(Revision::new("snapshot"))
     }
 
@@ -534,7 +584,12 @@ impl Vcs for TestVcs {
         Ok(state.conflicts.clone())
     }
 
-    fn conflict_sides(&self, _revision: &Revision, _path: &Path) -> Result<ConflictSides, Error> {
+    fn conflict_sides(
+        &self,
+        _revision: &Revision,
+        _path: &Path,
+        _base: Option<&Revision>,
+    ) -> Result<ConflictSides, Error> {
         Ok(self.sides())
     }
 
@@ -571,6 +626,25 @@ impl Vcs for TestVcs {
         })
     }
 
+    fn restore_preflight(
+        &self,
+        _workspace: &Workspace,
+        _revision: &Revision,
+    ) -> Result<(), Error> {
+        let state = self.state();
+        if state
+            .conflicts_by_revision
+            .get(&state.tip)
+            .is_some_and(|conflicts| !conflicts.is_empty())
+        {
+            return Err(Error::Backend {
+                operation: "restore".to_string(),
+                message: "the shared commit is conflicted; resolve it first".to_string(),
+            });
+        }
+        Ok(())
+    }
+
     fn export(&self) -> Result<(), Error> {
         Ok(())
     }
@@ -604,19 +678,33 @@ impl Vcs for TestVcs {
         &self,
         _workspace: &Workspace,
         revision: &Revision,
-        _expected: &Revision,
+        expected: &Revision,
     ) -> Result<(), Error> {
-        self.state().advanced.push(revision.as_str().to_string());
+        let mut state = self.state();
+        if expected.as_str() != state.tip {
+            return Err(Error::Raced);
+        }
+        state.advanced.push(revision.as_str().to_string());
         Ok(())
     }
 
     fn deleted_paths(&self, from: &TreeId, to: &TreeId) -> Result<Vec<PathBuf>, Error> {
+        let mut state = self.state();
+        let key = (from.as_str().to_string(), to.as_str().to_string());
+        state.deleted_calls.push(key.clone());
+        Ok(state.deleted_paths.get(&key).cloned().unwrap_or_default())
+    }
+
+    fn changed_paths(&self, from: &TreeId, to: &TreeId) -> Result<Vec<PathBuf>, Error> {
         let state = self.state();
-        Ok(state
-            .deleted_paths
-            .get(&(from.as_str().to_string(), to.as_str().to_string()))
-            .cloned()
-            .unwrap_or_default())
+        let key = (from.as_str().to_string(), to.as_str().to_string());
+        let mut paths = state.deleted_paths.get(&key).cloned().unwrap_or_default();
+        if let Some(changed) = state.changed_paths.get(&key) {
+            paths.extend(changed.iter().cloned());
+        }
+        paths.sort();
+        paths.dedup();
+        Ok(paths)
     }
 
     fn observe(&self, _workspace: &Workspace, _staging: &Path) -> Result<TreeId, Error> {
@@ -644,6 +732,8 @@ impl Vcs for TestVcs {
         Ok(Report {
             base: Revision::new(state.synced.clone()),
             branch: Revision::new(state.tip.clone()),
+            state: String::new(),
+            ours: None,
             sandbox: (!state.sandbox_absent).then(|| Revision::new(state.sandbox_tip.clone())),
             conflicts: Vec::new(),
             worktree: None,

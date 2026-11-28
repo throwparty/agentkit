@@ -285,6 +285,7 @@ fn conflict_sides_read_each_side_of_a_merge() {
         .conflict_sides(
             &Revision::new(merge.to_string()),
             std::path::Path::new("greeting.txt"),
+            None,
         )
         .expect("sides");
 

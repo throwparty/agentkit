@@ -81,6 +81,11 @@ pub enum GitError {
         #[source]
         source: git2::Error,
     },
+    #[error("Git fetch failed: {source}")]
+    Fetch {
+        #[source]
+        source: git2::Error,
+    },
 }
 
 impl From<GitError> for SandboxError {

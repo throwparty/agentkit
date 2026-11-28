@@ -147,13 +147,17 @@ pub(crate) fn begin(
 pub(crate) fn marker_conflicts(
     repo: &Path,
     revision: &str,
+    base: Option<&str>,
 ) -> Result<Vec<crate::vcs::Conflict>, VcsError> {
-    let output = git(
+    // List the paths with markers first, NUL-delimited so a colon in a path
+    // is not a field separator, then scan each file's content through `show`.
+    let listed = git(
         repo,
         &[
             "grep",
             "--no-color",
-            "-n",
+            "-z",
+            "-l",
             "-I",
             "-E",
             r"^(<<<<<<<|\|\|\|\|\|\|\|)",
@@ -162,35 +166,43 @@ pub(crate) fn marker_conflicts(
             ".",
         ],
     )?;
-    if !output.status.success() && output.status.code() != Some(1) {
-        return Err(failed("scan the revision for conflict markers", &output));
+    if !listed.status.success() && listed.status.code() != Some(1) {
+        return Err(failed("scan the revision for conflict markers", &listed));
     }
-    let stdout = String::from_utf8_lossy(&output.stdout);
+
     let mut found: Vec<crate::vcs::Conflict> = Vec::new();
-    for line in stdout.lines() {
-        let mut parts = line.splitn(4, ':');
-        let (_, path, _, content) = (parts.next(), parts.next(), parts.next(), parts.next());
-        let (Some(path), Some(content)) = (path, content) else {
+    for record in listed.stdout.split(|byte| *byte == 0) {
+        if record.is_empty() {
+            continue;
+        }
+        let text = String::from_utf8_lossy(record);
+        let Some((_, path)) = text.split_once(':') else {
             continue;
         };
-        let entry = found
-            .iter_mut()
-            .find(|conflict| conflict.path == Path::new(path));
-        if content.starts_with("<<<<<<<") {
-            match entry {
-                Some(conflict) => conflict.hunks += 1,
-                None => found.push(crate::vcs::Conflict {
-                    path: PathBuf::from(path),
-                    hunks: 1,
-                    sides: 2,
-                    base: false,
-                }),
-            }
-        } else if content.starts_with("|||||||")
-            && let Some(conflict) = entry
-        {
-            conflict.base = true;
+        let shown = match git(repo, &["show", &format!("{revision}:{path}")]) {
+            Ok(output) if output.status.success() => output,
+            _ => continue,
+        };
+        let content = String::from_utf8_lossy(&shown.stdout);
+        let hunks = content
+            .lines()
+            .filter(|line| line.starts_with("<<<<<<<"))
+            .count();
+        if hunks == 0 {
+            continue;
         }
+        // The base is available when the path exists in the tree the conflict
+        // was built against. A diff3 marker is a presentation choice.
+        let base = base.is_some_and(|base| {
+            git(repo, &["cat-file", "-e", &format!("{base}:{path}")])
+                .is_ok_and(|output| output.status.success())
+        });
+        found.push(crate::vcs::Conflict {
+            path: PathBuf::from(path),
+            hunks,
+            sides: 2,
+            base,
+        });
     }
     Ok(found)
 }
@@ -242,6 +254,8 @@ pub(crate) fn report(
     Ok(Report {
         base: synced.clone(),
         branch: branch.clone(),
+        state: String::new(),
+        ours: None,
         sandbox: Some(sandbox.clone()),
         conflicts,
         worktree,
@@ -305,23 +319,56 @@ fn stage_in(
     branch: &Revision,
     sandbox: &Revision,
 ) -> Result<Staged, VcsError> {
+    let merge_base = format!("--merge-base={}", synced.as_str());
     let merged = git(
         path,
         &[
-            "read-tree",
-            "-m",
-            synced.as_str(),
+            "merge-tree",
+            "--write-tree",
+            &merge_base,
             branch.as_str(),
             sandbox.as_str(),
         ],
     )?;
-    if !merged.status.success() {
-        return Err(failed("merge the sandbox branch", &merged));
-    }
+    match merged.status.code() {
+        // A clean content merge: write its tree into the worktree. `read-tree
+        // -m` below only knows tree/index merges and would leave stages for
+        // edits that merge cleanly.
+        Some(0) => {
+            let tree = String::from_utf8_lossy(&merged.stdout)
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            let written = git(path, &["read-tree", "-u", "--reset", &tree])?;
+            if !written.status.success() {
+                return Err(failed("write the merged tree", &written));
+            }
+        }
+        // Genuine conflicts: populate index stages and the conflicted working
+        // tree so the user can resolve them.
+        Some(1) => {
+            let merged = git(
+                path,
+                &[
+                    "read-tree",
+                    "-m",
+                    synced.as_str(),
+                    branch.as_str(),
+                    sandbox.as_str(),
+                ],
+            )?;
+            if !merged.status.success() {
+                return Err(failed("merge the sandbox branch", &merged));
+            }
 
-    let checked_out = git(path, &["checkout", "--conflict=merge", "--", "."])?;
-    if !checked_out.status.success() {
-        return Err(failed("write the conflicted working tree", &checked_out));
+            let checked_out = git(path, &["checkout", "--conflict=merge", "--", "."])?;
+            if !checked_out.status.success() {
+                return Err(failed("write the conflicted working tree", &checked_out));
+            }
+        }
+        _ => return Err(failed("merge the sandbox branch", &merged)),
     }
 
     let git_dir = git(path, &["rev-parse", "--git-dir"])?;
@@ -412,6 +459,34 @@ pub(crate) fn finish(
         return Err(failed("read the merge commit", &head));
     }
     let head = text(&head);
+
+    // `status --porcelain` can be empty while MERGE_HEAD is still present, for
+    // example when the chosen tree equals the branch's original tree. Reject
+    // that, and require a real merge commit whose first parent is the branch
+    // and whose second is the sandbox revision captured at staging.
+    let merge_head = git(path, &["rev-parse", "-q", "--verify", "MERGE_HEAD"])?;
+    if merge_head.status.success() {
+        return Err(VcsError::Backend {
+            operation: "finish the merge".to_string(),
+            message: "the staging worktree still has an unfinished merge".to_string(),
+        });
+    }
+    let first_parent = git(path, &["rev-parse", "HEAD^1"])?;
+    if !first_parent.status.success() || text(&first_parent) != branch_tip.as_str() {
+        return Err(VcsError::Backend {
+            operation: "finish the merge".to_string(),
+            message: format!(
+                "the staged commit's first parent is not the shared branch tip {branch_tip}"
+            ),
+        });
+    }
+    let second_parent = git(path, &["rev-parse", "HEAD^2"])?;
+    if !second_parent.status.success() {
+        return Err(VcsError::Backend {
+            operation: "finish the merge".to_string(),
+            message: "the staged commit does not contain the sandbox revision".to_string(),
+        });
+    }
 
     if head != branch_tip.as_str() {
         let contains = git(

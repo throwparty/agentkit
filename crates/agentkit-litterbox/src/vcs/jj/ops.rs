@@ -60,6 +60,27 @@ pub fn git(cwd: &Path, args: &[&str]) -> Result<String, Error> {
     Ok(text(&output))
 }
 
+/// Move a ref only if it still points at `expected`.
+pub fn git_update_ref(
+    cwd: &Path,
+    reference: &str,
+    new: &str,
+    expected: &str,
+) -> Result<(), Error> {
+    let output = run("git", cwd, &["update-ref", reference, new, expected])?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.contains("cannot lock ref") || stderr.contains("is at") {
+        return Err(Error::Raced);
+    }
+    Err(Error::Backend {
+        operation: format!("git update-ref {reference}"),
+        message: stderr.trim().to_string(),
+    })
+}
+
 /// The commit id a revset resolves to.
 pub fn commit_id(cwd: &Path, revset: &str) -> Result<String, Error> {
     jj(cwd, &["log", "--no-graph", "-r", revset, "-T", "commit_id"])

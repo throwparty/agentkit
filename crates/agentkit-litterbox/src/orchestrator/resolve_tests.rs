@@ -87,6 +87,40 @@ async fn begin_records_the_resolution_and_a_second_begin_is_refused() {
 }
 
 #[tokio::test]
+async fn begin_snapshots_the_workspace_before_reading_the_sandbox_side() {
+    let dir = TempDir::new().expect("tempdir");
+    let stored = stored();
+    let selected = selected();
+    let test = Arc::new(
+        TestVcs::new()
+            .with_observed_tree("edited")
+            .with_conflicts_for("resolution-revision", &["file.txt"]),
+    );
+    let vcs: Arc<dyn Vcs> = test.clone();
+
+    Resolver::new(&vcs, &stored, &selected, dir.path())
+        .begin()
+        .await
+        .expect("begin");
+
+    assert_eq!(
+        test.snapshots().len(),
+        1,
+        "the workspace is recorded first"
+    );
+    let reloaded = current(
+        metadata_store::load_sandbox_at(dir.path(), "demo")
+            .expect("load")
+            .expect("present"),
+    );
+    assert_eq!(
+        reloaded.resolution.expect("recorded").ours,
+        "snapshot",
+        "ours is the snapshot, not the pre-edit tip"
+    );
+}
+
+#[tokio::test]
 async fn begin_fails_on_a_shared_branch_tip_that_already_conflicts() {
     let dir = TempDir::new().expect("tempdir");
     let selected = selected();
@@ -196,6 +230,35 @@ async fn finish_fails_while_conflicts_remain_and_clears_when_they_are_gone() {
 }
 
 #[tokio::test]
+async fn finish_refuses_when_the_shared_tip_moved_after_begin() {
+    let dir = TempDir::new().expect("tempdir");
+    let selected = selected();
+    let test = Arc::new(
+        TestVcs::new()
+            .with_tip("branch-tip")
+            .with_sandbox_tip("sandbox-tip")
+            .with_synced("synced-revision")
+            .with_conflicts_for("resolution-revision", &["file.txt"]),
+    );
+    let vcs: Arc<dyn Vcs> = test.clone();
+    let stored = stored();
+    let resolver = Resolver::new(&vcs, &stored, &selected, dir.path());
+    resolver.begin().await.expect("begin");
+    test.move_tip("moved");
+    test.clear_conflicts("resolution-revision");
+
+    let error = resolver.finish().expect_err("the tip moved");
+    assert!(
+        error.to_string().contains("shared branch moved"),
+        "{error}"
+    );
+    assert!(
+        test.advanced().is_empty(),
+        "nothing is written over the newer tip"
+    );
+}
+
+#[tokio::test]
 async fn finish_reports_a_path_the_resolution_dropped() {
     let dir = TempDir::new().expect("tempdir");
     let selected = selected();
@@ -208,7 +271,8 @@ async fn finish_reports_a_path_the_resolution_dropped() {
             .with_tree("resolution-revision", "resolved-tree")
             .with_tree("branch-tip", "theirs-tree")
             .with_tree("sandbox-tip", "ours-tree")
-            .with_deleted("ours-tree", "resolved-tree", "ours-only.txt"),
+            .with_deleted("ours-tree", "resolved-tree", "ours-only.txt")
+            .with_changed("ours-tree", "resolved-tree", "ours-edited.txt"),
     );
     let vcs: Arc<dyn Vcs> = test.clone();
 
@@ -220,8 +284,11 @@ async fn finish_reports_a_path_the_resolution_dropped() {
 
     assert_eq!(
         finished.dropped_from_ours,
-        vec![std::path::PathBuf::from("ours-only.txt")],
-        "the report names what the resolution lost"
+        vec![
+            std::path::PathBuf::from("ours-edited.txt"),
+            std::path::PathBuf::from("ours-only.txt"),
+        ],
+        "the report names what the resolution changed or lost"
     );
     assert!(
         finished.dropped_from_theirs.is_empty(),

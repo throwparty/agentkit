@@ -39,6 +39,17 @@ pub trait Vcs: Send + Sync {
     /// bind returns the neutral unsupported error.
     fn bound_root(&self, workspace: &Workspace) -> Result<PathBuf, Error>;
 
+    /// Ensure the host directory a bound workspace lives in exists at
+    /// `revision`.
+    ///
+    /// A repair can be asked to reuse a workspace whose directory was removed.
+    /// A backend that owns such a directory recreates it here rather than
+    /// handing a missing path to compute. Backends that bind nothing do
+    /// nothing.
+    fn restore_workspace(&self, _workspace: &Workspace, _revision: &Revision) -> Result<(), Error> {
+        Ok(())
+    }
+
     /// The tree identity of the workspace's branch tip.
     fn identity(&self, workspace: &Workspace) -> Result<TreeId, Error>;
 
@@ -50,8 +61,13 @@ pub trait Vcs: Send + Sync {
         into: &Path,
     ) -> Result<(), Error>;
 
-    /// The transfer predicate for a snapshot, read from `rules_root`.
-    fn snapshot_filter(&self, rules_root: &Path) -> Result<Arc<dyn SnapshotSelector>, Error>;
+    /// The transfer predicate for a snapshot of `workspace`, read from
+    /// `rules_root`.
+    fn snapshot_filter(
+        &self,
+        workspace: &Workspace,
+        rules_root: &Path,
+    ) -> Result<Arc<dyn SnapshotSelector>, Error>;
 
     /// The selector that carries a snapshot's ignore files.
     fn ignore_files(&self) -> Arc<dyn SnapshotSelector>;
@@ -122,8 +138,31 @@ pub trait Vcs: Send + Sync {
     /// The conflicts a revision carries.
     fn conflicts(&self, revision: &Revision) -> Result<Vec<Conflict>, Error>;
 
+    /// The conflicts a revision carries, with `base` as the common ancestor
+    /// the conflict was materialised against.
+    ///
+    /// `Conflict::base` is the availability of a common-ancestor version, not
+    /// the presence of a marker section. A backend that can answer it should
+    /// override this; the default leaves the general query unchanged.
+    fn conflicts_with_base(
+        &self,
+        revision: &Revision,
+        _base: Option<&Revision>,
+    ) -> Result<Vec<Conflict>, Error> {
+        self.conflicts(revision)
+    }
+
     /// The three sides of one conflicted path.
-    fn conflict_sides(&self, revision: &Revision, path: &Path) -> Result<ConflictSides, Error>;
+    ///
+    /// `base` is the common ancestor the conflict was materialised against.
+    /// A backend that can address it reads that revision; the other may infer
+    /// it from the revision's parents.
+    fn conflict_sides(
+        &self,
+        revision: &Revision,
+        path: &Path,
+        base: Option<&Revision>,
+    ) -> Result<ConflictSides, Error>;
 
     /// Mark the given paths resolved in `revision`.
     fn resolve(&self, revision: &Revision, paths: &[PathBuf]) -> Result<Revision, Error>;
@@ -136,6 +175,19 @@ pub trait Vcs: Send + Sync {
 
     /// Restore the shared branch to the tree of `revision` by adding a commit.
     fn restore(&self, workspace: &Workspace, revision: &Revision) -> Result<Restored, Error>;
+
+    /// Refuse a restore before the orchestrator touches the workspace.
+    ///
+    /// A backend whose restore would be rejected after the workspace was
+    /// replaced reports the same refusal here, so `--discard-work` cannot
+    /// destroy edits before the operation fails.
+    fn restore_preflight(
+        &self,
+        _workspace: &Workspace,
+        _revision: &Revision,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
 
     /// Publish the backend's state to its external form, if it has one.
     fn export(&self) -> Result<(), Error>;
@@ -154,6 +206,10 @@ pub trait Vcs: Send + Sync {
     }
 
     /// The revision at the sandbox branch tip.
+    ///
+    /// This is the saved baseline: it must not move because the working copy
+    /// was read. A backend whose sandbox branch is the working copy answers
+    /// the same revision as [`Self::working_copy_tip`].
     fn sandbox_tip(&self, _workspace: &Workspace) -> Result<Revision, Error> {
         Err(not_implemented("read the sandbox branch"))
     }
@@ -161,6 +217,15 @@ pub trait Vcs: Send + Sync {
     /// Move the sandbox branch tip.
     fn set_sandbox_tip(&self, _workspace: &Workspace, _revision: &Revision) -> Result<(), Error> {
         Err(not_implemented("write the sandbox branch"))
+    }
+
+    /// The revision the workspace's mutable working copy currently holds.
+    ///
+    /// Resolution and conflict observation read this, not the saved baseline:
+    /// their work lives in the working copy until it is published. A backend
+    /// whose sandbox branch is the working copy has no separate revision.
+    fn working_copy_tip(&self, workspace: &Workspace) -> Result<Revision, Error> {
+        self.sandbox_tip(workspace)
     }
 
     /// Move the shared branch tip without moving the sandbox branch.
@@ -179,6 +244,16 @@ pub trait Vcs: Send + Sync {
     /// The paths present in `from` and absent from `to`.
     fn deleted_paths(&self, _from: &TreeId, _to: &TreeId) -> Result<Vec<PathBuf>, Error> {
         Err(not_implemented("compare trees"))
+    }
+
+    /// The paths whose content differs between `from` and `to`, including
+    /// deletions.
+    ///
+    /// A resolution report uses this, not [`Self::deleted_paths`]: keeping one
+    /// side of a conflicted file loses the other side's contribution even
+    /// though no path disappeared.
+    fn changed_paths(&self, from: &TreeId, to: &TreeId) -> Result<Vec<PathBuf>, Error> {
+        self.deleted_paths(from, to)
     }
 
     /// The tree a snapshot of `staging` would commit, without committing it.
@@ -234,9 +309,9 @@ fn not_implemented(operation: &str) -> Error {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::capabilities::{ConflictModel, ExportSupport};
     use super::super::types::BranchName;
+    use super::*;
     use crate::sandbox::contract::BindingSupport;
 
     struct Stub;
@@ -288,7 +363,11 @@ mod tests {
             unsupported("materialise")
         }
 
-        fn snapshot_filter(&self, _rules_root: &Path) -> Result<Arc<dyn SnapshotSelector>, Error> {
+        fn snapshot_filter(
+            &self,
+            _workspace: &Workspace,
+            _rules_root: &Path,
+        ) -> Result<Arc<dyn SnapshotSelector>, Error> {
             unsupported("snapshot_filter")
         }
 
@@ -358,6 +437,7 @@ mod tests {
             &self,
             _revision: &Revision,
             _path: &Path,
+            _base: Option<&Revision>,
         ) -> Result<ConflictSides, Error> {
             unsupported("conflict_sides")
         }

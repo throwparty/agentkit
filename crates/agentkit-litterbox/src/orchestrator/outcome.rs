@@ -46,7 +46,9 @@ pub struct SourceStatus {
     /// The shared branch tip.
     pub branch: String,
     /// The sandbox branch tip, when it is addressable.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    ///
+    /// This stays in the payload as `null` when absent: the MCP and CLI status
+    /// shapes must agree for the same recovery case.
     pub sandbox: Option<String>,
     /// The recorded sandbox tip when a resolution began, when one is open.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -70,8 +72,8 @@ pub struct SourceStatus {
 pub struct ResolutionView {
     /// The revision both sides agreed on when resolution began.
     pub synced: String,
-    /// The conflicted paths the working copy still carries.
-    pub conflicts: Vec<String>,
+    /// The conflicted paths and their counts the working copy still carries.
+    pub conflicts: Vec<ConflictView>,
     /// What the agent does next.
     pub next: String,
 }
@@ -98,6 +100,9 @@ pub struct WorkspaceBlock {
     /// The resolution the operation observed, when one is open.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resolution: Option<ResolutionView>,
+    /// The sandbox tip adoption dropped, when it dropped one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dropped: Option<String>,
 }
 
 /// One operation's result, plus the repair it performed on the way.
@@ -108,6 +113,7 @@ pub struct Performed<T> {
     /// The repair, when the operation had to recreate compute.
     pub recovery: Option<Recovery>,
     reconciliation: Option<Reconciled>,
+    recording_error: Option<String>,
 }
 
 impl<T> Performed<T> {
@@ -117,6 +123,7 @@ impl<T> Performed<T> {
             value,
             recovery: None,
             reconciliation: None,
+            recording_error: None,
         }
     }
 
@@ -126,6 +133,7 @@ impl<T> Performed<T> {
             value,
             recovery: Some(recovery),
             reconciliation: None,
+            recording_error: None,
         }
     }
 
@@ -138,14 +146,40 @@ impl<T> Performed<T> {
                 value: self.value,
                 recovery,
                 reconciliation: self.reconciliation,
+                recording_error: self.recording_error,
             }
         }
     }
 
-    /// Attach the reconciliation the operation performed.
+    /// Keep the result and attach the reconciliation the operation performed.
     pub(crate) fn with_reconciliation(mut self, reconciled: Reconciled) -> Self {
         self.reconciliation = Some(reconciled);
         self
+    }
+
+    /// Keep the result and report separately why it could not be recorded.
+    ///
+    /// The operation itself succeeded; only the snapshot that should make it
+    /// durable failed. Callers must not treat this as a failed operation.
+    pub(crate) fn with_recording_error(mut self, error: String) -> Self {
+        self.recording_error = Some(error);
+        self
+    }
+
+    /// Why the operation's result could not be recorded, when it could not.
+    pub fn recording_error(&self) -> Option<&str> {
+        self.recording_error.as_deref()
+    }
+
+    /// Map the operation's value while preserving the recovery and the
+    /// reconciliation the operation reported.
+    pub(crate) fn map<U>(self, map: impl FnOnce(T) -> U) -> Performed<U> {
+        Performed {
+            value: map(self.value),
+            recovery: self.recovery,
+            reconciliation: self.reconciliation,
+            recording_error: self.recording_error,
+        }
     }
 
     /// The source state after the reconciliation, when one ran.
@@ -266,7 +300,7 @@ pub struct Deletion {
 
 #[cfg(test)]
 mod tests {
-    use super::WorkspaceBlock;
+    use super::{SourceStatus, WorkspaceBlock};
 
     fn block(
         state: &str,
@@ -283,7 +317,31 @@ mod tests {
             conflicts: conflicts.iter().map(|path| path.to_string()).collect(),
             next: next.map(str::to_string),
             resolution: None,
+            dropped: None,
         }
+    }
+
+    #[test]
+    fn a_source_status_without_a_sandbox_keeps_the_null_field() {
+        let status = SourceStatus {
+            synced: "s".to_string(),
+            branch: "b".to_string(),
+            sandbox: None,
+            ours: None,
+            state: "resolving".to_string(),
+            reason: None,
+            next: None,
+            resolution: true,
+            conflicts: Vec::new(),
+        };
+
+        let value = serde_json::to_value(&status).expect("json");
+        assert_eq!(
+            value["sandbox"],
+            serde_json::Value::Null,
+            "the field is present as null, not omitted"
+        );
+        assert_eq!(value["state"], "resolving");
     }
 
     #[test]
@@ -305,5 +363,13 @@ mod tests {
         let text = toml::to_string(&block("clean", None, &[], None)).expect("toml");
         assert!(!text.contains("reason"), "{text}");
         assert!(!text.contains("next"), "{text}");
+    }
+
+    #[test]
+    fn a_dropped_tip_is_carried_in_the_block() {
+        let mut block = block("clean", None, &[], None);
+        block.dropped = Some("abcd".to_string());
+        let text = toml::to_string(&block).expect("toml");
+        assert!(text.contains("dropped = \"abcd\""), "{text}");
     }
 }

@@ -305,7 +305,7 @@ fn handle_remote(backend: Option<String>, name: String) -> ExitCode {
         Ok(config) => config,
         Err(error) => return report(error),
     };
-    let sandboxes = match project(config) {
+    let sandboxes = match crate::compose::open_existing(config).map_err(Error::from) {
         Ok(sandboxes) => sandboxes,
         Err(error) => return report(error),
     };
@@ -349,6 +349,10 @@ async fn handle_status(backend: Option<String>, name: String, json: bool) -> Exi
     println!("sandbox   {name}");
     println!("base      {}", divergence.base);
     println!("branch    {}", divergence.branch);
+    println!("state     {}", divergence.state);
+    if let Some(ours) = &divergence.ours {
+        println!("ours      {ours}");
+    }
     match &divergence.sandbox {
         Some(sandbox) => println!("sandbox   {sandbox}"),
         None => println!("sandbox   absent"),
@@ -489,6 +493,7 @@ async fn handle_restore(
             "target": result.target,
             "revision": result.revision,
             "created": result.created,
+            "workspace": result.workspace,
         });
         match serde_json::to_string_pretty(&value) {
             Ok(text) => println!("{text}"),
@@ -505,6 +510,7 @@ async fn handle_restore(
         println!("commit   none (the tree already matched)");
         println!("head     {}", result.revision);
     }
+    println!("workspace {}", result.workspace);
     ExitCode::from(0)
 }
 

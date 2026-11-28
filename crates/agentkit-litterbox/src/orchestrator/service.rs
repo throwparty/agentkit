@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -46,6 +46,8 @@ pub struct Sandboxes {
     project_slug: String,
     records_dir: std::path::PathBuf,
     fixed: Option<Selected>,
+    /// Where materialised workspaces are staged, when a test overrides it.
+    staging_root: Option<PathBuf>,
 }
 
 /// What a project's sandboxes currently look like.
@@ -94,6 +96,7 @@ impl Sandboxes {
             project_slug,
             records_dir,
             fixed: None,
+            staging_root: None,
         })
     }
 
@@ -128,6 +131,7 @@ impl Sandboxes {
             project_slug,
             records_dir,
             fixed: Some(fixed),
+            staging_root: None,
         }
     }
 
@@ -135,6 +139,13 @@ impl Sandboxes {
     #[cfg(test)]
     pub fn with_binding(mut self, binding: Option<WorkspaceBinding>) -> Self {
         self.binding = binding;
+        self
+    }
+
+    /// Put staged workspaces under `root` instead of the data directory.
+    #[cfg(test)]
+    pub fn with_staging_root(mut self, root: PathBuf) -> Self {
+        self.staging_root = Some(root);
         self
     }
 
@@ -377,6 +388,15 @@ impl Sandboxes {
     /// Repair a missing sandbox through the backend's reuse mode.
     async fn repair(&self, name: &str, selected: &Selected) -> Result<Recovery, Error> {
         let _lock = lock::acquire(&self.records_dir, name).await?;
+        self.repair_locked(name, selected).await
+    }
+
+    /// The repair body, for callers that already hold the sandbox lock.
+    async fn repair_locked(
+        &self,
+        name: &str,
+        selected: &Selected,
+    ) -> Result<Recovery, Error> {
         let stored = self.stored(name)?;
         let name = stored.sandbox.name.clone();
 
@@ -426,11 +446,32 @@ impl Sandboxes {
                     });
                 }
                 match self.vcs.tip(&workspace) {
-                    Ok(revision) => (
-                        revision,
-                        "shared".to_string(),
-                        Some(self.shared_fallback_note(&stored)),
-                    ),
+                    Ok(revision) => {
+                        if self
+                            .vcs
+                            .conflicts(&revision)
+                            .map_err(contract_error)?
+                            .is_empty()
+                        {
+                            (
+                                revision,
+                                "shared".to_string(),
+                                Some(self.shared_fallback_note(&stored)),
+                            )
+                        } else {
+                            let synced =
+                                self.vcs.synced(&workspace).map_err(contract_error)?;
+                            (
+                                synced,
+                                "shared".to_string(),
+                                Some(
+                                    "the shared branch is conflicted; materialised from the last \
+                                     synced revision. Resolve the shared branch before adopting it."
+                                        .to_string(),
+                                ),
+                            )
+                        }
+                    }
                     Err(VcsError::NotFound { .. }) => {
                         return Err(Error::Unavailable {
                             backend: selected.name().to_string(),
@@ -451,10 +492,17 @@ impl Sandboxes {
 
         // The record decides how the workspace is presented, so a
         // configuration change affects only new sandboxes.
+        //
+        // A bound backend's host directory can be gone while the branch and
+        // record survive; recreate it at the chosen revision before compute is
+        // asked to bind it.
+        self.vcs
+            .restore_workspace(&workspace, &materialised)
+            .map_err(contract_error)?;
         let masked_paths = self.vcs.masked_paths(&workspace);
         let staged = match binding {
             WorkspaceBinding::Copied => {
-                let staged = TempDir::new().map_err(SandboxError::Io)?;
+                let staged = self.staging_dir("repair-")?;
                 self.vcs
                     .materialise(&workspace, &materialised, staged.path())
                     .map_err(contract_error)?;
@@ -527,6 +575,16 @@ impl Sandboxes {
         name: &str,
         policy: PausedPolicy,
     ) -> Result<Option<Recovery>, Error> {
+        let _lock = lock::acquire(&self.records_dir, name).await?;
+        self.ensure_live_locked(name, policy).await
+    }
+
+    /// The liveness check, for callers that already hold the sandbox lock.
+    async fn ensure_live_locked(
+        &self,
+        name: &str,
+        policy: PausedPolicy,
+    ) -> Result<Option<Recovery>, Error> {
         let stored = self.stored(name)?;
         let selected = self.select_for(&stored.sandbox, "use the sandbox").await?;
         let inspection = selected.core().inspect(&stored.sandbox).await?;
@@ -540,7 +598,7 @@ impl Sandboxes {
             },
             SandboxStatus::Missing => {
                 let canonical = stored.sandbox.name.clone();
-                Ok(Some(self.repair(&canonical, &selected).await?))
+                Ok(Some(self.repair_locked(&canonical, &selected).await?))
             }
             SandboxStatus::Unknown => Err(Error::Unavailable {
                 backend: selected.name().to_string(),
@@ -581,6 +639,7 @@ impl Sandboxes {
 
         match metadata_store::load_sandbox_at(&self.records_dir, &name)? {
             Some(LoadedSandbox::Current(stored)) => {
+                self.ensure_tool(&stored)?;
                 let workspace = VcsWorkspace::from_branch(&stored.branch_name);
                 let staging = self.vcs.staging(&workspace);
                 let selected = match self.select_for(&stored.sandbox, "delete the sandbox").await {
@@ -779,11 +838,14 @@ impl Sandboxes {
         name: &str,
         command: &[String],
     ) -> Result<Performed<Execution>, Error> {
-        let recovery = self.ensure_live(name, PausedPolicy::Refuse).await?;
+        let _lock = lock::acquire(&self.records_dir, name).await?;
+        let recovery = self
+            .ensure_live_locked(name, PausedPolicy::Refuse)
+            .await?;
         let stored = self.stored(name)?;
         let selected = self.select_for(&stored.sandbox, "run a command").await?;
         let reconciler = Reconciler::new(&self.vcs, &stored, &selected, &self.records_dir);
-        reconciler.before(Action::Tool).await?;
+        let before = reconciler.before(Action::Tool).await?;
 
         let result = selected.core().exec(&stored.sandbox, command).await;
         match &result {
@@ -795,12 +857,29 @@ impl Sandboxes {
             }
         }
         let value = result?;
-        let reconciled = reconciler
-            .after("litterbox: snapshot after a command")
-            .await?;
-        Ok(Performed::fresh(value)
-            .or_recovery(recovery)
-            .with_reconciliation(reconciled))
+        let dropped = before.dropped;
+        match reconciler.after("litterbox: snapshot after a command").await {
+            Ok(mut reconciled) => {
+                if reconciled.dropped.is_none() {
+                    reconciled.dropped = dropped;
+                }
+                Ok(Performed::fresh(value)
+                    .or_recovery(recovery)
+                    .with_reconciliation(reconciled))
+            }
+            Err(error) => {
+                // The command already ran. Failing here would discard its
+                // output and invite the caller to run it a second time.
+                tracing::warn!(
+                    sandbox = %name,
+                    %error,
+                    "the command finished but its snapshot failed"
+                );
+                Ok(Performed::fresh(value)
+                    .or_recovery(recovery)
+                    .with_recording_error(error.to_string()))
+            }
+        }
     }
 
     /// Describe a sandbox.
@@ -1087,8 +1166,26 @@ impl Sandboxes {
         backends::select_as(&self.config, operation).await
     }
 
+    /// A directory for a workspace being materialised.
+    ///
+    /// It lives under Litterbox's data directory, never the system temporary
+    /// directory: a cleaner that expunges temporary files must not be able to
+    /// take a create or repair out from under a running backend.
+    fn staging_dir(&self, prefix: &str) -> Result<TempDir, SandboxError> {
+        let root = self.staging_root.clone().unwrap_or_else(|| {
+            agentkit_common::data_dir("litterbox")
+                .join("staging")
+                .join(&self.project_slug)
+        });
+        std::fs::create_dir_all(&root).map_err(SandboxError::Io)?;
+        tempfile::Builder::new()
+            .prefix(prefix)
+            .tempdir_in(&root)
+            .map_err(SandboxError::Io)
+    }
+
     fn materialise(&self, prepared: &Prepared) -> Result<TempDir, SandboxError> {
-        let staged = TempDir::new().map_err(SandboxError::Io)?;
+        let staged = self.staging_dir("create-")?;
         self.vcs
             .materialise(&prepared.workspace, &prepared.base, staged.path())?;
         Ok(staged)
@@ -1730,12 +1827,43 @@ impl Sandboxes {
             });
         }
 
+        // Backend refusals that would only surface inside `restore` come
+        // first: `--discard-work` must not destroy the workspace before the
+        // operation is known to be possible.
+        self.vcs
+            .restore_preflight(&workspace, &target)
+            .map_err(contract_error)?;
+
         let reconciler = Reconciler::new(&self.vcs, &stored, &selected, &self.records_dir);
-        let state = reconciler.state().await?;
+        let inspection = selected.core().inspect(&stored.sandbox).await?;
+        let live = matches!(inspection.status, SandboxStatus::Active);
+        let binding = stored.binding();
         let staging = self.vcs.staging(&workspace);
-        let loses_work = state.merge != Merge::None
-            || state.workspace == WorkspaceAxis::Dirty
-            || staging.is_some();
+        // A copied workspace is only readable through running compute. When
+        // compute is absent or paused, skip the observation and the workspace
+        // write: repair materialises the restored revision from the refs.
+        let observed = if binding == WorkspaceBinding::Copied && !live {
+            None
+        } else {
+            Some(reconciler.state_with_workspace().await?)
+        };
+        let (state, workspace_tree) = match &observed {
+            Some((state, tree)) => (Some(*state), Some(tree.clone())),
+            None => (None, None),
+        };
+        let loses_work = match state {
+            Some(state) => {
+                state.merge != Merge::None
+                    || state.workspace == WorkspaceAxis::Dirty
+                    || staging.is_some()
+            }
+            None => {
+                stored.merge.is_some()
+                    || stored.resolution.is_some()
+                    || staging.is_some()
+                    || !matches!(inspection.status, SandboxStatus::Missing)
+            }
+        };
 
         let mut hints = Vec::new();
         if loses_work && !flags.discard_work {
@@ -1758,7 +1886,17 @@ impl Sandboxes {
             self.vcs.discard_stage(&workspace).map_err(contract_error)?;
         }
 
-        reconciler.replace_workspace(&target).await?;
+        let workspace_state = if binding == WorkspaceBinding::Copied && live {
+            let tree = workspace_tree.expect("observed while compute is live");
+            reconciler
+                .replace_workspace_from_tree(&target, &tree)
+                .await?;
+            "replaced".to_string()
+        } else if binding == WorkspaceBinding::Bound {
+            "updated by the VCS".to_string()
+        } else {
+            "deferred; repair will materialise the restored revision".to_string()
+        };
         let restored = self
             .vcs
             .restore(&workspace, &target)
@@ -1776,6 +1914,7 @@ impl Sandboxes {
             target: target.as_str().to_string(),
             revision: restored.revision.as_str().to_string(),
             created: restored.created,
+            workspace: workspace_state,
         })
     }
 
@@ -1786,22 +1925,48 @@ impl Sandboxes {
         let workspace = VcsWorkspace::from_branch(&stored.branch_name);
         let resolving = stored.resolution.is_some();
         match self.vcs.sandbox_tip(&workspace) {
-            Ok(_) => self.vcs.report(&workspace).map_err(contract_error),
+            Ok(_) => Ok(self.finalize_report(
+                self.vcs.report(&workspace).map_err(contract_error)?,
+                &stored,
+            )),
             Err(VcsError::NotFound { .. }) if resolving => {
                 let base = self.vcs.synced(&workspace).map_err(contract_error)?;
                 let branch = self.vcs.tip(&workspace).map_err(contract_error)?;
-                Ok(Report {
-                    base,
-                    branch: branch.clone(),
-                    sandbox: None,
-                    conflicts: Vec::new(),
-                    worktree: self.vcs.staging(&workspace),
-                    reflog: None,
-                    next: Some(self.absent_sandbox_next(&stored, Some(&branch))),
-                })
+                Ok(self.finalize_report(
+                    Report {
+                        base,
+                        branch: branch.clone(),
+                        state: String::new(),
+                        ours: None,
+                        sandbox: None,
+                        conflicts: Vec::new(),
+                        worktree: self.vcs.staging(&workspace),
+                        reflog: None,
+                        next: Some(self.absent_sandbox_next(&stored, Some(&branch))),
+                    },
+                    &stored,
+                ))
             }
             Err(error) => Err(contract_error(error)),
         }
+    }
+
+    /// Fill the status fields that belong to the record, not the VCS.
+    fn finalize_report(&self, mut report: Report, stored: &StoredSandbox) -> Report {
+        let resolving = stored.resolution.is_some();
+        report.state = if resolving {
+            "resolving"
+        } else if stored.merge.is_some() || !report.conflicts.is_empty() {
+            "diverged"
+        } else {
+            "clean"
+        }
+        .to_string();
+        report.ours = stored
+            .resolution
+            .as_ref()
+            .map(|open| Revision::new(open.ours.clone()));
+        report
     }
 
     /// The continuation for an open resolution whose sandbox revision is gone.
@@ -1823,7 +1988,8 @@ impl Sandboxes {
                 "the jj workspace for '{name}' is absent. In the clone at {store}, `jj op log` \
                  or `jj log -r 'all()'` names the resolution commit whose parents are {ours} and \
                  {shared}; re-attach it with `jj workspace add --name {name} --revision <commit>`, \
-                 or add the workspace at {ours} and run `sandbox-reconcile begin`. Do not push the \
+                 or add the workspace at {ours}, abandon the open resolution with \
+                 `sandbox-reconcile abandon`, then run `sandbox-reconcile begin`. Do not push the \
                  sandbox branch. If neither is recoverable, run `litterbox delete {name} \
                  --ignore-unmerged` (add `--ignore-invalid` when the record cannot be read) and \
                  create it again."
@@ -1832,7 +1998,8 @@ impl Sandboxes {
                 "the sandbox branch refs/litterbox/workspaces/{name} is absent. In the VCS store \
                  at {store}, `git fsck --lost-found` lists the dangling resolution merge whose \
                  parents are {ours} and {shared}; restore it with `git update-ref \
-                 refs/litterbox/workspaces/{name} <commit>`, or restore the ref at {ours} and run \
+                 refs/litterbox/workspaces/{name} <commit>`, or restore the ref at {ours}, abandon \
+                 the open resolution with `sandbox-reconcile abandon`, then run \
                  `sandbox-reconcile begin`. Do not push the sandbox branch. If neither is \
                  recoverable, run `litterbox delete {name} --ignore-unmerged` (add \
                  `--ignore-invalid` when the record cannot be read) and create it again."
@@ -1895,7 +2062,10 @@ impl Sandboxes {
 
     /// Begin resolving a conflict inside the sandbox.
     pub(crate) async fn begin_resolution(&self, name: &str) -> Result<Performed<Resolved>, Error> {
-        let recovery = self.ensure_live(name, PausedPolicy::Refuse).await?;
+        let _lock = lock::acquire(&self.records_dir, name).await?;
+        let recovery = self
+            .ensure_live_locked(name, PausedPolicy::Refuse)
+            .await?;
         let stored = self.stored(name)?;
         let selected = self
             .select_for(&stored.sandbox, "resolve a conflict")
@@ -1908,7 +2078,10 @@ impl Sandboxes {
 
     /// Finish a resolution, failing while the working copy still conflicts.
     pub(crate) async fn finish_resolution(&self, name: &str) -> Result<Performed<Resolved>, Error> {
-        let recovery = self.ensure_live(name, PausedPolicy::Refuse).await?;
+        let _lock = lock::acquire(&self.records_dir, name).await?;
+        let recovery = self
+            .ensure_live_locked(name, PausedPolicy::Refuse)
+            .await?;
         let stored = self.stored(name)?;
         let selected = self
             .select_for(&stored.sandbox, "resolve a conflict")
@@ -1922,7 +2095,10 @@ impl Sandboxes {
         &self,
         name: &str,
     ) -> Result<Performed<Resolved>, Error> {
-        let recovery = self.ensure_live(name, PausedPolicy::Refuse).await?;
+        let _lock = lock::acquire(&self.records_dir, name).await?;
+        let recovery = self
+            .ensure_live_locked(name, PausedPolicy::Refuse)
+            .await?;
         let stored = self.stored(name)?;
         let selected = self
             .select_for(&stored.sandbox, "resolve a conflict")
@@ -1966,7 +2142,17 @@ impl Sandboxes {
             Err(error) => return Err(contract_error(error)),
         };
         let conflicts = if resolving {
-            self.vcs.conflicts(&sandbox).map_err(contract_error)?
+            let working = self
+                .vcs
+                .working_copy_tip(&workspace)
+                .map_err(contract_error)?;
+            let base = stored
+                .resolution
+                .as_ref()
+                .map(|open| Revision::new(open.synced.clone()));
+            self.vcs
+                .conflicts_with_base(&working, base.as_ref())
+                .map_err(contract_error)?
         } else {
             self.vcs.conflicts(&branch).map_err(contract_error)?
         };
@@ -2017,11 +2203,29 @@ impl Sandboxes {
         let stored = self.stored(name)?;
         self.ensure_tool(&stored)?;
         let workspace = VcsWorkspace::from_branch(&stored.branch_name);
-        let revision = self.vcs.sandbox_tip(&workspace).map_err(contract_error)?;
+        // The live tip is a single-parent child once the agent's first edit is
+        // snapshotted. The sides belong to the merge `begin` wrote, which the
+        // record keeps.
+        let revision = match stored
+            .resolution
+            .as_ref()
+            .filter(|open| !open.conflict.is_empty())
+        {
+            Some(open) => Revision::new(open.conflict.clone()),
+            None => self
+                .vcs
+                .working_copy_tip(&workspace)
+                .map_err(contract_error)?,
+        };
+        let base = stored
+            .resolution
+            .as_ref()
+            .filter(|open| !open.synced.is_empty())
+            .map(|open| Revision::new(open.synced.clone()));
         let relative = std::path::Path::new(path);
         let sides = self
             .vcs
-            .conflict_sides(&revision, relative)
+            .conflict_sides(&revision, relative, base.as_ref())
             .map_err(contract_error)?;
         let tree = match side {
             "base" => sides
@@ -2058,23 +2262,46 @@ impl Sandboxes {
         source: &std::path::Path,
         destination: &str,
     ) -> Result<Performed<()>, Error> {
-        let recovery = self.ensure_live(name, PausedPolicy::Allow).await?;
+        let _lock = lock::acquire(&self.records_dir, name).await?;
+        let recovery = self
+            .ensure_live_locked(name, PausedPolicy::Allow)
+            .await?;
         let stored = self.stored(name)?;
         let selected = self
             .select_for(&stored.sandbox, "upload into the sandbox")
             .await?;
         let reconciler = Reconciler::new(&self.vcs, &stored, &selected, &self.records_dir);
-        reconciler.before(Action::Tool).await?;
+        let before = reconciler.before(Action::Tool).await?;
         selected
             .core()
             .upload(&stored.sandbox, source, destination)
             .await?;
-        let reconciled = reconciler
+        let dropped = before.dropped;
+        match reconciler
             .after("litterbox: snapshot after an upload")
-            .await?;
-        Ok(Performed::fresh(())
-            .or_recovery(recovery)
-            .with_reconciliation(reconciled))
+            .await
+        {
+            Ok(mut reconciled) => {
+                if reconciled.dropped.is_none() {
+                    reconciled.dropped = dropped;
+                }
+                Ok(Performed::fresh(())
+                    .or_recovery(recovery)
+                    .with_reconciliation(reconciled))
+            }
+            Err(error) => {
+                // The upload landed. Report the recording failure separately
+                // rather than asking the caller to repeat the upload.
+                tracing::warn!(
+                    sandbox = %name,
+                    %error,
+                    "the upload finished but its snapshot failed"
+                );
+                Ok(Performed::fresh(())
+                    .or_recovery(recovery)
+                    .with_recording_error(error.to_string()))
+            }
+        }
     }
 
     /// Copy a sandbox path out to the host.
@@ -2084,7 +2311,10 @@ impl Sandboxes {
         source: &str,
         destination: &std::path::Path,
     ) -> Result<Performed<()>, Error> {
-        let recovery = self.ensure_live(name, PausedPolicy::Allow).await?;
+        let _lock = lock::acquire(&self.records_dir, name).await?;
+        let recovery = self
+            .ensure_live_locked(name, PausedPolicy::Allow)
+            .await?;
         let stored = self.stored(name)?;
         let selected = self
             .select_for(&stored.sandbox, "download from the sandbox")
@@ -2102,7 +2332,10 @@ impl Sandboxes {
 
     /// Download the workspace and commit it to the sandbox's snapshot branch.
     pub async fn snapshot(&self, name: &str, message: &str) -> Result<Performed<()>, Error> {
-        let recovery = self.ensure_live(name, PausedPolicy::Allow).await?;
+        let _lock = lock::acquire(&self.records_dir, name).await?;
+        let recovery = self
+            .ensure_live_locked(name, PausedPolicy::Allow)
+            .await?;
         let stored = self.stored(name)?;
         let selected = self
             .select_for(&stored.sandbox, "snapshot the workspace")
@@ -2240,10 +2473,41 @@ mod seam_tests {
     use crate::sandbox::report::State;
     use crate::sandbox::selected::Selected;
     use crate::testing::{TestBackend, TestVcs};
-    use crate::vcs::{HistoryStep, Revision};
+    use crate::vcs::{HistoryStep, Prepared, Revision};
 
     fn scratch() -> TempDir {
         TempDir::new().expect("tempdir")
+    }
+
+    #[test]
+    fn materialised_workspaces_are_staged_under_the_data_directory() {
+        let parent = scratch();
+        let root = parent.path().join("staging");
+        let records = scratch();
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(TestVcs::new());
+        let sandboxes = Sandboxes::for_test(
+            Config::default(),
+            vcs,
+            false,
+            "project".to_string(),
+            records.path().to_path_buf(),
+            selected(backend),
+        )
+        .with_staging_root(root.clone());
+
+        let prepared = Prepared {
+            workspace: crate::vcs::Workspace::from_branch("litterbox/demo"),
+            base: Revision::new("base"),
+        };
+        let staged = sandboxes.materialise(&prepared).expect("materialise");
+
+        assert!(
+            staged.path().starts_with(&root),
+            "staged at {} instead of {}",
+            staged.path().display(),
+            root.display()
+        );
     }
 
     fn selected(backend: Arc<TestBackend>) -> Selected {
@@ -2327,6 +2591,91 @@ mod seam_tests {
                 .with_tip("branch")
                 .with_synced("branch")
                 .with_sandbox_tip("branch")
+                .with_observed_tree("workspace")
+                .with_history(vec![
+                    HistoryStep {
+                        revision: Revision::new("branch"),
+                        time: 2,
+                        description: "current".to_string(),
+                        synced: false,
+                    },
+                    HistoryStep {
+                        revision: Revision::new("target"),
+                        time: 1,
+                        description: "older".to_string(),
+                        synced: false,
+                    },
+                ]),
+        );
+        let config = Config {
+            project: crate::config::ProjectConfig {
+                slug: Some("project".to_string()),
+                backends: Some(vec!["test".to_string()]),
+            },
+            ..Config::default()
+        };
+        let sandboxes = Sandboxes::for_test(
+            config,
+            vcs.clone(),
+            false,
+            "project".to_string(),
+            records.path().to_path_buf(),
+            selected(backend),
+        );
+        sandboxes.create("demo").await.expect("create");
+        let mut stored = current_record(records.path(), "demo");
+        stored.merge = Some(metadata_store::StoredMerge {
+            base: "base".to_string(),
+            ours: "branch".to_string(),
+            theirs: "branch".to_string(),
+        });
+        metadata_store::store_sandbox_at(records.path(), "demo", &stored).expect("store");
+
+        let report = sandboxes.history("demo").await.expect("history");
+        assert_eq!(report.state, "diverged");
+        assert_eq!(report.steps.len(), 2);
+
+        let error = sandboxes
+            .restore("demo", "2", RestoreFlags::default())
+            .await
+            .expect_err("refused");
+        assert!(error.to_string().contains("--discard-work"), "{error}");
+        assert!(vcs.restored().is_empty(), "a refusal changes nothing");
+
+        let restored = sandboxes
+            .restore(
+                "demo",
+                "2",
+                RestoreFlags {
+                    discard_work: true,
+                    discard_resolution: false,
+                },
+            )
+            .await
+            .expect("restore");
+        assert_eq!(restored.target, "target");
+        assert_eq!(restored.revision, "target");
+        assert_eq!(
+            vcs.restored(),
+            vec![("branch".to_string(), "target".to_string())]
+        );
+        assert!(
+            vcs.deleted_calls()
+                .contains(&("workspace".to_string(), "tree".to_string())),
+            "cleanup uses the observed workspace tree, not the sandbox commit"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_conflicted_shared_tip_refuses_before_the_workspace_is_touched() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(
+            TestVcs::new()
+                .with_tip("branch")
+                .with_synced("branch")
+                .with_sandbox_tip("branch")
+                .with_observed_tree("workspace")
                 .with_conflicts_for("branch", &["file.txt"])
                 .with_history(vec![
                     HistoryStep {
@@ -2360,18 +2709,7 @@ mod seam_tests {
         );
         sandboxes.create("demo").await.expect("create");
 
-        let report = sandboxes.history("demo").await.expect("history");
-        assert_eq!(report.state, "diverged");
-        assert_eq!(report.steps.len(), 2);
-
         let error = sandboxes
-            .restore("demo", "2", RestoreFlags::default())
-            .await
-            .expect_err("refused");
-        assert!(error.to_string().contains("--discard-work"), "{error}");
-        assert!(vcs.restored().is_empty(), "a refusal changes nothing");
-
-        let restored = sandboxes
             .restore(
                 "demo",
                 "2",
@@ -2381,9 +2719,70 @@ mod seam_tests {
                 },
             )
             .await
-            .expect("restore");
+            .expect_err("the shared tip is conflicted");
+
+        assert!(error.to_string().contains("conflicted"), "{error}");
+        assert!(vcs.restored().is_empty(), "no restore was written");
+        assert!(
+            vcs.deleted_calls().is_empty(),
+            "the workspace was not replaced before the refusal"
+        );
+    }
+
+    #[tokio::test]
+    async fn restore_without_live_compute_restores_the_refs_and_defers_the_workspace() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(
+            TestVcs::new()
+                .with_tip("branch")
+                .with_synced("branch")
+                .with_sandbox_tip("branch")
+                .with_history(vec![
+                    HistoryStep {
+                        revision: Revision::new("branch"),
+                        time: 2,
+                        description: "current".to_string(),
+                        synced: false,
+                    },
+                    HistoryStep {
+                        revision: Revision::new("target"),
+                        time: 1,
+                        description: "older".to_string(),
+                        synced: false,
+                    },
+                ]),
+        );
+        let config = Config {
+            project: crate::config::ProjectConfig {
+                slug: Some("project".to_string()),
+                backends: Some(vec!["test".to_string()]),
+            },
+            ..Config::default()
+        };
+        let sandboxes = Sandboxes::for_test(
+            config,
+            vcs.clone(),
+            false,
+            "project".to_string(),
+            records.path().to_path_buf(),
+            selected(backend.clone()),
+        );
+        sandboxes.create("demo").await.expect("create");
+        backend.mark_missing("demo");
+
+        let restored = sandboxes
+            .restore("demo", "2", RestoreFlags::default())
+            .await
+            .expect("the refs restore without compute");
+
         assert_eq!(restored.target, "target");
         assert_eq!(restored.revision, "target");
+        assert!(
+            restored.workspace.contains("repair"),
+            "the result names the deferred workspace: {}",
+            restored.workspace
+        );
         assert_eq!(
             vcs.restored(),
             vec![("branch".to_string(), "target".to_string())]
@@ -2518,10 +2917,15 @@ mod seam_tests {
             .finish_resolution("demo")
             .await
             .expect("the resolution lands");
-        assert!(
-            finished.value.dropped_from_ours.is_empty(),
-            "{:?}",
-            finished.value.dropped_from_ours
+        assert_eq!(
+            finished.value.dropped_from_ours,
+            vec![std::path::PathBuf::from("greeting.txt")],
+            "the resolution replaced the sandbox's version"
+        );
+        assert_eq!(
+            finished.value.dropped_from_theirs,
+            vec![std::path::PathBuf::from("greeting.txt")],
+            "the resolution replaced the shared version"
         );
 
         let landed = vcs.tip(&workspace).expect("branch tip");
@@ -2666,7 +3070,38 @@ mod seam_tests {
         assert_eq!(vcs.snapshots().len(), 1, "one snapshot after the command");
         assert_eq!(
             performed.state().map(|state| state.workspace),
-            Some(crate::orchestrator::source::Workspace::Dirty)
+            Some(crate::orchestrator::source::Workspace::Clean),
+            "the returned state is the post-plan state"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_command_reports_its_result_when_the_snapshot_fails() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(
+            TestVcs::new()
+                .with_observed_tree("edited")
+                .failing_snapshot(),
+        );
+        let sandboxes = orchestrator_vcs(records.path(), backend, vcs.clone());
+        sandboxes.create("demo").await.expect("create");
+
+        let performed = sandboxes
+            .exec("demo", &["true".to_string()])
+            .await
+            .expect("the command's own success survives a failed snapshot");
+
+        assert_eq!(performed.value.exit_code, 0);
+        assert!(
+            performed
+                .recording_error()
+                .is_some_and(|error| error.contains("refused the snapshot")),
+            "the recording failure is reported separately"
+        );
+        assert!(
+            performed.block().is_none(),
+            "no reconciliation completed, so no workspace block is claimed"
         );
     }
 
@@ -3876,6 +4311,12 @@ mod seam_tests {
 
         let report = sandboxes.report("demo").await.expect("report");
         assert!(report.sandbox.is_none());
+        assert_eq!(report.state, "resolving");
+        assert_eq!(
+            report.ours.as_ref().map(|ours| ours.as_str()),
+            Some("0123456789abcdef"),
+            "the recorded parent is in the status"
+        );
         assert!(
             report
                 .next
@@ -4137,6 +4578,78 @@ mod seam_tests {
     }
 
     #[tokio::test]
+    async fn a_command_clears_resolved_paths_from_the_workspace_block() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(
+            TestVcs::new()
+                .with_tip("branch-tip")
+                .with_sandbox_tip("resolution-revision")
+                .with_synced("synced")
+                .with_observed_tree("edited")
+                .with_conflicts_for("resolution-revision", &["file.txt"])
+                .with_conflicts_for("snapshot", &[]),
+        );
+        let sandboxes = orchestrator_vcs(records.path(), backend, vcs);
+        sandboxes.create("demo").await.expect("create");
+        let mut stored = current_record(records.path(), "demo");
+        stored.resolution = Some(metadata_store::StoredResolution {
+            synced: "synced".to_string(),
+            ours: "ours".to_string(),
+            conflict: "resolution-revision".to_string(),
+            theirs: "branch-tip".to_string(),
+        });
+        metadata_store::store_sandbox_at(records.path(), "demo", &stored).expect("store");
+
+        let performed = sandboxes
+            .exec("demo", &["true".to_string()])
+            .await
+            .expect("exec");
+
+        let block = performed.block().expect("block");
+        assert!(
+            block.conflicts.is_empty(),
+            "the resolved path is gone: {block:?}"
+        );
+        assert!(
+            block
+                .resolution
+                .expect("resolution")
+                .conflicts
+                .is_empty(),
+            "the resolution view reads the post-snapshot revision"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_status_during_resolution_reports_the_sandbox_conflicts() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(
+            TestVcs::new()
+                .with_sandbox_tip("conflict-revision")
+                .with_conflicts_for("conflict-revision", &["file.txt"]),
+        );
+        let sandboxes = orchestrator_vcs(records.path(), backend, vcs);
+        sandboxes.create("demo").await.expect("create");
+        let mut stored = current_record(records.path(), "demo");
+        stored.resolution = Some(metadata_store::StoredResolution {
+            synced: "base".to_string(),
+            ours: "ours".to_string(),
+            conflict: "conflict-revision".to_string(),
+            theirs: "branch".to_string(),
+        });
+        metadata_store::store_sandbox_at(records.path(), "demo", &stored).expect("store");
+
+        let status = sandboxes.source_status("demo").await.expect("status");
+
+        assert!(status.resolution);
+        assert_eq!(status.state, "resolving");
+        assert_eq!(status.conflicts.len(), 1, "{:?}", status.conflicts);
+        assert_eq!(status.conflicts[0].path, "file.txt");
+    }
+
+    #[tokio::test]
     async fn list_carries_the_source_state_from_the_record() {
         let records = TempDir::new().expect("records");
         let backend = Arc::new(TestBackend::new());
@@ -4147,6 +4660,8 @@ mod seam_tests {
         stored.resolution = Some(metadata_store::StoredResolution {
             synced: "base".to_string(),
             ours: "ours".to_string(),
+            conflict: "conflict".to_string(),
+            theirs: "theirs".to_string(),
         });
         metadata_store::store_sandbox_at(records.path(), "demo", &stored).expect("store");
 

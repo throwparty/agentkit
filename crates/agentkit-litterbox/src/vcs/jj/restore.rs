@@ -53,16 +53,16 @@ pub(super) fn restore(
     ops::jj_ok(&path, &["new", tip.as_str(), "-m", &message])?;
     ops::jj_ok(&path, &["restore", "--from", target_text])?;
     let commit = ops::commit_id(&path, "@")?;
-    ops::jj_ok(
-        &vcs.root,
-        &[
-            "bookmark",
-            "set",
-            workspace.branch().as_str(),
-            "-r",
-            &commit,
-        ],
-    )?;
+    // Publish with the expected tip. An external push since the read above
+    // must surface as a race rather than being overwritten by a commit
+    // parented on the old tip.
+    let reference = format!("refs/heads/{}", workspace.branch().as_str());
+    ops::git_update_ref(&vcs.root, &reference, &commit, tip.as_str())?;
+    ops::jj_ok(&vcs.root, &["git", "import"])?;
+    // The restore commit is now both the shared and the sandbox tip. Start a
+    // fresh child so editing the workspace cannot rewrite either.
+    vcs.write_sandbox(sandbox, &commit)?;
+    ops::jj_ok(&path, &["new", commit.as_str()])?;
     vcs.write_synced(sandbox, &commit)?;
 
     Ok(Restored {

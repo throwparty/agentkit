@@ -24,6 +24,13 @@ use crate::vcs::{
 };
 
 /// A jj-backed VCS.
+/// Held while a jj mutation runs: the in-process mutex plus the cross-process
+/// clone lock.
+struct Guard<'a> {
+    _local: std::sync::MutexGuard<'a, ()>,
+    _file: clone::Lock,
+}
+
 pub struct JjVcs {
     root: PathBuf,
     #[allow(dead_code)]
@@ -45,17 +52,25 @@ impl JjVcs {
             lock: Mutex::new(()),
             config,
         };
+        // The config path and its candidate file are shared between processes.
+        // `prepare` already runs under this lock; take it here too so two CLI
+        // opens cannot overwrite or rename each other's candidate.
+        let guard = vcs
+            .lock()
+            .map_err(|error| SandboxError::Config(error.to_string()))?;
         vcs.apply_config()
             .map_err(|error| SandboxError::Config(error.to_string()))?;
+        drop(guard);
         Ok(vcs)
     }
 
     /// Apply the per-repo config string the clone includes.
     ///
-    /// jj keeps a repository's config under the user's config directory, keyed
-    /// by the repository id, so `jj config path --repo` is the only stable way
-    /// to find it. The file is replaced rather than appended, so a changed or
-    /// removed string clears the previous settings.
+    /// The caller holds the clone lock. jj keeps a repository's config under
+    /// the user's config directory, keyed by the repository id, so `jj config
+    /// path --repo` is the only stable way to find it. The file is replaced
+    /// rather than appended, so a changed or removed string clears the
+    /// previous settings.
     fn apply_config(&self) -> Result<(), Error> {
         if !self.root.join(".jj").is_dir() {
             return Ok(());
@@ -84,10 +99,16 @@ impl JjVcs {
         Ok(())
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, ()> {
-        self.lock
+    fn lock(&self) -> Result<Guard<'_>, Error> {
+        let local = self
+            .lock
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let file = clone::lock(&self.root)?;
+        Ok(Guard {
+            _local: local,
+            _file: file,
+        })
     }
 
     fn workspace(&self, sandbox: &str) -> PathBuf {
@@ -98,6 +119,14 @@ impl JjVcs {
         ops::git(&self.root, &["update-ref", &synced_ref(sandbox), revision])?;
         Ok(())
     }
+
+    fn write_sandbox(&self, sandbox: &str, revision: &str) -> Result<(), Error> {
+        ops::git(
+            &self.root,
+            &["update-ref", &sandbox_ref(sandbox), revision],
+        )?;
+        Ok(())
+    }
 }
 
 fn branch_name(sandbox: &str) -> String {
@@ -106,6 +135,11 @@ fn branch_name(sandbox: &str) -> String {
 
 fn synced_ref(sandbox: &str) -> String {
     format!("refs/litterbox/synced/{sandbox}")
+}
+
+/// The saved sandbox revision, kept apart from the workspace's mutable `@`.
+fn sandbox_ref(sandbox: &str) -> String {
+    format!("refs/litterbox/sandbox/{sandbox}")
 }
 
 fn sandbox_of(workspace: &Workspace) -> &str {
@@ -126,10 +160,36 @@ fn unsupported(operation: &str) -> Error {
     }
 }
 
+/// Whether `tree` in the clone holds `path`.
+fn path_has(root: &Path, tree: &str, path: &Path) -> bool {
+    path.to_str().is_some_and(|path| {
+        ops::blob(root, tree, path)
+            .ok()
+            .flatten()
+            .is_some()
+    })
+}
+
+/// Selects every path in the full-content pass.
+struct SelectAll;
+
+impl SnapshotSelector for SelectAll {
+    fn selects(
+        &self,
+        _relative: &Path,
+        _is_dir: bool,
+    ) -> Result<bool, crate::sandbox::contract::Error> {
+        Ok(true)
+    }
+}
+
 /// The tree a directory's contents would produce, through the clone's object
 /// database, without committing.
 fn tree_from_dir(root: &Path, dir: &Path) -> Result<TreeId, Error> {
     let index = tempfile::NamedTempFile::new().map_err(Error::Io)?;
+    // `git add` rejects a pre-created empty index. It must create the index
+    // itself; keep the temporary path so it is removed on drop.
+    std::fs::remove_file(index.path()).map_err(Error::Io)?;
     let git_dir = root.join(".git");
     let staged = std::process::Command::new("git")
         .current_dir(dir)
@@ -178,7 +238,10 @@ fn copy_tree(from: &Path, to: &Path) -> Result<(), Error> {
             }
             let path = entry.path();
             let child = rel.join(&name);
-            if path.is_dir() {
+            let metadata = std::fs::symlink_metadata(&path).map_err(Error::Io)?;
+            if metadata.file_type().is_symlink() {
+                out.push((path, child));
+            } else if metadata.is_dir() {
                 walk(&path, &child, out)?;
             } else {
                 out.push((path, child));
@@ -199,7 +262,8 @@ fn copy_tree(from: &Path, to: &Path) -> Result<(), Error> {
             }
             let path = entry.path();
             let child = rel.join(&name);
-            if path.is_dir() {
+            let metadata = std::fs::symlink_metadata(&path).map_err(Error::Io)?;
+            if metadata.is_dir() {
                 prune(&path, &child, keep)?;
                 if std::fs::read_dir(&path)
                     .map(|mut entries| entries.next().is_none())
@@ -223,7 +287,18 @@ fn copy_tree(from: &Path, to: &Path) -> Result<(), Error> {
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent).map_err(Error::Io)?;
         }
-        std::fs::copy(source, &target).map_err(Error::Io)?;
+        let metadata = std::fs::symlink_metadata(source).map_err(Error::Io)?;
+        if metadata.file_type().is_symlink() {
+            // A sandbox-controlled link is copied as a link. Never follow it:
+            // its target may point anywhere on the host.
+            if std::fs::symlink_metadata(&target).is_ok() {
+                std::fs::remove_file(&target).map_err(Error::Io)?;
+            }
+            let link = std::fs::read_link(source).map_err(Error::Io)?;
+            std::os::unix::fs::symlink(link, &target).map_err(Error::Io)?;
+        } else {
+            std::fs::copy(source, &target).map_err(Error::Io)?;
+        }
     }
     prune(to, Path::new(""), &keep)
 }
@@ -283,7 +358,7 @@ impl Vcs for JjVcs {
     }
 
     fn prepare(&self, sandbox: &str) -> Result<Prepared, Error> {
-        let _guard = self.lock();
+        let _guard = self.lock()?;
         clone::ensure(&self.root, &self.host)?;
         self.apply_config()?;
         let workspace = self.workspace(sandbox);
@@ -292,23 +367,52 @@ impl Vcs for JjVcs {
                 name: sandbox.to_string(),
             });
         }
-        // The clone's working copy sits on the imported head; its parent is the
-        // base a sandbox starts from.
-        let base = ops::commit_id(&self.root, "@-")?;
-        let branch = branch_name(sandbox);
-        ops::jj_ok(&self.root, &["bookmark", "set", &branch, "-r", &base])?;
-        if let Some(parent) = workspace.parent() {
-            std::fs::create_dir_all(parent).map_err(Error::Io)?;
+        // The host checkout is the creation source. The clone is only as fresh
+        // as its last import, so resolve the host HEAD and bring its commit in
+        // when the clone does not hold it.
+        let host_head = ops::git(&self.host, &["rev-parse", "HEAD"])?;
+        if ops::git(&self.root, &["cat-file", "-e", &host_head]).is_err() {
+            let host_path = self.host.to_str().ok_or_else(|| Error::Backend {
+                operation: "prepare".to_string(),
+                message: "the host path is not UTF-8".to_string(),
+            })?;
+            ops::git(&self.root, &["fetch", host_path, &host_head])?;
         }
-        let path = workspace.to_str().ok_or_else(|| Error::Backend {
-            operation: "prepare".to_string(),
-            message: "the workspace path is not UTF-8".to_string(),
-        })?;
-        ops::jj_ok(
-            &self.root,
-            &["workspace", "add", "--name", sandbox, "-r", &base, path],
-        )?;
-        self.write_synced(sandbox, &base)?;
+        let base = host_head;
+        let branch = branch_name(sandbox);
+        let mut bookmarked = false;
+        let mut workspace_added = false;
+        let result = (|| -> Result<(), Error> {
+            ops::jj_ok(&self.root, &["bookmark", "set", &branch, "-r", &base])?;
+            bookmarked = true;
+            if let Some(parent) = workspace.parent() {
+                std::fs::create_dir_all(parent).map_err(Error::Io)?;
+            }
+            let path = workspace.to_str().ok_or_else(|| Error::Backend {
+                operation: "prepare".to_string(),
+                message: "the workspace path is not UTF-8".to_string(),
+            })?;
+            ops::jj_ok(
+                &self.root,
+                &["workspace", "add", "--name", sandbox, "-r", &base, path],
+            )?;
+            workspace_added = true;
+            self.write_synced(sandbox, &base)?;
+            self.write_sandbox(sandbox, &base)?;
+            Ok(())
+        })();
+        if let Err(error) = result {
+            if workspace_added {
+                let _ = ops::jj_ok(&self.root, &["workspace", "forget", sandbox]);
+                let _ = std::fs::remove_dir_all(&workspace);
+            }
+            if bookmarked {
+                let _ = ops::jj_ok(&self.root, &["bookmark", "delete", &branch]);
+            }
+            let _ = ops::git(&self.root, &["update-ref", "-d", &synced_ref(sandbox)]);
+            let _ = ops::git(&self.root, &["update-ref", "-d", &sandbox_ref(sandbox)]);
+            return Err(error);
+        }
         Ok(Prepared {
             workspace: Workspace::from_branch(branch),
             base: Revision::new(base),
@@ -321,6 +425,29 @@ impl Vcs for JjVcs {
 
     fn bound_root(&self, workspace: &Workspace) -> Result<PathBuf, Error> {
         Ok(self.workspace(sandbox_of(workspace)))
+    }
+
+    fn restore_workspace(&self, workspace: &Workspace, revision: &Revision) -> Result<(), Error> {
+        let sandbox = sandbox_of(workspace);
+        let target = self.workspace(sandbox);
+        if target.is_dir() {
+            return Ok(());
+        }
+        let _guard = self.lock()?;
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(Error::Io)?;
+        }
+        let path = target.to_str().ok_or_else(|| Error::Backend {
+            operation: "restore the workspace".to_string(),
+            message: "the workspace path is not UTF-8".to_string(),
+        })?;
+        // The directory can be gone while the workspace is still registered.
+        let _ = ops::jj_ok(&self.root, &["workspace", "forget", sandbox]);
+        ops::jj_ok(
+            &self.root,
+            &["workspace", "add", "--name", sandbox, "-r", revision.as_str(), path],
+        )?;
+        Ok(())
     }
 
     fn identity(&self, workspace: &Workspace) -> Result<TreeId, Error> {
@@ -360,8 +487,15 @@ impl Vcs for JjVcs {
         })
     }
 
-    fn snapshot_filter(&self, _rules_root: &Path) -> Result<Arc<dyn SnapshotSelector>, Error> {
-        Ok(Arc::new(IgnoreFiles))
+    fn snapshot_filter(
+        &self,
+        _workspace: &Workspace,
+        _rules_root: &Path,
+    ) -> Result<Arc<dyn SnapshotSelector>, Error> {
+        // The second transfer is the full content pass. `IgnoreFiles` is only
+        // for the first pass that fetches the ignore inputs; selecting it here
+        // would omit every ordinary tracked file.
+        Ok(Arc::new(SelectAll))
     }
 
     fn ignore_files(&self) -> Arc<dyn SnapshotSelector> {
@@ -372,16 +506,22 @@ impl Vcs for JjVcs {
         &self,
         workspace: &Workspace,
         staging: &Path,
-        _message: &str,
+        message: &str,
     ) -> Result<Revision, Error> {
-        let _guard = self.lock();
+        let _guard = self.lock()?;
         let sandbox = sandbox_of(workspace);
         let target = self.workspace(sandbox);
         if staging != target {
             copy_tree(staging, &target)?;
         }
-        // Any jj command snapshots the working copy into `@`.
-        Ok(Revision::new(ops::commit_id(&target, "@")?))
+        // Snapshot the working copy into a commit and publish it. `@` is
+        // mutable: any later command may rewrite it, so move to a fresh child
+        // and record the published commit as the saved baseline.
+        ops::jj_ok(&target, &["describe", "-m", message])?;
+        let published = ops::commit_id(&target, "@")?;
+        ops::jj_ok(&target, &["new"])?;
+        self.write_sandbox(sandbox, &published)?;
+        Ok(Revision::new(published))
     }
 
     fn sandboxes(&self) -> Result<Vec<String>, Error> {
@@ -408,7 +548,7 @@ impl Vcs for JjVcs {
     }
 
     fn delete_branch(&self, sandbox: &str) -> Result<(), Error> {
-        let _guard = self.lock();
+        let _guard = self.lock()?;
         let branch = branch_name(sandbox);
         let workspace = self.workspace(sandbox);
         let has_branch = ops::git(
@@ -428,6 +568,7 @@ impl Vcs for JjVcs {
         }
         let _ = ops::jj_ok(&self.root, &["bookmark", "delete", &branch]);
         let _ = ops::git(&self.root, &["update-ref", "-d", &synced_ref(sandbox)]);
+        let _ = ops::git(&self.root, &["update-ref", "-d", &sandbox_ref(sandbox)]);
         Ok(())
     }
 
@@ -509,20 +650,75 @@ impl Vcs for JjVcs {
         Ok(TreeId::new(ops::tree_id(&self.root, revision.as_str())?))
     }
 
+    fn deleted_paths(&self, from: &TreeId, to: &TreeId) -> Result<Vec<PathBuf>, Error> {
+        let output = ops::git(
+            &self.root,
+            &[
+                "diff",
+                "--name-only",
+                "--diff-filter=D",
+                from.as_str(),
+                to.as_str(),
+            ],
+        )?;
+        Ok(output
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(PathBuf::from)
+            .collect())
+    }
+
+    fn changed_paths(&self, from: &TreeId, to: &TreeId) -> Result<Vec<PathBuf>, Error> {
+        let output = ops::git(
+            &self.root,
+            &[
+                "diff",
+                "--name-only",
+                "--diff-filter=DM",
+                from.as_str(),
+                to.as_str(),
+            ],
+        )?;
+        Ok(output
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(PathBuf::from)
+            .collect())
+    }
+
     fn sandbox_tip(&self, workspace: &Workspace) -> Result<Revision, Error> {
-        let target = self.workspace(sandbox_of(workspace));
-        if !target.is_dir() {
-            return Err(Error::NotFound {
-                name: sandbox_of(workspace).to_string(),
-            });
+        let sandbox = sandbox_of(workspace);
+        // A read of the saved ref never touches the workspace: running jj
+        // there would snapshot `@` and change the very revision this answers.
+        match ops::git(&self.root, &["rev-parse", &sandbox_ref(sandbox)]) {
+            Ok(revision) => Ok(Revision::new(revision)),
+            Err(_) => Err(Error::NotFound {
+                name: sandbox.to_string(),
+            }),
         }
-        Ok(Revision::new(ops::commit_id(&target, "@")?))
     }
 
     fn set_sandbox_tip(&self, workspace: &Workspace, revision: &Revision) -> Result<(), Error> {
-        let target = self.workspace(sandbox_of(workspace));
-        ops::jj_ok(&target, &["new", revision.as_str()])?;
+        let sandbox = sandbox_of(workspace);
+        self.write_sandbox(sandbox, revision.as_str())?;
+        let target = self.workspace(sandbox);
+        if target.is_dir() {
+            // Keep `@` a throwaway child, so editing the workspace cannot
+            // rewrite the revision that was just recorded.
+            ops::jj_ok(&target, &["new", revision.as_str()])?;
+        }
         Ok(())
+    }
+
+    fn working_copy_tip(&self, workspace: &Workspace) -> Result<Revision, Error> {
+        let sandbox = sandbox_of(workspace);
+        let target = self.workspace(sandbox);
+        if !target.is_dir() {
+            return Err(Error::NotFound {
+                name: sandbox.to_string(),
+            });
+        }
+        Ok(Revision::new(ops::commit_id(&target, "@")?))
     }
 
     fn advance(
@@ -531,19 +727,22 @@ impl Vcs for JjVcs {
         revision: &Revision,
         expected: &Revision,
     ) -> Result<(), Error> {
-        let _guard = self.lock();
-        if &self.tip(workspace)? != expected {
-            return Err(Error::Raced);
-        }
-        self.set_tip(workspace, revision)
+        let _guard = self.lock()?;
+        let branch = workspace.branch().as_str();
+        let reference = format!("refs/heads/{branch}");
+        ops::git_update_ref(&self.root, &reference, revision.as_str(), expected.as_str())?;
+        ops::jj_ok(&self.root, &["git", "import"])?;
+        Ok(())
     }
 
     fn observe(&self, workspace: &Workspace, staging: &Path) -> Result<TreeId, Error> {
         let target = self.workspace(sandbox_of(workspace));
         if staging == target {
-            // Bound: force the snapshot, then read `@`'s tree.
-            let revision = ops::commit_id(&target, "@")?;
-            return Ok(TreeId::new(ops::tree_id(&self.root, &revision)?));
+            // Bound: read the host directory through a temporary Git index.
+            // Running any jj command here would snapshot pending edits into
+            // `@`, so a restore would then classify the workspace as clean and
+            // discard them without `--discard-work`.
+            return tree_from_dir(&self.root, &target);
         }
         tree_from_dir(&self.root, staging)
     }
@@ -575,6 +774,13 @@ impl Vcs for JjVcs {
             let tip = self.tip(workspace)?;
             self.write_synced(sandbox, tip.as_str())?;
         }
+        if ops::git(&self.root, &["rev-parse", "--verify", &sandbox_ref(sandbox)]).is_err() {
+            // A clone that predates the saved ref stored the sandbox baseline
+            // in the workspace's `@`; migrate that revision rather than the
+            // shared tip, or the next snapshot would drop the sandbox's work.
+            let saved = self.working_copy_tip(workspace)?;
+            self.write_sandbox(sandbox, saved.as_str())?;
+        }
         Ok(())
     }
 
@@ -588,16 +794,36 @@ impl Vcs for JjVcs {
     }
 
     fn resolve_begin(&self, workspace: &Workspace) -> Result<Begun, Error> {
+        let synced = self.synced(workspace)?;
         let ours = self.sandbox_tip(workspace)?;
         let theirs = self.tip(workspace)?;
         let path = self.workspace(sandbox_of(workspace));
-        let _guard = self.lock();
+        let _guard = self.lock()?;
+        // The shared side hangs off the actual tip, so the merge keeps its
+        // ancestry. The sandbox side is rebuilt on `synced`, so the merge base
+        // is the recorded agreement rather than an inferred ancestor.
         ops::jj_ok(
             &path,
             &[
                 "new",
-                ours.as_str(),
                 theirs.as_str(),
+                "-m",
+                "litterbox: resolution theirs",
+            ],
+        )?;
+        let theirs_side = ops::commit_id(&path, "@")?;
+        ops::jj_ok(
+            &path,
+            &["new", synced.as_str(), "-m", "litterbox: resolution ours"],
+        )?;
+        ops::jj_ok(&path, &["restore", "--from", ours.as_str()])?;
+        let ours_side = ops::commit_id(&path, "@")?;
+        ops::jj_ok(
+            &path,
+            &[
+                "new",
+                &ours_side,
+                &theirs_side,
                 "-m",
                 "litterbox: resolve the divergence",
             ],
@@ -608,22 +834,33 @@ impl Vcs for JjVcs {
     }
 
     fn resolve_abandon(&self, workspace: &Workspace, ours: &Revision) -> Result<Revision, Error> {
-        let _guard = self.lock();
-        let path = self.workspace(sandbox_of(workspace));
+        let _guard = self.lock()?;
+        let sandbox = sandbox_of(workspace);
+        let path = self.workspace(sandbox);
+        // The resolution lived only in `@`; the saved baseline never moved.
+        self.write_sandbox(sandbox, ours.as_str())?;
         ops::jj_ok(&path, &["new", ours.as_str()])?;
         Ok(Revision::new(ops::commit_id(&path, "@")?))
     }
 
     fn conflicts(&self, revision: &Revision) -> Result<Vec<Conflict>, Error> {
+        let base_tree = ops::conflict_sides(&self.root, revision.as_str())
+            .ok()
+            .and_then(|(base, _, _)| base);
         Ok(ops::conflicts(&self.root, revision.as_str())?
             .into_iter()
             .map(|(path, sides)| {
                 let hunks = ops::conflict_regions(&self.root, revision.as_str(), &path);
+                // A path the common ancestor does not hold is an add/add: it
+                // has content sides but no base side.
+                let base = base_tree
+                    .as_deref()
+                    .is_some_and(|tree| path_has(&self.root, tree, &path));
                 Conflict {
                     path,
                     hunks,
                     sides,
-                    base: true,
+                    base,
                 }
             })
             .collect())
@@ -639,6 +876,8 @@ impl Vcs for JjVcs {
         Ok(Report {
             base,
             branch,
+            state: String::new(),
+            ours: None,
             sandbox: Some(sandbox),
             conflicts,
             worktree,
@@ -648,7 +887,7 @@ impl Vcs for JjVcs {
     }
 
     fn stage(&self, workspace: &Workspace) -> Result<Staged, Error> {
-        let _guard = self.lock();
+        let _guard = self.lock()?;
         let sandbox = sandbox_of(workspace);
         let path = clone::reconcile(&self.root, sandbox);
         if path.exists() {
@@ -685,9 +924,8 @@ impl Vcs for JjVcs {
         )?;
         ops::jj_ok(
             &path,
-            &["new", base.as_str(), "-m", "litterbox staging: theirs"],
+            &["new", branch.as_str(), "-m", "litterbox staging: theirs"],
         )?;
-        ops::jj_ok(&path, &["restore", "--from", branch.as_str()])?;
         let theirs = ops::commit_id(&path, "@")?;
         ops::jj_ok(
             &path,
@@ -711,7 +949,7 @@ impl Vcs for JjVcs {
     }
 
     fn finish(&self, workspace: &Workspace) -> Result<Finished, Error> {
-        let _guard = self.lock();
+        let _guard = self.lock()?;
         let sandbox = sandbox_of(workspace);
         let path = clone::reconcile(&self.root, sandbox);
         if !path.is_dir() {
@@ -737,16 +975,9 @@ impl Vcs for JjVcs {
                 ),
             });
         }
-        ops::jj_ok(
-            &self.root,
-            &[
-                "bookmark",
-                "set",
-                workspace.branch().as_str(),
-                "-r",
-                &merged,
-            ],
-        )?;
+        let reference = format!("refs/heads/{}", workspace.branch().as_str());
+        ops::git_update_ref(&self.root, &reference, &merged, tip.as_str())?;
+        ops::jj_ok(&self.root, &["git", "import"])?;
         let name = format!("{sandbox}-staging");
         let _ = ops::jj_ok(&self.root, &["workspace", "forget", &name]);
         let _ = std::fs::remove_dir_all(&path);
@@ -756,7 +987,7 @@ impl Vcs for JjVcs {
     }
 
     fn discard_stage(&self, workspace: &Workspace) -> Result<(), Error> {
-        let _guard = self.lock();
+        let _guard = self.lock()?;
         let sandbox = sandbox_of(workspace);
         let path = clone::reconcile(&self.root, sandbox);
         let name = format!("{sandbox}-staging");
@@ -772,10 +1003,17 @@ impl Vcs for JjVcs {
         path.is_dir().then_some(path)
     }
 
-    fn conflict_sides(&self, revision: &Revision, _path: &Path) -> Result<ConflictSides, Error> {
+    fn conflict_sides(
+        &self,
+        revision: &Revision,
+        path: &Path,
+        _base: Option<&Revision>,
+    ) -> Result<ConflictSides, Error> {
         let (base, ours, theirs) = ops::conflict_sides(&self.root, revision.as_str())?;
         Ok(ConflictSides {
-            base: base.map(TreeId::new),
+            base: base
+                .filter(|tree| path_has(&self.root, tree, path))
+                .map(TreeId::new),
             ours: TreeId::new(ours),
             theirs: TreeId::new(theirs),
         })
@@ -790,13 +1028,28 @@ impl Vcs for JjVcs {
     }
 
     fn history(&self, workspace: &Workspace) -> Result<Vec<HistoryStep>, Error> {
-        let _guard = self.lock();
+        let _guard = self.lock()?;
         history::read(&self.root, workspace.branch().as_str())
     }
 
     fn restore(&self, workspace: &Workspace, revision: &Revision) -> Result<Restored, Error> {
-        let _guard = self.lock();
+        let _guard = self.lock()?;
         restore::restore(self, workspace, sandbox_of(workspace), revision)
+    }
+
+    fn restore_preflight(
+        &self,
+        workspace: &Workspace,
+        _revision: &Revision,
+    ) -> Result<(), Error> {
+        let tip = self.tip(workspace)?;
+        if !self.conflicts(&tip)?.is_empty() {
+            return Err(Error::Backend {
+                operation: "restore".to_string(),
+                message: "the shared commit is conflicted; resolve it first".to_string(),
+            });
+        }
+        Ok(())
     }
 
     fn export(&self) -> Result<(), Error> {
@@ -1070,22 +1323,32 @@ mod tests {
         assert_eq!(conflicts[0].path, Path::new("file.txt"));
         assert_eq!(conflicts[0].sides, 2);
         assert_eq!(
-            vcs.sandbox_tip(&workspace).expect("sandbox tip"),
+            vcs.working_copy_tip(&workspace).expect("working copy tip"),
             revision,
             "the working copy holds the conflict"
         );
+        assert_eq!(
+            vcs.sandbox_tip(&workspace).expect("sandbox tip"),
+            Revision::new(ours.clone()),
+            "the saved baseline is not rewritten by the resolution"
+        );
 
         let restored = vcs
-            .resolve_abandon(&workspace, &Revision::new(ours))
+            .resolve_abandon(&workspace, &Revision::new(ours.clone()))
             .expect("abandon");
         assert!(
             vcs.conflicts(&restored).expect("conflicts").is_empty(),
             "the restored revision carries no conflict"
         );
         assert_eq!(
-            vcs.sandbox_tip(&workspace).expect("sandbox tip"),
+            vcs.working_copy_tip(&workspace).expect("working copy tip"),
             restored,
             "the working copy is back on the sandbox side"
+        );
+        assert_eq!(
+            vcs.sandbox_tip(&workspace).expect("sandbox tip"),
+            Revision::new(ours),
+            "abandon restores the saved baseline"
         );
 
         vcs.set_tip(&workspace, &revision).expect("conflicted tip");
@@ -1157,7 +1420,7 @@ mod tests {
         assert!(conflicts[0].base, "the merge has a common ancestor");
 
         let sides = vcs
-            .conflict_sides(&Revision::new(merge), Path::new("file.txt"))
+            .conflict_sides(&Revision::new(merge), Path::new("file.txt"), None)
             .expect("sides");
         let side = |tree: &crate::vcs::TreeId| {
             String::from_utf8(
@@ -1177,6 +1440,112 @@ mod tests {
 
         let clean = vcs.conflicts(&Revision::new(ours)).expect("clean");
         assert!(clean.is_empty(), "an unconflicted revision reports nothing");
+    }
+
+    #[test]
+    fn observing_a_bound_workspace_does_not_snapshot_pending_edits() {
+        unsafe {
+            std::env::set_var("JJ_USER", "Test");
+            std::env::set_var("JJ_EMAIL", "test@example.com");
+        }
+
+        let host = repository();
+        let data = TempDir::new().expect("data");
+        let vcs =
+            JjVcs::open_at(data.path().join("clone"), host.path().to_path_buf()).expect("backend");
+        let prepared = vcs.prepare("demo").expect("prepare");
+        let workspace = prepared.workspace.clone();
+        let base_tree = vcs.tree(&prepared.base).expect("base tree");
+        let saved = vcs.sandbox_tip(&workspace).expect("saved");
+
+        std::fs::write(vcs.workspace("demo").join("pending.txt"), "pending\n").expect("write");
+        let observed = vcs
+            .observe(&workspace, &vcs.workspace("demo"))
+            .expect("observe");
+
+        assert_ne!(observed, base_tree, "the pending edit is visible");
+        assert_eq!(
+            vcs.sandbox_tip(&workspace).expect("saved"),
+            saved,
+            "the observation did not snapshot the edit"
+        );
+        assert!(
+            vcs.workspace("demo").join("pending.txt").exists(),
+            "the edit is still in the workspace"
+        );
+    }
+
+    #[test]
+    fn a_missing_workspace_is_restored_at_the_saved_revision() {
+        unsafe {
+            std::env::set_var("JJ_USER", "Test");
+            std::env::set_var("JJ_EMAIL", "test@example.com");
+        }
+
+        let host = repository();
+        let data = TempDir::new().expect("data");
+        let vcs =
+            JjVcs::open_at(data.path().join("clone"), host.path().to_path_buf()).expect("backend");
+        let prepared = vcs.prepare("demo").expect("prepare");
+        let workspace = prepared.workspace.clone();
+        let base = vcs.tip(&workspace).expect("base");
+
+        std::fs::remove_dir_all(vcs.workspace("demo")).expect("remove");
+        assert!(!vcs.workspace("demo").is_dir());
+
+        vcs.restore_workspace(&workspace, &base)
+            .expect("restore the workspace");
+
+        assert!(vcs.workspace("demo").is_dir(), "the directory is back");
+        assert_eq!(vcs.sandbox_tip(&workspace).expect("saved"), base);
+        let working = vcs.working_copy_tip(&workspace).expect("working copy");
+        assert_eq!(
+            vcs.tree(&working).expect("working tree"),
+            vcs.tree(&base).expect("base tree")
+        );
+    }
+
+    #[test]
+    fn an_add_add_conflict_reports_no_base() {
+        unsafe {
+            std::env::set_var("JJ_USER", "Test");
+            std::env::set_var("JJ_EMAIL", "test@example.com");
+        }
+
+        let host = repository();
+        let data = TempDir::new().expect("data");
+        let root = data.path().join("clone");
+        let vcs = JjVcs::open_at(root.clone(), host.path().to_path_buf()).expect("backend");
+        vcs.prepare("demo").expect("prepare");
+
+        jj(&root, &["describe", "-m", "base"]);
+        let base = super::ops::commit_id(&root, "@").expect("base id");
+
+        jj(&root, &["new", &base, "-m", "ours"]);
+        std::fs::write(root.join("added.txt"), "ours\n").expect("write");
+        let ours = super::ops::commit_id(&root, "@").expect("ours id");
+
+        jj(&root, &["new", &base, "-m", "theirs"]);
+        std::fs::write(root.join("added.txt"), "theirs\n").expect("write");
+        let theirs = super::ops::commit_id(&root, "@").expect("theirs id");
+
+        jj(&root, &["new", &ours, &theirs, "-m", "merge"]);
+        let merge = super::ops::commit_id(&root, "@").expect("merge id");
+
+        let conflicts = vcs
+            .conflicts(&Revision::new(merge.clone()))
+            .expect("conflicts");
+        assert_eq!(conflicts.len(), 1, "{conflicts:?}");
+        assert_eq!(conflicts[0].path, Path::new("added.txt"));
+        assert!(
+            !conflicts[0].base,
+            "the common ancestor holds no version of the path"
+        );
+
+        let sides = vcs
+            .conflict_sides(&Revision::new(merge), Path::new("added.txt"), None)
+            .expect("sides");
+        assert!(sides.base.is_none(), "an add/add has no base side");
     }
 
     #[test]
@@ -1217,6 +1586,58 @@ mod tests {
         vcs.set_synced(&workspace, &snapshot)
             .expect("record synced");
         assert_eq!(vcs.synced(&workspace).expect("synced"), snapshot);
+    }
+
+    #[test]
+    fn a_snapshot_never_rewrites_the_published_revision() {
+        unsafe {
+            std::env::set_var("JJ_USER", "Test");
+            std::env::set_var("JJ_EMAIL", "test@example.com");
+        }
+
+        let host = repository();
+        let data = TempDir::new().expect("data");
+        let vcs =
+            JjVcs::open_at(data.path().join("clone"), host.path().to_path_buf()).expect("backend");
+        let prepared = vcs.prepare("demo").expect("prepare");
+        let workspace = prepared.workspace.clone();
+
+        let staging = TempDir::new().expect("staging");
+        std::fs::write(staging.path().join("README.md"), "one").expect("write");
+        let first = vcs
+            .snapshot(&workspace, staging.path(), "one")
+            .expect("snapshot");
+        vcs.advance(&workspace, &first, &prepared.base)
+            .expect("advance");
+        vcs.set_synced(&workspace, &first).expect("synced");
+
+        // An edit in the workspace is not the saved baseline, and reading the
+        // baseline must not snapshot that edit into it.
+        std::fs::write(vcs.workspace("demo").join("README.md"), "two").expect("write");
+        assert_eq!(
+            vcs.sandbox_tip(&workspace).expect("saved"),
+            first,
+            "reading the baseline does not snapshot the working copy"
+        );
+        let working = vcs.working_copy_tip(&workspace).expect("working");
+        assert_ne!(working, first, "the edit is in the working copy");
+        assert_ne!(
+            vcs.tree(&working).expect("working tree"),
+            vcs.tree(&first).expect("saved tree")
+        );
+
+        // The next snapshot publishes a descendant rather than rewriting the
+        // revision the shared branch already points at.
+        std::fs::write(staging.path().join("README.md"), "two").expect("write");
+        let second = vcs
+            .snapshot(&workspace, staging.path(), "two")
+            .expect("second snapshot");
+        assert_ne!(second, first);
+        assert!(
+            vcs.is_ancestor(&first, &second).expect("ancestry"),
+            "the published revision survives the later snapshot"
+        );
+        assert_eq!(vcs.sandbox_tip(&workspace).expect("saved"), second);
     }
 
     #[test]

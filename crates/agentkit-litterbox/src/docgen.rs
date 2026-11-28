@@ -76,11 +76,11 @@ pub fn mcp_section() -> String {
          | --- | --- | --- | --- |\n\
          | command tools | runs; a snapshot advances the shared branch | runs; a snapshot stays on the sandbox branch | runs; edits are the resolution |\n\
          | `sandbox-status` | clean | diverged, with the reason | resolving, with the conflicts |\n\
-         | `sandbox-reconcile` | begin fails; there is nothing to resolve | begin opens a resolution | begin fails; finish and abandon close it |\n\
+         | `sandbox-reconcile` | begin fails; there is nothing to resolve | begins when the divergence conflicts and the shared tip is clean; fails otherwise | begin fails; finish and abandon close it |\n\
          | `sandbox-create` on a missing name | repair lands clean | repair keeps the divergence | repair keeps the resolution |\n\
          \n\
-         `sandbox-create` on an active, paused, diverged or resolving name is a conflict. On a\n\
-         missing name it repairs the compute and reports the recovery. `sandbox-ports` answers\n\
+         `sandbox-create` on an active or paused name is a conflict. A name whose compute is\n\
+         missing is repaired and keeps its divergence or resolution. `sandbox-ports` answers\n\
          from the record, so the same ports come back whether or not the compute is alive.\n\
          \n\
          A paused command or `sandbox-reconcile` action is refused before any join, so the\n\

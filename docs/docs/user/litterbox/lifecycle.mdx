@@ -107,8 +107,9 @@ stateDiagram-v2
 | `sandbox-reconcile`                                    | begins, finishes or abandons a resolution | invalid params, `conflict`, naming the resume command | repairs, then begins, finishes or abandons |
 
 `sandbox-create` is not an operation on an existing sandbox: it takes a new
-name, and any name already in use — `active`, `paused`, `missing`, `diverged` or
-`resolving` — is a conflict. `sandbox-ports` answers from the record, so the
+name. A name whose compute is `active` or `paused` is a conflict, including when
+its source state is `diverged` or `resolving`. A name whose compute is `missing`
+is repaired and keeps its source state. `sandbox-ports` answers from the record, so the
 same ports come back whether or not the compute is alive; a backend that does
 not forward ports reports the operation as unsupported.
 
@@ -131,7 +132,7 @@ not forward ports reports the operation as unsupported.
 | ------------------- | -------------------------- | --------------------------- | --------------------------- |
 | command tools       | run; a snapshot advances the shared branch | run; a snapshot stays on the sandbox branch | run; edits are the resolution |
 | `sandbox-status`    | clean                      | diverged, with the reason   | resolving, with the conflicts |
-| `sandbox-reconcile` | begin fails; nothing to resolve | begin opens a resolution | begin fails; finish and abandon close it |
+| `sandbox-reconcile` | begin fails; nothing to resolve | begins when the divergence conflicts and the shared tip is clean; fails otherwise | begin fails; finish and abandon close it |
 | `sandbox-create` on a missing name | repair lands clean | repair keeps the divergence | repair keeps the resolution |
 
 Neither `diverged` nor `resolving` refuses a command tool. The sandbox keeps
@@ -210,10 +211,12 @@ refuses rather than clearing the resolution, and both `status` and
 - **Git:** in the VCS store, `git fsck --lost-found` lists the dangling
   resolution merge whose parents are `ours` and the shared tip. Restore it with
   `git update-ref refs/litterbox/workspaces/<name> <commit>`. If the merge is
-  gone, restore the ref at `ours` and run `sandbox-reconcile begin`.
+  gone, restore the ref at `ours`, abandon the open resolution with
+  `sandbox-reconcile abandon`, then run `sandbox-reconcile begin`.
 - **jj:** in the clone, `jj op log` or `jj log -r 'all()'` names the commit.
   Re-attach it with `jj workspace add --name <name> --revision <commit>`. If it
-  is gone, add the workspace at `ours` and run `sandbox-reconcile begin`.
+  is gone, add the workspace at `ours`, abandon the open resolution with
+  `sandbox-reconcile abandon`, then run `sandbox-reconcile begin`.
 - Do not push the sandbox branch to the shared branch: that publishes a
   conflicted tree and is not a recovery.
 - If neither commit is recoverable, inspect the shared branch and run

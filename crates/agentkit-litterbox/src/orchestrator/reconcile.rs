@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use tempfile::TempDir;
 
 use crate::metadata_store::{self, StoredMerge, StoredSandbox};
-use crate::orchestrator::outcome::{ResolutionView, WorkspaceBlock};
+use crate::orchestrator::outcome::{ConflictView, ResolutionView, WorkspaceBlock};
 use crate::orchestrator::service::contract_error;
 use crate::orchestrator::source::{self, Action, Merge, SourceState, Step};
 use crate::sandbox::contract::{Error, SnapshotSelector, WorkspaceBinding};
@@ -41,6 +41,7 @@ struct Observation {
     synced: Revision,
     branch: Revision,
     sandbox: Revision,
+    workspace_tree: TreeId,
     source: Option<WorkspaceSource>,
     block: WorkspaceBlock,
 }
@@ -110,15 +111,61 @@ impl<'a> Reconciler<'a> {
         let (state, observed) = self.classify_with(action, false, true).await?;
         let steps = source::plan(state, action, self.vcs.capabilities().conflict_model);
 
-        let block = observed.block.clone();
+        let mut block = observed.block.clone();
         match self.execute(state, &steps, &observed, message).await? {
-            Ok(dropped) => Ok(Ok(Reconciled {
-                state,
-                dropped,
-                block,
-            })),
+            Ok((dropped, state)) => {
+                if self.stored.resolution.is_some() {
+                    self.refresh_resolution_block(&mut block).await?;
+                }
+                if let Some(dropped) = &dropped {
+                    block.dropped = Some(dropped.as_str().to_string());
+                }
+                Ok(Ok(Reconciled {
+                    state,
+                    dropped,
+                    block,
+                }))
+            }
             Err(Raced) => Ok(Err(Raced)),
         }
+    }
+
+    /// Re-read the conflicts the working copy carries after a plan ran.
+    ///
+    /// A snapshot rewrites the sandbox revision, so the pre-plan block can
+    /// still list a path the command just resolved.
+    async fn refresh_resolution_block(&self, block: &mut WorkspaceBlock) -> Result<(), Error> {
+        let workspace = self.workspace_handle();
+        let working = match self.vcs.working_copy_tip(&workspace) {
+            Ok(revision) => revision,
+            Err(crate::vcs::Error::NotFound { .. }) => return Ok(()),
+            Err(error) => return Err(contract_error(error)),
+        };
+        let base = self
+            .stored
+            .resolution
+            .as_ref()
+            .map(|open| Revision::new(open.synced.clone()));
+        let conflicts = self
+            .vcs
+            .conflicts_with_base(&working, base.as_ref())
+            .map_err(contract_error)?;
+        block.conflicts = conflicts
+            .iter()
+            .map(|conflict| conflict.path.display().to_string())
+            .collect();
+        if let Some(resolution) = block.resolution.as_mut() {
+            resolution.conflicts = conflicts
+                .iter()
+                .map(|conflict| crate::orchestrator::outcome::ConflictView {
+                    path: conflict.path.display().to_string(),
+                    hunks: conflict.hunks,
+                    sides: conflict.sides,
+                    base: conflict.base,
+                })
+                .collect();
+        }
+        Ok(())
     }
 
     /// Read the state without changing anything.
@@ -126,10 +173,15 @@ impl<'a> Reconciler<'a> {
     /// The workspace is always observed so a restore can tell whether it would
     /// lose unsaved work. A held merge is not cleared: a refused restore must
     /// write nothing.
-    pub(crate) async fn state(&self) -> Result<SourceState, Error> {
+    /// Read the state and the observed workspace tree together.
+    ///
+    /// A restore uses the tree to delete the workspace entries the target
+    /// does not hold, including files the sandbox added after its last
+    /// snapshot.
+    pub(crate) async fn state_with_workspace(&self) -> Result<(SourceState, TreeId), Error> {
         self.classify_with(Action::Tool, true, false)
             .await
-            .map(|(state, _)| state)
+            .map(|(state, observed)| (state, observed.workspace_tree))
     }
 
     /// Read the state, and the workspace tree when the plan can use it.
@@ -182,6 +234,15 @@ impl<'a> Reconciler<'a> {
             merge = Merge::Pending;
         }
 
+        // An open resolution is held like a pending merge: tools run and
+        // snapshot, but only `finish` advances the shared branch. Without
+        // this, a clean shared branch would let the next tool adopt content
+        // over the conflict tree.
+        let resolving = self.stored.resolution.is_some();
+        if resolving {
+            merge = Merge::Resolving;
+        }
+
         // The pre-plan reads the workspace only when the result can change the
         // steps: a moved branch, a held merge, or a snapshot.
         let needs_observation =
@@ -204,14 +265,19 @@ impl<'a> Reconciler<'a> {
             merge,
         );
 
-        let resolving = self.stored.resolution.is_some();
-        let resolution_conflicts: Vec<String> = if resolving {
+        let resolution_conflicts = if resolving {
+            let working = self
+                .vcs
+                .working_copy_tip(&workspace)
+                .map_err(contract_error)?;
+            let base = self
+                .stored
+                .resolution
+                .as_ref()
+                .map(|open| Revision::new(open.synced.clone()));
             self.vcs
-                .conflicts(&sandbox)
+                .conflicts_with_base(&working, base.as_ref())
                 .map_err(contract_error)?
-                .into_iter()
-                .map(|conflict| conflict.path.display().to_string())
-                .collect()
         } else {
             Vec::new()
         };
@@ -237,10 +303,17 @@ impl<'a> Reconciler<'a> {
             synced: synced.as_str().to_string(),
             branch: branch.as_str().to_string(),
             sandbox: sandbox.as_str().to_string(),
-            conflicts: conflicted
-                .iter()
-                .map(|path| path.display().to_string())
-                .collect(),
+            conflicts: if resolving {
+                resolution_conflicts
+                    .iter()
+                    .map(|conflict| conflict.path.display().to_string())
+                    .collect()
+            } else {
+                conflicted
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect()
+            },
             next: if resolving {
                 Some("resolve the conflicts in the workspace, then finish or abandon".to_string())
             } else if !conflicted.is_empty() {
@@ -255,9 +328,18 @@ impl<'a> Reconciler<'a> {
             },
             resolution: self.stored.resolution.as_ref().map(|open| ResolutionView {
                 synced: open.synced.clone(),
-                conflicts: resolution_conflicts,
+                conflicts: resolution_conflicts
+                    .iter()
+                    .map(|conflict| ConflictView {
+                        path: conflict.path.display().to_string(),
+                        hunks: conflict.hunks,
+                        sides: conflict.sides,
+                        base: conflict.base,
+                    })
+                    .collect(),
                 next: "resolve the conflicts in the workspace, then finish or abandon".to_string(),
             }),
+            dropped: None,
         };
 
         Ok((
@@ -266,6 +348,7 @@ impl<'a> Reconciler<'a> {
                 synced,
                 branch,
                 sandbox,
+                workspace_tree: workspace_tree.clone(),
                 source: observed_source,
                 block,
             },
@@ -278,17 +361,37 @@ impl<'a> Reconciler<'a> {
         steps: &[Step],
         observed: &Observation,
         message: &str,
-    ) -> Result<Result<Option<Revision>, Raced>, Error> {
+    ) -> Result<Result<(Option<Revision>, SourceState), Raced>, Error> {
         let workspace = self.workspace_handle();
         let mut dropped = None;
+        let mut post = state;
 
         for step in steps {
             match step {
                 Step::Proceed => {}
                 Step::AdoptHistory => {
-                    self.vcs
-                        .set_synced(&workspace, &observed.branch)
-                        .map_err(contract_error)?;
+                    // The branch history moved without a content change. Only
+                    // move the sandbox ref when it is already contained in the
+                    // adopted history; otherwise sandbox-only history would be
+                    // dropped, and a later snapshot would reintroduce the old
+                    // parent over the rewritten branch.
+                    if self
+                        .vcs
+                        .is_ancestor(&observed.sandbox, &observed.branch)
+                        .map_err(contract_error)?
+                    {
+                        self.vcs
+                            .set_sandbox_tip(&workspace, &observed.branch)
+                            .map_err(contract_error)?;
+                        self.vcs
+                            .set_synced(&workspace, &observed.branch)
+                            .map_err(contract_error)?;
+                        post.base = source::Base::Synced;
+                        post.merge = Merge::None;
+                    } else {
+                        self.record_merge(observed)?;
+                        post.merge = Merge::Pending;
+                    }
                 }
                 Step::AdoptContent => {
                     if !self
@@ -305,6 +408,8 @@ impl<'a> Reconciler<'a> {
                     self.vcs
                         .set_synced(&workspace, &observed.branch)
                         .map_err(contract_error)?;
+                    post.base = source::Base::Synced;
+                    post.merge = Merge::None;
                 }
                 Step::Snapshot => {
                     let Some(source) = &observed.source else {
@@ -317,19 +422,31 @@ impl<'a> Reconciler<'a> {
                         .vcs
                         .snapshot(&workspace, &source.path, message)
                         .map_err(contract_error)?;
-                    if state.merge != Merge::Pending {
+                    if state.merge != Merge::Pending && state.merge != Merge::Resolving {
                         match self.vcs.advance(&workspace, &revision, &observed.branch) {
                             Ok(()) => {
                                 self.vcs
                                     .set_synced(&workspace, &revision)
                                     .map_err(contract_error)?;
+                                post.base = source::Base::Synced;
+                                post.merge = Merge::None;
+                                post.workspace = source::Workspace::Clean;
                             }
-                            Err(crate::vcs::Error::Raced) => return Ok(Err(Raced)),
+                            Err(crate::vcs::Error::Raced) => {
+                                // The snapshot is already on the sandbox ref. Record it
+                                // as a held divergence before retrying, or the retry
+                                // sees a clean workspace and adopts over it.
+                                self.record_merge_with(&revision, observed)?;
+                                return Ok(Err(Raced));
+                            }
                             Err(error) => return Err(contract_error(error)),
                         }
                     }
                 }
-                Step::Block(_) => self.record_merge(observed)?,
+                Step::Block(_) => {
+                    self.record_merge(observed)?;
+                    post.merge = Merge::Pending;
+                }
                 Step::Merge | Step::Resolve | Step::Abort | Step::Materialise => {
                     return Err(Error::failed(format!(
                         "the sandbox cannot perform {step:?}"
@@ -338,7 +455,7 @@ impl<'a> Reconciler<'a> {
             }
         }
 
-        Ok(Ok(dropped))
+        Ok(Ok((dropped, post)))
     }
 
     /// Read the workspace and return the tree a snapshot would commit.
@@ -377,7 +494,7 @@ impl<'a> Reconciler<'a> {
             .await?;
         let filter = self
             .vcs
-            .snapshot_filter(staging.path())
+            .snapshot_filter(&workspace, staging.path())
             .map_err(contract_error)?;
         let filter: Arc<dyn SnapshotSelector> = Arc::new(Excluding {
             inner: filter,
@@ -414,16 +531,23 @@ impl<'a> Reconciler<'a> {
         Ok(())
     }
 
-    /// Replace the workspace with the target tree, without moving a ref.
-    pub(crate) async fn replace_workspace(&self, target: &Revision) -> Result<(), Error> {
-        let workspace = self.workspace_handle();
-        let sandbox = self.vcs.sandbox_tip(&workspace).map_err(contract_error)?;
-        self.replace_workspace_with(target, &sandbox).await
+    pub(crate) async fn replace_workspace_with(
+        &self,
+        target: &Revision,
+        old: &Revision,
+    ) -> Result<(), Error> {
+        let old_tree = self.vcs.tree(old).map_err(contract_error)?;
+        self.replace_workspace_from_tree(target, &old_tree).await
     }
 
-    async fn replace_workspace_with(&self, target: &Revision, old: &Revision) -> Result<(), Error> {
+    /// Replace the workspace with `target`, deleting entries absent from it
+    /// relative to `old_tree`.
+    pub(crate) async fn replace_workspace_from_tree(
+        &self,
+        target: &Revision,
+        old_tree: &TreeId,
+    ) -> Result<(), Error> {
         let workspace = self.workspace_handle();
-        let old_tree = self.vcs.tree(old).map_err(contract_error)?;
         let new_tree = self.vcs.tree(target).map_err(contract_error)?;
 
         let staging = tempfile::tempdir()
@@ -432,35 +556,114 @@ impl<'a> Reconciler<'a> {
             .materialise(&workspace, target, staging.path())
             .map_err(contract_error)?;
 
+        // `upload` refuses source symlinks. The tree came from the VCS, not
+        // from the sandbox, so take the links out, upload the regular entries,
+        // and recreate the links in the sandbox explicitly.
+        let symlinks = take_symlinks(staging.path())
+            .map_err(|error| Error::failed(format!("could not read staged links: {error}")))?;
+
         let path = self.workspace_path().await?;
+
+        // Remove obsolete tracked paths before uploading. A file replaced by a
+        // directory, or the reverse, would otherwise collide with the old
+        // entry. Empty directories left behind are removed too; a directory
+        // holding ignored files is left alone because rmdir fails.
+        let deleted = self
+            .vcs
+            .deleted_paths(old_tree, &new_tree)
+            .map_err(contract_error)?;
+        if !deleted.is_empty() {
+            let mut command = vec!["rm".to_string(), "-rf".to_string(), "--".to_string()];
+            let mut directories: Vec<PathBuf> = Vec::new();
+            for relative in &deleted {
+                command.push(format!("{path}/{}", relative.display()));
+                let mut parent = relative.parent();
+                while let Some(directory) = parent {
+                    if directory.as_os_str().is_empty() {
+                        break;
+                    }
+                    if !directories.iter().any(|seen| seen == directory) {
+                        directories.push(directory.to_path_buf());
+                    }
+                    parent = directory.parent();
+                }
+            }
+            let execution = self
+                .selected
+                .core()
+                .exec(&self.stored.sandbox, &command)
+                .await?;
+            if execution.exit_code != 0 {
+                return Err(Error::failed(format!(
+                    "removing obsolete paths failed: {}",
+                    execution.stderr.trim()
+                )));
+            }
+
+            // Deepest first, so a parent can become empty after its child.
+            directories.sort_by_key(|directory| std::cmp::Reverse(directory.components().count()));
+            for directory in directories {
+                let command = vec![
+                    "rmdir".to_string(),
+                    "--".to_string(),
+                    format!("{path}/{}", directory.display()),
+                ];
+                let _ = self
+                    .selected
+                    .core()
+                    .exec(&self.stored.sandbox, &command)
+                    .await;
+            }
+        }
+
         self.selected
             .core()
             .upload(&self.stored.sandbox, staging.path(), &path)
             .await?;
 
-        let deleted = self
-            .vcs
-            .deleted_paths(&old_tree, &new_tree)
-            .map_err(contract_error)?;
-        if !deleted.is_empty() {
-            let mut command = vec!["rm".to_string(), "-rf".to_string(), "--".to_string()];
-            for relative in deleted {
-                command.push(format!("{path}/{}", relative.display()));
-            }
-            self.selected
+        for (relative, target) in symlinks {
+            let command = vec![
+                "ln".to_string(),
+                "-sfn".to_string(),
+                target.to_string_lossy().into_owned(),
+                format!("{path}/{}", relative.display()),
+            ];
+            let execution = self
+                .selected
                 .core()
                 .exec(&self.stored.sandbox, &command)
                 .await?;
+            if execution.exit_code != 0 {
+                return Err(Error::failed(format!(
+                    "restoring the symlink {} failed: {}",
+                    relative.display(),
+                    execution.stderr.trim()
+                )));
+            }
         }
 
         Ok(())
     }
 
     fn record_merge(&self, observed: &Observation) -> Result<(), Error> {
+        self.store_merge(&observed.synced, &observed.sandbox, &observed.branch)
+    }
+
+    /// Record a merge whose sandbox side is newer than the observation's.
+    fn record_merge_with(&self, ours: &Revision, observed: &Observation) -> Result<(), Error> {
+        self.store_merge(&observed.synced, ours, &observed.branch)
+    }
+
+    fn store_merge(
+        &self,
+        base: &Revision,
+        ours: &Revision,
+        theirs: &Revision,
+    ) -> Result<(), Error> {
         let merge = StoredMerge {
-            base: observed.synced.to_string(),
-            ours: observed.sandbox.to_string(),
-            theirs: observed.branch.to_string(),
+            base: base.to_string(),
+            ours: ours.to_string(),
+            theirs: theirs.to_string(),
         };
         let mut updated = self.stored.clone();
         updated.merge = Some(merge.clone());
@@ -506,8 +709,40 @@ impl<'a> Reconciler<'a> {
     }
 }
 
-fn merge_state(merge: Option<&StoredMerge>) -> Merge {
-    match merge {
+/// Remove every symlink under `root`, returning each link's relative path and
+/// target. The walk never follows a link.
+fn take_symlinks(root: &Path) -> std::io::Result<Vec<(PathBuf, PathBuf)>> {
+    fn walk(
+        root: &Path,
+        current: &Path,
+        found: &mut Vec<(PathBuf, PathBuf)>,
+    ) -> std::io::Result<()> {
+        for entry in std::fs::read_dir(current)? {
+            let entry = entry?;
+            let path = entry.path();
+            let relative = path
+                .strip_prefix(root)
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|_| path.clone());
+            let metadata = std::fs::symlink_metadata(&path)?;
+            if metadata.file_type().is_symlink() {
+                found.push((relative, std::fs::read_link(&path)?));
+            } else if metadata.is_dir() {
+                walk(root, &path, found)?;
+            }
+        }
+        Ok(())
+    }
+
+    let mut found = Vec::new();
+    walk(root, root, &mut found)?;
+    for (relative, _) in &found {
+        std::fs::remove_file(root.join(relative))?;
+    }
+    Ok(found)
+}
+
+fn merge_state(merge: Option<&StoredMerge>) -> Merge {    match merge {
         Some(_) => Merge::Pending,
         None => Merge::None,
     }

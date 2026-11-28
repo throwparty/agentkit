@@ -4,7 +4,7 @@
 //! the root transfers resolve under and the path a sandbox names. The walk
 //! lives in `backends::transfer`, shared with the other mechanisms.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::backends::transfer;
 use crate::sandbox::contract::{Error, SnapshotSelector};
@@ -15,8 +15,13 @@ pub(crate) fn copy_from(source: &Path, destination: &Path) -> Result<(), Error> 
 }
 
 /// Copy a host path into the workspace at a sandbox destination.
-pub(crate) fn transfer_in(source: &Path, workspace: &Path, destination: &str) -> Result<(), Error> {
-    transfer::transfer_in(workspace, workspace, source, destination, &[])
+pub(crate) fn transfer_in(
+    source: &Path,
+    workspace: &Path,
+    destination: &str,
+    masks: &[PathBuf],
+) -> Result<(), Error> {
+    transfer::transfer_in(workspace, workspace, source, destination, masks)
 }
 
 /// Copy a sandbox path out to the host, applying a caller's snapshot rules.
@@ -25,6 +30,7 @@ pub(crate) fn transfer_out(
     source: &str,
     destination: &Path,
     selector: Option<&dyn SnapshotSelector>,
+    masks: &[PathBuf],
 ) -> Result<(), Error> {
-    transfer::transfer_out(workspace, workspace, source, destination, selector, &[])
+    transfer::transfer_out(workspace, workspace, source, destination, selector, masks)
 }

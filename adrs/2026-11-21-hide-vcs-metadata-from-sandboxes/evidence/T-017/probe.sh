@@ -39,7 +39,7 @@ run_test() {
     printf 'FAIL: %s failed\n' "$filter"
     exit "$status"
   fi
-  if ! printf '%s\n' "$output" | grep -q '1 passed'; then
+  if ! printf '%s\n' "$output" | grep -Eq '^test result: ok\. 1 passed; 0 failed; 0 ignored; 0 measured;'; then
     printf 'FAIL: %s did not run exactly one test\n' "$filter"
     exit 1
   fi

@@ -36,6 +36,19 @@ pub struct StoredResolution {
     /// Resolving rewrites the revision under resolution, never its parents, so
     /// this stays addressable and is what abandon restores.
     pub ours: String,
+    /// The conflict revision written into the sandbox when resolution began.
+    ///
+    /// It is the merge whose sides `read_side` reports, and the tree the
+    /// sandbox held before any resolution edit was published. Old records
+    /// predate it, so an empty value falls back to the live sandbox tip.
+    #[serde(default)]
+    pub conflict: String,
+    /// The shared branch tip the resolution was built against.
+    ///
+    /// `finish` advances the branch only while it still points here, so a push
+    /// after `begin` cannot be replaced by a resolution that never saw it.
+    #[serde(default)]
+    pub theirs: String,
 }
 
 /// A sandbox as persisted: the contract's record plus the branch it was paired
