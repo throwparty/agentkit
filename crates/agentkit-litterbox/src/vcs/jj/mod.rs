@@ -782,9 +782,8 @@ impl Vcs for JjVcs {
         )?;
         ops::jj_ok(
             &path,
-            &["new", base.as_str(), "-m", "litterbox staging: theirs"],
+            &["new", branch.as_str(), "-m", "litterbox staging: theirs"],
         )?;
-        ops::jj_ok(&path, &["restore", "--from", branch.as_str()])?;
         let theirs = ops::commit_id(&path, "@")?;
         ops::jj_ok(
             &path,
