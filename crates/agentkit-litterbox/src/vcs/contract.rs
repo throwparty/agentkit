@@ -176,6 +176,19 @@ pub trait Vcs: Send + Sync {
     /// Restore the shared branch to the tree of `revision` by adding a commit.
     fn restore(&self, workspace: &Workspace, revision: &Revision) -> Result<Restored, Error>;
 
+    /// Refuse a restore before the orchestrator touches the workspace.
+    ///
+    /// A backend whose restore would be rejected after the workspace was
+    /// replaced reports the same refusal here, so `--discard-work` cannot
+    /// destroy edits before the operation fails.
+    fn restore_preflight(
+        &self,
+        _workspace: &Workspace,
+        _revision: &Revision,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+
     /// Publish the backend's state to its external form, if it has one.
     fn export(&self) -> Result<(), Error>;
 

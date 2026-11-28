@@ -626,6 +626,25 @@ impl Vcs for TestVcs {
         })
     }
 
+    fn restore_preflight(
+        &self,
+        _workspace: &Workspace,
+        _revision: &Revision,
+    ) -> Result<(), Error> {
+        let state = self.state();
+        if state
+            .conflicts_by_revision
+            .get(&state.tip)
+            .is_some_and(|conflicts| !conflicts.is_empty())
+        {
+            return Err(Error::Backend {
+                operation: "restore".to_string(),
+                message: "the shared commit is conflicted; resolve it first".to_string(),
+            });
+        }
+        Ok(())
+    }
+
     fn export(&self) -> Result<(), Error> {
         Ok(())
     }

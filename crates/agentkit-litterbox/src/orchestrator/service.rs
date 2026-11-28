@@ -1827,6 +1827,13 @@ impl Sandboxes {
             });
         }
 
+        // Backend refusals that would only surface inside `restore` come
+        // first: `--discard-work` must not destroy the workspace before the
+        // operation is known to be possible.
+        self.vcs
+            .restore_preflight(&workspace, &target)
+            .map_err(contract_error)?;
+
         let reconciler = Reconciler::new(&self.vcs, &stored, &selected, &self.records_dir);
         let (state, workspace_tree) = reconciler.state_with_workspace().await?;
         let staging = self.vcs.staging(&workspace);
@@ -2552,7 +2559,6 @@ mod seam_tests {
                 .with_synced("branch")
                 .with_sandbox_tip("branch")
                 .with_observed_tree("workspace")
-                .with_conflicts_for("branch", &["file.txt"])
                 .with_history(vec![
                     HistoryStep {
                         revision: Revision::new("branch"),
@@ -2584,6 +2590,13 @@ mod seam_tests {
             selected(backend),
         );
         sandboxes.create("demo").await.expect("create");
+        let mut stored = current_record(records.path(), "demo");
+        stored.merge = Some(metadata_store::StoredMerge {
+            base: "base".to_string(),
+            ours: "branch".to_string(),
+            theirs: "branch".to_string(),
+        });
+        metadata_store::store_sandbox_at(records.path(), "demo", &stored).expect("store");
 
         let report = sandboxes.history("demo").await.expect("history");
         assert_eq!(report.state, "diverged");
@@ -2617,6 +2630,69 @@ mod seam_tests {
             vcs.deleted_calls()
                 .contains(&("workspace".to_string(), "tree".to_string())),
             "cleanup uses the observed workspace tree, not the sandbox commit"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_conflicted_shared_tip_refuses_before_the_workspace_is_touched() {
+        let records = TempDir::new().expect("records");
+        let backend = Arc::new(TestBackend::new());
+        let vcs = Arc::new(
+            TestVcs::new()
+                .with_tip("branch")
+                .with_synced("branch")
+                .with_sandbox_tip("branch")
+                .with_observed_tree("workspace")
+                .with_conflicts_for("branch", &["file.txt"])
+                .with_history(vec![
+                    HistoryStep {
+                        revision: Revision::new("branch"),
+                        time: 2,
+                        description: "current".to_string(),
+                        synced: false,
+                    },
+                    HistoryStep {
+                        revision: Revision::new("target"),
+                        time: 1,
+                        description: "older".to_string(),
+                        synced: false,
+                    },
+                ]),
+        );
+        let config = Config {
+            project: crate::config::ProjectConfig {
+                slug: Some("project".to_string()),
+                backends: Some(vec!["test".to_string()]),
+            },
+            ..Config::default()
+        };
+        let sandboxes = Sandboxes::for_test(
+            config,
+            vcs.clone(),
+            false,
+            "project".to_string(),
+            records.path().to_path_buf(),
+            selected(backend),
+        );
+        sandboxes.create("demo").await.expect("create");
+
+        let error = sandboxes
+            .restore(
+                "demo",
+                "2",
+                RestoreFlags {
+                    discard_work: true,
+                    discard_resolution: false,
+                },
+            )
+            .await
+            .expect_err("the shared tip is conflicted");
+
+        assert!(error.to_string().contains("conflicted"), "{error}");
+        assert!(vcs.restored().is_empty(), "no restore was written");
+        assert!(
+            vcs.deleted_calls().is_empty(),
+            "the workspace was not replaced before the refusal"
         );
     }
 

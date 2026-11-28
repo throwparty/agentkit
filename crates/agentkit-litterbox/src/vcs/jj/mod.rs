@@ -1029,6 +1029,21 @@ impl Vcs for JjVcs {
         restore::restore(self, workspace, sandbox_of(workspace), revision)
     }
 
+    fn restore_preflight(
+        &self,
+        workspace: &Workspace,
+        _revision: &Revision,
+    ) -> Result<(), Error> {
+        let tip = self.tip(workspace)?;
+        if !self.conflicts(&tip)?.is_empty() {
+            return Err(Error::Backend {
+                operation: "restore".to_string(),
+                message: "the shared commit is conflicted; resolve it first".to_string(),
+            });
+        }
+        Ok(())
+    }
+
     fn export(&self) -> Result<(), Error> {
         Ok(())
     }
