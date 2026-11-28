@@ -79,6 +79,16 @@ pub(super) fn restore(
         .map_err(|source| SandboxError::from(GitError::Commit { source }))?;
 
     if target_commit.tree_id() == tip_commit.tree_id() {
+        // The tree already matches, but the shared ref must still be the tip
+        // this comparison was made against. A push in between must not be
+        // reported as a successful restore of the old revision.
+        refs::write_matching(
+            repo,
+            &branch_ref,
+            tip,
+            tip,
+            "litterbox: verify the shared branch before aligning the sandbox",
+        )?;
         refs::write(
             repo,
             &refs::sandbox(branch),
