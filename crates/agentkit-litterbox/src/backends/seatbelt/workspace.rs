@@ -16,7 +16,7 @@ pub(crate) fn copy_from(source: &Path, destination: &Path) -> Result<(), Error> 
 
 /// Copy a host path into the workspace at a sandbox destination.
 pub(crate) fn transfer_in(source: &Path, workspace: &Path, destination: &str) -> Result<(), Error> {
-    transfer::transfer_in(workspace, workspace, source, destination)
+    transfer::transfer_in(workspace, workspace, source, destination, &[])
 }
 
 /// Copy a sandbox path out to the host, applying a caller's snapshot rules.
@@ -26,5 +26,5 @@ pub(crate) fn transfer_out(
     destination: &Path,
     selector: Option<&dyn SnapshotSelector>,
 ) -> Result<(), Error> {
-    transfer::transfer_out(workspace, workspace, source, destination, selector)
+    transfer::transfer_out(workspace, workspace, source, destination, selector, &[])
 }
