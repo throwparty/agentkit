@@ -730,9 +730,11 @@ impl Vcs for JjVcs {
     fn observe(&self, workspace: &Workspace, staging: &Path) -> Result<TreeId, Error> {
         let target = self.workspace(sandbox_of(workspace));
         if staging == target {
-            // Bound: force the snapshot, then read `@`'s tree.
-            let revision = ops::commit_id(&target, "@")?;
-            return Ok(TreeId::new(ops::tree_id(&self.root, &revision)?));
+            // Bound: read the host directory through a temporary Git index.
+            // Running any jj command here would snapshot pending edits into
+            // `@`, so a restore would then classify the workspace as clean and
+            // discard them without `--discard-work`.
+            return tree_from_dir(&self.root, &target);
         }
         tree_from_dir(&self.root, staging)
     }
@@ -1415,6 +1417,39 @@ mod tests {
 
         let clean = vcs.conflicts(&Revision::new(ours)).expect("clean");
         assert!(clean.is_empty(), "an unconflicted revision reports nothing");
+    }
+
+    #[test]
+    fn observing_a_bound_workspace_does_not_snapshot_pending_edits() {
+        unsafe {
+            std::env::set_var("JJ_USER", "Test");
+            std::env::set_var("JJ_EMAIL", "test@example.com");
+        }
+
+        let host = repository();
+        let data = TempDir::new().expect("data");
+        let vcs =
+            JjVcs::open_at(data.path().join("clone"), host.path().to_path_buf()).expect("backend");
+        let prepared = vcs.prepare("demo").expect("prepare");
+        let workspace = prepared.workspace.clone();
+        let base_tree = vcs.tree(&prepared.base).expect("base tree");
+        let saved = vcs.sandbox_tip(&workspace).expect("saved");
+
+        std::fs::write(vcs.workspace("demo").join("pending.txt"), "pending\n").expect("write");
+        let observed = vcs
+            .observe(&workspace, &vcs.workspace("demo"))
+            .expect("observe");
+
+        assert_ne!(observed, base_tree, "the pending edit is visible");
+        assert_eq!(
+            vcs.sandbox_tip(&workspace).expect("saved"),
+            saved,
+            "the observation did not snapshot the edit"
+        );
+        assert!(
+            vcs.workspace("demo").join("pending.txt").exists(),
+            "the edit is still in the workspace"
+        );
     }
 
     #[test]
