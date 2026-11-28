@@ -336,9 +336,18 @@ impl Vcs for JjVcs {
                 name: sandbox.to_string(),
             });
         }
-        // The clone's working copy sits on the imported head; its parent is the
-        // base a sandbox starts from.
-        let base = ops::commit_id(&self.root, "@-")?;
+        // The host checkout is the creation source. The clone is only as fresh
+        // as its last import, so resolve the host HEAD and bring its commit in
+        // when the clone does not hold it.
+        let host_head = ops::git(&self.host, &["rev-parse", "HEAD"])?;
+        if ops::git(&self.root, &["cat-file", "-e", &host_head]).is_err() {
+            let host_path = self.host.to_str().ok_or_else(|| Error::Backend {
+                operation: "prepare".to_string(),
+                message: "the host path is not UTF-8".to_string(),
+            })?;
+            ops::git(&self.root, &["fetch", host_path, &host_head])?;
+        }
+        let base = host_head;
         let branch = branch_name(sandbox);
         ops::jj_ok(&self.root, &["bookmark", "set", &branch, "-r", &base])?;
         if let Some(parent) = workspace.parent() {
