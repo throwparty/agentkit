@@ -45,6 +45,18 @@ impl GitVcsConfig {
 /// replaced on every call, so an empty or absent string clears the previous
 /// settings. Git validates the string before it is installed.
 pub fn apply_config(store: &Path, config: Option<&str>) -> Result<(), SandboxError> {
+    // Project opens can race. The candidate and overlay are shared paths, so
+    // hold one interprocess lock across write, validation, replacement and
+    // installation.
+    let lock_path = store.with_extension("litterbox.config.lock");
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&lock_path)
+        .map_err(SandboxError::Io)?;
+    lock.lock().map_err(SandboxError::Io)?;
+
     let overlay = store.join("litterbox.config");
     let temporary = store.join("litterbox.config.tmp");
     std::fs::write(&temporary, config.unwrap_or("")).map_err(SandboxError::Io)?;
