@@ -232,7 +232,7 @@ pub(crate) fn render(input: &ProfileInput) -> Result<RenderedProfile, RenderErro
     if !input.masked_paths.is_empty() {
         let mut denied = Vec::new();
         for relative in &input.masked_paths {
-            let path = resolve_masked(workspace, relative)?;
+            let path = resolve_masked(&workspace, relative)?;
             push_path(&mut denied, path);
         }
         if !denied.is_empty() {
