@@ -587,6 +587,24 @@ impl Vcs for JjVcs {
         Ok(TreeId::new(ops::tree_id(&self.root, revision.as_str())?))
     }
 
+    fn deleted_paths(&self, from: &TreeId, to: &TreeId) -> Result<Vec<PathBuf>, Error> {
+        let output = ops::git(
+            &self.root,
+            &[
+                "diff",
+                "--name-only",
+                "--diff-filter=D",
+                from.as_str(),
+                to.as_str(),
+            ],
+        )?;
+        Ok(output
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(PathBuf::from)
+            .collect())
+    }
+
     fn sandbox_tip(&self, workspace: &Workspace) -> Result<Revision, Error> {
         let target = self.workspace(sandbox_of(workspace));
         if !target.is_dir() {
