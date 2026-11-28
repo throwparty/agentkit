@@ -473,7 +473,11 @@ impl<'a> Reconciler<'a> {
         self.replace_workspace_with(target, &sandbox).await
     }
 
-    async fn replace_workspace_with(&self, target: &Revision, old: &Revision) -> Result<(), Error> {
+    pub(crate) async fn replace_workspace_with(
+        &self,
+        target: &Revision,
+        old: &Revision,
+    ) -> Result<(), Error> {
         let workspace = self.workspace_handle();
         let old_tree = self.vcs.tree(old).map_err(contract_error)?;
         let new_tree = self.vcs.tree(target).map_err(contract_error)?;

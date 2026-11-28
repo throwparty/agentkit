@@ -146,18 +146,19 @@ impl<'a> Resolver<'a> {
                 .resolve_abandon(&workspace, &ours)
                 .map_err(contract_error)?;
             if self.stored.binding() == WorkspaceBinding::Copied {
-                self.publish(&workspace, &restored).await?;
+                self.publish(&ours, &restored).await?;
             }
             return Err(Error::failed(
                 "the branches merge without a conflict; there is nothing to resolve".to_string(),
             ));
         }
         if self.stored.binding() == WorkspaceBinding::Copied {
-            self.publish(&workspace, &begun.revision).await?;
+            self.publish(&ours, &begun.revision).await?;
         }
         self.record(Some(StoredResolution {
             synced: synced.as_str().to_string(),
             ours: ours.as_str().to_string(),
+            conflict: begun.revision.as_str().to_string(),
         }))?;
         Ok(Resolved {
             synced,
@@ -168,23 +169,9 @@ impl<'a> Resolver<'a> {
     }
 
     /// Write a revision into a copied sandbox's workspace.
-    async fn publish(&self, workspace: &Workspace, revision: &Revision) -> Result<(), Error> {
-        let staging = tempfile::tempdir()
-            .map_err(|error| Error::failed(format!("could not create a staging dir: {error}")))?;
-        self.vcs
-            .materialise(workspace, revision, staging.path())
-            .map_err(contract_error)?;
-        let path = self
-            .selected
-            .core()
-            .inspect(&self.stored.sandbox)
-            .await?
-            .workspace;
-        self.selected
-            .core()
-            .upload(&self.stored.sandbox, staging.path(), &path)
-            .await?;
-        Ok(())
+    async fn publish(&self, old: &Revision, revision: &Revision) -> Result<(), Error> {
+        let reconciler = Reconciler::new(self.vcs, self.stored, self.selected, self.records_dir);
+        reconciler.replace_workspace_with(revision, old).await
     }
 
     /// Close a resolution, failing while the working copy still conflicts.
@@ -252,7 +239,16 @@ impl<'a> Resolver<'a> {
             .resolve_abandon(&workspace, &ours)
             .map_err(contract_error)?;
         if self.stored.binding() == WorkspaceBinding::Copied {
-            self.publish(&workspace, &revision).await?;
+            // The sandbox holds the conflict tree unless a later snapshot
+            // moved the saved baseline. Deletions are relative to the content
+            // the sandbox actually has, not to `ours`.
+            let saved = self.vcs.sandbox_tip(&workspace).map_err(contract_error)?;
+            let old = if saved == ours && !open.conflict.is_empty() {
+                Revision::new(open.conflict.clone())
+            } else {
+                saved
+            };
+            self.publish(&old, &revision).await?;
         }
         self.record(None)?;
         Ok(Resolved {
